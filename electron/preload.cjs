@@ -24,4 +24,5 @@ contextBridge.exposeInMainWorld('codiff', {
     return () => ipcRenderer.removeListener('codiff:repositoryChanged', listener);
   },
   showInFolder: (path) => ipcRenderer.invoke('codiff:showInFolder', path),
+  writeReviewComments: (payload) => ipcRenderer.invoke('codiff:writeReviewComments', payload),
 });

@@ -347,8 +347,12 @@ const createWindow = (repositoryPath, launchOptions = { walkthrough: false }) =>
     minWidth: 880,
     show: false,
     title: `Codiff - ${repositoryPath}`,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
-    trafficLightPosition: { x: 25, y: 24 },
+    // Keep the native Windows/Linux title bar so the desktop window has
+    // normal minimize/maximize/close controls. Codiff's upstream hidden title
+    // bar works on macOS, but on Windows it leaves our packaged app without a
+    // practical close button.
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 25, y: 24 } } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -473,6 +477,41 @@ ipcMain.handle('codiff:showInFolder', async (event, filePath) => {
   } else {
     shell.openPath(state.root);
   }
+});
+
+ipcMain.handle('codiff:writeReviewComments', async (event, payload) => {
+  // Persist the renderer's in-memory review comments next to the repository
+  // being reviewed. This gives external automation a stable file to read after
+  // a human finishes commenting in the Codiff window.
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  const state = await readRepositoryState(repositoryPath);
+  const directory = join(state.root, '.codiff');
+  const markdownPath = join(directory, 'review-comments.md');
+  const jsonPath = join(directory, 'review-comments.json');
+
+  // Treat the IPC payload as untrusted UI input: normalize missing/malformed
+  // values so a bad renderer message cannot crash the main process handler.
+  const comments = Array.isArray(payload?.comments) ? payload.comments : [];
+  const markdown = typeof payload?.markdown === 'string' ? payload.markdown : '';
+
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(markdownPath, markdown, 'utf8');
+  writeFileSync(
+    jsonPath,
+    JSON.stringify(
+      {
+        comments,
+        generatedAt: new Date().toISOString(),
+        repositoryRoot: state.root,
+        source: state.source,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  return { jsonPath, markdownPath };
 });
 
 ipcMain.handle('codiff:getRelativePath', async (event, filePath) => {

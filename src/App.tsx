@@ -2314,6 +2314,27 @@ export default function App() {
     reviewCommentsRef.current = reviewComments;
   }, [reviewComments]);
 
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+
+    // Review comments normally live only in React state. Export them whenever
+    // they change so external review tooling can read the latest reviewer
+    // feedback from disk and apply fixes in the source worktree.
+    const markdown = buildReviewCommentsMarkdown(
+      state.files,
+      reviewComments,
+      preferences.showWhitespace,
+    );
+    window.codiff
+      .writeReviewComments({
+        comments: reviewComments,
+        markdown,
+      })
+      .catch(() => undefined);
+  }, [preferences.showWhitespace, reviewComments, state]);
+
   const showWhitespace = preferences.showWhitespace;
   const walkthroughNotes = useMemo(() => getWalkthroughNotes(walkthrough), [walkthrough]);
   const orderedFiles = useMemo(

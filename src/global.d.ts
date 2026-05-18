@@ -24,6 +24,17 @@ declare global {
       onPreferencesChanged: (callback: (preferences: CodiffPreferences) => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
       showInFolder: (path: string) => Promise<void>;
+      writeReviewComments: (payload: {
+        comments: ReadonlyArray<{
+          body: string;
+          filePath: string;
+          id: string;
+          lineNumber: number;
+          sectionId: string;
+          side: 'additions' | 'deletions';
+        }>;
+        markdown: string;
+      }) => Promise<{ jsonPath: string; markdownPath: string }>;
     };
   }
 }
