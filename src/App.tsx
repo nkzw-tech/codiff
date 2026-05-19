@@ -99,6 +99,7 @@ type ReviewComment = {
   lineNumber: number;
   sectionId: string;
   side: 'additions' | 'deletions';
+  startLineNumber?: number;
   submittedAt?: string;
   url?: string;
 };
@@ -1070,8 +1071,10 @@ export const fileHasVisibleDiff = (file: ChangedFile, showWhitespace: boolean) =
 const getFirstVisibleSection = (file: ChangedFile, showWhitespace: boolean) =>
   getVisibleDiffSections(file, showWhitespace)[0]?.section;
 
-const getCommentKey = (comment: Pick<ReviewComment, 'lineNumber' | 'sectionId' | 'side'>) =>
-  `${comment.sectionId}:${comment.side}:${comment.lineNumber}`;
+const getCommentKey = (
+  comment: Pick<ReviewComment, 'lineNumber' | 'sectionId' | 'side' | 'startLineNumber'>,
+) =>
+  `${comment.sectionId}:${comment.side}:${comment.lineNumber}:${comment.startLineNumber ?? comment.lineNumber}`;
 
 const getReviewCommentsDigest = (comments: ReadonlyArray<ReviewComment>) =>
   comments
@@ -1155,23 +1158,28 @@ const getReviewCommentPatchContext = (
       additionLineNumber += content.additions;
     }
 
-    const targetIndex = rows.findIndex((row) =>
+    const matchesLine = (row: (typeof rows)[number], lineNumber: number) =>
       row.side
         ? row.side === comment.side &&
           (comment.side === 'additions'
-            ? row.additionLineNumber === comment.lineNumber
-            : row.deletionLineNumber === comment.lineNumber)
+            ? row.additionLineNumber === lineNumber
+            : row.deletionLineNumber === lineNumber)
         : comment.side === 'additions'
-          ? row.additionLineNumber === comment.lineNumber
-          : row.deletionLineNumber === comment.lineNumber,
-    );
+          ? row.additionLineNumber === lineNumber
+          : row.deletionLineNumber === lineNumber;
+
+    const startLine = comment.startLineNumber ?? comment.lineNumber;
+    const endLine = comment.lineNumber;
+    const targetIndex = rows.findIndex((row) => matchesLine(row, endLine));
+    const rangeStartIndex = rows.findIndex((row) => matchesLine(row, startLine));
 
     if (targetIndex === -1) {
       continue;
     }
 
-    const start = Math.max(0, targetIndex - 3);
-    const end = Math.min(rows.length, targetIndex + 4);
+    const anchorStart = rangeStartIndex === -1 ? targetIndex : rangeStartIndex;
+    const start = Math.max(0, Math.min(anchorStart, targetIndex) - 3);
+    const end = Math.min(rows.length, Math.max(anchorStart, targetIndex) + 4);
     const context = rows.slice(start, end).map((row) => {
       const lineNumber =
         row.prefix === '+'
@@ -1215,8 +1223,13 @@ export const buildReviewCommentsMarkdown = (
           : 'No patch context available.';
       const fence = getMarkdownFence(context);
 
+      const lineLabel =
+        comment.startLineNumber != null && comment.startLineNumber !== comment.lineNumber
+          ? `lines ${comment.startLineNumber}–${comment.lineNumber}`
+          : `line ${comment.lineNumber}`;
+
       return [
-        `${index + 1}. **${comment.filePath}** (${comment.side} line ${comment.lineNumber})`,
+        `${index + 1}. **${comment.filePath}** (${comment.side} ${lineLabel})`,
         '',
         indentMarkdown(`${fence}diff\n${context}\n${fence}`),
         '',
@@ -1998,7 +2011,11 @@ function ReviewAnnotation({
                 >
                   <strong>{displayName}</strong>
                   <span>
-                    {comment.side === 'additions' ? 'New' : 'Old'} line {comment.lineNumber}
+                    {comment.side === 'additions' ? 'New' : 'Old'}{' '}
+                    {comment.startLineNumber != null &&
+                    comment.startLineNumber !== comment.lineNumber
+                      ? `lines ${comment.startLineNumber}–${comment.lineNumber}`
+                      : `line ${comment.lineNumber}`}
                   </span>
                   {!comment.isReadOnly ? (
                     <button
@@ -2039,7 +2056,12 @@ function ReviewAnnotation({
                   ) : null}
                 </div>
                 <textarea
-                  aria-label={`Comment on ${comment.filePath} line ${comment.lineNumber}`}
+                  aria-label={`Comment on ${comment.filePath} ${
+                    comment.startLineNumber != null &&
+                    comment.startLineNumber !== comment.lineNumber
+                      ? `lines ${comment.startLineNumber}–${comment.lineNumber}`
+                      : `line ${comment.lineNumber}`
+                  }`}
                   className={`review-comment-input${comment.isReadOnly ? ' read-only' : ''}`}
                   onChange={(event) => onUpdateComment(comment.id, event.currentTarget.value)}
                   onKeyDown={(event) => handleCommentKeyDown(event, comment)}
@@ -2240,7 +2262,7 @@ function ReviewCodeView({
         diffIndicators: 'bars',
         diffStyle: 'split',
         enableGutterUtility: true,
-        enableLineSelection: false,
+        enableLineSelection: true,
         expandUnchanged: false,
         expansionLineCount: diffContextExpansionLineCount,
         hunkSeparators: 'line-info-basic',
@@ -2254,11 +2276,14 @@ function ReviewCodeView({
             return;
           }
           const side = range.side ?? range.endSide ?? 'additions';
+          const start = Math.min(range.start, range.end);
+          const end = Math.max(range.start, range.end);
           onCreateComment({
             filePath: meta.file.path,
-            lineNumber: range.start,
+            lineNumber: end,
             sectionId: meta.section.id,
             side,
+            ...(end !== start ? { startLineNumber: start } : {}),
           });
         },
         stickyHeaders: true,
@@ -3852,6 +3877,9 @@ export default function App() {
             filePath: comment.filePath,
             lineNumber: comment.lineNumber,
             side: comment.side,
+            ...(comment.startLineNumber != null && comment.startLineNumber !== comment.lineNumber
+              ? { startLineNumber: comment.startLineNumber }
+              : {}),
           },
           source: currentState.source,
         })
@@ -3906,6 +3934,9 @@ export default function App() {
             filePath: comment.filePath,
             lineNumber: comment.lineNumber,
             side: comment.side,
+            ...(comment.startLineNumber != null && comment.startLineNumber !== comment.lineNumber
+              ? { startLineNumber: comment.startLineNumber }
+              : {}),
           })),
           event,
           source: currentState.source,

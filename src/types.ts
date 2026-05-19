@@ -171,6 +171,7 @@ export type PullRequestReviewComment = {
   filePath: string;
   lineNumber: number;
   side: 'additions' | 'deletions';
+  startLineNumber?: number;
 };
 
 export type PullRequestExistingReviewComment = PullRequestReviewComment & {

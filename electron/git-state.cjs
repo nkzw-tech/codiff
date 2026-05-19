@@ -813,12 +813,22 @@ const readPullRequestState = async (launchPath, source) => {
 
 const toGitHubReviewSide = (side) => (side === 'deletions' ? 'LEFT' : 'RIGHT');
 
-const normalizePullRequestComment = (comment) => ({
-  body: comment.body,
-  line: comment.lineNumber,
-  path: comment.filePath,
-  side: toGitHubReviewSide(comment.side),
-});
+const normalizePullRequestComment = (comment) => {
+  const payload = {
+    body: comment.body,
+    line: comment.lineNumber,
+    path: comment.filePath,
+    side: toGitHubReviewSide(comment.side),
+  };
+  if (
+    typeof comment.startLineNumber === 'number' &&
+    comment.startLineNumber !== comment.lineNumber
+  ) {
+    payload.start_line = comment.startLineNumber;
+    payload.start_side = toGitHubReviewSide(comment.side);
+  }
+  return payload;
+};
 
 const submitPullRequestComment = async (launchPath, request) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
