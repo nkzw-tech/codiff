@@ -4,7 +4,6 @@ const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 
 const CODEX_TIMEOUT_MS = 45_000;
-const CODEX_MODEL = 'gpt-5.3-codex-spark';
 const CODEX_REASONING_EFFORT = 'high';
 
 const getCodexCommand = () => {
@@ -23,6 +22,8 @@ const getCodexCommand = () => {
 
 const oneLine = (value, fallback = '') =>
   (typeof value === 'string' ? value : fallback).replace(/\s+/g, ' ').trim();
+
+const CODEX_MODEL = oneLine(process.env.CODIFF_CODEX_MODEL);
 
 const truncate = (value, maxLength) => {
   if (value.length <= maxLength) {
@@ -72,8 +73,7 @@ const runCodex = async (
       getCodexCommand(),
       [
         'exec',
-        '-m',
-        CODEX_MODEL,
+        ...(CODEX_MODEL ? ['-m', CODEX_MODEL] : []),
         '-c',
         `model_reasoning_effort="${CODEX_REASONING_EFFORT}"`,
         '--cd',
