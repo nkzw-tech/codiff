@@ -2506,6 +2506,26 @@ function ReviewCodeView({
   );
 }
 
+function ReviewSourceLoading() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setVisible(true), 200);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return (
+    <div className="review-source-loading">
+      {visible ? (
+        <div className="review-source-loading-indicator" role="status">
+          <span aria-hidden className="review-source-loading-spinner" />
+          <span>Loading diff…</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RepositoryChangeBanner({ visible }: { visible: boolean }) {
   return (
     <div aria-live="polite" className={`repository-change-banner${visible ? ' visible' : ''}`}>
@@ -4032,7 +4052,7 @@ export default function App() {
       </aside>
       <main className="review">
         {isSwitchingSource ? (
-          <div className="review-source-loading" />
+          <ReviewSourceLoading />
         ) : state.files.length === 0 ? (
           <div className="empty-state">
             <div className="empty-panel squircle">

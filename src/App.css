@@ -677,9 +677,37 @@
 }
 
 .review-source-loading {
+  align-items: center;
   background: var(--code-bg);
+  display: flex;
   height: 100%;
+  justify-content: center;
   width: 100%;
+}
+
+.review-source-loading-indicator {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  gap: 10px;
+}
+
+.review-source-loading-spinner {
+  animation: review-source-loading-spin 0.8s linear infinite;
+  border: 2px solid var(--file-border);
+  border-radius: 50%;
+  border-top-color: var(--text);
+  display: inline-block;
+  height: 16px;
+  width: 16px;
+}
+
+@keyframes review-source-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .code-view {
