@@ -140,9 +140,33 @@
 
 .app-shell {
   display: grid;
-  grid-template-columns: 292px minmax(0, 1fr);
+  grid-template-columns: 292px 6px minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
+}
+
+.sidebar-resizer {
+  -webkit-app-region: no-drag;
+  cursor: col-resize;
+  position: relative;
+  user-select: none;
+  z-index: 21;
+}
+
+.sidebar-resizer::before {
+  background: transparent;
+  content: '';
+  inset: 0 -4px;
+  position: absolute;
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer.dragging::after {
+  background: color-mix(in srgb, var(--tree-selection-focus) 60%, transparent);
+  content: '';
+  inset: 0 2px;
+  position: absolute;
+  transition: background 120ms ease;
 }
 
 .repository-change-banner {
@@ -1695,10 +1719,6 @@
 }
 
 @media (max-width: 880px) {
-  .app-shell {
-    grid-template-columns: 220px minmax(0, 1fr);
-  }
-
   .diff-search-panel {
     grid-template-columns: minmax(120px, 1fr) 48px 28px 28px 28px;
     left: 230px;

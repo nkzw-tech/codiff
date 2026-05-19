@@ -27,6 +27,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
 import codexIconUrl from './assets/codex.svg';
@@ -891,6 +892,30 @@ const readViewed = (root: string): Record<string, string> => {
 
 const writeViewed = (root: string, viewed: Record<string, string>) => {
   localStorage.setItem(getViewedKey(root), JSON.stringify(viewed));
+};
+
+const SIDEBAR_WIDTH_STORAGE_KEY = 'codiff:sidebar-width';
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 640;
+const SIDEBAR_DEFAULT_WIDTH = 292;
+
+const clampSidebarWidth = (width: number): number =>
+  Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+
+const readSidebarWidth = (): number => {
+  const raw = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+  if (!raw) {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+  return clampSidebarWidth(parsed);
+};
+
+const writeSidebarWidth = (width: number) => {
+  localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width));
 };
 
 const getItemId = (section: DiffSection) => `diff:${section.id}`;
@@ -3319,6 +3344,7 @@ export default function App() {
   const [pendingSource, setPendingSource] = useState<ReviewSource | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tree');
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => readSidebarWidth());
   const [state, setState] = useState<RepositoryState | null>(null);
   const [terminalHelperInstalling, setTerminalHelperInstalling] = useState(false);
   const [terminalHelperStatus, setTerminalHelperStatus] = useState<TerminalHelperStatus>(
@@ -4064,6 +4090,44 @@ export default function App() {
     [pendingSource, saveCurrentSourceSession],
   );
 
+  const handleSidebarResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    const handle = event.currentTarget;
+    const shell = handle.parentElement;
+    if (!shell) {
+      return;
+    }
+    const shellLeft = shell.getBoundingClientRect().left;
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const next = clampSidebarWidth(moveEvent.clientX - shellLeft);
+      setSidebarWidth(next);
+    };
+
+    const handleEnd = () => {
+      handle.releasePointerCapture(event.pointerId);
+      handle.removeEventListener('pointermove', handleMove);
+      handle.removeEventListener('pointerup', handleEnd);
+      handle.removeEventListener('pointercancel', handleEnd);
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      setSidebarWidth((width) => {
+        writeSidebarWidth(width);
+        return width;
+      });
+    };
+
+    handle.addEventListener('pointermove', handleMove);
+    handle.addEventListener('pointerup', handleEnd);
+    handle.addEventListener('pointercancel', handleEnd);
+  }, []);
+
   const changeSidebarMode = useCallback(
     (mode: SidebarMode) => {
       if (mode === 'tree') {
@@ -4528,7 +4592,10 @@ export default function App() {
   const isSwitchingSource = pendingSource != null;
 
   return (
-    <div className="app-shell">
+    <div
+      className="app-shell"
+      style={{ gridTemplateColumns: `${sidebarWidth}px 6px minmax(0, 1fr)` }}
+    >
       <div aria-hidden className="window-drag-region" />
       <RepositoryChangeBanner
         visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
@@ -4596,6 +4663,7 @@ export default function App() {
           walkthroughUnread={walkthroughUnread}
         />
       </aside>
+      <div aria-hidden className="sidebar-resizer" onPointerDown={handleSidebarResizeStart} />
       <main className="review">
         {isSwitchingSource ? (
           <ReviewSourceLoading />
