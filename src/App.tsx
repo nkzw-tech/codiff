@@ -2261,21 +2261,6 @@ function ReviewCodeView({
             side,
           });
         },
-        onLineClick: (line, context) => {
-          if (line.type !== 'diff-line') {
-            return;
-          }
-          const meta = itemMetadata.get(context.item.id);
-          if (!meta || meta.isCollapsed) {
-            return;
-          }
-          onCreateComment({
-            filePath: meta.file.path,
-            lineNumber: line.lineNumber,
-            sectionId: meta.section.id,
-            side: line.annotationSide,
-          });
-        },
         stickyHeaders: true,
         theme: {
           dark: 'Dunkel',
