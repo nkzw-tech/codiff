@@ -17,6 +17,7 @@ const { parseArgs } = require('node:util');
 const {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -49,6 +50,7 @@ const repositoryWatchers = new Map();
 const windowRepositories = new Map();
 const windowLaunchOptions = new Map();
 let preferences = {
+  copyCommentsOnClose: false,
   openAIModel: DEFAULT_OPENAI_MODEL,
   showWhitespace: false,
   theme: 'system',
@@ -672,6 +674,16 @@ const buildApplicationMenu = () =>
           type: 'checkbox',
         },
         {
+          checked: preferences.copyCommentsOnClose,
+          click: (menuItem) => {
+            updatePreferences({
+              copyCommentsOnClose: menuItem.checked,
+            });
+          },
+          label: 'Copy Comments on Close',
+          type: 'checkbox',
+        },
+        {
           label: 'Theme',
           submenu: [
             {
@@ -706,6 +718,46 @@ const buildApplicationMenu = () =>
     },
   ]);
 
+let nextCopyPendingCommentsRequestId = 0;
+const pendingCopyPendingCommentsRequests = new Map();
+let quitting = false;
+
+ipcMain.on('codiff:copyPendingCommentsResult', (event, requestId, markdown) => {
+  const pending = pendingCopyPendingCommentsRequests.get(requestId);
+  if (!pending || pending.webContentsId !== event.sender.id) {
+    return;
+  }
+
+  pendingCopyPendingCommentsRequests.delete(requestId);
+  pending.resolve(typeof markdown === 'string' ? markdown : '');
+});
+
+const requestPendingCommentsMarkdown = (browserWindow) =>
+  new Promise((resolve) => {
+    if (browserWindow.isDestroyed() || browserWindow.webContents.isDestroyed()) {
+      resolve('');
+      return;
+    }
+
+    const requestId = ++nextCopyPendingCommentsRequestId;
+    const webContentsId = browserWindow.webContents.id;
+    const timeout = setTimeout(() => {
+      if (pendingCopyPendingCommentsRequests.delete(requestId)) {
+        resolve('');
+      }
+    }, 2000);
+
+    pendingCopyPendingCommentsRequests.set(requestId, {
+      resolve: (markdown) => {
+        clearTimeout(timeout);
+        resolve(markdown);
+      },
+      webContentsId,
+    });
+
+    browserWindow.webContents.send('codiff:copyPendingCommentsRequest', requestId);
+  });
+
 const createWindow = (
   repositoryPath,
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
@@ -738,6 +790,26 @@ const createWindow = (
     startRepositoryWatcher(window, repositoryPath);
   }
   window.once('ready-to-show', () => window.show());
+  let allowClose = false;
+  window.on('close', (event) => {
+    if (allowClose || quitting || !preferences.copyCommentsOnClose) {
+      return;
+    }
+
+    event.preventDefault();
+    requestPendingCommentsMarkdown(window)
+      .then((markdown) => {
+        if (markdown) {
+          clipboard.writeText(markdown);
+        }
+      })
+      .finally(() => {
+        allowClose = true;
+        if (!window.isDestroyed()) {
+          window.close();
+        }
+      });
+  });
   window.on('closed', () => {
     const watcher = repositoryWatchers.get(webContentsId);
     if (watcher?.interval) {
@@ -794,6 +866,10 @@ if (squirrelStartup || !lock) {
 
   app.on('window-all-closed', () => {
     app.quit();
+  });
+
+  app.on('before-quit', () => {
+    quitting = true;
   });
 }
 

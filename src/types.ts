@@ -164,6 +164,7 @@ export type DiffSectionContentRequest = {
 export type CodiffTheme = 'system' | 'light' | 'dark';
 
 export type CodiffPreferences = {
+  copyCommentsOnClose: boolean;
   openAIModel: string;
   showWhitespace: boolean;
   theme: CodiffTheme;

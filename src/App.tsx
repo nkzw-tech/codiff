@@ -416,6 +416,7 @@ const fileTreeSort = (
 ) => compareTreePaths(left.path, right.path);
 
 const defaultPreferences: CodiffPreferences = {
+  copyCommentsOnClose: false,
   openAIModel: 'gpt-5.3-codex-spark',
   showWhitespace: false,
   theme: 'system',
@@ -2965,6 +2966,7 @@ export default function App() {
   const sourceSessionsRef = useRef<Map<string, SourceSession>>(new Map());
   const stateRef = useRef<RepositoryState | null>(null);
   const collapsedRef = useRef<Set<string>>(new Set());
+  const preferencesRef = useRef<CodiffPreferences>(defaultPreferences);
   const reviewCommentsRef = useRef<ReadonlyArray<ReviewComment>>([]);
   const selectedPathRef = useRef<string | null>(null);
   const sidebarModeRef = useRef<SidebarMode>('tree');
@@ -3426,6 +3428,26 @@ export default function App() {
   useEffect(() => {
     reviewCommentsRef.current = reviewComments;
   }, [reviewComments]);
+
+  useEffect(() => {
+    preferencesRef.current = preferences;
+  }, [preferences]);
+
+  useEffect(() => {
+    const removeListener = window.codiff.onCopyPendingCommentsRequest(() => {
+      const currentState = stateRef.current;
+      if (!currentState) {
+        return '';
+      }
+
+      return buildReviewCommentsMarkdown(
+        currentState.files,
+        reviewCommentsRef.current,
+        preferencesRef.current.showWhitespace,
+      );
+    });
+    return removeListener;
+  }, []);
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;

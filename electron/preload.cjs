@@ -11,6 +11,24 @@ contextBridge.exposeInMainWorld('codiff', {
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getWalkthrough: (source) => ipcRenderer.invoke('codiff:getWalkthrough', source),
   installTerminalHelper: () => ipcRenderer.invoke('codiff:installTerminalHelper'),
+  onCopyPendingCommentsRequest: (callback) => {
+    const listener = (_event, requestId) => {
+      Promise.resolve(callback()).then(
+        (markdown) => {
+          ipcRenderer.send(
+            'codiff:copyPendingCommentsResult',
+            requestId,
+            typeof markdown === 'string' ? markdown : '',
+          );
+        },
+        () => {
+          ipcRenderer.send('codiff:copyPendingCommentsResult', requestId, '');
+        },
+      );
+    };
+    ipcRenderer.on('codiff:copyPendingCommentsRequest', listener);
+    return () => ipcRenderer.removeListener('codiff:copyPendingCommentsRequest', listener);
+  },
   onFindInDiffs: (callback) => {
     const listener = () => callback();
     ipcRenderer.on('codiff:findInDiffs', listener);
