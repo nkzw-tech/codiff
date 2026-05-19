@@ -4529,6 +4529,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <div aria-hidden className="window-drag-region" />
       <RepositoryChangeBanner
         visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
       />

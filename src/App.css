@@ -355,10 +355,9 @@
 .sidebar-path-row {
   align-items: center;
   display: flex;
-  min-height: 42px;
+  min-height: 38px;
   min-width: 0;
-  padding-top: 10px;
-  padding-left: 72px;
+  padding-left: 84px;
 }
 
 .sidebar-path {
@@ -368,7 +367,6 @@
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
-  transform: translateY(-6px);
   white-space: nowrap;
 }
 
@@ -718,6 +716,16 @@
   overflow: hidden;
 }
 
+.window-drag-region {
+  -webkit-app-region: drag;
+  height: 38px;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 20;
+}
+
 .review-source-loading {
   background: var(--code-bg);
   width: 100%;
@@ -856,6 +864,7 @@
 }
 
 .codiff-file-header {
+  -webkit-app-region: no-drag;
   -webkit-backdrop-filter: blur(4px) saturate(1.18);
   align-items: center;
   backdrop-filter: blur(4px) saturate(1.18);
