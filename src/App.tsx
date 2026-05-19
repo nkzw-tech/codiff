@@ -371,6 +371,7 @@ const fileTreeSort = (
 
 const defaultPreferences: CodiffPreferences = {
   showWhitespace: false,
+  theme: 'system',
 };
 
 const codeViewUnsafeCSS = `
@@ -3252,6 +3253,15 @@ export default function App() {
       removeListener();
     };
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (preferences.theme === 'system') {
+      root.removeAttribute('data-theme');
+    } else {
+      root.setAttribute('data-theme', preferences.theme);
+    }
+  }, [preferences.theme]);
 
   useEffect(
     () => () => {

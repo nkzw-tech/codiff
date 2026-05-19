@@ -159,8 +159,11 @@ export type DiffSectionContentRequest = {
   source?: ReviewSource;
 };
 
+export type CodiffTheme = 'system' | 'light' | 'dark';
+
 export type CodiffPreferences = {
   showWhitespace: boolean;
+  theme: CodiffTheme;
 };
 
 export type PullRequestReviewComment = {
