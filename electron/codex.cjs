@@ -1,9 +1,10 @@
 // @ts-check
 
-const { spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { existsSync, promises: fs } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
+const { promisify } = require('node:util');
 
 const CODEX_TIMEOUT_MS = 45_000;
 const DEFAULT_OPENAI_MODEL = 'gpt-5.3-codex-spark';
@@ -40,10 +41,26 @@ const OPENAI_MODELS = Object.freeze([
   },
 ]);
 const OPENAI_MODEL_IDS = new Set(OPENAI_MODELS.map((model) => model.id));
+const execFileAsync = promisify(execFile);
+/** @type {Promise<string> | null} */
+let codexCommandPromise = null;
 
-const getCodexCommand = () => {
-  if (process.env.CODIFF_CODEX_PATH) {
-    return process.env.CODIFF_CODEX_PATH;
+const resolveCodexCommand = async () => {
+  const shell = process.env.SHELL;
+  if (shell) {
+    try {
+      const { stdout } = await execFileAsync(shell, ['-lc', 'command -v codex'], {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+      const command = stdout.trim();
+
+      if (command) {
+        return command;
+      }
+    } catch {
+      // Fall back to known locations below.
+    }
   }
 
   for (const path of ['/opt/homebrew/bin/codex', '/usr/local/bin/codex']) {
@@ -53,6 +70,15 @@ const getCodexCommand = () => {
   }
 
   return 'codex';
+};
+
+const getCodexCommand = () => {
+  if (process.env.CODIFF_CODEX_PATH) {
+    return Promise.resolve(process.env.CODIFF_CODEX_PATH);
+  }
+
+  codexCommandPromise ||= resolveCodexCommand();
+  return codexCommandPromise;
 };
 
 /**
@@ -173,6 +199,7 @@ const runCodex = async (
 
   /** @param {string} codexModel @returns {Promise<string>} */
   const invokeCodex = async (codexModel) => {
+    const codexCommand = await getCodexCommand();
     const directory = await fs.mkdtemp(join(tmpdir(), 'codiff-codex-'));
     const outputPath = join(directory, outputName);
     const schemaPath = join(directory, 'schema.json');
@@ -186,7 +213,6 @@ const runCodex = async (
         let stdout = '';
         let finished = false;
 
-        const codexCommand = getCodexCommand();
         const child = spawn(
           codexCommand,
           [
