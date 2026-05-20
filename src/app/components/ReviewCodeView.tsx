@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 import codexIconUrl from '../../assets/codex.svg';
 import type {
@@ -64,6 +65,51 @@ import type {
 } from '../../types.ts';
 import { DiffLineCountBadge } from './Sidebar.tsx';
 
+function CopyFilePathButton({ path }: { path: string }) {
+  const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current != null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const handleClick = useCallback(
+    async (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      await navigator.clipboard.writeText(path);
+      setCopied(true);
+      if (copiedTimerRef.current != null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+      copiedTimerRef.current = window.setTimeout(() => {
+        setCopied(false);
+        copiedTimerRef.current = null;
+      }, 1600);
+    },
+    [path],
+  );
+
+  return (
+    <button
+      aria-label={copied ? 'Path copied' : 'Copy file path'}
+      className={`codiff-copy-path-button${copied ? ' copied' : ''}`}
+      onClick={(event) => void handleClick(event)}
+      title={copied ? 'Path copied' : 'Copy file path'}
+      type="button"
+    >
+      <span
+        aria-hidden
+        className={copied ? 'codiff-copy-path-icon check' : 'codiff-copy-path-icon'}
+      />
+    </button>
+  );
+}
+
 function CodeViewHeader({
   meta,
   onOpenFile,
@@ -97,19 +143,29 @@ function CodeViewHeader({
         isCollapsed ? ' collapsed' : ''
       }${isSelected ? ' selected' : ''}${isViewed ? ' viewed' : ''}`}
     >
-      <button
+      <div
         aria-expanded={!isCollapsed}
         aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
         className="codiff-header-toggle"
         onClick={() => onToggleCollapsed(file, isCollapsed)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onToggleCollapsed(file, isCollapsed);
+          }
+        }}
+        role="button"
+        tabIndex={0}
         title={isCollapsed ? 'Expand' : 'Collapse'}
-        type="button"
       >
         <span className="codiff-chevron-box">
           <span className={isCollapsed ? 'codiff-chevron collapsed' : 'codiff-chevron'} />
         </span>
         <span className="codiff-file-heading">
-          <span className="codiff-file-path">{file.path}</span>
+          <span className="codiff-file-path-row">
+            <span className="codiff-file-path">{file.path}</span>
+            <CopyFilePathButton path={file.path} />
+          </span>
           {file.oldPath ? <span className="codiff-file-old-path">{file.oldPath}</span> : null}
           {walkthroughNote ? (
             <span className="codiff-file-note">{walkthroughNote.reason}</span>
@@ -120,7 +176,7 @@ function CodeViewHeader({
             {sectionLabel[section.kind]}
           </span>
         ) : null}
-      </button>
+      </div>
       <DiffLineCountBadge lineCount={lineCount} />
       <div className={`codiff-status-badge ${file.status}`}>{statusLabel[file.status]}</div>
       {canRenderMarkdown ? (

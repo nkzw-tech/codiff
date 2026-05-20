@@ -1010,7 +1010,8 @@
 .codiff-header-toggle,
 .codiff-markdown-button,
 .codiff-open-button,
-.codiff-viewed-button {
+.codiff-viewed-button,
+.codiff-copy-path-button {
   -webkit-app-region: no-drag;
   align-items: center;
   background: transparent;
@@ -1019,6 +1020,79 @@
   cursor: pointer;
   display: inline-flex;
   justify-content: center;
+}
+
+.codiff-copy-path-button {
+  border-radius: 6px;
+  color: var(--muted);
+  corner-shape: squircle;
+  flex: none;
+  height: 20px;
+  opacity: 0;
+  padding: 0;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+  width: 20px;
+}
+
+.codiff-file-header:hover .codiff-copy-path-button,
+.codiff-copy-path-button:focus-visible,
+.codiff-copy-path-button.copied {
+  opacity: 1;
+}
+
+.codiff-copy-path-button:hover {
+  background: rgb(127 127 127 / 0.14);
+  color: var(--text);
+}
+
+.codiff-copy-path-button.copied {
+  color: var(--viewed);
+}
+
+.codiff-copy-path-icon {
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  display: block;
+  height: 9px;
+  position: relative;
+  width: 9px;
+}
+
+.codiff-copy-path-icon::after {
+  background: var(--file-bg);
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  content: '';
+  display: block;
+  height: 9px;
+  left: 3px;
+  position: absolute;
+  top: 3px;
+  width: 9px;
+}
+
+.codiff-copy-path-icon.check {
+  border: 0;
+  height: 12px;
+  width: 12px;
+}
+
+.codiff-copy-path-icon.check::after {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  border-radius: 0;
+  content: '';
+  height: 5px;
+  left: 1px;
+  position: absolute;
+  top: 1px;
+  transform: rotate(-45deg);
+  width: 9px;
 }
 
 .codiff-header-toggle {
@@ -1071,6 +1145,13 @@
   overflow: hidden;
 }
 
+.codiff-file-path-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
 .codiff-file-path,
 .codiff-file-old-path {
   display: block;
@@ -1082,6 +1163,7 @@
 
 .codiff-file-path {
   font-size: 13px;
+  min-width: 0;
 }
 
 .codiff-file-old-path {
