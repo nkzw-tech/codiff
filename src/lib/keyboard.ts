@@ -10,7 +10,8 @@ export const isNativeInputTarget = (target: EventTarget | null) => {
   );
 };
 
-const isMacPlatform = (platform = navigator.platform) => platform.toLowerCase().includes('mac');
+export const isMacPlatform = (platform = navigator.platform) =>
+  platform.toLowerCase().includes('mac');
 
 export const isDiffSearchShortcut = (
   event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,

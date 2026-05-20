@@ -1,6 +1,6 @@
 // @ts-check
 
-const { parseStatus, validateRepositoryPath } = require('./git-state/common.cjs');
+const { gitOrEmpty, parseStatus, validateRepositoryPath } = require('./git-state/common.cjs');
 const {
   listRepositoryHistory,
   readCommitSectionContent,
@@ -28,12 +28,16 @@ const {
  */
 
 /** @param {string} launchPath @param {ReviewSource} [source] @returns {Promise<RepositoryState>} */
-const readRepositoryState = async (launchPath, source = { type: 'working-tree' }) =>
-  source.type === 'pull-request'
-    ? readPullRequestState(launchPath, source)
-    : source.type === 'commit'
-      ? readCommitState(launchPath, source.ref)
-      : readWorkingTreeState(launchPath, { eagerContents: false });
+const readRepositoryState = async (launchPath, source = { type: 'working-tree' }) => {
+  const state =
+    source.type === 'pull-request'
+      ? await readPullRequestState(launchPath, source)
+      : source.type === 'commit'
+        ? await readCommitState(launchPath, source.ref)
+        : await readWorkingTreeState(launchPath, { eagerContents: false });
+  const branch = (await gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD'])).trim() || null;
+  return { ...state, branch };
+};
 
 /** @param {string} launchPath @param {DiffSectionContentRequest} request */
 const readDiffSectionContent = async (launchPath, request) =>

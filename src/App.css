@@ -545,7 +545,7 @@
   corner-shape: squircle;
   cursor: pointer;
   display: grid;
-  gap: 6px;
+  gap: 0 6px;
   grid-template-columns: 62px minmax(0, 1fr);
   min-height: 34px;
   padding: 4px;
@@ -581,6 +581,26 @@
   color: var(--text);
   font: 12px/1.35 var(--font-sans);
   padding-inline: 4px;
+}
+
+.history-entry-meta {
+  color: var(--text-secondary, color-mix(in srgb, var(--text) 40%, transparent));
+  display: flex;
+  font: 10px/1.2 var(--font-sans);
+  gap: 8px;
+  justify-content: space-between;
+  padding-inline: 4px;
+  white-space: nowrap;
+}
+
+.history-entry-meta > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-entry-meta > span:last-child {
+  flex: none;
 }
 
 .history-loading {

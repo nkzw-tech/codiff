@@ -53,6 +53,7 @@ export type ReviewSource =
     };
 
 export type HistoryEntry = {
+  author: string;
   committedAt: number;
   parents: ReadonlyArray<string>;
   ref: string;
@@ -65,6 +66,7 @@ export type RepositoryHistory = {
 };
 
 export type RepositoryState = {
+  branch: string | null;
   files: ReadonlyArray<ChangedFile>;
   generatedAt: number;
   launchPath: string;
