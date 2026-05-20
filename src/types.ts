@@ -55,6 +55,7 @@ export type ReviewSource =
 export type HistoryEntry = {
   author: string;
   committedAt: number;
+  gravatarUrl?: string;
   parents: ReadonlyArray<string>;
   ref: string;
   subject: string;

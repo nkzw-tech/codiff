@@ -63,6 +63,7 @@ import type {
   GitIdentity,
   PullRequestExistingReviewComment,
 } from '../../types.ts';
+import { Gravatar } from './Gravatar.tsx';
 import { DiffLineCountBadge } from './Sidebar.tsx';
 
 function CopyFilePathButton({ path }: { path: string }) {
@@ -222,18 +223,12 @@ function ReviewAvatar({
   const label = author?.login || identity?.name || identity?.email || 'Git user';
   const avatarUrl = author?.avatarUrl || identity?.gravatarUrl;
 
-  return avatarUrl ? (
-    <img alt="" className="review-comment-avatar" draggable={false} src={avatarUrl} />
-  ) : (
-    <span aria-hidden className="review-comment-avatar fallback">
-      {label.trim()[0]?.toUpperCase() ?? '?'}
-    </span>
-  );
+  return <Gravatar fallback={label} size="medium" url={avatarUrl} />;
 }
 
 function CodexAvatar() {
   return (
-    <img alt="" className="review-comment-avatar codex" draggable={false} src={codexIconUrl} />
+    <img alt="" className="review-comment-avatar-codex" draggable={false} src={codexIconUrl} />
   );
 }
 

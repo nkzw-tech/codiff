@@ -8,6 +8,7 @@ const {
   fileSort,
   formatBytes,
   getFingerprint,
+  getGravatarHash,
   git,
   gitBufferWithInput,
   normalizeStatus,
@@ -553,19 +554,24 @@ const listRepositoryHistory = async (launchPath, limit = 200) => {
   const raw = await git(repoRoot, [
     'log',
     `--max-count=${limit}`,
-    '--format=%H%x1f%P%x1f%ct%x1f%s%x1f%aN%x1e',
+    '--format=%H%x1f%P%x1f%ct%x1f%s%x1f%aN%x1f%aE%x1e',
   ]);
   const entries = [];
 
   for (const record of raw.split('\x1e')) {
-    const [ref, parents, committedAt, subject, author] = record.trim().split('\x1f');
+    const [ref, parents, committedAt, subject, author, email] = record.trim().split('\x1f');
     if (!ref || !committedAt || subject == null) {
       continue;
     }
 
+    const gravatarUrl = email
+      ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
+      : undefined;
+
     entries.push({
       author: author || '',
       committedAt: Number(committedAt) * 1000,
+      gravatarUrl,
       parents: parents ? parents.split(' ') : [],
       ref,
       subject,

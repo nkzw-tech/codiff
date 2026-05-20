@@ -20,6 +20,7 @@ import { renderInlineMarkdown } from '../../lib/markdown.tsx';
 import { getShortRef, getSourceKey } from '../../lib/source.ts';
 import { walkthroughActionLabel, walkthroughImpactLabel } from '../../lib/walkthrough.ts';
 import type { ChangedFile, HistoryEntry, ReviewSource, Walkthrough } from '../../types.ts';
+import { Gravatar } from './Gravatar.tsx';
 
 export function Sidebar({
   currentSource,
@@ -383,6 +384,7 @@ function HistorySidebar({
           ? {
               author: null,
               committedAt: null,
+              gravatarUrl: undefined,
               key: getSourceKey(pullRequestSource),
               ref: pullRequestSource.number ? `PR #${pullRequestSource.number}` : 'PR',
               source: pullRequestSource satisfies ReviewSource,
@@ -392,6 +394,7 @@ function HistorySidebar({
         {
           author: null,
           committedAt: null,
+          gravatarUrl: undefined,
           key: 'working-tree',
           ref: '',
           source: { type: 'working-tree' } satisfies ReviewSource,
@@ -400,6 +403,7 @@ function HistorySidebar({
         ...entries.map((entry) => ({
           author: entry.author,
           committedAt: entry.committedAt,
+          gravatarUrl: entry.gravatarUrl,
           key: `commit:${entry.ref}`,
           ref: entry.ref,
           source: { ref: entry.ref, type: 'commit' } satisfies ReviewSource,
@@ -436,29 +440,51 @@ function HistorySidebar({
         const selected = row.key === currentSourceKey;
         return (
           <button
-            className={`history-entry${selected ? ' selected' : ''}`}
+            className={`history-entry${selected ? ' selected' : ''}${row.gravatarUrl ? ' with-avatar' : ''}`}
             key={row.key}
             onClick={() => onSelectSource(row.source)}
             title={row.subject}
             type="button"
           >
-            <span className="history-entry-ref">
-              {row.source.type === 'commit'
-                ? getShortRef(row.source.ref)
-                : row.source.type === 'pull-request'
-                  ? row.ref
-                  : 'local'}
-            </span>
-            <span className="history-entry-subject">{row.subject}</span>
-            {row.author && row.committedAt ? (
+            {row.gravatarUrl ? (
               <>
-                <span />
-                <span className="history-entry-meta">
-                  <span>{row.author}</span>
-                  <span>{shortDate(row.committedAt)}</span>
+                <Gravatar fallback={row.author || '?'} size="small" url={row.gravatarUrl} />
+                <span className="history-entry-content">
+                  <span className="history-entry-title-row">
+                    <span className="history-entry-ref">
+                      {row.source.type === 'commit' ? getShortRef(row.source.ref) : row.ref}
+                    </span>
+                    <span className="history-entry-subject">{row.subject}</span>
+                  </span>
+                  {row.author && row.committedAt ? (
+                    <span className="history-entry-meta">
+                      <span>{row.author}</span>
+                      <span>{shortDate(row.committedAt)}</span>
+                    </span>
+                  ) : null}
                 </span>
               </>
-            ) : null}
+            ) : (
+              <>
+                <span className="history-entry-ref">
+                  {row.source.type === 'commit'
+                    ? getShortRef(row.source.ref)
+                    : row.source.type === 'pull-request'
+                      ? row.ref
+                      : 'local'}
+                </span>
+                <span className="history-entry-subject">{row.subject}</span>
+                {row.author && row.committedAt ? (
+                  <>
+                    <span />
+                    <span className="history-entry-meta">
+                      <span>{row.author}</span>
+                      <span>{shortDate(row.committedAt)}</span>
+                    </span>
+                  </>
+                ) : null}
+              </>
+            )}
           </button>
         );
       })}
