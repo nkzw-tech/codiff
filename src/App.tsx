@@ -810,6 +810,29 @@ export default function App() {
         title: 'Copy Review Comments',
       }),
       registry.register({
+        execute: () => {
+          const currentState = stateRef.current;
+          if (!currentState) {
+            return;
+          }
+
+          const markdown = buildReviewCommentsMarkdown(
+            currentState.files,
+            reviewCommentsRef.current,
+            preferencesRef.current.showWhitespace,
+          );
+          if (markdown) {
+            void navigator.clipboard.writeText(markdown).then(() => {
+              window.close();
+            });
+          } else {
+            window.close();
+          }
+        },
+        id: 'copy-comments-and-close',
+        title: 'Copy Review Comments and Close',
+      }),
+      registry.register({
         description: () => selectedPathRef.current,
         execute: () => {
           const currentState = stateRef.current;
