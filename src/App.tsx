@@ -20,7 +20,7 @@ import {
 import { ReviewCodeView } from './app/components/ReviewCodeView.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
 import { defaultConfig } from './config/defaults.ts';
-import { matchesShortcut } from './config/keymap.ts';
+import { getShortcutLabel, matchesShortcut } from './config/keymap.ts';
 import type { CodiffConfig } from './config/types.ts';
 import {
   defaultLaunchOptions,
@@ -49,7 +49,14 @@ import {
   getReviewCommentRangeProps,
   getReviewCommentsFromState,
 } from './lib/review-comments.ts';
-import { clampSidebarWidth, readSidebarWidth, writeSidebarWidth } from './lib/sidebar-width.ts';
+import {
+  SIDEBAR_COLLAPSE_THRESHOLD,
+  clampSidebarWidth,
+  readSidebarCollapsed,
+  readSidebarWidth,
+  writeSidebarCollapsed,
+  writeSidebarWidth,
+} from './lib/sidebar-width.ts';
 import { getRepositoryLoadError, getShortRef, getSourceKey, getSourceLabel } from './lib/source.ts';
 import { readViewed, writeViewed } from './lib/viewed.ts';
 import {
@@ -100,6 +107,7 @@ export default function App() {
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [pendingSource, setPendingSource] = useState<ReviewSource | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => readSidebarCollapsed());
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tree');
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readSidebarWidth());
   const [state, setState] = useState<RepositoryState | null>(null);
@@ -706,6 +714,19 @@ export default function App() {
     setActiveDiffSearchMatchIndex(0);
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      writeSidebarCollapsed(next);
+      return next;
+    });
+  }, []);
+
+  const expandSidebar = useCallback(() => {
+    setSidebarCollapsed(false);
+    writeSidebarCollapsed(false);
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (matchesShortcut(event, codiffConfig.keymap, 'commandBar')) {
@@ -713,15 +734,27 @@ export default function App() {
         setCommandBarVisible((current) => !current);
         return;
       }
+      if (matchesShortcut(event, codiffConfig.keymap, 'toggleSidebar')) {
+        event.preventDefault();
+        toggleSidebar();
+        return;
+      }
       if (matchesShortcut(event, codiffConfig.keymap, 'diffSearch')) {
         event.preventDefault();
         openDiffSearch();
+        return;
+      }
+      if (matchesShortcut(event, codiffConfig.keymap, 'fileFilter')) {
+        if (sidebarCollapsed) {
+          event.preventDefault();
+          expandSidebar();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [codiffConfig.keymap, openDiffSearch]);
+  }, [codiffConfig.keymap, expandSidebar, openDiffSearch, sidebarCollapsed, toggleSidebar]);
 
   useEffect(() => {
     const registry = commandRegistryRef.current;
@@ -837,6 +870,12 @@ export default function App() {
         title: 'Open File in Editor',
       }),
       registry.register({
+        execute: toggleSidebar,
+        id: 'toggle-sidebar',
+        keymapAction: 'toggleSidebar',
+        title: 'Toggle Sidebar',
+      }),
+      registry.register({
         execute: () => window.location.reload(),
         id: 'reload',
         title: 'Reload Window',
@@ -849,7 +888,7 @@ export default function App() {
         unregister();
       }
     };
-  }, [bumpItemVersion, openDiffSearch]);
+  }, [bumpItemVersion, openDiffSearch, toggleSidebar]);
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
 
@@ -1018,22 +1057,38 @@ export default function App() {
     handle.setPointerCapture(event.pointerId);
     handle.classList.add('dragging');
     document.body.style.cursor = 'col-resize';
+    let collapsed = false;
 
-    const handleMove = (moveEvent: PointerEvent) => {
-      setSidebarWidth(clampSidebarWidth(moveEvent.clientX - shellLeft));
-    };
-
-    const handleEnd = () => {
+    const cleanup = () => {
       handle.releasePointerCapture(event.pointerId);
       handle.removeEventListener('pointermove', handleMove);
       handle.removeEventListener('pointerup', handleEnd);
       handle.removeEventListener('pointercancel', handleEnd);
       handle.classList.remove('dragging');
       document.body.style.cursor = '';
-      setSidebarWidth((width) => {
-        writeSidebarWidth(width);
-        return width;
-      });
+    };
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const rawWidth = moveEvent.clientX - shellLeft;
+      if (rawWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
+        // Collapse immediately mid-drag — no resistance, no snap on release
+        collapsed = true;
+        setSidebarCollapsed(true);
+        writeSidebarCollapsed(true);
+        cleanup();
+        return;
+      }
+      setSidebarWidth(clampSidebarWidth(rawWidth));
+    };
+
+    const handleEnd = () => {
+      cleanup();
+      if (!collapsed) {
+        setSidebarWidth((width) => {
+          writeSidebarWidth(width);
+          return width;
+        });
+      }
     };
 
     handle.addEventListener('pointermove', handleMove);
@@ -1532,12 +1587,49 @@ export default function App() {
     !walkthroughLoading &&
     walkthroughError?.code === 'CODEX_NOT_FOUND';
 
+  const sidebarLabel = `${compactPath(state.root)}${state.branch ? ` (${state.branch})` : ''}`;
+  const sidebarSourceLabel =
+    state.source.type !== 'working-tree' ? ` · ${getSourceLabel(state.source)}` : '';
+
   return (
     <div
-      className="app-shell"
-      style={{ gridTemplateColumns: `${sidebarWidth}px 6px minmax(0, 1fr)` }}
+      className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
+      style={
+        sidebarCollapsed
+          ? undefined
+          : { gridTemplateColumns: `${sidebarWidth}px 6px minmax(0, 1fr)` }
+      }
     >
       <div aria-hidden className="window-drag-region" />
+      {sidebarCollapsed ? (
+        <div className="collapsed-sidebar-bar">
+          <button
+            className="sidebar-toggle-button"
+            onClick={expandSidebar}
+            title={`Expand sidebar (${getShortcutLabel(codiffConfig.keymap, 'toggleSidebar')})`}
+            type="button"
+          >
+            <svg
+              aria-hidden
+              fill="none"
+              height="16"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              width="16"
+            >
+              <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
+              <line x1="9" x2="9" y1="3" y2="21" />
+            </svg>
+          </button>
+          <div className="collapsed-sidebar-label" title={state.root}>
+            {sidebarLabel}
+            {sidebarSourceLabel}
+          </div>
+        </div>
+      ) : null}
       <RepositoryChangeBanner
         visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
       />
@@ -1578,9 +1670,30 @@ export default function App() {
       <aside className="squircle sidebar">
         <div className="sidebar-header">
           <div className="sidebar-path-row">
+            <button
+              className="sidebar-toggle-button"
+              onClick={toggleSidebar}
+              title={`Collapse sidebar (${getShortcutLabel(codiffConfig.keymap, 'toggleSidebar')})`}
+              type="button"
+            >
+              <svg
+                aria-hidden
+                fill="none"
+                height="16"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+                width="16"
+              >
+                <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
+                <line x1="9" x2="9" y1="3" y2="21" />
+              </svg>
+            </button>
             <div className="sidebar-path" title={state.root}>
-              {compactPath(state.root)}
-              {state.source.type !== 'working-tree' ? ` · ${getSourceLabel(state.source)}` : ''}
+              {sidebarLabel}
+              {sidebarSourceLabel}
             </div>
           </div>
         </div>

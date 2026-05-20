@@ -81,6 +81,11 @@
           "type": "string",
           "default": "Escape",
           "description": "Discard an empty review comment."
+        },
+        "toggleSidebar": {
+          "type": "string",
+          "default": "Mod+b",
+          "description": "Toggle the sidebar between expanded and collapsed states."
         }
       }
     }

@@ -16,6 +16,7 @@ export const defaultKeymap: CodiffKeymap = {
   nextSearchMatch: 'Enter',
   prevSearchMatch: 'Shift+Enter',
   submitComment: 'Mod+Enter',
+  toggleSidebar: 'Mod+b',
 };
 
 export const defaultConfig: CodiffConfig = {

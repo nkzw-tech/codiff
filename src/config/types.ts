@@ -18,6 +18,7 @@ export type CodiffKeymap = {
   nextSearchMatch: KeyCombo;
   prevSearchMatch: KeyCombo;
   submitComment: KeyCombo;
+  toggleSidebar: KeyCombo;
 };
 
 export type CodiffConfig = {

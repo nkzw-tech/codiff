@@ -40,6 +40,7 @@ const defaultKeymap = {
   nextSearchMatch: 'Enter',
   prevSearchMatch: 'Shift+Enter',
   submitComment: 'Mod+Enter',
+  toggleSidebar: 'Mod+b',
 };
 
 /** @type {CodiffConfig} */
@@ -175,6 +176,10 @@ const mergeConfig = (raw) => {
         typeof rawKeymap.submitComment === 'string'
           ? rawKeymap.submitComment
           : defaultKeymap.submitComment,
+      toggleSidebar:
+        typeof rawKeymap.toggleSidebar === 'string'
+          ? rawKeymap.toggleSidebar
+          : defaultKeymap.toggleSidebar,
     },
     settings: {
       copyCommentsOnClose:
