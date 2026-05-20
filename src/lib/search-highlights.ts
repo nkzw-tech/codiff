@@ -41,12 +41,13 @@ const highlightTextContainer = (
     node = walker.nextNode();
   }
 
-  const row = container.closest<HTMLElement>('[data-line]');
   const codeColumn = container.closest<HTMLElement>('[data-code]');
-  const side = codeColumn?.hasAttribute('data-deletions') ? 'deletions' : 'additions';
+  const side: 'additions' | 'deletions' = codeColumn?.hasAttribute('data-deletions')
+    ? 'deletions'
+    : 'additions';
   const isActiveLine =
     activeMatch?.lineNumber != null &&
-    Number(row?.dataset.line) === activeMatch.lineNumber &&
+    Number(container.dataset.line) === activeMatch.lineNumber &&
     activeMatch.side === side;
 
   for (const textNode of textNodes) {
@@ -94,7 +95,7 @@ export const applySearchHighlights = (
       const matchForItem = activeMatch && activeMatch.itemId === id ? activeMatch : null;
 
       for (const container of Array.from(
-        root.querySelectorAll<HTMLElement>('[data-code] [data-column-content]'),
+        root.querySelectorAll<HTMLElement>('[data-code] [data-line]'),
       )) {
         highlightTextContainer(container, normalizedQuery, matchForItem);
       }
