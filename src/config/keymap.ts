@@ -79,5 +79,5 @@ export const getShortcutLabel = (keymap: CodiffKeymap, action: keyof CodiffKeyma
       }
       return part.trim().toUpperCase();
     })
-    .join(mac ? '' : '+');
+    .join('+');
 };

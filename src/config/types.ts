@@ -11,6 +11,7 @@ export type KeyCombo = string;
 
 export type CodiffKeymap = {
   closeSearch: KeyCombo;
+  commandBar: KeyCombo;
   diffSearch: KeyCombo;
   discardComment: KeyCombo;
   fileFilter: KeyCombo;

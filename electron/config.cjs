@@ -33,6 +33,7 @@ const defaultSettings = {
 /** @type {CodiffKeymap} */
 const defaultKeymap = {
   closeSearch: 'Escape',
+  commandBar: 'Mod+Shift+p',
   diffSearch: 'Mod+f',
   discardComment: 'Escape',
   fileFilter: 'Mod+p',
@@ -152,6 +153,8 @@ const mergeConfig = (raw) => {
         typeof rawKeymap.closeSearch === 'string'
           ? rawKeymap.closeSearch
           : defaultKeymap.closeSearch,
+      commandBar:
+        typeof rawKeymap.commandBar === 'string' ? rawKeymap.commandBar : defaultKeymap.commandBar,
       diffSearch:
         typeof rawKeymap.diffSearch === 'string' ? rawKeymap.diffSearch : defaultKeymap.diffSearch,
       discardComment:

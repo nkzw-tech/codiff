@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import { CommandBar } from './app/components/CommandBar.tsx';
 import {
   CopyCommentsButton,
   CodexUnavailablePanel,
@@ -38,6 +39,7 @@ import {
   type WalkthroughError,
 } from './lib/app-types.ts';
 import { DEFAULT_PADDING } from './lib/code-view-options.ts';
+import { type Command, createCommandRegistry } from './lib/command-registry.ts';
 import { getDiffSearchResult } from './lib/diff-search.ts';
 import { fileHasVisibleDiff, getFirstVisibleSection, getItemId } from './lib/diff.ts';
 import { compactPath, fuzzyMatches, sortFiles } from './lib/files.ts';
@@ -125,6 +127,9 @@ export default function App() {
   const viewedRef = useRef<Record<string, string>>({});
   const walkthroughRef = useRef<Walkthrough | null>(null);
   const walkthroughErrorRef = useRef<WalkthroughError | null>(null);
+  const [commandBarVisible, setCommandBarVisible] = useState(false);
+  const [commandBarCommands, setCommandBarCommands] = useState<ReadonlyArray<Command>>([]);
+  const commandRegistryRef = useRef(createCommandRegistry());
 
   const bumpItemVersion = useCallback((path: string) => {
     setItemVersionByPath((current) => ({
@@ -703,6 +708,11 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (matchesShortcut(event, codiffConfig.keymap, 'commandBar')) {
+        event.preventDefault();
+        setCommandBarVisible((current) => !current);
+        return;
+      }
       if (matchesShortcut(event, codiffConfig.keymap, 'diffSearch')) {
         event.preventDefault();
         openDiffSearch();
@@ -712,6 +722,134 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [codiffConfig.keymap, openDiffSearch]);
+
+  useEffect(() => {
+    const registry = commandRegistryRef.current;
+    const unregisterFns = [
+      registry.register({
+        execute: () => {
+          const input = document.querySelector<HTMLInputElement>('.sidebar-search');
+          input?.focus();
+          input?.select();
+        },
+        id: 'file-filter',
+        keymapAction: 'fileFilter',
+        title: 'Focus File Filter',
+      }),
+      registry.register({
+        execute: openDiffSearch,
+        id: 'diff-search',
+        keymapAction: 'diffSearch',
+        title: 'Find in Diffs',
+      }),
+      registry.register({
+        execute: () => setSidebarMode('tree'),
+        id: 'sidebar-tree',
+        title: 'Show File Tree',
+      }),
+      registry.register({
+        execute: () => setSidebarMode('history'),
+        id: 'sidebar-history',
+        title: 'Show History',
+      }),
+      registry.register({
+        execute: () => setSidebarMode('walkthrough'),
+        id: 'sidebar-walkthrough',
+        title: 'Show Walkthrough',
+      }),
+      registry.register({
+        execute: () => {
+          const currentState = stateRef.current;
+          if (!currentState) {
+            return;
+          }
+
+          const markdown = buildReviewCommentsMarkdown(
+            currentState.files,
+            reviewCommentsRef.current,
+            preferencesRef.current.showWhitespace,
+          );
+          if (markdown) {
+            void navigator.clipboard.writeText(markdown);
+          }
+        },
+        id: 'copy-comments',
+        title: 'Copy Review Comments',
+      }),
+      registry.register({
+        description: () => selectedPathRef.current,
+        execute: () => {
+          const currentState = stateRef.current;
+          const path = selectedPathRef.current;
+          if (!currentState || !path) {
+            return;
+          }
+
+          const file = currentState.files.find((f) => f.path === path);
+          if (!file) {
+            return;
+          }
+
+          const isViewed = viewedRef.current[file.path] === file.fingerprint;
+          setViewed((current) => {
+            if (isViewed) {
+              const next = { ...current };
+              delete next[file.path];
+              if (currentState.source.type === 'working-tree') {
+                writeViewed(currentState.root, next);
+              }
+              return next;
+            }
+
+            const next = {
+              ...current,
+              [file.path]: file.fingerprint,
+            };
+            if (currentState.source.type === 'working-tree') {
+              writeViewed(currentState.root, next);
+            }
+            return next;
+          });
+
+          setCollapsed((current) => {
+            const next = new Set(current);
+            if (isViewed) {
+              next.delete(file.path);
+            } else {
+              next.add(file.path);
+            }
+            return next;
+          });
+          bumpItemVersion(file.path);
+        },
+        id: 'toggle-viewed',
+        title: 'Toggle Viewed',
+      }),
+      registry.register({
+        description: () => selectedPathRef.current,
+        execute: () => {
+          const path = selectedPathRef.current;
+          if (path) {
+            void window.codiff.openFile(path).catch(() => {});
+          }
+        },
+        id: 'open-file',
+        title: 'Open File in Editor',
+      }),
+      registry.register({
+        execute: () => window.location.reload(),
+        id: 'reload',
+        title: 'Reload Window',
+      }),
+    ];
+    setCommandBarCommands(registry.commands);
+
+    return () => {
+      for (const unregister of unregisterFns) {
+        unregister();
+      }
+    };
+  }, [bumpItemVersion, openDiffSearch]);
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
 
@@ -1414,6 +1552,12 @@ export default function App() {
         onPrevious={() => moveDiffSearchMatch(-1)}
         query={diffSearchQuery}
         visible={diffSearchVisible}
+      />
+      <CommandBar
+        commands={commandBarCommands}
+        keymap={codiffConfig.keymap}
+        onClose={() => setCommandBarVisible(false)}
+        visible={commandBarVisible}
       />
       {!isSwitchingSource ? (
         <div className="review-action-bar">

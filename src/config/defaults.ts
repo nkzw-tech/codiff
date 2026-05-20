@@ -9,6 +9,7 @@ export const defaultSettings: CodiffSettings = {
 
 export const defaultKeymap: CodiffKeymap = {
   closeSearch: 'Escape',
+  commandBar: 'Mod+Shift+p',
   diffSearch: 'Mod+f',
   discardComment: 'Escape',
   fileFilter: 'Mod+p',
