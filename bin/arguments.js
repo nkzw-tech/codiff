@@ -13,7 +13,8 @@ const parsePullRequestNumberArgument = (arg) => {
   return match ? Number(match[1]) : null;
 };
 
-const parsePullRequestNumberValue = (arg) => (/^[1-9]\d*$/.test(arg) ? Number(arg) : null);
+const parsePullRequestNumberValue = (arg) =>
+  parsePullRequestNumberArgument(arg.startsWith('#') ? arg : `#${arg}`);
 
 const isPullRequestMarkerArgument = (arg) => /^(?:pr|pull-request)$/i.test(arg);
 

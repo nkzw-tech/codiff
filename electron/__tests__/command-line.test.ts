@@ -44,6 +44,18 @@ test('parses pull request markers without resolving the repository remote', () =
   });
 });
 
+test('parses hash-prefixed pull request marker values', () => {
+  expect(parseCommandLineArguments(['codiff', 'pr', '#12', '/repo'])).toMatchObject({
+    launchOptions: {
+      repositoryPathProvided: true,
+      source: undefined,
+      walkthrough: false,
+    },
+    pullRequestNumber: 12,
+    repositoryPath: '/repo',
+  });
+});
+
 test('parses full GitHub pull request URLs as launch sources', () => {
   expect(
     parseCommandLineArguments(['codiff', 'https://github.com/nkzw-tech/codiff/pull/11', '/repo'])

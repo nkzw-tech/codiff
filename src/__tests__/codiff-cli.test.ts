@@ -75,6 +75,16 @@ test('parseArguments treats PR marker arguments as review sources', () => {
   });
 });
 
+test('parseArguments treats hash-prefixed PR marker values as review sources', () => {
+  expect(parseArguments(['pr', '#75'])).toEqual({
+    commitRef: null,
+    pullRequestNumber: 75,
+    pullRequestUrl: null,
+    requestedPath: resolve(process.cwd()),
+    walkthrough: false,
+  });
+});
+
 test('resolvePullRequestUrl builds GitHub PR URLs from the origin remote', async () => {
   const repositoryPath = await mkdtemp(join(tmpdir(), 'codiff-cli-'));
 
