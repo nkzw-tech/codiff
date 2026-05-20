@@ -1,3 +1,4 @@
+import type { CodiffConfig } from './config/types.ts';
 import type {
   CodiffPreferences,
   CodiffLaunchOptions,
@@ -20,6 +21,7 @@ declare global {
   interface Window {
     codiff: {
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
+      getConfig: () => Promise<CodiffConfig>;
       getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
       getGitIdentity: () => Promise<GitIdentity>;
       getLaunchOptions: () => Promise<CodiffLaunchOptions>;
@@ -29,10 +31,12 @@ declare global {
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getWalkthrough: (source?: ReviewSource) => Promise<WalkthroughResult>;
       installTerminalHelper: () => Promise<TerminalHelperStatus>;
+      onConfigChanged: (callback: (config: CodiffConfig) => void) => () => void;
       onCopyPendingCommentsRequest: (callback: () => string | Promise<string>) => () => void;
       onFindInDiffs: (callback: () => void) => () => void;
       onPreferencesChanged: (callback: (preferences: CodiffPreferences) => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
+      openConfigFile: () => Promise<void>;
       openFile: (path: string) => Promise<void>;
       showInFolder: (path: string) => Promise<void>;
       submitPullRequestComment: (

@@ -31,6 +31,16 @@ const {
   normalizeOpenAIModel,
   OPENAI_MODELS,
 } = require('./codex.cjs');
+const {
+  configToPreferences,
+  defaultConfig,
+  getConfigPath,
+  initConfig,
+  migrateFromPreferences,
+  readConfig,
+  watchConfig,
+  writeConfig,
+} = require('./config.cjs');
 const { readReviewAssistantReply } = require('./review-assist.cjs');
 const {
   findMatchingWindowIdentity,
@@ -49,6 +59,7 @@ const { createTerminalHelper } = require('./main/terminal-helper.cjs');
 const { readWalkthrough } = require('./walkthrough.cjs');
 
 /**
+ * @typedef {import('../src/config/types.ts').CodiffConfig} CodiffConfig
  * @typedef {import('../src/types.ts').CodiffLaunchOptions} CodiffLaunchOptions
  * @typedef {import('../src/types.ts').CodiffPreferences} CodiffPreferences
  * @typedef {import('../src/types.ts').CodiffTheme} CodiffTheme
@@ -73,13 +84,8 @@ const windowLaunchOptions = new Map();
 /** @type {Map<number, Promise<RepositoryState>>} */
 const windowInitialRepositoryStates = new Map();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
-/** @type {CodiffPreferences} */
-let preferences = {
-  copyCommentsOnClose: false,
-  openAIModel: DEFAULT_OPENAI_MODEL,
-  showWhitespace: false,
-  theme: 'system',
-};
+/** @type {CodiffConfig} */
+let config = defaultConfig;
 
 const { getTerminalHelperStatus, installTerminalHelper } = createTerminalHelper({
   app,
@@ -88,75 +94,54 @@ const { getTerminalHelperStatus, installTerminalHelper } = createTerminalHelper(
 });
 const { openFileInEditor } = createEditorOpener({ shell });
 
-const getPreferencesPath = () => join(app.getPath('userData'), 'preferences.json');
-
-/** @param {unknown} theme @returns {CodiffTheme} */
-const normalizeTheme = (theme) =>
-  theme === 'system' || theme === 'light' || theme === 'dark' ? theme : 'system';
-
-/** @returns {CodiffPreferences} */
-const readPreferences = () => {
-  try {
-    const storedPreferences = JSON.parse(readFileSync(getPreferencesPath(), 'utf8'));
-    return {
-      ...preferences,
-      ...storedPreferences,
-      openAIModel: normalizeOpenAIModel(storedPreferences?.openAIModel),
-      theme: normalizeTheme(storedPreferences?.theme),
-    };
-  } catch {
-    return preferences;
-  }
-};
-
-const writePreferences = () => {
-  writeFileSync(getPreferencesPath(), JSON.stringify(preferences, null, 2));
-};
-
-const sendPreferencesChanged = () => {
+const sendConfigChanged = () => {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
-      window.webContents.send('codiff:preferencesChanged', preferences);
+      window.webContents.send('codiff:configChanged', config);
     }
   }
 };
 
-/** @param {Partial<CodiffPreferences>} nextPreferences */
-const updatePreferences = (nextPreferences) => {
-  preferences = {
-    ...preferences,
-    ...nextPreferences,
-    openAIModel: normalizeOpenAIModel(nextPreferences.openAIModel ?? preferences.openAIModel),
-    theme: normalizeTheme(nextPreferences.theme ?? preferences.theme),
+/** @param {Partial<CodiffConfig>} nextConfig */
+const updateConfig = (nextConfig) => {
+  config = {
+    keymap: { ...config.keymap, ...nextConfig.keymap },
+    settings: {
+      ...config.settings,
+      ...nextConfig.settings,
+      openAIModel: normalizeOpenAIModel(
+        nextConfig.settings?.openAIModel ?? config.settings.openAIModel,
+      ),
+    },
   };
-  nativeTheme.themeSource = preferences.theme;
-  writePreferences();
-  sendPreferencesChanged();
+  nativeTheme.themeSource = config.settings.theme;
+  writeConfig(config);
+  sendConfigChanged();
   Menu.setApplicationMenu(buildApplicationMenu());
 };
 
 /** @param {string} model */
 const selectOpenAIModel = (model) => {
   const openAIModel = normalizeOpenAIModel(model);
-  if (preferences.openAIModel === openAIModel) {
+  if (config.settings.openAIModel === openAIModel) {
     return;
   }
 
-  updatePreferences({ openAIModel });
+  updateConfig({ settings: { ...config.settings, openAIModel } });
 };
 
 const getCodexOptions = () => ({
   fallbackModel: FALLBACK_OPENAI_MODEL,
-  model: preferences.openAIModel,
+  model: config.settings.openAIModel,
   /** @param {string} fallbackModel */
   onModelFallback: async (fallbackModel) => {
-    updatePreferences({ openAIModel: fallbackModel });
+    updateConfig({ settings: { ...config.settings, openAIModel: fallbackModel } });
   },
 });
 
 /** @param {CodiffTheme} theme */
 const updateTheme = (theme) => {
-  updatePreferences({ theme });
+  updateConfig({ settings: { ...config.settings, theme } });
 };
 
 /** @param {string} repositoryPath */
@@ -241,7 +226,7 @@ const openRepositoryFolder = async (browserWindow) => {
 /** @returns {Array<import('electron').MenuItemConstructorOptions>} */
 const buildOpenAIModelSubmenu = () =>
   OPENAI_MODELS.map((model) => ({
-    checked: preferences.openAIModel === model.id,
+    checked: config.settings.openAIModel === model.id,
     click: () => selectOpenAIModel(model.id),
     label: model.label,
     type: 'radio',
@@ -329,20 +314,20 @@ const buildApplicationMenu = () =>
         label: 'View',
         submenu: [
           {
-            checked: preferences.showWhitespace,
+            checked: config.settings.showWhitespace,
             click: (menuItem) => {
-              updatePreferences({
-                showWhitespace: menuItem.checked,
+              updateConfig({
+                settings: { ...config.settings, showWhitespace: menuItem.checked },
               });
             },
             label: 'Show Whitespace',
             type: 'checkbox',
           },
           {
-            checked: preferences.copyCommentsOnClose,
+            checked: config.settings.copyCommentsOnClose,
             click: (menuItem) => {
-              updatePreferences({
-                copyCommentsOnClose: menuItem.checked,
+              updateConfig({
+                settings: { ...config.settings, copyCommentsOnClose: menuItem.checked },
               });
             },
             label: 'Copy Comments on Close',
@@ -352,24 +337,32 @@ const buildApplicationMenu = () =>
             label: 'Theme',
             submenu: [
               {
-                checked: preferences.theme === 'system',
+                checked: config.settings.theme === 'system',
                 click: () => updateTheme('system'),
                 label: 'Match System',
                 type: 'radio',
               },
               {
-                checked: preferences.theme === 'light',
+                checked: config.settings.theme === 'light',
                 click: () => updateTheme('light'),
                 label: 'Light',
                 type: 'radio',
               },
               {
-                checked: preferences.theme === 'dark',
+                checked: config.settings.theme === 'dark',
                 click: () => updateTheme('dark'),
                 label: 'Dark',
                 type: 'radio',
               },
             ],
+          },
+          { type: 'separator' },
+          {
+            click: () => {
+              initConfig();
+              shell.openPath(getConfigPath());
+            },
+            label: 'Open Config File...',
           },
           { type: 'separator' },
           { role: 'togglefullscreen' },
@@ -444,7 +437,7 @@ const createWindow = (
   let allowClose = false;
   let copyingPendingCommentsBeforeClose = false;
   window.on('close', (event) => {
-    if (allowClose || quitting || !preferences.copyCommentsOnClose) {
+    if (allowClose || quitting || !config.settings.copyCommentsOnClose) {
       return;
     }
 
@@ -543,10 +536,25 @@ if (squirrelStartup || !lock) {
   });
 
   app.on('ready', () => {
-    preferences = readPreferences();
-    nativeTheme.themeSource = preferences.theme;
+    migrateFromPreferences(app.getPath('userData'), normalizeOpenAIModel);
+    config = readConfig();
+    config.settings.openAIModel = normalizeOpenAIModel(config.settings.openAIModel);
+    nativeTheme.themeSource = config.settings.theme;
     Menu.setApplicationMenu(buildApplicationMenu());
     focusOrCreateWindow(getLaunchPath(), getLaunchOptions());
+
+    watchConfig((nextConfig) => {
+      config = {
+        ...nextConfig,
+        settings: {
+          ...nextConfig.settings,
+          openAIModel: normalizeOpenAIModel(nextConfig.settings.openAIModel),
+        },
+      };
+      nativeTheme.themeSource = config.settings.theme;
+      sendConfigChanged();
+      Menu.setApplicationMenu(buildApplicationMenu());
+    });
   });
 
   app.on('activate', () => {
@@ -564,7 +572,7 @@ if (squirrelStartup || !lock) {
       (window) => !window.isDestroyed() && !window.webContents.isDestroyed(),
     );
 
-    if (preferences.copyCommentsOnClose && !quitAfterCopyingPendingComments && windows.length) {
+    if (config.settings.copyCommentsOnClose && !quitAfterCopyingPendingComments && windows.length) {
       event.preventDefault();
       if (copyingPendingCommentsBeforeQuit) {
         return;
@@ -655,7 +663,14 @@ ipcMain.handle('codiff:getGitIdentity', async (event) => {
   return readGitIdentity(repositoryPath);
 });
 
-ipcMain.handle('codiff:getPreferences', () => preferences);
+ipcMain.handle('codiff:getPreferences', () => configToPreferences(config));
+
+ipcMain.handle('codiff:getConfig', () => config);
+
+ipcMain.handle('codiff:openConfigFile', () => {
+  initConfig();
+  shell.openPath(getConfigPath());
+});
 
 ipcMain.handle('codiff:openFile', async (event, filePath) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();

@@ -18,6 +18,9 @@ import {
 } from './app/components/Panels.tsx';
 import { ReviewCodeView } from './app/components/ReviewCodeView.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
+import { defaultConfig } from './config/defaults.ts';
+import { matchesShortcut } from './config/keymap.ts';
+import type { CodiffConfig } from './config/types.ts';
 import {
   defaultLaunchOptions,
   defaultPreferences,
@@ -38,7 +41,6 @@ import { DEFAULT_PADDING } from './lib/code-view-options.ts';
 import { getDiffSearchResult } from './lib/diff-search.ts';
 import { fileHasVisibleDiff, getFirstVisibleSection, getItemId } from './lib/diff.ts';
 import { compactPath, fuzzyMatches, sortFiles } from './lib/files.ts';
-import { isDiffSearchShortcut } from './lib/keyboard.ts';
 import {
   buildReviewCommentsMarkdown,
   getCommentKey,
@@ -86,6 +88,7 @@ export default function App() {
   const [itemVersionByPath, setItemVersionByPath] = useState<Record<string, number>>({});
   const [localChangesDetected, setLocalChangesDetected] = useState(false);
   const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>(defaultLaunchOptions);
+  const [codiffConfig, setCodiffConfig] = useState<CodiffConfig>(defaultConfig);
   const [preferences, setPreferences] = useState<CodiffPreferences>(defaultPreferences);
   const [reviewComments, setReviewComments] = useState<ReadonlyArray<ReviewComment>>([]);
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
@@ -533,19 +536,31 @@ export default function App() {
   useEffect(() => {
     let canceled = false;
 
-    window.codiff.getPreferences().then((nextPreferences) => {
+    window.codiff.getConfig().then((nextConfig) => {
       if (!canceled) {
-        setPreferences(nextPreferences);
+        setCodiffConfig(nextConfig);
+        setPreferences({
+          copyCommentsOnClose: nextConfig.settings.copyCommentsOnClose,
+          openAIModel: nextConfig.settings.openAIModel,
+          showWhitespace: nextConfig.settings.showWhitespace,
+          theme: nextConfig.settings.theme,
+        });
       }
     });
 
-    const removeListener = window.codiff.onPreferencesChanged((nextPreferences) => {
-      setPreferences(nextPreferences);
+    const removeConfigListener = window.codiff.onConfigChanged((nextConfig) => {
+      setCodiffConfig(nextConfig);
+      setPreferences({
+        copyCommentsOnClose: nextConfig.settings.copyCommentsOnClose,
+        openAIModel: nextConfig.settings.openAIModel,
+        showWhitespace: nextConfig.settings.showWhitespace,
+        theme: nextConfig.settings.theme,
+      });
     });
 
     return () => {
       canceled = true;
-      removeListener();
+      removeConfigListener();
     };
   }, []);
 
@@ -688,7 +703,7 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isDiffSearchShortcut(event)) {
+      if (matchesShortcut(event, codiffConfig.keymap, 'diffSearch')) {
         event.preventDefault();
         openDiffSearch();
       }
@@ -696,7 +711,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [openDiffSearch]);
+  }, [codiffConfig.keymap, openDiffSearch]);
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
 
@@ -1391,6 +1406,7 @@ export default function App() {
       <DiffSearchPanel
         activeIndex={effectiveActiveDiffSearchMatchIndex}
         focusRequest={diffSearchFocusRequest}
+        keymap={codiffConfig.keymap}
         matchCount={diffSearchMatches.length}
         onChange={updateDiffSearchQuery}
         onClose={closeDiffSearch}
@@ -1430,6 +1446,7 @@ export default function App() {
           historyEntries={historyEntries}
           historyHasMore={historyHasMore}
           historyLoading={historyLoading}
+          keymap={codiffConfig.keymap}
           mode={sidebarMode}
           onActivatePath={activatePath}
           onLoadMoreHistory={loadMoreHistory}
@@ -1495,6 +1512,7 @@ export default function App() {
             gitIdentity={gitIdentity}
             isPullRequest={isPullRequest}
             itemVersionByPath={itemVersionByPath}
+            keymap={codiffConfig.keymap}
             onAskCodex={askCodex}
             onCreateComment={createComment}
             onDeleteComment={deleteComment}

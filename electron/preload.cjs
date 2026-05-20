@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 /** @type {Window['codiff']} */
 const codiff = {
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
+  getConfig: () => ipcRenderer.invoke('codiff:getConfig'),
   getDiffSectionContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionContent', request),
   getGitIdentity: () => ipcRenderer.invoke('codiff:getGitIdentity'),
   getLaunchOptions: () => ipcRenderer.invoke('codiff:getLaunchOptions'),
@@ -14,6 +15,12 @@ const codiff = {
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getWalkthrough: (source) => ipcRenderer.invoke('codiff:getWalkthrough', source),
   installTerminalHelper: () => ipcRenderer.invoke('codiff:installTerminalHelper'),
+  onConfigChanged: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {import('../src/config/types.ts').CodiffConfig} nextConfig */
+    const listener = (_event, nextConfig) => callback(nextConfig);
+    ipcRenderer.on('codiff:configChanged', listener);
+    return () => ipcRenderer.removeListener('codiff:configChanged', listener);
+  },
   onCopyPendingCommentsRequest: (callback) => {
     /** @param {Electron.IpcRendererEvent} _event @param {number} requestId */
     const listener = (_event, requestId) => {
@@ -50,6 +57,7 @@ const codiff = {
     ipcRenderer.on('codiff:repositoryChanged', listener);
     return () => ipcRenderer.removeListener('codiff:repositoryChanged', listener);
   },
+  openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
   showInFolder: (path) => ipcRenderer.invoke('codiff:showInFolder', path),
   submitPullRequestComment: (request) =>

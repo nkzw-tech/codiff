@@ -5,6 +5,8 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
+import { matchesShortcut } from '../../config/keymap.ts';
+import type { CodiffKeymap } from '../../config/types.ts';
 import type { RepositoryLoadError, ReviewComment } from '../../lib/app-types.ts';
 import { getReloadShortcutLabel } from '../../lib/keyboard.ts';
 import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
@@ -136,6 +138,7 @@ export function CodexUnavailablePanel({ onShowFiles }: { onShowFiles: () => void
 export function DiffSearchPanel({
   activeIndex,
   focusRequest,
+  keymap,
   matchCount,
   onChange,
   onClose,
@@ -146,6 +149,7 @@ export function DiffSearchPanel({
 }: {
   activeIndex: number;
   focusRequest: number;
+  keymap: CodiffKeymap;
   matchCount: number;
   onChange: (query: string) => void;
   onClose: () => void;
@@ -169,22 +173,24 @@ export function DiffSearchPanel({
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      if (event.key === 'Escape') {
+      if (matchesShortcut(event, keymap, 'closeSearch')) {
         event.preventDefault();
         onClose();
         return;
       }
 
-      if (event.key === 'Enter') {
+      if (matchesShortcut(event, keymap, 'prevSearchMatch')) {
         event.preventDefault();
-        if (event.shiftKey) {
-          onPrevious();
-        } else {
-          onNext();
-        }
+        onPrevious();
+        return;
+      }
+
+      if (matchesShortcut(event, keymap, 'nextSearchMatch')) {
+        event.preventDefault();
+        onNext();
       }
     },
-    [onClose, onNext, onPrevious],
+    [keymap, onClose, onNext, onPrevious],
   );
 
   return (

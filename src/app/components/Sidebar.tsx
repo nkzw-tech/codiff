@@ -1,6 +1,8 @@
 import type { FileTreeRowDecorationRenderer } from '@pierre/trees';
 import { FileTree, useFileTree } from '@pierre/trees/react';
 import { useCallback, useEffect, useMemo, useRef, type MouseEvent } from 'react';
+import { matchesShortcut } from '../../config/keymap.ts';
+import type { CodiffKeymap } from '../../config/types.ts';
 import type {
   DiffLineCount,
   PullRequestSource,
@@ -28,6 +30,7 @@ export function Sidebar({
   historyEntries,
   historyHasMore,
   historyLoading,
+  keymap,
   mode,
   onActivatePath,
   onLoadMoreHistory,
@@ -51,6 +54,7 @@ export function Sidebar({
   historyEntries: ReadonlyArray<HistoryEntry>;
   historyHasMore: boolean;
   historyLoading: boolean;
+  keymap: CodiffKeymap;
   mode: SidebarMode;
   onActivatePath: (path: string) => void;
   onLoadMoreHistory: () => void;
@@ -205,11 +209,7 @@ export function Sidebar({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        !isNativeInputTarget(event.target) &&
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === 'p'
-      ) {
+      if (!isNativeInputTarget(event.target) && matchesShortcut(event, keymap, 'fileFilter')) {
         event.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -218,7 +218,7 @@ export function Sidebar({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [keymap]);
 
   useEffect(() => {
     if (!selectedPath) {

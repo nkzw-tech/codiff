@@ -18,6 +18,8 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import codexIconUrl from '../../assets/codex.svg';
+import { matchesShortcut } from '../../config/keymap.ts';
+import type { CodiffKeymap } from '../../config/types.ts';
 import type {
   CodeViewInstance,
   CodeViewItemMetadata,
@@ -274,6 +276,7 @@ function ReviewAnnotation({
   focusCommentRequest,
   identity,
   isPullRequest,
+  keymap,
   onAskCodex,
   onCommentBlur,
   onCommentFocus,
@@ -287,6 +290,7 @@ function ReviewAnnotation({
   focusCommentRequest: number;
   identity: GitIdentity | null;
   isPullRequest: boolean;
+  keymap: CodiffKeymap;
   onAskCodex: (commentId: string) => void;
   onCommentBlur: (comment: ReviewComment, body: string) => void;
   onCommentFocus: (comment: ReviewComment) => void;
@@ -309,7 +313,7 @@ function ReviewAnnotation({
 
   const handleCommentKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLTextAreaElement>, comment: ReviewComment) => {
-      if (event.key === 'Enter' && event.metaKey && !event.shiftKey) {
+      if (matchesShortcut(event, keymap, 'submitComment')) {
         if (isPullRequest && canSubmitCommentToGitHub(comment)) {
           event.preventDefault();
           event.stopPropagation();
@@ -325,7 +329,7 @@ function ReviewAnnotation({
         return;
       }
 
-      if (event.key !== 'Escape') {
+      if (!matchesShortcut(event, keymap, 'discardComment')) {
         return;
       }
 
@@ -340,7 +344,7 @@ function ReviewAnnotation({
         onDeleteComment(comment.id);
       }
     },
-    [isPullRequest, onAskCodex, onDeleteComment, onSubmitComment],
+    [isPullRequest, keymap, onAskCodex, onDeleteComment, onSubmitComment],
   );
 
   if (annotationComments.length === 0) {
@@ -463,6 +467,7 @@ export function ReviewCodeView({
   gitIdentity,
   isPullRequest,
   itemVersionByPath,
+  keymap,
   onAskCodex,
   onCreateComment,
   onDeleteComment,
@@ -489,6 +494,7 @@ export function ReviewCodeView({
   gitIdentity: GitIdentity | null;
   isPullRequest: boolean;
   itemVersionByPath: Readonly<Record<string, number>>;
+  keymap: CodiffKeymap;
   onAskCodex: (commentId: string) => void;
   onCreateComment: (comment: Omit<ReviewComment, 'body' | 'id'>) => void;
   onDeleteComment: (commentId: string) => void;
@@ -1060,6 +1066,7 @@ export function ReviewCodeView({
           focusCommentRequest={focusCommentRequest}
           identity={gitIdentity}
           isPullRequest={isPullRequest}
+          keymap={keymap}
           onAskCodex={onAskCodex}
           onCommentBlur={blurComment}
           onCommentFocus={focusComment}
@@ -1078,6 +1085,7 @@ export function ReviewCodeView({
       focusComment,
       gitIdentity,
       isPullRequest,
+      keymap,
       markMarkdownPreviewLayoutReady,
       onAskCodex,
       onSubmitComment,

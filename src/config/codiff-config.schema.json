@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Codiff Configuration",
+  "description": "Configuration file for Codiff. Supports JSON and JSONC (JSON with Comments).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path to the JSON schema for editor autocompletion."
+    },
+    "settings": {
+      "type": "object",
+      "description": "Application settings.",
+      "additionalProperties": false,
+      "properties": {
+        "copyCommentsOnClose": {
+          "type": "boolean",
+          "default": false,
+          "description": "Copy pending review comments to clipboard when closing a window."
+        },
+        "openAIModel": {
+          "type": "string",
+          "default": "gpt-5.3-codex-spark",
+          "description": "The OpenAI model to use for review assistance and walkthroughs."
+        },
+        "showWhitespace": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show whitespace characters in diffs."
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["system", "light", "dark"],
+          "default": "system",
+          "description": "Application color theme. 'system' follows OS preference."
+        }
+      }
+    },
+    "keymap": {
+      "type": "object",
+      "description": "Keyboard shortcut overrides for in-app actions. Use 'Mod' for Cmd on macOS and Ctrl on other platforms.",
+      "additionalProperties": false,
+      "properties": {
+        "diffSearch": {
+          "type": "string",
+          "default": "Mod+f",
+          "description": "Open the diff search panel."
+        },
+        "fileFilter": {
+          "type": "string",
+          "default": "Mod+p",
+          "description": "Focus the file filter search input in the sidebar."
+        },
+        "nextSearchMatch": {
+          "type": "string",
+          "default": "Enter",
+          "description": "Navigate to the next search match."
+        },
+        "prevSearchMatch": {
+          "type": "string",
+          "default": "Shift+Enter",
+          "description": "Navigate to the previous search match."
+        },
+        "closeSearch": {
+          "type": "string",
+          "default": "Escape",
+          "description": "Close the search panel."
+        },
+        "submitComment": {
+          "type": "string",
+          "default": "Mod+Enter",
+          "description": "Submit a review comment to GitHub or ask Codex."
+        },
+        "discardComment": {
+          "type": "string",
+          "default": "Escape",
+          "description": "Discard an empty review comment."
+        }
+      }
+    }
+  }
+}
