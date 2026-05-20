@@ -42,6 +42,11 @@
       "description": "Keyboard shortcut overrides for in-app actions. Use 'Mod' for Cmd on macOS and Ctrl on other platforms.",
       "additionalProperties": false,
       "properties": {
+        "commandBar": {
+          "type": "string",
+          "default": "Mod+Shift+p",
+          "description": "Open the command palette."
+        },
         "diffSearch": {
           "type": "string",
           "default": "Mod+f",
