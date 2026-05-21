@@ -259,9 +259,36 @@ const getCommandLineLaunchOptions = (commandLine = process.argv, fallbackPath = 
 const getLaunchPath = () =>
   resolve(process.env.CODIFF_REPOSITORY_PATH || getCommandLineRepositoryPath() || process.cwd());
 
+/**
+ * @param {string} launchPath
+ * @param {CodiffLaunchOptions} launchOptions
+ * @param {string} lastRepositoryPath
+ * @param {NodeJS.ProcessEnv} [environment]
+ */
+const getInitialRepositoryPath = (
+  launchPath,
+  launchOptions,
+  lastRepositoryPath,
+  environment = process.env,
+) => {
+  if (
+    lastRepositoryPath &&
+    existsSync(lastRepositoryPath) &&
+    !environment.CODIFF_REPOSITORY_PATH &&
+    !launchOptions.repositoryPathProvided &&
+    !launchOptions.source &&
+    !launchOptions.walkthrough
+  ) {
+    return resolve(lastRepositoryPath);
+  }
+
+  return launchPath;
+};
+
 const getLaunchOptions = () => getCommandLineLaunchOptions();
 
 module.exports = {
+  getInitialRepositoryPath,
   getCommandLineLaunchOptions,
   getCommandLineRepositoryPath,
   getLaunchOptions,

@@ -168,6 +168,7 @@ export type CodiffTheme = 'system' | 'light' | 'dark';
 
 export type CodiffPreferences = {
   copyCommentsOnClose: boolean;
+  lastRepositoryPath: string;
   openAIModel: string;
   showWhitespace: boolean;
   theme: CodiffTheme;

@@ -41,6 +41,7 @@ const { createPendingCommentsClipboardController } = require('./pending-comments
 const {
   getCommandLineLaunchOptions,
   getCommandLineRepositoryPath,
+  getInitialRepositoryPath,
   getLaunchOptions,
   getLaunchPath,
 } = require('./main/command-line.cjs');
@@ -76,6 +77,7 @@ const pendingCommentsClipboardController = createPendingCommentsClipboardControl
 /** @type {CodiffPreferences} */
 let preferences = {
   copyCommentsOnClose: false,
+  lastRepositoryPath: '',
   openAIModel: DEFAULT_OPENAI_MODEL,
   showWhitespace: false,
   theme: 'system',
@@ -94,6 +96,10 @@ const getPreferencesPath = () => join(app.getPath('userData'), 'preferences.json
 const normalizeTheme = (theme) =>
   theme === 'system' || theme === 'light' || theme === 'dark' ? theme : 'system';
 
+/** @param {unknown} path */
+const normalizeLastRepositoryPath = (path) =>
+  typeof path === 'string' && path.length > 0 ? path : '';
+
 /** @returns {CodiffPreferences} */
 const readPreferences = () => {
   try {
@@ -101,6 +107,7 @@ const readPreferences = () => {
     return {
       ...preferences,
       ...storedPreferences,
+      lastRepositoryPath: normalizeLastRepositoryPath(storedPreferences?.lastRepositoryPath),
       openAIModel: normalizeOpenAIModel(storedPreferences?.openAIModel),
       theme: normalizeTheme(storedPreferences?.theme),
     };
@@ -157,6 +164,19 @@ const getCodexOptions = () => ({
 /** @param {CodiffTheme} theme */
 const updateTheme = (theme) => {
   updatePreferences({ theme });
+};
+
+/** @param {string} repositoryPath */
+const rememberLastRepositoryPath = (repositoryPath) => {
+  if (preferences.lastRepositoryPath === repositoryPath) {
+    return;
+  }
+
+  preferences = {
+    ...preferences,
+    lastRepositoryPath: repositoryPath,
+  };
+  writePreferences();
 };
 
 /** @param {string} repositoryPath */
@@ -536,9 +556,14 @@ if (squirrelStartup || !lock) {
 
   app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
     const data = /** @type {SingleInstanceAdditionalData} */ (additionalData || {});
+    const launchOptions =
+      data.launchOptions || getCommandLineLaunchOptions(commandLine, workingDirectory);
+    const launchPath = resolve(
+      data.repositoryPath || getCommandLineRepositoryPath(commandLine) || workingDirectory,
+    );
     focusOrCreateWindow(
-      resolve(data.repositoryPath || getCommandLineRepositoryPath(commandLine) || workingDirectory),
-      data.launchOptions || getCommandLineLaunchOptions(commandLine, workingDirectory),
+      getInitialRepositoryPath(launchPath, launchOptions, preferences.lastRepositoryPath),
+      launchOptions,
     );
   });
 
@@ -546,12 +571,20 @@ if (squirrelStartup || !lock) {
     preferences = readPreferences();
     nativeTheme.themeSource = preferences.theme;
     Menu.setApplicationMenu(buildApplicationMenu());
-    focusOrCreateWindow(getLaunchPath(), getLaunchOptions());
+    const launchOptions = getLaunchOptions();
+    focusOrCreateWindow(
+      getInitialRepositoryPath(getLaunchPath(), launchOptions, preferences.lastRepositoryPath),
+      launchOptions,
+    );
   });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      focusOrCreateWindow(getLaunchPath(), getLaunchOptions());
+      const launchOptions = getLaunchOptions();
+      focusOrCreateWindow(
+        getInitialRepositoryPath(getLaunchPath(), launchOptions, preferences.lastRepositoryPath),
+        launchOptions,
+      );
     }
   });
 
@@ -592,6 +625,7 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   const state = initialState
     ? await initialState
     : await readRepositoryState(repositoryPath, source || launchOptions?.source);
+  rememberLastRepositoryPath(state.root);
   const identity = getWindowIdentityForSource(state.root, state.source);
   if (identity) {
     windowIdentities.set(event.sender.id, identity);

@@ -1,18 +1,37 @@
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
-const { parseCommandLineArguments, parseGitHubRemoteUrl } = require('../main/command-line.cjs') as {
-  parseCommandLineArguments: (commandLine: ReadonlyArray<string>) => {
-    launchOptions: {
-      repositoryPathProvided: boolean;
-      source?: { ref: string; type: 'commit' } | { type: 'pull-request'; url: string };
-      walkthrough: boolean;
+const { getInitialRepositoryPath, parseCommandLineArguments, parseGitHubRemoteUrl } =
+  require('../main/command-line.cjs') as {
+    getInitialRepositoryPath: (
+      launchPath: string,
+      launchOptions: {
+        repositoryPathProvided: boolean;
+        source?: { ref: string; type: 'commit' } | { type: 'pull-request'; url: string };
+        walkthrough: boolean;
+      },
+      lastRepositoryPath: string,
+      environment?: NodeJS.ProcessEnv,
+    ) => string;
+    parseCommandLineArguments: (commandLine: ReadonlyArray<string>) => {
+      launchOptions: {
+        repositoryPathProvided: boolean;
+        source?: { ref: string; type: 'commit' } | { type: 'pull-request'; url: string };
+        walkthrough: boolean;
+      };
+      pullRequestNumber: number | null;
+      repositoryPath: string | null;
     };
-    pullRequestNumber: number | null;
-    repositoryPath: string | null;
+    parseGitHubRemoteUrl: (value: string) => { owner: string; repo: string } | null;
   };
-  parseGitHubRemoteUrl: (value: string) => { owner: string; repo: string } | null;
+
+const defaultLaunchOptions = {
+  repositoryPathProvided: false,
+  walkthrough: false,
 };
 
 test('parses commit and walkthrough command-line options', () => {
@@ -104,4 +123,73 @@ test('parses GitHub remotes from ssh and https URLs', () => {
     repo: 'codiff',
   });
   expect(parseGitHubRemoteUrl('https://example.com/nkzw-tech/codiff.git')).toBeNull();
+});
+
+test('restores the last repository for plain app launches', async () => {
+  const lastRepositoryPath = await mkdtemp(join(tmpdir(), 'codiff-last-repo-'));
+
+  try {
+    expect(
+      getInitialRepositoryPath('/fallback', defaultLaunchOptions, lastRepositoryPath, {}),
+    ).toBe(lastRepositoryPath);
+  } finally {
+    await rm(lastRepositoryPath, { force: true, recursive: true });
+  }
+});
+
+test('does not restore missing last repositories', () => {
+  expect(
+    getInitialRepositoryPath('/fallback', defaultLaunchOptions, '/missing/codiff-repo', {}),
+  ).toBe('/fallback');
+});
+
+test('does not restore over explicit launch intent', async () => {
+  const lastRepositoryPath = await mkdtemp(join(tmpdir(), 'codiff-last-repo-'));
+
+  try {
+    expect(
+      getInitialRepositoryPath(
+        '/fallback',
+        {
+          repositoryPathProvided: true,
+          walkthrough: false,
+        },
+        lastRepositoryPath,
+        {},
+      ),
+    ).toBe('/fallback');
+    expect(
+      getInitialRepositoryPath(
+        '/fallback',
+        {
+          repositoryPathProvided: false,
+          source: {
+            ref: 'HEAD',
+            type: 'commit',
+          },
+          walkthrough: false,
+        },
+        lastRepositoryPath,
+        {},
+      ),
+    ).toBe('/fallback');
+    expect(
+      getInitialRepositoryPath(
+        '/fallback',
+        {
+          repositoryPathProvided: false,
+          walkthrough: true,
+        },
+        lastRepositoryPath,
+        {},
+      ),
+    ).toBe('/fallback');
+    expect(
+      getInitialRepositoryPath('/fallback', defaultLaunchOptions, lastRepositoryPath, {
+        CODIFF_REPOSITORY_PATH: '/explicit',
+      }),
+    ).toBe('/fallback');
+  } finally {
+    await rm(lastRepositoryPath, { force: true, recursive: true });
+  }
 });
