@@ -15,13 +15,6 @@ export type CommandRegistry = {
 
 export const createCommandRegistry = (): CommandRegistry => {
   let commands: Array<Command> = [];
-  const listeners = new Set<() => void>();
-
-  const notify = () => {
-    for (const listener of listeners) {
-      listener();
-    }
-  };
 
   return {
     get commands() {
@@ -29,11 +22,9 @@ export const createCommandRegistry = (): CommandRegistry => {
     },
     register(command: Command) {
       commands = [...commands, command];
-      notify();
 
       return () => {
         commands = commands.filter((c) => c.id !== command.id);
-        notify();
       };
     },
   };

@@ -75,7 +75,7 @@ export const getShortcutLabel = (keymap: CodiffKeymap, action: keyof CodiffKeyma
         return mac ? '\u21A9' : 'Enter';
       }
       if (lower === 'escape') {
-        return mac ? 'Esc' : 'Esc';
+        return 'Esc';
       }
       return part.trim().toUpperCase();
     })

@@ -747,7 +747,13 @@ export default function App() {
       if (matchesShortcut(event, codiffConfig.keymap, 'fileFilter')) {
         if (sidebarCollapsed) {
           event.preventDefault();
+          event.stopImmediatePropagation();
           expandSidebar();
+          requestAnimationFrame(() => {
+            const input = document.querySelector<HTMLInputElement>('.sidebar-search');
+            input?.focus();
+            input?.select();
+          });
         }
       }
     };
@@ -761,9 +767,12 @@ export default function App() {
     const unregisterFns = [
       registry.register({
         execute: () => {
-          const input = document.querySelector<HTMLInputElement>('.sidebar-search');
-          input?.focus();
-          input?.select();
+          expandSidebar();
+          requestAnimationFrame(() => {
+            const input = document.querySelector<HTMLInputElement>('.sidebar-search');
+            input?.focus();
+            input?.select();
+          });
         },
         id: 'file-filter',
         keymapAction: 'fileFilter',
@@ -911,7 +920,7 @@ export default function App() {
         unregister();
       }
     };
-  }, [bumpItemVersion, openDiffSearch, toggleSidebar]);
+  }, [bumpItemVersion, expandSidebar, openDiffSearch, toggleSidebar]);
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
 

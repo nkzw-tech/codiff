@@ -45,12 +45,6 @@ const codiff = {
     ipcRenderer.on('codiff:findInDiffs', listener);
     return () => ipcRenderer.removeListener('codiff:findInDiffs', listener);
   },
-  onPreferencesChanged: (callback) => {
-    /** @param {Electron.IpcRendererEvent} _event @param {import('../src/types.ts').CodiffPreferences} preferences */
-    const listener = (_event, preferences) => callback(preferences);
-    ipcRenderer.on('codiff:preferencesChanged', listener);
-    return () => ipcRenderer.removeListener('codiff:preferencesChanged', listener);
-  },
   onRepositoryChanged: (callback) => {
     /** @param {Electron.IpcRendererEvent} _event @param {{root: string}} change */
     const listener = (_event, change) => callback(change);

@@ -17,8 +17,8 @@ export function CommandBar({
 }) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const filtered = filterCommands(commands, query);
 
@@ -34,6 +34,10 @@ export function CommandBar({
     [onClose],
   );
 
+  const scrollIndexIntoView = useCallback((index: number) => {
+    itemRefs.current[index]?.scrollIntoView({ block: 'nearest' });
+  }, []);
+
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
       if (event.key === 'Escape') {
@@ -47,8 +51,9 @@ export function CommandBar({
       if (event.key === 'ArrowDown') {
         event.preventDefault();
         setSelectedIndex((current) => {
-          const next = current + 1;
-          return next >= filtered.length ? 0 : next;
+          const next = current + 1 >= filtered.length ? 0 : current + 1;
+          scrollIndexIntoView(next);
+          return next;
         });
         return;
       }
@@ -56,8 +61,9 @@ export function CommandBar({
       if (event.key === 'ArrowUp') {
         event.preventDefault();
         setSelectedIndex((current) => {
-          const next = current - 1;
-          return next < 0 ? Math.max(filtered.length - 1, 0) : next;
+          const next = current - 1 < 0 ? Math.max(filtered.length - 1, 0) : current - 1;
+          scrollIndexIntoView(next);
+          return next;
         });
         return;
       }
@@ -71,7 +77,7 @@ export function CommandBar({
         return;
       }
     },
-    [clampedIndex, executeAndClose, filtered, onClose],
+    [clampedIndex, executeAndClose, filtered, onClose, scrollIndexIntoView],
   );
 
   const handleOverlayClick = useCallback(
@@ -103,7 +109,6 @@ export function CommandBar({
           onChange={(event) => handleQueryChange(event.currentTarget.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type a command..."
-          ref={inputRef}
           spellCheck={false}
           type="text"
           value={query}
@@ -118,6 +123,9 @@ export function CommandBar({
                 key={command.id}
                 onClick={() => executeAndClose(command)}
                 onPointerEnter={() => setSelectedIndex(index)}
+                ref={(element) => {
+                  itemRefs.current[index] = element;
+                }}
                 type="button"
               >
                 <span className="command-bar-item-title">
