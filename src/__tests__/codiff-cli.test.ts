@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -185,6 +185,60 @@ test('packaged terminal helper forwards HEAD^1 to Electron as a commit', async (
       '--commit',
       'HEAD^1',
       process.cwd(),
+    ]);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('packaged terminal helper forwards relative repository paths as absolute paths', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-app-helper-'));
+  const fakeBin = join(directory, 'bin');
+  const logPath = join(directory, 'open-args.txt');
+  const repositoryPath = join(directory, 'repo');
+  const openPath = join(fakeBin, 'open');
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(join(repositoryPath, 'sub'), { recursive: true });
+    const actualRepositoryPath = await realpath(repositoryPath);
+    await writeFile(
+      openPath,
+      '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$OPEN_ARGS_FILE"\ndone\n',
+    );
+    await chmod(openPath, 0o755);
+
+    const runHelper = async (args: ReadonlyArray<string>) => {
+      await writeFile(logPath, '');
+      await execFileAsync(resolve('bin/codiff-app'), args, {
+        cwd: repositoryPath,
+        env: {
+          ...process.env,
+          OPEN_ARGS_FILE: logPath,
+          PATH: `${fakeBin}:${process.env.PATH}`,
+        },
+      });
+      return (await readFile(logPath, 'utf8')).trim().split('\n');
+    };
+
+    expect(await runHelper(['.'])).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      `${actualRepositoryPath}/.`,
+    ]);
+    expect(await runHelper(['sub'])).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      join(actualRepositoryPath, 'sub'),
+    ]);
+    expect(await runHelper(['-w', '.'])).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      '--walkthrough',
+      `${actualRepositoryPath}/.`,
     ]);
   } finally {
     await rm(directory, { force: true, recursive: true });

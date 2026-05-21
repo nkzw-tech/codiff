@@ -90,6 +90,11 @@ done
 
 repository_path="${repository_path:-$PWD}"
 
+case "$repository_path" in
+  /*) ;;
+  *) repository_path="$PWD/$repository_path" ;;
+esac
+
 if [ -n "$pull_request_source" ] && [ "$walkthrough" -eq 1 ]; then
   open -n "$app_path" --args --walkthrough "$pull_request_source" "$repository_path"
 elif [ -n "$pull_request_source" ]; then
