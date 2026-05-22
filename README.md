@@ -47,6 +47,12 @@ codiff -w
 codiff -w a1b2c3d
 ```
 
+Show all available options:
+
+```bash
+codiff --help
+```
+
 Launching Codiff in multiple repositories opens a separate native window for each repository.
 
 ## Command Bar
