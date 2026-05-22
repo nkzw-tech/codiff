@@ -750,16 +750,58 @@
 }
 
 .walkthrough-group-header {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
   color: var(--text);
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   font: 700 11px/1.25 var(--font-sans);
   gap: 2px;
   padding: 5px 6px 3px;
+  text-align: left;
+  width: 100%;
 }
 
-.walkthrough-group-header span {
+.walkthrough-group-header:hover {
+  background: rgb(127 127 127 / 0.08);
+}
+
+.walkthrough-group-title-row {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 14px minmax(0, 1fr) max-content;
+  min-width: 0;
+}
+
+.walkthrough-group-chevron {
+  color: var(--muted);
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.walkthrough-group.collapsed .walkthrough-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.walkthrough-group-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.walkthrough-group-count {
+  background: rgb(127 127 127 / 0.1);
+  border-radius: 999px;
+  color: var(--muted);
+  font: 700 10px/1 var(--font-mono);
+  min-width: 20px;
+  padding: 4px 6px;
+  text-align: center;
 }
 
 .walkthrough-group-header small {

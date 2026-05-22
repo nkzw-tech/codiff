@@ -1,6 +1,7 @@
 import type { FileTreeRowDecorationRenderer } from '@pierre/trees';
 import { FileTree, useFileTree } from '@pierre/trees/react';
-import { useCallback, useEffect, useMemo, useRef, type MouseEvent } from 'react';
+import { ChevronDown } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
 import type {
@@ -491,6 +492,9 @@ function WalkthroughSidebar({
   walkthroughNotes: ReadonlyMap<string, WalkthroughNote>;
   walkthroughSummary: Walkthrough['summary'] | null;
 }) {
+  const [collapsedGroupKeys, setCollapsedGroupKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const groups = useMemo(() => {
     const nextGroups: Array<{
       files: Array<{ file: ChangedFile; note?: WalkthroughNote }>;
@@ -523,6 +527,17 @@ function WalkthroughSidebar({
 
     return nextGroups;
   }, [files, walkthroughNotes]);
+  const toggleGroupCollapsed = useCallback((key: string) => {
+    setCollapsedGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <div className="walkthrough-list">
@@ -533,41 +548,65 @@ function WalkthroughSidebar({
           <span>{renderInlineMarkdown(walkthroughSummary.skim)}</span>
         </div>
       ) : null}
-      {groups.map((group) => (
-        <section className="walkthrough-group" key={group.key}>
-          <div className="walkthrough-group-header" title={`${group.title}. ${group.reason}`}>
-            <span>{group.title}</span>
-            <small>{renderInlineMarkdown(group.reason)}</small>
-          </div>
-          {group.files.map(({ file, note }) => {
-            const lineCount = getDiffLineCount(file, showWhitespace);
-            return (
-              <button
-                className={`walkthrough-file${selectedPath === file.path ? ' selected' : ''}`}
-                key={file.path}
-                onClick={() => onActivatePath(file.path)}
-                title={note?.reason ?? file.path}
-                type="button"
-              >
-                <span className="walkthrough-file-title">
-                  <span className="walkthrough-file-path">{file.path}</span>
-                  <DiffLineCountBadge className="walkthrough-line-count" lineCount={lineCount} />
-                </span>
-                {note ? (
-                  <span className="walkthrough-file-meta">
-                    {walkthroughImpactLabel[note.impact]} · {walkthroughActionLabel[note.action]}
-                  </span>
-                ) : null}
-                <span className="walkthrough-file-reason">
-                  {renderInlineMarkdown(
-                    note?.context ?? note?.reason ?? 'Review this changed file.',
-                  )}
-                </span>
-              </button>
-            );
-          })}
-        </section>
-      ))}
+      {groups.map((group) => {
+        const collapsed = collapsedGroupKeys.has(group.key);
+        return (
+          <section className={`walkthrough-group${collapsed ? ' collapsed' : ''}`} key={group.key}>
+            <button
+              aria-expanded={!collapsed}
+              className="walkthrough-group-header"
+              onClick={() => toggleGroupCollapsed(group.key)}
+              title={`${group.title}. ${group.reason}`}
+              type="button"
+            >
+              <span className="walkthrough-group-title-row">
+                <ChevronDown
+                  aria-hidden
+                  className="walkthrough-group-chevron"
+                  size={14}
+                  strokeWidth={2.4}
+                />
+                <span className="walkthrough-group-title">{group.title}</span>
+                <span className="walkthrough-group-count">{group.files.length}</span>
+              </span>
+              <small>{renderInlineMarkdown(group.reason)}</small>
+            </button>
+            {collapsed
+              ? null
+              : group.files.map(({ file, note }) => {
+                  const lineCount = getDiffLineCount(file, showWhitespace);
+                  return (
+                    <button
+                      className={`walkthrough-file${selectedPath === file.path ? ' selected' : ''}`}
+                      key={file.path}
+                      onClick={() => onActivatePath(file.path)}
+                      title={note?.reason ?? file.path}
+                      type="button"
+                    >
+                      <span className="walkthrough-file-title">
+                        <span className="walkthrough-file-path">{file.path}</span>
+                        <DiffLineCountBadge
+                          className="walkthrough-line-count"
+                          lineCount={lineCount}
+                        />
+                      </span>
+                      {note ? (
+                        <span className="walkthrough-file-meta">
+                          {walkthroughImpactLabel[note.impact]} ·{' '}
+                          {walkthroughActionLabel[note.action]}
+                        </span>
+                      ) : null}
+                      <span className="walkthrough-file-reason">
+                        {renderInlineMarkdown(
+                          note?.context ?? note?.reason ?? 'Review this changed file.',
+                        )}
+                      </span>
+                    </button>
+                  );
+                })}
+          </section>
+        );
+      })}
     </div>
   );
 }
