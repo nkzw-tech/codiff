@@ -5,12 +5,24 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
-import { parseArguments, resolvePullRequestUrl } from './arguments.js';
+import packageJson from '../package.json' with { type: 'json' };
+import { formatHelpText, parseArguments, resolvePullRequestUrl } from './arguments.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const run = () => {
   const parsedArguments = parseArguments(process.argv.slice(2));
+
+  if (parsedArguments.help) {
+    process.stdout.write(formatHelpText(packageJson.version));
+    return;
+  }
+
+  if (parsedArguments.version) {
+    process.stdout.write(`codiff v${packageJson.version}\n`);
+    return;
+  }
+
   const { commitRef, pullRequestNumber, requestedPath, walkthrough } = parsedArguments;
   let { pullRequestUrl } = parsedArguments;
 

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import { parseArguments, resolvePullRequestUrl } from '../../bin/arguments.js';
+import { formatHelpText, parseArguments, resolvePullRequestUrl } from '../../bin/arguments.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -17,9 +17,11 @@ test('parseArguments treats a hash positional as a commit ref', () => {
 
   expect(parseArguments(['-w', commitRef])).toEqual({
     commitRef,
+    help: false,
     pullRequestNumber: null,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
+    version: false,
     walkthrough: true,
   });
 });
@@ -27,17 +29,21 @@ test('parseArguments treats a hash positional as a commit ref', () => {
 test('parseArguments treats HEAD positional revisions as commit refs', () => {
   expect(parseArguments(['HEAD'])).toEqual({
     commitRef: 'HEAD',
+    help: false,
     pullRequestNumber: null,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
+    version: false,
     walkthrough: false,
   });
 
   expect(parseArguments(['HEAD^1'])).toEqual({
     commitRef: 'HEAD^1',
+    help: false,
     pullRequestNumber: null,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
+    version: false,
     walkthrough: false,
   });
 });
@@ -51,9 +57,11 @@ test('parseArguments keeps existing hash-like paths as repository paths', async 
 
     expect(parseArguments([repositoryPath])).toEqual({
       commitRef: null,
+      help: false,
       pullRequestNumber: null,
       pullRequestUrl: null,
       requestedPath: repositoryPath,
+      version: false,
       walkthrough: false,
     });
   } finally {
@@ -66,9 +74,11 @@ test('parseArguments treats GitHub pull request URLs as review sources', () => {
 
   expect(parseArguments([pullRequestUrl])).toEqual({
     commitRef: null,
+    help: false,
     pullRequestNumber: null,
     pullRequestUrl,
     requestedPath: resolve(process.cwd()),
+    version: false,
     walkthrough: false,
   });
 });
@@ -76,9 +86,11 @@ test('parseArguments treats GitHub pull request URLs as review sources', () => {
 test('parseArguments treats PR number shorthands as review sources', () => {
   expect(parseArguments(['#75'])).toEqual({
     commitRef: null,
+    help: false,
     pullRequestNumber: 75,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
+    version: false,
     walkthrough: false,
   });
 });
@@ -86,9 +98,11 @@ test('parseArguments treats PR number shorthands as review sources', () => {
 test('parseArguments treats PR marker arguments as review sources', () => {
   expect(parseArguments(['pr', '75'])).toEqual({
     commitRef: null,
+    help: false,
     pullRequestNumber: 75,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
+    version: false,
     walkthrough: false,
   });
 });
@@ -96,9 +110,11 @@ test('parseArguments treats PR marker arguments as review sources', () => {
 test('parseArguments treats hash-prefixed PR marker values as review sources', () => {
   expect(parseArguments(['pr', '#75'])).toEqual({
     commitRef: null,
+    help: false,
     pullRequestNumber: 75,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
+    version: false,
     walkthrough: false,
   });
 });
@@ -243,4 +259,63 @@ test('packaged terminal helper forwards relative repository paths as absolute pa
   } finally {
     await rm(directory, { force: true, recursive: true });
   }
+});
+
+test('parseArguments recognizes --help and -h flags', () => {
+  expect(parseArguments(['--help']).help).toBe(true);
+  expect(parseArguments(['-h']).help).toBe(true);
+});
+
+test('parseArguments recognizes --version and -v flags', () => {
+  expect(parseArguments(['--version']).version).toBe(true);
+  expect(parseArguments(['-v']).version).toBe(true);
+});
+
+test('parseArguments defaults help and version to false', () => {
+  const result = parseArguments([]);
+  expect(result.help).toBe(false);
+  expect(result.version).toBe(false);
+});
+
+test('formatHelpText includes version and all flags', () => {
+  const text = formatHelpText('1.2.3');
+  expect(text).toContain('codiff v1.2.3');
+  expect(text).toContain('Usage:');
+  expect(text).toContain('--help');
+  expect(text).toContain('--version');
+  expect(text).toContain('--commit');
+  expect(text).toContain('--walkthrough');
+  expect(text).toContain('-h');
+  expect(text).toContain('-v');
+  expect(text).toContain('-w');
+});
+
+test('codiff-app --help prints help text and exits 0', async () => {
+  const { stdout } = await execFileAsync(resolve('bin/codiff-app'), ['--help'], {
+    encoding: 'utf8',
+  });
+  expect(stdout).toContain('codiff v');
+  expect(stdout).toContain('Usage:');
+  expect(stdout).toContain('--help');
+});
+
+test('codiff-app -h prints help text and exits 0', async () => {
+  const { stdout } = await execFileAsync(resolve('bin/codiff-app'), ['-h'], {
+    encoding: 'utf8',
+  });
+  expect(stdout).toContain('Usage:');
+});
+
+test('codiff-app --version prints version and exits 0', async () => {
+  const { stdout } = await execFileAsync(resolve('bin/codiff-app'), ['--version'], {
+    encoding: 'utf8',
+  });
+  expect(stdout).toMatch(/^codiff v\d+\.\d+\.\d+\n$/);
+});
+
+test('codiff-app -v prints version and exits 0', async () => {
+  const { stdout } = await execFileAsync(resolve('bin/codiff-app'), ['-v'], {
+    encoding: 'utf8',
+  });
+  expect(stdout).toMatch(/^codiff v\d+\.\d+\.\d+\n$/);
 });

@@ -3,6 +3,64 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
+export const flagDefinitions = [
+  { argument: '<ref>', description: 'Review a specific commit.', name: 'commit', type: 'string' },
+  { description: 'Show this help message and exit.', name: 'help', short: 'h', type: 'boolean' },
+  {
+    description: 'Show version number and exit.',
+    name: 'version',
+    short: 'v',
+    type: 'boolean',
+  },
+  {
+    description: 'Start with an LLM-generated review walkthrough.',
+    name: 'walkthrough',
+    short: 'w',
+    type: 'boolean',
+  },
+];
+
+export const usageExamples = [
+  { command: 'codiff', description: 'Review staged and unstaged changes.' },
+  { command: 'codiff /path/to/repo', description: 'Review changes in a specific repository.' },
+  { command: 'codiff a1b2c3d', description: 'Review a specific commit.' },
+  { command: "codiff '#75'", description: 'Review pull request #75.' },
+  { command: 'codiff pr 75', description: 'Review pull request #75 (alternate syntax).' },
+  { command: 'codiff -w', description: 'Start with an LLM walkthrough.' },
+  { command: 'codiff -w a1b2c3d', description: 'Walkthrough a specific commit.' },
+];
+
+const parseArgsOptions = Object.fromEntries(
+  flagDefinitions.map(({ name, short, type }) => [name, { type, ...(short ? { short } : {}) }]),
+);
+
+export const formatHelpText = (version) => {
+  const flagLines = flagDefinitions.map(({ argument, description, name, short }) => {
+    const label = `--${name}${argument ? ` ${argument}` : ''}${short ? `, -${short}` : ''}`;
+    return { description, label };
+  });
+  const flagPad = Math.max(...flagLines.map(({ label }) => label.length)) + 2;
+
+  const examplePad = Math.max(...usageExamples.map(({ command }) => command.length)) + 2;
+
+  const lines = [
+    `codiff v${version} — A fast local diff viewer.`,
+    '',
+    'Usage: codiff [options] [<ref> | <pr> | <url>] [path]',
+    '',
+    'Options:',
+    ...flagLines.map(({ description, label }) => `  ${label.padEnd(flagPad)}${description}`),
+    '',
+    'Examples:',
+    ...usageExamples.map(
+      ({ command, description }) => `  ${command.padEnd(examplePad)}${description}`,
+    ),
+    '',
+  ];
+
+  return lines.join('\n');
+};
+
 const commitHashPattern = /^[0-9a-f]{4,64}$/i;
 const headCommitRefPattern = /^(?:HEAD|@)(?:(?:[~^]\d*)|\^\{[^}]+\}|@\{[^}]+\})*$/;
 const pullRequestNumberPattern = /^#([1-9]\d*)$/;
@@ -123,15 +181,7 @@ export const parseArguments = (args) => {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
     args,
-    options: {
-      commit: {
-        type: 'string',
-      },
-      walkthrough: {
-        short: 'w',
-        type: 'boolean',
-      },
-    },
+    options: parseArgsOptions,
     strict: false,
   });
 
@@ -173,9 +223,11 @@ export const parseArguments = (args) => {
 
   return {
     commitRef,
+    help: values.help === true,
     pullRequestNumber,
     pullRequestUrl,
     requestedPath: resolve(requestedPath ?? process.cwd()),
+    version: values.version === true,
     walkthrough: values.walkthrough === true,
   };
 };

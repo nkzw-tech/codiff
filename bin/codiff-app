@@ -15,6 +15,35 @@ done
 
 script_dir="$(CDPATH= cd -P "$(dirname "$source_path")" >/dev/null 2>&1 && pwd)"
 app_path="$(CDPATH= cd -P "$script_dir/../../../.." >/dev/null 2>&1 && pwd)"
+
+codiff_version() {
+  sed -n 's/^  "version": "\([^"]*\)".*/\1/p' "$script_dir/../package.json"
+}
+
+show_help() {
+  version="$(codiff_version)"
+  cat <<EOF
+codiff v${version} — A fast local diff viewer.
+
+Usage: codiff [options] [<ref> | <pr> | <url>] [path]
+
+Options:
+  --commit <ref>        Review a specific commit.
+  --help, -h            Show this help message and exit.
+  --version, -v         Show version number and exit.
+  --walkthrough, -w     Start with an LLM-generated review walkthrough.
+
+Examples:
+  codiff                Review staged and unstaged changes.
+  codiff /path/to/repo  Review changes in a specific repository.
+  codiff a1b2c3d        Review a specific commit.
+  codiff '#75'          Review pull request #75.
+  codiff pr 75          Review pull request #75 (alternate syntax).
+  codiff -w             Start with an LLM walkthrough.
+  codiff -w a1b2c3d     Walkthrough a specific commit.
+EOF
+}
+
 repository_path=""
 commit_ref=""
 pull_request_source=""
@@ -61,6 +90,14 @@ for arg in "$@"; do
   fi
 
   case "$arg" in
+    --help|-h)
+      show_help
+      exit 0
+      ;;
+    --version|-v)
+      printf 'codiff v%s\n' "$(codiff_version)"
+      exit 0
+      ;;
     --walkthrough|-w)
       walkthrough=1
       ;;
