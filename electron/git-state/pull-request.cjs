@@ -13,7 +13,8 @@ const { createSummary, getFingerprint, git, gitOrEmpty } = require('./common.cjs
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
- * @typedef {{head?: {sha?: string}; title?: string}} GitHubPullRequestMetadata
+ * @typedef {{base?: {sha?: string}; head?: {sha?: string}; title?: string}} GitHubPullRequestMetadata
+ * @typedef {{author?: {avatar_url?: string}; commit?: {author?: {date?: string; email?: string; name?: string}; message?: string}; parents?: ReadonlyArray<{sha?: string}>; sha?: string}} GitHubCommit
  * @typedef {{[key: string]: any}} GitHubReviewComment
  */
 
@@ -222,6 +223,82 @@ const readPullRequestComments = async (repoRoot, pullRequest) => {
   return pages.flat().map(normalizeGitHubReviewComment).filter(Boolean);
 };
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<Array<GitHubCommit>>} */
+const readPullRequestCommits = async (repoRoot, pullRequest) => {
+  const pages = JSON.parse(
+    await ghApi(repoRoot, [
+      '--paginate',
+      '--slurp',
+      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/commits?per_page=100`,
+    ]),
+  );
+  return pages.flat();
+};
+
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest @param {string} sha @param {number} limit @returns {Promise<Array<GitHubCommit>>} */
+const readRepositoryCommits = async (repoRoot, pullRequest, sha, limit) => {
+  /** @type {Array<GitHubCommit>} */
+  const commits = [];
+  for (let page = 1; commits.length < limit; page += 1) {
+    const pageCommits = JSON.parse(
+      await ghApi(repoRoot, [
+        `repos/${pullRequest.owner}/${pullRequest.repo}/commits?sha=${encodeURIComponent(
+          sha,
+        )}&per_page=${Math.min(limit - commits.length, 100)}&page=${page}`,
+      ]),
+    );
+    if (!Array.isArray(pageCommits) || pageCommits.length === 0) {
+      break;
+    }
+    commits.push(...pageCommits);
+  }
+  return commits;
+};
+
+/** @param {GitHubCommit} commit @param {'base' | 'pull-request'} [scope] */
+const normalizeGitHubCommit = (commit, scope) => {
+  const ref = commit.sha;
+  const committedAt = Date.parse(commit.commit?.author?.date || '');
+  const message = commit.commit?.message || '';
+  if (!ref || !message || !Number.isFinite(committedAt)) {
+    return null;
+  }
+
+  return {
+    author: commit.commit?.author?.name || '',
+    committedAt,
+    gravatarUrl: commit.author?.avatar_url,
+    parents: commit.parents?.map((parent) => parent.sha).filter(Boolean) || [],
+    ref,
+    ...(scope ? { scope } : {}),
+    subject: message.split('\n')[0],
+  };
+};
+
+/** @param {GitHubCommit} commit */
+const normalizeGitHubPullRequestCommit = (commit) => normalizeGitHubCommit(commit, 'pull-request');
+
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source @param {number} [limit] */
+const listPullRequestHistory = async (launchPath, source, limit = 200) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const pullRequest = parseGitHubPullRequestUrl(source.url);
+  await assertPullRequestMatchesRepository(repoRoot, pullRequest);
+  const [metadata, commits] = await Promise.all([
+    readPullRequestMetadata(repoRoot, pullRequest),
+    readPullRequestCommits(repoRoot, pullRequest),
+  ]);
+  const baseCommits = metadata.base?.sha
+    ? await readRepositoryCommits(repoRoot, pullRequest, metadata.base.sha, limit)
+    : [];
+  return {
+    entries: [
+      ...commits.map(normalizeGitHubPullRequestCommit).filter(Boolean).reverse(),
+      ...baseCommits.map((commit) => normalizeGitHubCommit(commit, 'base')).filter(Boolean),
+    ],
+    root: repoRoot,
+  };
+};
+
 /** @param {string} diff @returns {Map<string, string>} */
 const splitPullRequestDiff = (diff) => {
   const chunks = diff
@@ -423,6 +500,9 @@ const submitPullRequestReview = async (launchPath, request) => {
 module.exports = {
   createPatchFromPullRequestFile,
   createPullRequestSource,
+  listPullRequestHistory,
+  normalizeGitHubCommit,
+  normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,

@@ -682,9 +682,9 @@ ipcMain.handle('codiff:getDiffSectionContent', async (event, request) => {
   return readDiffSectionContent(repositoryPath, request);
 });
 
-ipcMain.handle('codiff:getRepositoryHistory', async (event, limit) => {
+ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return listRepositoryHistory(repositoryPath, limit);
+  return listRepositoryHistory(repositoryPath, limit, source);
 });
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {

@@ -242,10 +242,7 @@ export default function App() {
       }
       setTerminalHelperStatus(nextTerminalHelperStatus);
 
-      const [nextState, history] = await Promise.all([
-        window.codiff.getRepositoryState(),
-        window.codiff.getRepositoryHistory(HISTORY_PAGE_SIZE),
-      ]);
+      const nextState = await window.codiff.getRepositoryState();
 
       if (canceled) {
         return;
@@ -255,6 +252,15 @@ export default function App() {
         ...nextState,
         files: sortFiles(nextState.files),
       };
+      const history = await window.codiff.getRepositoryHistory(
+        HISTORY_PAGE_SIZE,
+        orderedState.source.type === 'pull-request' ? orderedState.source : undefined,
+      );
+
+      if (canceled) {
+        return;
+      }
+
       const shouldLoadWalkthrough = nextLaunchOptions.walkthrough && orderedState.files.length > 0;
       const shouldStartInHistory =
         orderedState.source.type === 'working-tree' && orderedState.files.length === 0;
@@ -844,7 +850,7 @@ export default function App() {
     historyRequestRef.current = request;
     setHistoryLoading(true);
     window.codiff
-      .getRepositoryHistory(nextLimit)
+      .getRepositoryHistory(nextLimit, historyPullRequestSource ?? undefined)
       .then((history) => {
         if (historyRequestRef.current !== request) {
           return;
@@ -864,7 +870,7 @@ export default function App() {
           setHistoryLoading(false);
         }
       });
-  }, [historyHasMore, historyLimit, historyLoading]);
+  }, [historyHasMore, historyLimit, historyLoading, historyPullRequestSource]);
 
   const moveDiffSearchMatch = useCallback(
     (direction: 1 | -1) => {

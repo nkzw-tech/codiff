@@ -609,6 +609,14 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tree-selection-focus) 42%, transparent);
 }
 
+.history-section {
+  color: var(--muted);
+  font: 10px/1.2 var(--font-sans);
+  letter-spacing: 0.04em;
+  padding: 10px 8px 2px 82px;
+  text-transform: uppercase;
+}
+
 .history-entry-subject {
   overflow: hidden;
   text-overflow: ellipsis;

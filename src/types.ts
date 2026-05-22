@@ -58,6 +58,7 @@ export type HistoryEntry = {
   gravatarUrl?: string;
   parents: ReadonlyArray<string>;
   ref: string;
+  scope?: 'base' | 'pull-request';
   subject: string;
 };
 

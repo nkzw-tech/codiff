@@ -26,6 +26,7 @@ type GitStateModule = {
     launchPath: string,
     limit?: number,
   ) => Promise<{ entries: ReadonlyArray<unknown>; root: string }>;
+  normalizeGitHubPullRequestCommit: (commit: Record<string, unknown>) => unknown;
   normalizeGitHubReviewComment: (comment: Record<string, unknown>) => unknown;
   normalizePullRequestComment: (comment: Record<string, unknown>) => Record<string, unknown>;
   parseGitHubPullRequestUrl: (value: string) => {
@@ -50,6 +51,7 @@ const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const {
   listRepositoryHistory,
+  normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,
@@ -140,6 +142,34 @@ test('normalizeGitHubReviewComment preserves multi-line ranges', () => {
     lineNumber: 8,
     side: 'additions',
     startLineNumber: 5,
+  });
+});
+
+test('normalizeGitHubPullRequestCommit reads GitHub PR commit metadata', () => {
+  expect(
+    normalizeGitHubPullRequestCommit({
+      author: {
+        avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
+      },
+      commit: {
+        author: {
+          date: '2026-05-22T12:34:56Z',
+          email: 'author@example.com',
+          name: 'PR Author',
+        },
+        message: 'Feature commit\n\nBody',
+      },
+      parents: [{ sha: 'parent-sha' }],
+      sha: 'commit-sha',
+    }),
+  ).toEqual({
+    author: 'PR Author',
+    committedAt: Date.parse('2026-05-22T12:34:56Z'),
+    gravatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
+    parents: ['parent-sha'],
+    ref: 'commit-sha',
+    scope: 'pull-request',
+    subject: 'Feature commit',
   });
 });
 

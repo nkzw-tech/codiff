@@ -10,7 +10,8 @@ const codiff = {
   getGitIdentity: () => ipcRenderer.invoke('codiff:getGitIdentity'),
   getLaunchOptions: () => ipcRenderer.invoke('codiff:getLaunchOptions'),
   getPreferences: () => ipcRenderer.invoke('codiff:getPreferences'),
-  getRepositoryHistory: (limit) => ipcRenderer.invoke('codiff:getRepositoryHistory', limit),
+  getRepositoryHistory: (limit, source) =>
+    ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getWalkthrough: (source) => ipcRenderer.invoke('codiff:getWalkthrough', source),

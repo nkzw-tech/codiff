@@ -378,52 +378,69 @@ function HistorySidebar({
   const currentSourceKey = getSourceKey(currentSource);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const listRef = useRef<HTMLDivElement>(null);
-  const rows = useMemo(
-    () =>
-      [
-        pullRequestSource
+  const rows = useMemo(() => {
+    const commitRows = entries.map((entry) => ({
+      author: entry.author,
+      committedAt: entry.committedAt,
+      gravatarUrl: entry.gravatarUrl,
+      key: `commit:${entry.ref}`,
+      kind: 'entry' as const,
+      ref: entry.ref,
+      scope: entry.scope,
+      source: { ref: entry.ref, type: 'commit' } satisfies ReviewSource,
+      subject: entry.subject,
+    }));
+    const matchesQuery = (row: (typeof commitRows)[number]) =>
+      !normalizedQuery ||
+      row.subject.toLowerCase().includes(normalizedQuery) ||
+      row.ref.toLowerCase().includes(normalizedQuery);
+
+    if (pullRequestSource) {
+      const pullRequestRows = commitRows
+        .filter((row) => row.scope === 'pull-request')
+        .filter(matchesQuery);
+      const baseRows = commitRows.filter((row) => row.scope === 'base').filter(matchesQuery);
+      return [
+        !normalizedQuery
           ? {
               author: null,
               committedAt: null,
               gravatarUrl: undefined,
               key: getSourceKey(pullRequestSource),
+              kind: 'entry' as const,
               ref: pullRequestSource.number ? `PR #${pullRequestSource.number}` : 'PR',
               source: pullRequestSource satisfies ReviewSource,
               subject: pullRequestSource.title || 'Pull Request',
             }
           : null,
-        {
-          author: null,
-          committedAt: null,
-          gravatarUrl: undefined,
-          key: 'working-tree',
-          ref: '',
-          source: { type: 'working-tree' } satisfies ReviewSource,
-          subject: 'Uncommitted',
-        },
-        ...entries.map((entry) => ({
-          author: entry.author,
-          committedAt: entry.committedAt,
-          gravatarUrl: entry.gravatarUrl,
-          key: `commit:${entry.ref}`,
-          ref: entry.ref,
-          source: { ref: entry.ref, type: 'commit' } satisfies ReviewSource,
-          subject: entry.subject,
-        })),
-      ].filter((row): row is NonNullable<typeof row> => row != null),
-    [entries, pullRequestSource],
-  );
-  const visibleRows = useMemo(
-    () =>
-      normalizedQuery
-        ? rows.filter(
-            (row) =>
-              row.subject.toLowerCase().includes(normalizedQuery) ||
-              row.ref.toLowerCase().includes(normalizedQuery),
-          )
-        : rows,
-    [normalizedQuery, rows],
-  );
+        pullRequestRows.length > 0
+          ? { key: 'history-section:pull-request', kind: 'section' as const, label: 'In this PR' }
+          : null,
+        ...pullRequestRows,
+        baseRows.length > 0
+          ? { key: 'history-section:base', kind: 'section' as const, label: 'Base history' }
+          : null,
+        ...baseRows,
+      ].filter((row): row is NonNullable<typeof row> => row != null);
+    }
+
+    const localRows = commitRows.filter(matchesQuery);
+    return [
+      !normalizedQuery
+        ? {
+            author: null,
+            committedAt: null,
+            gravatarUrl: undefined,
+            key: 'working-tree',
+            kind: 'entry' as const,
+            ref: '',
+            source: { type: 'working-tree' } satisfies ReviewSource,
+            subject: 'Uncommitted',
+          }
+        : null,
+      ...localRows,
+    ].filter((row): row is NonNullable<typeof row> => row != null);
+  }, [entries, normalizedQuery, pullRequestSource]);
   const maybeLoadMore = useCallback(() => {
     const element = listRef.current;
     if (!element || loading || !hasMore || normalizedQuery) {
@@ -437,7 +454,15 @@ function HistorySidebar({
 
   return (
     <div className="history-list" onScroll={maybeLoadMore} ref={listRef}>
-      {visibleRows.map((row) => {
+      {rows.map((row) => {
+        if (row.kind === 'section') {
+          return (
+            <div className="history-section" key={row.key}>
+              {row.label}
+            </div>
+          );
+        }
+
         const selected = row.key === currentSourceKey;
         const hasMetadata = Boolean(row.author && row.committedAt);
         return (

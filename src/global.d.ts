@@ -26,7 +26,7 @@ declare global {
       getGitIdentity: () => Promise<GitIdentity>;
       getLaunchOptions: () => Promise<CodiffLaunchOptions>;
       getPreferences: () => Promise<CodiffPreferences>;
-      getRepositoryHistory: (limit?: number) => Promise<RepositoryHistory>;
+      getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getWalkthrough: (source?: ReviewSource) => Promise<WalkthroughResult>;
