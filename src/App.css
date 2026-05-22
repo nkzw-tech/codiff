@@ -610,11 +610,18 @@
 }
 
 .history-section {
-  color: var(--muted);
-  font: 10px/1.2 var(--font-sans);
-  letter-spacing: 0.04em;
-  padding: 10px 8px 2px 82px;
+  align-items: center;
+  color: var(--text);
+  display: flex;
+  font: 700 11px/1.25 var(--font-sans);
+  min-height: 24px;
+  overflow: hidden;
+  padding: 6px 10px 2px;
+  position: relative;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
+  z-index: 1;
 }
 
 .history-entry-subject {

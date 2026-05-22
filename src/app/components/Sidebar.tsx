@@ -396,10 +396,13 @@ function HistorySidebar({
       row.ref.toLowerCase().includes(normalizedQuery);
 
     if (pullRequestSource) {
+      const hasScopedRows = commitRows.some((row) => row.scope != null);
       const pullRequestRows = commitRows
-        .filter((row) => row.scope === 'pull-request')
+        .filter((row) => (hasScopedRows ? row.scope === 'pull-request' : row.scope == null))
         .filter(matchesQuery);
-      const baseRows = commitRows.filter((row) => row.scope === 'base').filter(matchesQuery);
+      const baseRows = hasScopedRows
+        ? commitRows.filter((row) => row.scope === 'base').filter(matchesQuery)
+        : [];
       return [
         !normalizedQuery
           ? {
@@ -413,13 +416,13 @@ function HistorySidebar({
               subject: pullRequestSource.title || 'Pull Request',
             }
           : null,
-        pullRequestRows.length > 0
-          ? { key: 'history-section:pull-request', kind: 'section' as const, label: 'In this PR' }
-          : null,
+        {
+          key: 'history-section:pull-request',
+          kind: 'section' as const,
+          label: hasScopedRows ? 'Pull request commits' : 'Branch history',
+        },
         ...pullRequestRows,
-        baseRows.length > 0
-          ? { key: 'history-section:base', kind: 'section' as const, label: 'Base history' }
-          : null,
+        { key: 'history-section:base', kind: 'section' as const, label: 'Base history' },
         ...baseRows,
       ].filter((row): row is NonNullable<typeof row> => row != null);
     }
