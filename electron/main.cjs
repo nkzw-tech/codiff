@@ -53,6 +53,11 @@ const {
 } = require('./main/command-line.cjs');
 const { createEditorOpener } = require('./main/editor.cjs');
 const { createTerminalHelper } = require('./main/terminal-helper.cjs');
+const {
+  readWindowState,
+  validateWindowStateOnScreen,
+  writeWindowState,
+} = require('./window-state.cjs');
 const { readWalkthrough } = require('./walkthrough.cjs');
 
 /**
@@ -423,13 +428,17 @@ const createWindow = (
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
   identity = getWindowIdentity(repositoryPath, launchOptions),
 ) => {
+  const savedState = readWindowState();
+  const validatedState = savedState
+    ? validateWindowStateOnScreen(savedState, screen.getAllDisplays())
+    : null;
+
   const display = screen.getPrimaryDisplay();
   const { height, width } = display.workAreaSize;
   const window = new BrowserWindow({
     autoHideMenuBar: true,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#141414' : '#ffffff',
-    center: true,
-    height: Math.max(720, Math.floor(height * 0.86)),
+    height: validatedState?.height ?? Math.max(720, Math.floor(height * 0.86)),
     minHeight: 520,
     minWidth: 880,
     show: false,
@@ -441,7 +450,34 @@ const createWindow = (
       nodeIntegration: false,
       preload: join(__dirname, 'preload.cjs'),
     },
-    width: Math.max(1120, Math.floor(width * 0.86)),
+    width: validatedState?.width ?? Math.max(1120, Math.floor(width * 0.86)),
+    ...(validatedState ? { x: validatedState.x, y: validatedState.y } : { center: true }),
+  });
+
+  if (validatedState?.isMaximized) {
+    window.maximize();
+  }
+  if (validatedState?.isFullScreen) {
+    window.setFullScreen(true);
+  }
+
+  let normalBounds = validatedState
+    ? {
+        x: validatedState.x,
+        y: validatedState.y,
+        width: validatedState.width,
+        height: validatedState.height,
+      }
+    : window.getBounds();
+  window.on('resize', () => {
+    if (!window.isMaximized() && !window.isFullScreen()) {
+      normalBounds = window.getBounds();
+    }
+  });
+  window.on('move', () => {
+    if (!window.isMaximized() && !window.isFullScreen()) {
+      normalBounds = window.getBounds();
+    }
   });
 
   const webContentsId = window.webContents.id;
@@ -460,6 +496,17 @@ const createWindow = (
   let allowClose = false;
   let copyingPendingCommentsBeforeClose = false;
   window.on('close', (event) => {
+    try {
+      writeWindowState({
+        height: normalBounds.height,
+        isFullScreen: window.isFullScreen(),
+        isMaximized: window.isMaximized(),
+        width: normalBounds.width,
+        x: normalBounds.x,
+        y: normalBounds.y,
+      });
+    } catch {}
+
     if (allowClose || quitting || !config.settings.copyCommentsOnClose) {
       return;
     }
