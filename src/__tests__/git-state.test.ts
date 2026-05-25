@@ -22,6 +22,12 @@ type StatusEntry = {
 };
 
 type GitStateModule = {
+  collectResolvedReviewCommentIds: (
+    threads: ReadonlyArray<{
+      comments?: { nodes?: ReadonlyArray<{ databaseId?: number | null }> } | null;
+      isResolved?: boolean;
+    }>,
+  ) => Set<number>;
   createPullRequestHistoryFetchRefspecs: (
     pullRequest: { number: number; owner: string; repo: string; url: string },
     metadata: { base?: { ref?: string; sha?: string } },
@@ -59,11 +65,16 @@ type GitStateModule = {
   ) => Promise<{ root: string; signature: string }>;
   readRepositoryState: (launchPath: string, source?: ReviewSource) => Promise<RepositoryState>;
   readWorkingTreeState: (launchPath: string) => Promise<RepositoryState>;
+  selectUnresolvedReviewComments: (
+    comments: ReadonlyArray<Record<string, unknown>>,
+    resolvedCommentIds: ReadonlySet<number>,
+  ) => Array<Record<string, unknown>>;
 };
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const {
+  collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
   getPullRequestHeadImageSource,
   listRepositoryHistory,
@@ -76,6 +87,7 @@ const {
   readRepositoryChangeSignature,
   readRepositoryState,
   readWorkingTreeState,
+  selectUnresolvedReviewComments,
 } = require('../../electron/git-state.cjs') as GitStateModule;
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
@@ -231,6 +243,117 @@ test('normalizeGitHubReviewComment preserves multi-line ranges', () => {
     side: 'additions',
     startLineNumber: 5,
   });
+});
+
+test('normalizeGitHubReviewComment flags comments anchored to outdated lines', () => {
+  expect(
+    normalizeGitHubReviewComment({
+      body: 'This moved.',
+      created_at: '2026-05-19T00:00:00Z',
+      html_url: 'https://github.com/nkzw-tech/codiff/pull/1#discussion_r7',
+      id: 7,
+      line: null,
+      original_line: 12,
+      path: 'src/file.ts',
+      side: 'RIGHT',
+      user: {
+        login: 'reviewer',
+      },
+    }),
+  ).toMatchObject({
+    body: 'This moved.',
+    isOutdated: true,
+    lineNumber: 12,
+  });
+});
+
+test('normalizeGitHubReviewComment leaves current comments unflagged', () => {
+  const comment = normalizeGitHubReviewComment({
+    body: 'Still current.',
+    created_at: '2026-05-19T00:00:00Z',
+    html_url: 'https://github.com/nkzw-tech/codiff/pull/1#discussion_r8',
+    id: 8,
+    line: 20,
+    path: 'src/file.ts',
+    side: 'RIGHT',
+    user: {
+      login: 'reviewer',
+    },
+  });
+
+  expect(comment).toMatchObject({ lineNumber: 20 });
+  expect(comment).not.toHaveProperty('isOutdated');
+});
+
+test('collectResolvedReviewCommentIds gathers comment ids from resolved threads only', () => {
+  expect(
+    collectResolvedReviewCommentIds([
+      {
+        comments: { nodes: [{ databaseId: 1 }, { databaseId: 2 }] },
+        isResolved: true,
+      },
+      {
+        comments: { nodes: [{ databaseId: 3 }] },
+        isResolved: false,
+      },
+      {
+        comments: { nodes: [{ databaseId: 4 }, { databaseId: null }] },
+        isResolved: true,
+      },
+    ]),
+  ).toEqual(new Set([1, 2, 4]));
+});
+
+test('collectResolvedReviewCommentIds tolerates missing thread and comment data', () => {
+  expect(
+    collectResolvedReviewCommentIds([
+      { isResolved: true },
+      { comments: null, isResolved: true },
+      { comments: { nodes: undefined }, isResolved: true },
+    ]),
+  ).toEqual(new Set());
+});
+
+test('selectUnresolvedReviewComments drops comments that belong to resolved threads', () => {
+  const comments = [
+    {
+      body: 'This is resolved already.',
+      id: 1,
+      line: 5,
+      path: 'src/a.ts',
+      side: 'RIGHT',
+      user: { login: 'reviewer' },
+    },
+    {
+      body: 'This still needs attention.',
+      id: 2,
+      line: 8,
+      path: 'src/b.ts',
+      side: 'RIGHT',
+      user: { login: 'reviewer' },
+    },
+  ];
+
+  const result = selectUnresolvedReviewComments(comments, new Set([1]));
+
+  expect(result).toHaveLength(1);
+  expect(result[0]).toMatchObject({
+    body: 'This still needs attention.',
+    filePath: 'src/b.ts',
+    id: 'github:2',
+  });
+});
+
+test('selectUnresolvedReviewComments keeps every comment when nothing is resolved', () => {
+  const comments = [
+    { body: 'One.', id: 10, line: 1, path: 'src/a.ts', side: 'RIGHT', user: { login: 'reviewer' } },
+    { body: 'Two.', id: 11, line: 2, path: 'src/a.ts', side: 'RIGHT', user: { login: 'reviewer' } },
+  ];
+
+  expect(selectUnresolvedReviewComments(comments, new Set()).map((comment) => comment.id)).toEqual([
+    'github:10',
+    'github:11',
+  ]);
 });
 
 test('normalizeGitHubPullRequestCommit reads GitHub PR commit metadata', () => {

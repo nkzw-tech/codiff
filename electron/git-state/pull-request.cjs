@@ -29,6 +29,7 @@ const {
  * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string}} GitHubPullRequestMetadata
  * @typedef {{author?: {avatar_url?: string}; commit?: {author?: {date?: string; email?: string; name?: string}; message?: string}; parents?: ReadonlyArray<{sha?: string}>; sha?: string}} GitHubCommit
  * @typedef {{[key: string]: any}} GitHubReviewComment
+ * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
  */
 
 /** @param {string} value @returns {PullRequestReference} */
@@ -352,6 +353,7 @@ const normalizeGitHubReviewComment = (comment) => {
     body: comment.body,
     filePath: comment.path,
     id: `github:${comment.id}`,
+    ...(typeof comment.line !== 'number' ? { isOutdated: true } : {}),
     lineNumber,
     side,
     ...(hasRange ? { startLineNumber } : {}),
@@ -361,16 +363,101 @@ const normalizeGitHubReviewComment = (comment) => {
   };
 };
 
+/** @param {ReadonlyArray<GitHubReviewThread>} threads @returns {Set<number>} */
+const collectResolvedReviewCommentIds = (threads) => {
+  /** @type {Set<number>} */
+  const ids = new Set();
+  for (const thread of threads) {
+    if (!thread?.isResolved) {
+      continue;
+    }
+    for (const comment of thread.comments?.nodes ?? []) {
+      if (typeof comment?.databaseId === 'number') {
+        ids.add(comment.databaseId);
+      }
+    }
+  }
+  return ids;
+};
+
+/** @param {ReadonlyArray<GitHubReviewComment>} comments @param {ReadonlySet<number>} resolvedCommentIds */
+const selectUnresolvedReviewComments = (comments, resolvedCommentIds) =>
+  comments
+    .filter((comment) => !resolvedCommentIds.has(comment.id))
+    .map(normalizeGitHubReviewComment)
+    .filter(Boolean);
+
+const RESOLVED_REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        nodes {
+          comments(first: 100) {
+            nodes {
+              databaseId
+            }
+          }
+          isResolved
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+    }
+  }
+}`;
+
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<Set<number>>} */
+const readResolvedReviewCommentIds = async (repoRoot, pullRequest) => {
+  try {
+    /** @type {Array<GitHubReviewThread>} */
+    const threads = [];
+    /** @type {string | undefined} */
+    let cursor;
+    let hasNextPage = true;
+    while (hasNextPage) {
+      const response = JSON.parse(
+        await ghApi(repoRoot, [
+          'graphql',
+          '-f',
+          `query=${RESOLVED_REVIEW_THREADS_QUERY}`,
+          '-f',
+          `owner=${pullRequest.owner}`,
+          '-f',
+          `repo=${pullRequest.repo}`,
+          '-F',
+          `number=${pullRequest.number}`,
+          ...(cursor ? ['-f', `cursor=${cursor}`] : []),
+        ]),
+      );
+      const reviewThreads = response?.data?.repository?.pullRequest?.reviewThreads;
+      if (!reviewThreads) {
+        break;
+      }
+      if (Array.isArray(reviewThreads.nodes)) {
+        threads.push(...reviewThreads.nodes);
+      }
+      cursor = reviewThreads.pageInfo?.endCursor ?? undefined;
+      hasNextPage = Boolean(reviewThreads.pageInfo?.hasNextPage && cursor);
+    }
+    return collectResolvedReviewCommentIds(threads);
+  } catch {
+    return new Set();
+  }
+};
+
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest */
 const readPullRequestComments = async (repoRoot, pullRequest) => {
-  const pages = JSON.parse(
-    await ghApi(repoRoot, [
+  const [pages, resolvedCommentIds] = await Promise.all([
+    ghApi(repoRoot, [
       '--paginate',
       '--slurp',
       `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/comments?per_page=100`,
-    ]),
-  );
-  return pages.flat().map(normalizeGitHubReviewComment).filter(Boolean);
+    ]).then((output) => JSON.parse(output)),
+    readResolvedReviewCommentIds(repoRoot, pullRequest),
+  ]);
+  return selectUnresolvedReviewComments(pages.flat(), resolvedCommentIds);
 };
 
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<Array<GitHubCommit>>} */
@@ -704,6 +791,7 @@ const submitPullRequestReview = async (launchPath, request) => {
 };
 
 module.exports = {
+  collectResolvedReviewCommentIds,
   createPatchFromPullRequestFile,
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSource,
@@ -716,6 +804,7 @@ module.exports = {
   parseGitHubPullRequestUrl,
   readPullRequestImageContent,
   readPullRequestState,
+  selectUnresolvedReviewComments,
   submitPullRequestComment,
   submitPullRequestReview,
 };

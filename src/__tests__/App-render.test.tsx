@@ -70,6 +70,7 @@ test('repository changes show the update banner without refreshing the working t
       copyCommentsOnClose: true,
       lastRepositoryPath: '/repo',
       openAIModel: defaultConfig.settings.openAIModel,
+      showOutdated: false,
       showWhitespace: false,
       theme: 'system' as const,
     })),
@@ -103,6 +104,7 @@ test('repository changes show the update banner without refreshing the working t
     }),
     openConfigFile: vi.fn(async () => {}),
     openFile: vi.fn(async () => {}),
+    setShowOutdated: vi.fn(async () => {}),
     showInFolder: vi.fn(async () => {}),
     submitPullRequestComment: vi.fn(async () => {
       throw new Error('Unexpected pull request comment submit.');

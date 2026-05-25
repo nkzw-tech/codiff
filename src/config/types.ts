@@ -4,6 +4,7 @@ export type CodiffSettings = {
   copyCommentsOnClose: boolean;
   lastRepositoryPath: string;
   openAIModel: string;
+  showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;
 };

@@ -8,6 +8,7 @@ const {
   readCommitState,
 } = require('./git-state/commit.cjs');
 const {
+  collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
   getPullRequestHeadImageSource,
   listPullRequestHistory,
@@ -17,6 +18,7 @@ const {
   parseGitHubPullRequestUrl,
   readPullRequestImageContent,
   readPullRequestState,
+  selectUnresolvedReviewComments,
   submitPullRequestComment,
   submitPullRequestReview,
 } = require('./git-state/pull-request.cjs');
@@ -72,6 +74,7 @@ const readDiffImageContent = (launchPath, request) =>
       : readWorkingTreeDiffImageContent(launchPath, request);
 
 module.exports = {
+  collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
   getPullRequestHeadImageSource,
   listRepositoryHistory: readRepositoryHistory,
@@ -80,6 +83,7 @@ module.exports = {
   normalizePullRequestComment,
   parseStatus,
   parseGitHubPullRequestUrl,
+  selectUnresolvedReviewComments,
   readDiffSectionContent,
   readDiffImageContent,
   readGitIdentity,

@@ -72,6 +72,7 @@ export type ReviewComment = {
     status: 'error' | 'submitting';
   };
   id: string;
+  isOutdated?: boolean;
   isReadOnly?: boolean;
   lineNumber: number;
   sectionId: string;

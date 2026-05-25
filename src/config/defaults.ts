@@ -4,6 +4,7 @@ export const defaultSettings: CodiffSettings = {
   copyCommentsOnClose: false,
   lastRepositoryPath: '',
   openAIModel: 'gpt-5.3-codex-spark',
+  showOutdated: false,
   showWhitespace: false,
   theme: 'system',
 };

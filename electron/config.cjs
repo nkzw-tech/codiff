@@ -27,6 +27,7 @@ const defaultSettings = {
   copyCommentsOnClose: false,
   lastRepositoryPath: '',
   openAIModel: 'gpt-5.3-codex-spark',
+  showOutdated: false,
   showWhitespace: false,
   theme: 'system',
 };
@@ -196,6 +197,10 @@ const mergeConfig = (raw) => {
         typeof rawSettings.openAIModel === 'string'
           ? rawSettings.openAIModel
           : defaultSettings.openAIModel,
+      showOutdated:
+        typeof rawSettings.showOutdated === 'boolean'
+          ? rawSettings.showOutdated
+          : defaultSettings.showOutdated,
       showWhitespace:
         typeof rawSettings.showWhitespace === 'boolean'
           ? rawSettings.showWhitespace
@@ -347,6 +352,7 @@ const configToPreferences = (config) => ({
   copyCommentsOnClose: config.settings.copyCommentsOnClose,
   lastRepositoryPath: config.settings.lastRepositoryPath,
   openAIModel: config.settings.openAIModel,
+  showOutdated: config.settings.showOutdated,
   showWhitespace: config.settings.showWhitespace,
   theme: config.settings.theme,
 });

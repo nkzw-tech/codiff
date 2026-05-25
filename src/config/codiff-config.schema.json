@@ -29,6 +29,11 @@
           "default": "gpt-5.3-codex-spark",
           "description": "The OpenAI model to use for review assistance and walkthroughs."
         },
+        "showOutdated": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show review comments anchored to outdated diff lines. Hidden by default, matching GitHub's review UI."
+        },
         "showWhitespace": {
           "type": "boolean",
           "default": false,

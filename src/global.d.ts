@@ -40,6 +40,7 @@ declare global {
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
       openConfigFile: () => Promise<void>;
       openFile: (path: string) => Promise<void>;
+      setShowOutdated: (value: boolean) => Promise<void>;
       showInFolder: (path: string) => Promise<void>;
       submitPullRequestComment: (
         request: SubmitPullRequestCommentRequest,

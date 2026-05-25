@@ -274,6 +274,7 @@ export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArra
                 body: comment.body,
                 filePath: comment.filePath,
                 id: comment.id,
+                ...(comment.isOutdated ? { isOutdated: true } : {}),
                 isReadOnly: true,
                 lineNumber: comment.lineNumber,
                 sectionId: section.id,
@@ -286,6 +287,12 @@ export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArra
           : [];
       })
     : [];
+
+export const getVisibleReviewComments = (
+  comments: ReadonlyArray<ReviewComment>,
+  showOutdated: boolean,
+): ReadonlyArray<ReviewComment> =>
+  showOutdated ? comments : comments.filter((comment) => !comment.isOutdated);
 
 export const shouldDiscardReviewCommentOnEscape = (
   body: string,
