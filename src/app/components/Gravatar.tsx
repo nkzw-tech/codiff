@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 function Gravatar({
   fallback,
   size,
@@ -8,9 +10,17 @@ function Gravatar({
   url?: string;
 }) {
   const className = `gravatar ${size}`;
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showImage = url && failedUrl !== url;
 
-  return url ? (
-    <img alt="" className={className} draggable={false} src={url} />
+  return showImage ? (
+    <img
+      alt=""
+      className={className}
+      draggable={false}
+      onError={() => setFailedUrl(url)}
+      src={url}
+    />
   ) : (
     <span aria-hidden className={`${className} fallback`}>
       {fallback.trim()[0]?.toUpperCase() ?? '?'}
