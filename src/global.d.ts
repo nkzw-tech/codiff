@@ -43,6 +43,7 @@ declare global {
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
       openConfigFile: () => Promise<void>;
       openFile: (path: string) => Promise<void>;
+      setDiffStyle: (value: CodiffPreferences['diffStyle']) => Promise<void>;
       setShowOutdated: (value: boolean) => Promise<void>;
       showInFolder: (path: string) => Promise<void>;
       submitPullRequestComment: (

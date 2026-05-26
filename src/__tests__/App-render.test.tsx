@@ -89,6 +89,7 @@ test('repository changes show the update banner without refreshing the working t
     })),
     getPreferences: vi.fn(async () => ({
       copyCommentsOnClose: true,
+      diffStyle: 'split' as const,
       lastRepositoryPath: '/repo',
       openAIModel: defaultConfig.settings.openAIModel,
       showOutdated: false,
@@ -129,6 +130,7 @@ test('repository changes show the update banner without refreshing the working t
     }),
     openConfigFile: vi.fn(async () => {}),
     openFile: vi.fn(async () => {}),
+    setDiffStyle: vi.fn(async () => {}),
     setShowOutdated: vi.fn(async () => {}),
     showInFolder: vi.fn(async () => {}),
     submitPullRequestComment: vi.fn(async () => {
@@ -216,6 +218,7 @@ test('walkthrough launch errors stay on the walkthrough tab without automatic re
     })),
     getPreferences: vi.fn(async () => ({
       copyCommentsOnClose: true,
+      diffStyle: 'split' as const,
       lastRepositoryPath: '/repo',
       openAIModel: defaultConfig.settings.openAIModel,
       showOutdated: false,
@@ -251,6 +254,7 @@ test('walkthrough launch errors stay on the walkthrough tab without automatic re
     onRepositoryChanged: vi.fn(() => () => {}),
     openConfigFile: vi.fn(async () => {}),
     openFile: vi.fn(async () => {}),
+    setDiffStyle: vi.fn(async () => {}),
     setShowOutdated: vi.fn(async () => {}),
     showInFolder: vi.fn(async () => {}),
     submitPullRequestComment: vi.fn(async () => {

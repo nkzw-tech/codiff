@@ -1,3 +1,5 @@
+import type { CodiffDiffStyle } from './config/types.ts';
+
 export type DiffSection = {
   binary: boolean;
   id: string;
@@ -227,6 +229,7 @@ export type CodiffTheme = 'system' | 'light' | 'dark';
 
 export type CodiffPreferences = {
   copyCommentsOnClose: boolean;
+  diffStyle: CodiffDiffStyle;
   lastRepositoryPath: string;
   openAIModel: string;
   showOutdated: boolean;

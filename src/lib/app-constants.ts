@@ -25,6 +25,7 @@ export const defaultTerminalHelperStatus: TerminalHelperStatus = {
 
 export const defaultPreferences: CodiffPreferences = {
   copyCommentsOnClose: false,
+  diffStyle: 'split',
   lastRepositoryPath: '',
   openAIModel: 'gpt-5.3-codex-spark',
   showOutdated: false,

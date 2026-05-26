@@ -13,6 +13,7 @@ const { join } = require('node:path');
 
 /**
  * @typedef {import('../src/config/types.ts').CodiffConfig} CodiffConfig
+ * @typedef {import('../src/config/types.ts').CodiffDiffStyle} CodiffDiffStyle
  * @typedef {import('../src/config/types.ts').CodiffKeymap} CodiffKeymap
  * @typedef {import('../src/config/types.ts').CodiffSettings} CodiffSettings
  * @typedef {import('../src/config/types.ts').CodiffTheme} CodiffTheme
@@ -25,6 +26,7 @@ const SCHEMA_URL =
 /** @type {CodiffSettings} */
 const defaultSettings = {
   copyCommentsOnClose: false,
+  diffStyle: 'split',
   lastRepositoryPath: '',
   openAIModel: 'gpt-5.3-codex-spark',
   showOutdated: false,
@@ -130,6 +132,10 @@ const parseJsonc = (text) => JSON.parse(stripTrailingCommas(stripJsoncComments(t
 const normalizeTheme = (theme) =>
   theme === 'system' || theme === 'light' || theme === 'dark' ? theme : 'system';
 
+/** @param {unknown} diffStyle @returns {CodiffDiffStyle} */
+const normalizeDiffStyle = (diffStyle) =>
+  diffStyle === 'split' || diffStyle === 'unified' ? diffStyle : 'split';
+
 /** @param {unknown} path */
 const normalizeLastRepositoryPath = (path) =>
   typeof path === 'string' && path.length > 0 ? path : '';
@@ -192,6 +198,7 @@ const mergeConfig = (raw) => {
         typeof rawSettings.copyCommentsOnClose === 'boolean'
           ? rawSettings.copyCommentsOnClose
           : defaultSettings.copyCommentsOnClose,
+      diffStyle: normalizeDiffStyle(rawSettings.diffStyle),
       lastRepositoryPath: normalizeLastRepositoryPath(rawSettings.lastRepositoryPath),
       openAIModel:
         typeof rawSettings.openAIModel === 'string'
@@ -350,6 +357,7 @@ const watchConfig = (onChange) => {
  */
 const configToPreferences = (config) => ({
   copyCommentsOnClose: config.settings.copyCommentsOnClose,
+  diffStyle: config.settings.diffStyle,
   lastRepositoryPath: config.settings.lastRepositoryPath,
   openAIModel: config.settings.openAIModel,
   showOutdated: config.settings.showOutdated,

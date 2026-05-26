@@ -2,6 +2,7 @@ import type { CodiffConfig, CodiffKeymap, CodiffSettings } from './types.ts';
 
 export const defaultSettings: CodiffSettings = {
   copyCommentsOnClose: false,
+  diffStyle: 'split',
   lastRepositoryPath: '',
   openAIModel: 'gpt-5.3-codex-spark',
   showOutdated: false,

@@ -578,6 +578,7 @@ export default function App() {
         setCodiffConfig(nextConfig);
         setPreferences({
           copyCommentsOnClose: nextConfig.settings.copyCommentsOnClose,
+          diffStyle: nextConfig.settings.diffStyle,
           lastRepositoryPath: nextConfig.settings.lastRepositoryPath,
           openAIModel: nextConfig.settings.openAIModel,
           showOutdated: nextConfig.settings.showOutdated,
@@ -591,6 +592,7 @@ export default function App() {
       setCodiffConfig(nextConfig);
       setPreferences({
         copyCommentsOnClose: nextConfig.settings.copyCommentsOnClose,
+        diffStyle: nextConfig.settings.diffStyle,
         lastRepositoryPath: nextConfig.settings.lastRepositoryPath,
         openAIModel: nextConfig.settings.openAIModel,
         showOutdated: nextConfig.settings.showOutdated,
@@ -677,6 +679,7 @@ export default function App() {
 
   const showWhitespace = preferences.showWhitespace;
   const showOutdated = preferences.showOutdated;
+  const diffStyle = preferences.diffStyle;
   const visibleReviewComments = useMemo(
     () => getVisibleReviewComments(reviewComments, showOutdated),
     [reviewComments, showOutdated],
@@ -1217,6 +1220,16 @@ export default function App() {
         },
         id: 'toggle-outdated-comments',
         title: 'Toggle Outdated Comments',
+      }),
+      registry.register({
+        description: () =>
+          preferencesRef.current.diffStyle === 'split' ? 'Switch to Unified' : 'Switch to Split',
+        execute: () => {
+          const nextDiffStyle = preferencesRef.current.diffStyle === 'split' ? 'unified' : 'split';
+          void window.codiff.setDiffStyle(nextDiffStyle).catch(() => {});
+        },
+        id: 'toggle-diff-layout',
+        title: 'Toggle Diff Layout',
       }),
       registry.register({
         execute: () => window.location.reload(),
@@ -1850,6 +1863,7 @@ export default function App() {
             activeSearchMatch={activeDiffSearchMatch}
             collapsed={collapsed}
             comments={visibleReviewComments}
+            diffStyle={diffStyle}
             files={visibleFiles}
             focusCommentId={focusCommentId}
             focusCommentRequest={focusCommentRequest}

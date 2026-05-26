@@ -1,7 +1,9 @@
+export type CodiffDiffStyle = 'split' | 'unified';
 export type CodiffTheme = 'system' | 'light' | 'dark';
 
 export type CodiffSettings = {
   copyCommentsOnClose: boolean;
+  diffStyle: CodiffDiffStyle;
   lastRepositoryPath: string;
   openAIModel: string;
   showOutdated: boolean;

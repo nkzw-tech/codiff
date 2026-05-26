@@ -19,6 +19,12 @@
           "default": false,
           "description": "Copy pending review comments to clipboard when closing a window."
         },
+        "diffStyle": {
+          "type": "string",
+          "enum": ["split", "unified"],
+          "default": "split",
+          "description": "Diff layout style. 'split' shows deleted and added lines side by side; 'unified' shows them in one column."
+        },
         "lastRepositoryPath": {
           "type": "string",
           "default": "",

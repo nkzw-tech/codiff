@@ -401,6 +401,27 @@ const buildApplicationMenu = () =>
         label: 'View',
         submenu: [
           {
+            checked: config.settings.diffStyle === 'split',
+            click: () => {
+              updateConfig({
+                settings: { ...config.settings, diffStyle: 'split' },
+              });
+            },
+            label: 'Split Diff',
+            type: 'radio',
+          },
+          {
+            checked: config.settings.diffStyle === 'unified',
+            click: () => {
+              updateConfig({
+                settings: { ...config.settings, diffStyle: 'unified' },
+              });
+            },
+            label: 'Unified Diff',
+            type: 'radio',
+          },
+          { type: 'separator' },
+          {
             checked: config.settings.showWhitespace,
             click: (menuItem) => {
               updateConfig({
@@ -813,6 +834,15 @@ ipcMain.handle('codiff:getGitIdentity', async (event) => {
 ipcMain.handle('codiff:getPreferences', () => configToPreferences(config));
 
 ipcMain.handle('codiff:getConfig', () => config);
+
+ipcMain.handle('codiff:setDiffStyle', (_event, value) => {
+  updateConfig({
+    settings: {
+      ...config.settings,
+      diffStyle: value === 'unified' ? 'unified' : 'split',
+    },
+  });
+});
 
 ipcMain.handle('codiff:setShowOutdated', (_event, value) => {
   updateConfig({ settings: { ...config.settings, showOutdated: Boolean(value) } });

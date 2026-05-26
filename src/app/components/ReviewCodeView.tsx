@@ -29,7 +29,7 @@ import {
 } from 'react';
 import codexIconUrl from '../../assets/codex.svg';
 import { matchesShortcut } from '../../config/keymap.ts';
-import type { CodiffKeymap } from '../../config/types.ts';
+import type { CodiffDiffStyle, CodiffKeymap } from '../../config/types.ts';
 import type {
   CodeViewInstance,
   CodeViewItemMetadata,
@@ -763,6 +763,7 @@ export function ReviewCodeView({
   activeSearchMatch,
   collapsed,
   comments,
+  diffStyle,
   files,
   focusCommentId,
   focusCommentRequest,
@@ -791,6 +792,7 @@ export function ReviewCodeView({
   activeSearchMatch: DiffSearchMatch | null;
   collapsed: ReadonlySet<string>;
   comments: ReadonlyArray<ReviewComment>;
+  diffStyle: CodiffDiffStyle;
   files: ReadonlyArray<ChangedFile>;
   focusCommentId: string | null;
   focusCommentRequest: number;
@@ -1000,7 +1002,7 @@ export function ReviewCodeView({
               selectedPath === file.path ? 'selected' : 'idle'
             }:${walkthroughNotes.get(file.path)?.reason ?? ''}:${
               showWhitespace ? 'ws' : 'ignore-ws'
-            }:${getReviewCommentsDigest(commentsBySection.get(section.id) ?? [])}`,
+            }:${diffStyle}:${getReviewCommentsDigest(commentsBySection.get(section.id) ?? [])}`,
           ),
         });
       }
@@ -1014,6 +1016,7 @@ export function ReviewCodeView({
   }, [
     collapsed,
     commentsBySection,
+    diffStyle,
     files,
     forceExpandedPaths,
     imagePreviewLayoutPassBySection,
@@ -1064,7 +1067,7 @@ export function ReviewCodeView({
       const startSide = range.side ?? range.endSide ?? 'additions';
       const endSide = range.endSide ?? startSide;
       if (startSide !== endSide) {
-        window.alert('Review comments cannot span both sides of a split diff.');
+        window.alert('Review comments cannot span added and deleted lines.');
         return;
       }
 
@@ -1093,7 +1096,7 @@ export function ReviewCodeView({
       ({
         collapsedContextThreshold: diffCollapsedContextThreshold,
         diffIndicators: 'bars',
-        diffStyle: 'split',
+        diffStyle,
         enableGutterUtility: true,
         enableLineSelection: true,
         expandUnchanged: false,
@@ -1162,7 +1165,13 @@ export function ReviewCodeView({
         tokenizeMaxLength: 100_000,
         unsafeCSS: codeViewUnsafeCSS,
       }) satisfies CodeViewOptions<ReviewAnnotationMetadata>,
-    [cancelPendingEmptyCommentDeletes, createCommentForRange, itemMetadata, onCreateComment],
+    [
+      cancelPendingEmptyCommentDeletes,
+      createCommentForRange,
+      diffStyle,
+      itemMetadata,
+      onCreateComment,
+    ],
   );
 
   const focusComment = useCallback((comment: ReviewComment) => {

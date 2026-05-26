@@ -70,6 +70,7 @@ The command bar includes actions for common review workflows:
 - Copy Review Comments
 - Copy Review Comments and Close
 - Toggle Viewed for the currently selected file
+- Toggle Diff Layout, with the target layout action shown as the hint
 - Open the currently selected file in your editor
 - Toggle Sidebar
 - Reload Window
@@ -86,6 +87,7 @@ is running so changes apply to open windows.
   "$schema": "https://raw.githubusercontent.com/nkzw-tech/codiff/main/src/config/codiff-config.schema.json",
   "settings": {
     "copyCommentsOnClose": false,
+    "diffStyle": "split",
     "lastRepositoryPath": "",
     "openAIModel": "gpt-5.3-codex-spark",
     "showWhitespace": false,
@@ -105,6 +107,8 @@ is running so changes apply to open windows.
 }
 ```
 
+Choose `View > Split Diff` or `View > Unified Diff`, use Toggle Diff Layout in the command bar,
+or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.
 Use `Mod` for <kbd>Cmd</kbd> on macOS and <kbd>Ctrl</kbd> on other platforms. Shortcut strings can
 combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Shift+p` or
 `Alt+Enter`.
