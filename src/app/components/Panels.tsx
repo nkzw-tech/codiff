@@ -32,7 +32,13 @@ export function ReviewSourceLoading() {
   );
 }
 
-export function RepositoryChangeBanner({ visible }: { visible: boolean }) {
+export function RepositoryChangeBanner({
+  onReload,
+  visible,
+}: {
+  onReload: () => void;
+  visible: boolean;
+}) {
   const [dismissed, setDismissed] = useState(false);
   const isVisible = visible && !dismissed;
 
@@ -40,11 +46,7 @@ export function RepositoryChangeBanner({ visible }: { visible: boolean }) {
     <div aria-live="polite" className={`repository-change-banner${isVisible ? ' visible' : ''}`}>
       <span className="repository-change-banner-content">
         <span>Local changes detected,</span>
-        <button
-          className="repository-change-reload"
-          onClick={() => window.location.reload()}
-          type="button"
-        >
+        <button className="repository-change-reload" onClick={onReload} type="button">
           {getReloadShortcutLabel()} to reload.
         </button>
       </span>

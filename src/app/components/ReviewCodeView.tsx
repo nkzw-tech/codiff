@@ -776,6 +776,12 @@ function ReviewAnnotation({
   );
 }
 
+const scrollTargetRetryFrameLimit = 90;
+
+function isScrollTargetRendered(viewer: CodeViewInstance, itemId: string) {
+  return viewer.getRenderedItems().some((item) => item.id === itemId);
+}
+
 export function ReviewCodeView({
   activeSearchMatch,
   collapsed,
@@ -1289,7 +1295,7 @@ export function ReviewCodeView({
     [],
   );
 
-  const scrollItemHeaderIntoView = useCallback((itemId: string) => {
+  const requestScrollItemHeaderIntoView = useCallback((itemId: string) => {
     const handle = codeViewRef.current;
     const viewer = handle?.getInstance();
     if (!handle || !viewer || viewer.getTopForItem(itemId) == null) {
@@ -1306,27 +1312,37 @@ export function ReviewCodeView({
     return true;
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!scrollTarget || handledScrollRequestRef.current === scrollTarget.request) {
+      return;
+    }
+
+    const itemId = firstItemByPath.get(scrollTarget.path);
+    if (!itemId) {
       return;
     }
 
     let frame: number | null = null;
     let attempts = 0;
     let canceled = false;
+    let requested = false;
 
     const tryScroll = () => {
       if (canceled || handledScrollRequestRef.current === scrollTarget.request) {
         return;
       }
 
-      const itemId = firstItemByPath.get(scrollTarget.path);
-      if (itemId && scrollItemHeaderIntoView(itemId)) {
+      const viewer = codeViewRef.current?.getInstance();
+      if (requested && viewer && isScrollTargetRendered(viewer, itemId)) {
         handledScrollRequestRef.current = scrollTarget.request;
         return;
       }
 
-      if (attempts < 6) {
+      if (requestScrollItemHeaderIntoView(itemId)) {
+        requested = true;
+      }
+
+      if (attempts < scrollTargetRetryFrameLimit) {
         attempts += 1;
         frame = window.requestAnimationFrame(tryScroll);
       }
@@ -1340,7 +1356,7 @@ export function ReviewCodeView({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [firstItemByPath, scrollItemHeaderIntoView, scrollTarget]);
+  }, [firstItemByPath, requestScrollItemHeaderIntoView, scrollTarget]);
 
   const scheduleSearchHighlights = useCallback(() => {
     const viewer = codeViewRef.current?.getInstance();

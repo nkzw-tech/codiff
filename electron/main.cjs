@@ -758,6 +758,9 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   const initialState = !source ? windowInitialRepositoryStates.get(event.sender.id) : undefined;
+  if (initialState) {
+    windowInitialRepositoryStates.delete(event.sender.id);
+  }
   const state = initialState
     ? await initialState
     : await readRepositoryState(repositoryPath, source || launchOptions?.source);
