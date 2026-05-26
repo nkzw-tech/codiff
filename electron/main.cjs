@@ -526,7 +526,7 @@ const createWindow = (
     show: false,
     title: `Codiff - ${repositoryPath}`,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 25, y: 24 } } : {}),
+    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 25, y: 22 } } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
