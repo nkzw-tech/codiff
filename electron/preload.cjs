@@ -59,6 +59,7 @@ const codiff = {
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),
+  setWordWrap: (value) => ipcRenderer.invoke('codiff:setWordWrap', value),
   showInFolder: (path) => ipcRenderer.invoke('codiff:showInFolder', path),
   submitPullRequestComment: (request) =>
     ipcRenderer.invoke('codiff:submitPullRequestComment', request),

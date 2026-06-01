@@ -807,6 +807,7 @@ export function ReviewCodeView({
   source,
   viewed,
   walkthroughNotes,
+  wordWrap,
 }: {
   activeSearchMatch: DiffSearchMatch | null;
   collapsed: ReadonlySet<string>;
@@ -838,6 +839,7 @@ export function ReviewCodeView({
   source: ReviewSource;
   viewed: Record<string, string>;
   walkthroughNotes: ReadonlyMap<string, WalkthroughNote>;
+  wordWrap: boolean;
 }) {
   const codeViewRef = useRef<CodeViewHandle<ReviewAnnotationMetadata>>(null);
   const deferredTimersRef = useRef<Set<number>>(new Set());
@@ -1194,6 +1196,7 @@ export function ReviewCodeView({
             Boolean(metadata && loadingSectionIds.has(metadata.section.id)),
           );
         },
+        overflow: wordWrap ? 'wrap' : 'scroll',
         stickyHeaders: true,
         theme: {
           dark: 'Dunkel',
@@ -1211,6 +1214,7 @@ export function ReviewCodeView({
       loadingSectionIds,
       onCreateComment,
       onLoadSection,
+      wordWrap,
     ],
   );
 

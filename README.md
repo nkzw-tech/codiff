@@ -92,6 +92,7 @@ is running so changes apply to open windows.
     "openAIModel": "gpt-5.3-codex-spark",
     "showWhitespace": false,
     "theme": "system",
+    "wordWrap": false,
   },
   "keymap": {
     "commandBar": "Mod+Shift+p",
@@ -109,6 +110,8 @@ is running so changes apply to open windows.
 
 Choose `View > Split Diff` or `View > Unified Diff`, use Toggle Diff Layout in the command bar,
 or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.
+Choose `View > Word Wrap`, use Toggle Word Wrap in the command bar, or set `settings.wordWrap`
+to `true` to wrap long diff lines.
 Use `Mod` for <kbd>Cmd</kbd> on macOS and <kbd>Ctrl</kbd> on other platforms. Shortcut strings can
 combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Shift+p` or
 `Alt+Enter`.

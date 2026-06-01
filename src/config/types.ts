@@ -9,6 +9,7 @@ export type CodiffSettings = {
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;
+  wordWrap: boolean;
 };
 
 export type KeyCombo = string;

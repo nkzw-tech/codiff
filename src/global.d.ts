@@ -45,6 +45,7 @@ declare global {
       openFile: (path: string) => Promise<void>;
       setDiffStyle: (value: CodiffPreferences['diffStyle']) => Promise<void>;
       setShowOutdated: (value: boolean) => Promise<void>;
+      setWordWrap: (value: boolean) => Promise<void>;
       showInFolder: (path: string) => Promise<void>;
       submitPullRequestComment: (
         request: SubmitPullRequestCommentRequest,

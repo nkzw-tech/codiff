@@ -88,13 +88,9 @@ test('repository changes show the update banner without refreshing the working t
       walkthrough: false,
     })),
     getPreferences: vi.fn(async () => ({
+      ...defaultConfig.settings,
       copyCommentsOnClose: true,
-      diffStyle: 'split' as const,
       lastRepositoryPath: '/repo',
-      openAIModel: defaultConfig.settings.openAIModel,
-      showOutdated: false,
-      showWhitespace: false,
-      theme: 'system' as const,
     })),
     getRepositoryHistory: vi.fn(async () => ({
       entries: [],
@@ -132,6 +128,7 @@ test('repository changes show the update banner without refreshing the working t
     openFile: vi.fn(async () => {}),
     setDiffStyle: vi.fn(async () => {}),
     setShowOutdated: vi.fn(async () => {}),
+    setWordWrap: vi.fn(async () => {}),
     showInFolder: vi.fn(async () => {}),
     submitPullRequestComment: vi.fn(async () => {
       throw new Error('Unexpected pull request comment submit.');
@@ -217,13 +214,9 @@ test('walkthrough launch errors stay on the walkthrough tab without automatic re
       walkthrough: true,
     })),
     getPreferences: vi.fn(async () => ({
+      ...defaultConfig.settings,
       copyCommentsOnClose: true,
-      diffStyle: 'split' as const,
       lastRepositoryPath: '/repo',
-      openAIModel: defaultConfig.settings.openAIModel,
-      showOutdated: false,
-      showWhitespace: false,
-      theme: 'system' as const,
     })),
     getRepositoryHistory: vi.fn(async () => ({
       entries: [],
@@ -256,6 +249,7 @@ test('walkthrough launch errors stay on the walkthrough tab without automatic re
     openFile: vi.fn(async () => {}),
     setDiffStyle: vi.fn(async () => {}),
     setShowOutdated: vi.fn(async () => {}),
+    setWordWrap: vi.fn(async () => {}),
     showInFolder: vi.fn(async () => {}),
     submitPullRequestComment: vi.fn(async () => {
       throw new Error('Unexpected pull request comment submit.');

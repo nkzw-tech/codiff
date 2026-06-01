@@ -8,6 +8,7 @@ export const defaultSettings: CodiffSettings = {
   showOutdated: false,
   showWhitespace: false,
   theme: 'system',
+  wordWrap: false,
 };
 
 export const defaultKeymap: CodiffKeymap = {

@@ -239,6 +239,7 @@ export type CodiffPreferences = {
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;
+  wordWrap: boolean;
 };
 
 export type PullRequestReviewComment = {

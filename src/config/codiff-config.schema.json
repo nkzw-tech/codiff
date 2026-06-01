@@ -50,6 +50,11 @@
           "enum": ["system", "light", "dark"],
           "default": "system",
           "description": "Application color theme. 'system' follows OS preference."
+        },
+        "wordWrap": {
+          "type": "boolean",
+          "default": false,
+          "description": "Wrap long diff lines instead of using horizontal scrolling."
         }
       }
     },

@@ -105,6 +105,10 @@ const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
         },
       };
 
+const getPreferencesFromConfig = ({ settings }: CodiffConfig): CodiffPreferences => ({
+  ...settings,
+});
+
 export default function App() {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [activeDiffSearchMatchIndex, setActiveDiffSearchMatchIndex] = useState(0);
@@ -591,29 +595,13 @@ export default function App() {
     window.codiff.getConfig().then((nextConfig) => {
       if (!canceled) {
         setCodiffConfig(nextConfig);
-        setPreferences({
-          copyCommentsOnClose: nextConfig.settings.copyCommentsOnClose,
-          diffStyle: nextConfig.settings.diffStyle,
-          lastRepositoryPath: nextConfig.settings.lastRepositoryPath,
-          openAIModel: nextConfig.settings.openAIModel,
-          showOutdated: nextConfig.settings.showOutdated,
-          showWhitespace: nextConfig.settings.showWhitespace,
-          theme: nextConfig.settings.theme,
-        });
+        setPreferences(getPreferencesFromConfig(nextConfig));
       }
     });
 
     const removeConfigListener = window.codiff.onConfigChanged((nextConfig) => {
       setCodiffConfig(nextConfig);
-      setPreferences({
-        copyCommentsOnClose: nextConfig.settings.copyCommentsOnClose,
-        diffStyle: nextConfig.settings.diffStyle,
-        lastRepositoryPath: nextConfig.settings.lastRepositoryPath,
-        openAIModel: nextConfig.settings.openAIModel,
-        showOutdated: nextConfig.settings.showOutdated,
-        showWhitespace: nextConfig.settings.showWhitespace,
-        theme: nextConfig.settings.theme,
-      });
+      setPreferences(getPreferencesFromConfig(nextConfig));
     });
 
     return () => {
@@ -695,6 +683,7 @@ export default function App() {
   const showWhitespace = preferences.showWhitespace;
   const showOutdated = preferences.showOutdated;
   const diffStyle = preferences.diffStyle;
+  const wordWrap = preferences.wordWrap;
   const visibleReviewComments = useMemo(
     () => getVisibleReviewComments(reviewComments, showOutdated),
     [reviewComments, showOutdated],
@@ -1248,6 +1237,15 @@ export default function App() {
         },
         id: 'toggle-diff-layout',
         title: 'Toggle Diff Layout',
+      }),
+      registry.register({
+        description: () =>
+          preferencesRef.current.wordWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
+        execute: () => {
+          void window.codiff.setWordWrap(!preferencesRef.current.wordWrap).catch(() => {});
+        },
+        id: 'toggle-word-wrap',
+        title: 'Toggle Word Wrap',
       }),
       registry.register({
         execute: () => window.location.reload(),
@@ -1917,6 +1915,7 @@ export default function App() {
             walkthroughNotes={
               sidebarMode === 'walkthrough' ? walkthroughNotes : emptyWalkthroughNotes
             }
+            wordWrap={wordWrap}
           />
         )}
       </main>

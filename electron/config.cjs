@@ -32,6 +32,7 @@ const defaultSettings = {
   showOutdated: false,
   showWhitespace: false,
   theme: 'system',
+  wordWrap: false,
 };
 
 /** @type {CodiffKeymap} */
@@ -213,6 +214,8 @@ const mergeConfig = (raw) => {
           ? rawSettings.showWhitespace
           : defaultSettings.showWhitespace,
       theme: normalizeTheme(rawSettings.theme),
+      wordWrap:
+        typeof rawSettings.wordWrap === 'boolean' ? rawSettings.wordWrap : defaultSettings.wordWrap,
     },
   };
 };
@@ -356,13 +359,7 @@ const watchConfig = (onChange) => {
  * @returns {CodiffPreferences}
  */
 const configToPreferences = (config) => ({
-  copyCommentsOnClose: config.settings.copyCommentsOnClose,
-  diffStyle: config.settings.diffStyle,
-  lastRepositoryPath: config.settings.lastRepositoryPath,
-  openAIModel: config.settings.openAIModel,
-  showOutdated: config.settings.showOutdated,
-  showWhitespace: config.settings.showWhitespace,
-  theme: config.settings.theme,
+  ...config.settings,
 });
 
 module.exports = {

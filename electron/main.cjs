@@ -422,6 +422,16 @@ const buildApplicationMenu = () =>
           },
           { type: 'separator' },
           {
+            checked: config.settings.wordWrap,
+            click: (menuItem) => {
+              updateConfig({
+                settings: { ...config.settings, wordWrap: menuItem.checked },
+              });
+            },
+            label: 'Word Wrap',
+            type: 'checkbox',
+          },
+          {
             checked: config.settings.showWhitespace,
             click: (menuItem) => {
               updateConfig({
@@ -846,6 +856,10 @@ ipcMain.handle('codiff:setDiffStyle', (_event, value) => {
 
 ipcMain.handle('codiff:setShowOutdated', (_event, value) => {
   updateConfig({ settings: { ...config.settings, showOutdated: Boolean(value) } });
+});
+
+ipcMain.handle('codiff:setWordWrap', (_event, value) => {
+  updateConfig({ settings: { ...config.settings, wordWrap: Boolean(value) } });
 });
 
 ipcMain.handle('codiff:openConfigFile', () => openConfigFile());

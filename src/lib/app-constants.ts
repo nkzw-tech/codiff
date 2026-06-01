@@ -31,4 +31,5 @@ export const defaultPreferences: CodiffPreferences = {
   showOutdated: false,
   showWhitespace: false,
   theme: 'system',
+  wordWrap: false,
 };
