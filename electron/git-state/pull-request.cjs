@@ -10,6 +10,8 @@ const {
   getImageMimeType,
   git,
   gitOrEmpty,
+  readGitFile,
+  summarizeContent,
   validateRepositoryPath,
 } = require('./common.cjs');
 
@@ -598,6 +600,152 @@ const createPullRequestSource = (pullRequest, metadata) => ({
   url: pullRequest.url,
 });
 
+/**
+ * Make sure the pull request head and base branch are available as local refs
+ * and resolve the two commits to diff against. GitHub computes the pull request
+ * diff against the merge base of the base branch and the head, so mirror that to
+ * keep line numbers and changes aligned with the GitHub review.
+ *
+ * Returns `null` when the full file contents cannot be resolved, in which case
+ * callers fall back to the GitHub-provided patch (which cannot expand
+ * unmodified context).
+ *
+ * @param {string} repoRoot
+ * @param {PullRequestReference} pullRequest
+ * @param {GitHubPullRequestMetadata} metadata
+ * @returns {Promise<{base: string; head: string} | null>}
+ */
+const resolvePullRequestContentRefs = async (repoRoot, pullRequest, metadata) => {
+  if (!metadata.base?.ref) {
+    return null;
+  }
+
+  const headRef = `refs/codiff/pull-requests/${pullRequest.number}/head`;
+  const baseRef = `refs/codiff/pull-requests/${pullRequest.number}/base`;
+  const headSha = metadata.head?.sha;
+  const baseSha = metadata.base?.sha;
+  const localHead = (
+    await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', headRef])
+  ).trim();
+  const localBase = (
+    await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', baseRef])
+  ).trim();
+
+  // Refetch when a ref is missing or has moved -- including when the base branch
+  // advanced or the pull request was retargeted (localBase !== base sha) -- so
+  // the merge base is always resolved against the current base and head rather
+  // than stale contents.
+  if (
+    localBase === '' ||
+    localHead === '' ||
+    (headSha != null && localHead !== headSha) ||
+    (baseSha != null && localBase !== baseSha)
+  ) {
+    try {
+      const remote = await selectPullRequestRemote(repoRoot, pullRequest);
+      await fetchPullRequestHistoryRefs(repoRoot, remote, pullRequest, metadata);
+    } catch {
+      return null;
+    }
+  }
+
+  const mergeBase = (await gitOrEmpty(repoRoot, ['merge-base', baseRef, headRef])).trim();
+  return mergeBase ? { base: mergeBase, head: headRef } : null;
+};
+
+/**
+ * git/GitHub emit `Binary files a/x and b/x differ` as a diff metadata line.
+ * Anchor to the start of a line so the same text appearing inside a patch's
+ * added/removed/context lines (which are prefixed with `+`/`-`/space) does not
+ * misclassify a text file as binary.
+ */
+const BINARY_DIFF_MARKER = /^Binary files .* differ/m;
+
+/**
+ * Build a diff section for a pull request file. When the full base and head
+ * contents are available the section carries `oldFile`/`newFile` so Codiff
+ * renders a recomputed diff with expandable unmodified context (matching commits
+ * and the working tree). Otherwise it falls back to the GitHub patch.
+ *
+ * @param {PullRequestReference} pullRequest
+ * @param {GitHubPullRequestFile} file
+ * @param {string} patch
+ * @param {import('./common.cjs').FileContentResult} [oldFile]
+ * @param {import('./common.cjs').FileContentResult} [newFile]
+ * @returns {import('../../src/types.ts').DiffSection}
+ */
+const createPullRequestSection = (pullRequest, file, patch, oldFile, newFile) => {
+  const id = `${file.filename}:pull-request:${pullRequest.number}`;
+  const patchBinary = !patch || BINARY_DIFF_MARKER.test(patch);
+  // Expandable context can only be rendered when both sides' contents are present.
+  const attemptedContent = oldFile != null && newFile != null;
+
+  if (attemptedContent && !patchBinary) {
+    const summary = summarizeContent(oldFile, newFile);
+    const status = normalizePullRequestFileStatus(file.status);
+    const oldContents = oldFile.file?.contents ?? '';
+    const newContents = newFile.file?.contents ?? '';
+    // A modification that reads empty on both sides means the content failed to
+    // load; keep the patch instead of rendering it as an empty (no-op) diff.
+    const contentMissing =
+      (status === 'modified' || status === 'renamed') && oldContents === '' && newContents === '';
+
+    if (!summary.binary && summary.loadState === 'ready' && !contentMissing) {
+      return {
+        binary: false,
+        id,
+        kind: 'pull-request',
+        loadState: 'ready',
+        newFile: newFile.file,
+        oldFile: oldFile.file,
+        patch,
+      };
+    }
+  }
+
+  // Pull request contents are loaded up front, so a file that falls back to its
+  // patch (binary, oversized, or refs unavailable) cannot be loaded on demand.
+  return {
+    binary: patchBinary,
+    id,
+    kind: 'pull-request',
+    loadState: patchBinary ? 'binary' : 'ready',
+    patch,
+    summary: createSummary(
+      patchBinary ? 'Binary file changed.' : 'Showing the pull request patch for this file.',
+      { canLoad: false },
+    ),
+  };
+};
+
+const PULL_REQUEST_CONTENT_CONCURRENCY = 16;
+
+/**
+ * Run an async mapper over `items` with a bounded number of concurrent calls so
+ * loading every file's contents does not spawn one git process per file at once.
+ *
+ * @template T, R
+ * @param {ReadonlyArray<T>} items
+ * @param {number} limit
+ * @param {(item: T) => Promise<R>} mapper
+ * @returns {Promise<Array<R>>}
+ */
+const mapWithConcurrency = async (items, limit, mapper) => {
+  /** @type {Array<R>} */
+  const results = new Array(items.length);
+  let cursor = 0;
+  const run = async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(items[index]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, run));
+  return results;
+};
+
 /** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source @returns {Promise<RepositoryState>} */
 const readPullRequestState = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
@@ -611,39 +759,48 @@ const readPullRequestState = async (launchPath, source) => {
     readPullRequestComments(repoRoot, pullRequest),
   ]);
   const diffByPath = splitPullRequestDiff(diff);
+  // Load every file's base and head contents up front from the local refs, so
+  // each diff renders in its final collapsed layout immediately and never shifts
+  // as expandable context becomes available. Files larger than the eager limit
+  // stay patch-only.
+  const contentRefs = await resolvePullRequestContentRefs(repoRoot, pullRequest, metadata).catch(
+    () => null,
+  );
 
   /** @type {Array<ChangedFile>} */
-  const files = [...apiFiles]
-    .sort((left, right) => left.filename.localeCompare(right.filename))
-    .map((file) => {
+  const files = (
+    await mapWithConcurrency([...apiFiles], PULL_REQUEST_CONTENT_CONCURRENCY, async (file) => {
       const patch = diffByPath.get(file.filename) || createPatchFromPullRequestFile(file);
-      const binary = !patch || /Binary files .* differ/.test(patch);
+      const oldPath = file.previous_filename || file.filename;
+      const [oldFile, newFile] =
+        contentRefs && !BINARY_DIFF_MARKER.test(patch)
+          ? await Promise.all([
+              readGitFile(repoRoot, contentRefs.base, oldPath),
+              readGitFile(repoRoot, contentRefs.head, file.filename),
+            ])
+          : [undefined, undefined];
+      const section = createPullRequestSection(pullRequest, file, patch, oldFile, newFile);
 
       return {
         fingerprint: getFingerprint(
-          `${metadata.head?.sha || ''}\n${file.status}\n${file.previous_filename || ''}\n${
-            file.filename
-          }\n${patch}`,
+          [
+            metadata.head?.sha || '',
+            file.status,
+            file.previous_filename || '',
+            file.filename,
+            section.loadState || 'ready',
+            section.oldFile?.cacheKey || '',
+            section.newFile?.cacheKey || '',
+            patch,
+          ].join('\n'),
         ),
         oldPath: file.previous_filename,
         path: file.filename,
-        sections: [
-          {
-            binary,
-            id: `${file.filename}:pull-request:${pullRequest.number}`,
-            kind: 'pull-request',
-            loadState: binary ? 'binary' : 'ready',
-            patch,
-            summary: binary
-              ? createSummary('Binary file changed.', {
-                  canLoad: false,
-                })
-              : undefined,
-          },
-        ],
+        sections: [section],
         status: normalizePullRequestFileStatus(file.status),
       };
-    });
+    })
+  ).sort((left, right) => left.path.localeCompare(right.path));
 
   return {
     files,
@@ -794,6 +951,7 @@ module.exports = {
   collectResolvedReviewCommentIds,
   createPatchFromPullRequestFile,
   createPullRequestHistoryFetchRefspecs,
+  createPullRequestSection,
   createPullRequestSource,
   getPullRequestHeadImageSource,
   listPullRequestHistory,
@@ -804,6 +962,7 @@ module.exports = {
   parseGitHubPullRequestUrl,
   readPullRequestImageContent,
   readPullRequestState,
+  resolvePullRequestContentRefs,
   selectUnresolvedReviewComments,
   submitPullRequestComment,
   submitPullRequestReview,

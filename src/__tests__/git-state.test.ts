@@ -21,6 +21,14 @@ type StatusEntry = {
   untracked: boolean;
 };
 
+type PullRequestFileContent = {
+  binary: boolean;
+  file?: { cacheKey?: string; contents: string; name: string };
+  fingerprint?: string;
+  loadState?: string;
+  summary?: unknown;
+};
+
 type GitStateModule = {
   collectResolvedReviewCommentIds: (
     threads: ReadonlyArray<{
@@ -32,6 +40,13 @@ type GitStateModule = {
     pullRequest: { number: number; owner: string; repo: string; url: string },
     metadata: { base?: { ref?: string; sha?: string } },
   ) => ReadonlyArray<string>;
+  createPullRequestSection: (
+    pullRequest: { number: number; owner: string; repo: string; url: string },
+    file: { filename: string; patch?: string; previous_filename?: string; status: string },
+    patch: string,
+    oldFile?: PullRequestFileContent,
+    newFile?: PullRequestFileContent,
+  ) => DiffSection;
   getPullRequestHeadImageSource: (
     pullRequest: { number: number; owner: string; repo: string; url: string },
     metadata: {
@@ -66,6 +81,11 @@ type GitStateModule = {
   ) => Promise<{ root: string; signature: string }>;
   readRepositoryState: (launchPath: string, source?: ReviewSource) => Promise<RepositoryState>;
   readWorkingTreeState: (launchPath: string) => Promise<RepositoryState>;
+  resolvePullRequestContentRefs: (
+    repoRoot: string,
+    pullRequest: { number: number; owner: string; repo: string; url: string },
+    metadata: { base?: { ref?: string; sha?: string }; head?: { ref?: string; sha?: string } },
+  ) => Promise<{ base: string; head: string } | null>;
   selectUnresolvedReviewComments: (
     comments: ReadonlyArray<Record<string, unknown>>,
     resolvedCommentIds: ReadonlySet<number>,
@@ -77,6 +97,7 @@ const require = createRequire(import.meta.url);
 const {
   collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
+  createPullRequestSection,
   getPullRequestHeadImageSource,
   listRepositoryHistory,
   normalizeGitHubPullRequestCommit,
@@ -88,6 +109,7 @@ const {
   readRepositoryChangeSignature,
   readRepositoryState,
   readWorkingTreeState,
+  resolvePullRequestContentRefs,
   selectUnresolvedReviewComments,
 } = require('../../electron/git-state.cjs') as GitStateModule;
 
@@ -169,6 +191,171 @@ test('createPullRequestHistoryFetchRefspecs fetches PR and base refs into Codiff
     '+refs/pull/25/head:refs/codiff/pull-requests/25/head',
     '+refs/heads/main:refs/codiff/pull-requests/25/base',
   ]);
+});
+
+const pullRequestFixture = {
+  number: 7,
+  owner: 'nkzw-tech',
+  repo: 'codiff',
+  url: 'https://github.com/nkzw-tech/codiff/pull/7',
+};
+
+test('createPullRequestSection renders full contents so pull request diffs can expand context', () => {
+  const section = createPullRequestSection(
+    pullRequestFixture,
+    { filename: 'src/app.ts', status: 'modified' },
+    'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n',
+    { binary: false, file: { cacheKey: 'base:src/app.ts', contents: 'old\n', name: 'src/app.ts' } },
+    { binary: false, file: { cacheKey: 'head:src/app.ts', contents: 'new\n', name: 'src/app.ts' } },
+  );
+
+  expect(section.id).toBe('src/app.ts:pull-request:7');
+  expect(section.binary).toBe(false);
+  expect(section.loadState).toBe('ready');
+  expect(section.oldFile?.contents).toBe('old\n');
+  expect(section.newFile?.contents).toBe('new\n');
+});
+
+test('createPullRequestSection falls back to a non-loadable patch section without contents', () => {
+  const section = createPullRequestSection(
+    pullRequestFixture,
+    { filename: 'src/app.ts', status: 'modified' },
+    'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+
+  expect(section.oldFile).toBeUndefined();
+  expect(section.newFile).toBeUndefined();
+  expect(section.loadState).toBe('ready');
+  // Pull request contents load up front, so a patch-only fallback is not
+  // loadable on demand (there is no pull-request section-content loader).
+  expect(section.summary?.canLoad).toBe(false);
+});
+
+test('createPullRequestSection treats the binary marker as a diff line, not patch content', () => {
+  // The patch's content adds a line that contains the binary-marker text. It
+  // must not be mistaken for an actual binary diff.
+  const patch =
+    'diff --git a/re.ts b/re.ts\n@@ -1 +1 @@\n-const a = 1;\n+const re = /Binary files .* differ/;\n';
+  const section = createPullRequestSection(
+    pullRequestFixture,
+    { filename: 're.ts', status: 'modified' },
+    patch,
+    { binary: false, file: { cacheKey: 'old', contents: 'const a = 1;\n', name: 're.ts' } },
+    {
+      binary: false,
+      file: { cacheKey: 'new', contents: 'const re = /Binary files .* differ/;\n', name: 're.ts' },
+    },
+  );
+
+  expect(section.binary).toBe(false);
+  expect(section.loadState).toBe('ready');
+  expect(section.oldFile?.contents).toBe('const a = 1;\n');
+  expect(section.newFile?.contents).toBe('const re = /Binary files .* differ/;\n');
+});
+
+test('createPullRequestSection keeps full contents for added files', () => {
+  const section = createPullRequestSection(
+    pullRequestFixture,
+    { filename: 'new.ts', status: 'added' },
+    'diff --git a/new.ts b/new.ts\n--- /dev/null\n+++ b/new.ts\n@@ -0,0 +1 @@\n+hello\n',
+    { binary: false, file: { cacheKey: 'base:new.ts:empty', contents: '', name: 'new.ts' } },
+    { binary: false, file: { cacheKey: 'head:new.ts', contents: 'hello\n', name: 'new.ts' } },
+  );
+
+  expect(section.oldFile?.contents).toBe('');
+  expect(section.newFile?.contents).toBe('hello\n');
+  expect(section.loadState).toBe('ready');
+});
+
+test('createPullRequestSection falls back to the patch for binary files', () => {
+  const section = createPullRequestSection(
+    pullRequestFixture,
+    { filename: 'logo.png', status: 'modified' },
+    'diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n',
+  );
+
+  expect(section.binary).toBe(true);
+  expect(section.loadState).toBe('binary');
+  expect(section.oldFile).toBeUndefined();
+  expect(section.newFile).toBeUndefined();
+});
+
+test('createPullRequestSection falls back to the patch when modified contents fail to load', () => {
+  const patch = 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n';
+  const section = createPullRequestSection(
+    pullRequestFixture,
+    { filename: 'src/app.ts', status: 'modified' },
+    patch,
+    { binary: false, file: { cacheKey: 'base:empty', contents: '', name: 'src/app.ts' } },
+    { binary: false, file: { cacheKey: 'head:empty', contents: '', name: 'src/app.ts' } },
+  );
+
+  expect(section.oldFile).toBeUndefined();
+  expect(section.newFile).toBeUndefined();
+  expect(section.loadState).toBe('ready');
+  expect(section.patch).toBe(patch);
+  // Once a load has been attempted but could not produce usable contents, the
+  // section is marked non-loadable so it is not requested again.
+  expect(section.summary?.canLoad).toBe(false);
+});
+
+test('resolvePullRequestContentRefs resolves the diff against the merge base', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'base');
+    const mergeBase = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    // The pull request head branches off the merge base.
+    await writeRepoFile(repo, 'file.txt', 'head change\n');
+    await commitAll(repo, 'head');
+    const headSha = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/head', headSha]);
+
+    // The base branch advances past the merge base after the PR was opened.
+    await git(repo, ['checkout', '-q', mergeBase]);
+    await writeRepoFile(repo, 'file.txt', 'base advanced\n');
+    await commitAll(repo, 'base advanced');
+    const baseTip = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/base', baseTip]);
+
+    const refs = await resolvePullRequestContentRefs(repo, pullRequestFixture, {
+      base: { ref: 'main' },
+      head: { sha: headSha },
+    });
+
+    expect(refs).toEqual({ base: mergeBase, head: 'refs/codiff/pull-requests/7/head' });
+    // The base tip is intentionally not used; only the PR's own changes show.
+    expect(refs?.base).not.toBe(baseTip);
+  });
+});
+
+test('resolvePullRequestContentRefs refetches when the fetched base no longer matches the base sha', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'base');
+    const mergeBase = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    await writeRepoFile(repo, 'file.txt', 'head change\n');
+    await commitAll(repo, 'head');
+    const headSha = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/head', headSha]);
+    await git(repo, ['checkout', '-q', mergeBase]);
+    await writeRepoFile(repo, 'file.txt', 'base advanced\n');
+    await commitAll(repo, 'base advanced');
+    const baseTip = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/base', baseTip]);
+
+    // GitHub reports a base sha that no longer matches the fetched base ref (the
+    // base branch moved or the pull request was retargeted). Resolution must
+    // refetch rather than diff against the stale local base; with no remote
+    // configured here the refetch fails and resolution reports it cannot resolve.
+    const refs = await resolvePullRequestContentRefs(repo, pullRequestFixture, {
+      base: { ref: 'main', sha: '0'.repeat(40) },
+      head: { sha: headSha },
+    });
+
+    expect(refs).toBeNull();
+  });
 });
 
 test('getPullRequestHeadImageSource uses fork repository metadata', () => {

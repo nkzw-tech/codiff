@@ -11,6 +11,7 @@ const {
 const {
   collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
+  createPullRequestSection,
   getPullRequestHeadImageSource,
   listPullRequestHistory,
   normalizeGitHubPullRequestCommit,
@@ -19,6 +20,7 @@ const {
   parseGitHubPullRequestUrl,
   readPullRequestImageContent,
   readPullRequestState,
+  resolvePullRequestContentRefs,
   selectUnresolvedReviewComments,
   submitPullRequestComment,
   submitPullRequestReview,
@@ -79,6 +81,7 @@ const readDiffImageContent = (launchPath, request) =>
 module.exports = {
   collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
+  createPullRequestSection,
   getPullRequestHeadImageSource,
   listRepositoryHistory: readRepositoryHistory,
   normalizeGitHubPullRequestCommit,
@@ -96,6 +99,7 @@ module.exports = {
   readPullRequestState,
   readRepositoryState,
   readWorkingTreeState,
+  resolvePullRequestContentRefs,
   submitPullRequestComment,
   submitPullRequestReview,
   validateRepositoryPath,
