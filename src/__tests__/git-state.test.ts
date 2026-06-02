@@ -663,6 +663,128 @@ test('readRepositoryState and history handle fresh repositories', async () => {
   });
 });
 
+test('readRepositoryState reports commit metadata for root commits', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'notes/todo.txt', 'write tests\nship polish\n');
+    await commitAll(repo, 'initial commit');
+    const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    const state = await readRepositoryState(repo, { ref: commit, type: 'commit' });
+    const metadata = state.commitMetadata;
+
+    if (!metadata) {
+      throw new Error('Expected commit metadata.');
+    }
+    expect(metadata.ref).toBe(commit);
+    expect(metadata.subject).toBe('initial commit');
+    expect(metadata.parents).toEqual([]);
+    expect(metadata.stats).toEqual({
+      additions: 2,
+      binaryFiles: 0,
+      deletions: 0,
+      files: 1,
+      renamedFiles: 0,
+    });
+    expect(metadata.files).toEqual([
+      {
+        additions: 2,
+        binary: false,
+        deletions: 0,
+        oldPath: undefined,
+        path: 'notes/todo.txt',
+        status: 'added',
+      },
+    ]);
+  });
+});
+
+test('readRepositoryState reports commit body, trailers, refs, and rename stats', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'old.txt', 'one\n');
+    await commitAll(repo, 'initial commit');
+    await git(repo, ['mv', 'old.txt', 'new.txt']);
+    await writeRepoFile(repo, 'new.txt', 'one\ntwo\n');
+    await git(repo, ['add', '--all']);
+    await git(repo, [
+      'commit',
+      '-m',
+      'rename file',
+      '-m',
+      'Detailed comment.',
+      '-m',
+      'Co-authored-by: Second Author <second@example.com>',
+    ]);
+    const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    await git(repo, ['tag', 'v-test', commit]);
+
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'commit' });
+    const metadata = state.commitMetadata;
+
+    if (!metadata) {
+      throw new Error('Expected commit metadata.');
+    }
+    expect(metadata.ref).toBe(commit);
+    expect(metadata.body).toBe('Detailed comment.');
+    expect(metadata.body).not.toContain('Co-authored-by');
+    expect(metadata.trailers).toEqual([
+      {
+        key: 'Co-authored-by',
+        value: 'Second Author <second@example.com>',
+      },
+    ]);
+    expect(metadata.refs).toContain('v-test');
+    expect(metadata.stats).toMatchObject({
+      additions: 1,
+      binaryFiles: 0,
+      deletions: 0,
+      files: 1,
+      renamedFiles: 1,
+    });
+    expect(metadata.files).toEqual([
+      {
+        additions: 1,
+        binary: false,
+        deletions: 0,
+        oldPath: 'old.txt',
+        path: 'new.txt',
+        status: 'renamed',
+      },
+    ]);
+  });
+});
+
+test('readRepositoryState preserves numstat for committed paths with tabs', async () => {
+  await withRepo(async (repo) => {
+    const path = 'notes/with\ttab.txt';
+    await writeRepoFile(repo, path, 'one\n');
+    await commitAll(repo, 'initial commit');
+    await writeRepoFile(repo, path, 'one\ntwo\n');
+    await commitAll(repo, 'modify tab path');
+
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'commit' });
+    const metadata = state.commitMetadata;
+
+    if (!metadata) {
+      throw new Error('Expected commit metadata.');
+    }
+    expect(metadata.stats).toMatchObject({
+      additions: 1,
+      deletions: 0,
+      files: 1,
+    });
+    expect(metadata.files).toEqual([
+      {
+        additions: 1,
+        binary: false,
+        deletions: 0,
+        oldPath: undefined,
+        path,
+        status: 'modified',
+      },
+    ]);
+  });
+});
+
 test('readRepositoryState opens branch refs as history-focused sources', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'file.txt', 'base\n');

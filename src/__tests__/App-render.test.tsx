@@ -12,7 +12,7 @@ import {
   getReloadSelectionPath,
   writeReloadSelection,
 } from '../lib/reload-selection.ts';
-import type { ChangedFile, RepositoryState, ReviewSource } from '../types.ts';
+import type { ChangedFile, CommitMetadata, RepositoryState, ReviewSource } from '../types.ts';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -430,6 +430,126 @@ test('Mod+K does not open deleted files', async () => {
     expect(app.openFile).not.toHaveBeenCalled();
   } finally {
     await app.cleanup();
+  }
+});
+
+test('commit details render inline in the diff view', async () => {
+  const changedFile = createChangedFile('src/app.ts');
+  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const writeClipboardText = vi.fn(async () => undefined);
+  const commitMetadata = {
+    author: {
+      date: '2026-01-01T12:00:00Z',
+      email: 'author@example.com',
+      name: 'Author',
+    },
+    body: 'Detailed commit body.',
+    committer: {
+      date: '2026-01-01T13:00:00Z',
+      email: 'committer@example.com',
+      name: 'Committer',
+    },
+    files: [
+      {
+        additions: 1,
+        binary: false,
+        deletions: 1,
+        path: 'src/app.ts',
+        status: 'modified' as const,
+      },
+    ],
+    parents: ['parent-sha'],
+    ref: 'abc1234',
+    refs: ['main'],
+    shortRef: 'abc1234',
+    signature: {
+      key: 'SHA256:abcdefghijklmnopqrstuvwxyz0123456789',
+      signer: 'signer@example.test',
+      status: 'G',
+    },
+    stats: {
+      additions: 1,
+      binaryFiles: 0,
+      deletions: 1,
+      files: 1,
+      renamedFiles: 0,
+    },
+    subject: 'Commit subject',
+    trailers: [
+      {
+        key: 'Co-authored-by',
+        value: 'Second Author <second@example.com>',
+      },
+    ],
+  } satisfies CommitMetadata;
+
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      commitMetadata,
+      files: [changedFile],
+      source,
+    })),
+  });
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      writeText: writeClipboardText,
+    },
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.loading')).toBeNull();
+      expect(container.querySelector('.commit-details-panel')).not.toBeNull();
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.commit-details-panel')?.textContent).toContain(
+        'Detailed commit body.',
+      );
+      expect(container.querySelector('.commit-details-panel')?.textContent).toContain(
+        'Co-authored-by',
+      );
+    });
+
+    const signature = container.querySelector<HTMLElement>('.commit-details-signature');
+    if (!signature) {
+      throw new Error('Expected commit signature.');
+    }
+    expect(signature.textContent).toBe(
+      'Verified signature by signer@example.test (SHA256:abcd...6789)',
+    );
+    expect(signature.textContent).not.toContain(commitMetadata.signature.key);
+    expect(signature.getAttribute('title')).toBe(commitMetadata.signature.key);
+
+    const copyButton = container.querySelector<HTMLButtonElement>('.commit-details-copy');
+    if (!copyButton) {
+      throw new Error('Expected commit details copy button.');
+    }
+
+    await act(async () => {
+      copyButton.click();
+    });
+
+    expect(writeClipboardText).toHaveBeenCalledWith(commitMetadata.ref);
+    expect(copyButton.getAttribute('aria-label')).toBe('Commit hash copied');
+    expect(copyButton.textContent).toContain(commitMetadata.shortRef);
+    expect(copyButton.textContent).not.toContain('Copied');
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
   }
 });
 

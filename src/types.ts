@@ -68,6 +68,50 @@ export type HistoryEntry = {
   subject: string;
 };
 
+export type CommitMetadataPerson = {
+  date: string;
+  email: string;
+  gravatarUrl?: string;
+  name: string;
+};
+
+export type CommitMetadataFile = {
+  additions?: number;
+  binary: boolean;
+  deletions?: number;
+  oldPath?: string;
+  path: string;
+  status: GitFileStatus;
+};
+
+export type CommitMetadata = {
+  author: CommitMetadataPerson;
+  body: string;
+  committer: CommitMetadataPerson;
+  files: ReadonlyArray<CommitMetadataFile>;
+  parents: ReadonlyArray<string>;
+  ref: string;
+  refs: ReadonlyArray<string>;
+  shortRef: string;
+  signature: {
+    key?: string;
+    signer?: string;
+    status: string;
+  };
+  stats: {
+    additions: number;
+    binaryFiles: number;
+    deletions: number;
+    files: number;
+    renamedFiles: number;
+  };
+  subject: string;
+  trailers: ReadonlyArray<{
+    key: string;
+    value: string;
+  }>;
+};
+
 export type RepositoryHistory = {
   entries: ReadonlyArray<HistoryEntry>;
   root: string;
@@ -75,6 +119,7 @@ export type RepositoryHistory = {
 
 export type RepositoryState = {
   branch: string | null;
+  commitMetadata?: CommitMetadata;
   files: ReadonlyArray<ChangedFile>;
   generatedAt: number;
   launchPath: string;

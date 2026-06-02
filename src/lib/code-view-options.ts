@@ -160,6 +160,52 @@ export const codeViewUnsafeCSS = `
     border-radius: 28px 28px 0 0;
   }
 
+  /* Commit details render through CodeView's file layout; hide the file UI around the panel. */
+  :host(.codiff-commit-details-item) {
+    --diffs-scrollbar-gutter-override: 0px;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
+  :host(.codiff-commit-details-item) [data-diffs-header="custom"][data-sticky] {
+    display: none;
+  }
+
+  :host(.codiff-commit-details-item) [data-file] {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+
+  :host(.codiff-commit-details-item) [data-file] [data-code] {
+    overflow: visible;
+    padding-bottom: 0;
+    padding-top: 0;
+    scrollbar-width: none;
+  }
+
+  :host(.codiff-commit-details-item) [data-file] [data-code]::-webkit-scrollbar {
+    display: none;
+  }
+
+  :host(.codiff-commit-details-item) [data-file] [data-line],
+  :host(.codiff-commit-details-item) [data-file] [data-column-number],
+  :host(.codiff-commit-details-item) [data-file] [data-gutter-buffer],
+  :host(.codiff-commit-details-item) [data-file] [data-gutter-gap] {
+    display: none;
+  }
+
+  :host(.codiff-commit-details-item) [data-file] [data-code],
+  :host(.codiff-commit-details-item) [data-file] [data-content] {
+    display: block;
+  }
+
+  :host(.codiff-commit-details-item) [data-file] [data-line-annotation] {
+    background: transparent;
+    grid-column: 1 / -1;
+  }
+
   /* Align scrollbar with number column */
   [data-code]::-webkit-scrollbar-track {
     margin-left: var(--diffs-column-number-width);

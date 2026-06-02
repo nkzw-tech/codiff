@@ -33,6 +33,8 @@ import {
   type DiffSearchResult,
   type RepositoryLoadError,
   type ReviewComment,
+  type ReviewScrollBehavior,
+  type ReviewScrollTarget,
   type SidebarMode,
   type SourceSession,
   type WalkthroughError,
@@ -144,7 +146,7 @@ export default function App() {
   const [reloadDeltaPaths, setReloadDeltaPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
     useState<PullRequestReviewEvent | null>(null);
-  const [scrollTarget, setScrollTarget] = useState<{ path: string; request: number } | null>(null);
+  const [scrollTarget, setScrollTarget] = useState<ReviewScrollTarget | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState('');
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [pendingSource, setPendingSource] = useState<ReviewSource | null>(null);
@@ -282,8 +284,9 @@ export default function App() {
     [bumpItemVersion],
   );
 
-  const scrollPathIntoReview = useCallback((path: string) => {
+  const scrollPathIntoReview = useCallback((path: string, behavior: ReviewScrollBehavior) => {
     setScrollTarget((current) => ({
+      behavior,
       path,
       request: (current?.request ?? 0) + 1,
     }));
@@ -430,7 +433,7 @@ export default function App() {
       const nextSelectedPath = reloadSelectedPath ?? initialFiles[0]?.path ?? null;
       setSelectedPath(nextSelectedPath);
       if (reloadSelectedPath) {
-        scrollPathIntoReview(reloadSelectedPath);
+        scrollPathIntoReview(reloadSelectedPath, 'instant');
       }
     };
 
@@ -931,7 +934,7 @@ export default function App() {
   const activatePath = useCallback(
     (path: string) => {
       setSelectedPath(path);
-      scrollPathIntoReview(path);
+      scrollPathIntoReview(path, 'smooth');
     },
     [scrollPathIntoReview],
   );
@@ -1961,6 +1964,7 @@ export default function App() {
             activeSearchMatch={activeDiffSearchMatch}
             collapsed={collapsed}
             comments={visibleReviewComments}
+            commitMetadata={state.source.type === 'commit' ? (state.commitMetadata ?? null) : null}
             diffStyle={diffStyle}
             files={visibleFiles}
             focusCommentId={focusCommentId}

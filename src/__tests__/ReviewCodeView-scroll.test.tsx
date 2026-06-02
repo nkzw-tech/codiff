@@ -8,7 +8,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewCodeView } from '../app/components/ReviewCodeView.tsx';
 import { defaultKeymap } from '../config/defaults.ts';
-import type { ChangedFile, ReviewSource } from '../types.ts';
+import type { ChangedFile, CommitMetadata, ReviewSource } from '../types.ts';
 
 const codeViewMock = vi.hoisted(() => ({
   scrollTo: vi.fn(),
@@ -23,6 +23,10 @@ vi.mock('@pierre/diffs/react', async () => {
         className?: string;
         items: Array<CodeViewItem<unknown>>;
         onScroll?: (scrollTop: number, viewer: unknown) => void;
+        renderAnnotation?: (
+          annotation: { metadata: unknown },
+          item: CodeViewItem<unknown>,
+        ) => React.ReactNode;
         renderCustomHeader?: (item: CodeViewItem<unknown>) => React.ReactNode;
       },
       ref: React.ForwardedRef<unknown>,
@@ -60,7 +64,7 @@ vi.mock('@pierre/diffs/react', async () => {
         () => ({
           clearSelectedLines: () => {},
           getInstance: () => viewer,
-          scrollTo: (target: { id: string; offset?: number }) => {
+          scrollTo: (target: { behavior?: string; id: string; offset?: number }) => {
             codeViewMock.scrollTo(target);
             const attempts = (scrollAttemptByIdRef.current.get(target.id) ?? 0) + 1;
             scrollAttemptByIdRef.current.set(target.id, attempts);
@@ -83,6 +87,15 @@ vi.mock('@pierre/diffs/react', async () => {
             'div',
             { key: item.id },
             props.renderCustomHeader ? props.renderCustomHeader(item) : null,
+            'annotations' in item && Array.isArray(item.annotations)
+              ? item.annotations.map((annotation, index) =>
+                  React.createElement(
+                    React.Fragment,
+                    { key: index },
+                    props.renderAnnotation?.(annotation, item),
+                  ),
+                )
+              : null,
           ),
         ),
       );
@@ -108,6 +121,52 @@ const createChangedFile = (path: string) =>
   }) satisfies ChangedFile;
 
 const source = { type: 'working-tree' } satisfies ReviewSource;
+const commitSource = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+const commitMetadata = {
+  author: {
+    date: '2026-01-01T12:00:00Z',
+    email: 'author@example.com',
+    name: 'Author',
+  },
+  body: '',
+  committer: {
+    date: '2026-01-01T12:00:00Z',
+    email: 'committer@example.com',
+    name: 'Committer',
+  },
+  files: [
+    {
+      additions: 1,
+      binary: false,
+      deletions: 1,
+      path: 'src/second.ts',
+      status: 'modified' as const,
+    },
+    {
+      additions: 1,
+      binary: false,
+      deletions: 0,
+      path: 'src/hidden.ts',
+      status: 'modified' as const,
+    },
+  ],
+  parents: ['parent-sha'],
+  ref: 'abc1234',
+  refs: ['main'],
+  shortRef: 'abc1234',
+  signature: {
+    status: 'N',
+  },
+  stats: {
+    additions: 2,
+    binaryFiles: 0,
+    deletions: 1,
+    files: 2,
+    renamedFiles: 0,
+  },
+  subject: 'Commit subject',
+  trailers: [],
+} satisfies CommitMetadata;
 
 const waitFor = async (assertion: () => void) => {
   let lastError: unknown;
@@ -142,6 +201,7 @@ test('reload scroll target is retried until the selected item renders', async ()
           activeSearchMatch={null}
           collapsed={new Set()}
           comments={[]}
+          commitMetadata={null}
           diffStyle="split"
           files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
           focusCommentId={null}
@@ -179,6 +239,95 @@ test('reload scroll target is retried until the selected item renders', async ()
     });
     expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
       expect.objectContaining({
+        behavior: 'instant',
+        id: 'diff:src/second.ts:unstaged',
+        type: 'item',
+      }),
+    );
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('commit metadata file rows scroll to the matching diff', async () => {
+  codeViewMock.scrollTo.mockClear();
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <ReviewCodeView
+          activeSearchMatch={null}
+          collapsed={new Set()}
+          comments={[]}
+          commitMetadata={commitMetadata}
+          diffStyle="split"
+          files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
+          focusCommentId={null}
+          focusCommentRequest={0}
+          forceExpandedPaths={new Set()}
+          gitIdentity={null}
+          isPullRequest={false}
+          itemVersionByPath={{}}
+          keymap={defaultKeymap}
+          loadingSectionIds={new Set()}
+          onAskCodex={() => {}}
+          onCreateComment={() => {}}
+          onDeleteComment={() => {}}
+          onLoadSection={() => {}}
+          onOpenFile={() => {}}
+          onSelectPathFromScroll={() => {}}
+          onSubmitComment={() => {}}
+          onToggleCollapsed={() => {}}
+          onToggleViewed={() => {}}
+          onUpdateComment={() => {}}
+          scrollTarget={null}
+          searchQuery=""
+          selectedPath={null}
+          showWhitespace={false}
+          source={commitSource}
+          viewed={{}}
+          walkthroughNotes={new Map()}
+          wordWrap={false}
+        />,
+      );
+    });
+
+    const fileButtons = [...container.querySelectorAll<HTMLButtonElement>('.commit-details-file')];
+    const fileButton = fileButtons.find((button) => button.textContent?.includes('src/second.ts'));
+    if (!fileButton) {
+      throw new Error('Expected commit metadata file button.');
+    }
+    const hiddenFileButton = fileButtons.find((button) =>
+      button.textContent?.includes('src/hidden.ts'),
+    );
+    if (!hiddenFileButton) {
+      throw new Error('Expected hidden commit metadata file button.');
+    }
+
+    expect(hiddenFileButton.disabled).toBe(true);
+    expect(hiddenFileButton.title).toContain('hidden by current filters');
+
+    await act(async () => {
+      hiddenFileButton.click();
+    });
+
+    expect(codeViewMock.scrollTo).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fileButton.click();
+    });
+
+    expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        behavior: 'smooth',
         id: 'diff:src/second.ts:unstaged',
         type: 'item',
       }),

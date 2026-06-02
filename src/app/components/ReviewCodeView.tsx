@@ -37,6 +37,8 @@ import type {
   ReviewAnnotationMetadata,
   ReviewComment,
   ReviewCommentAnnotationMetadata,
+  ReviewScrollBehavior,
+  ReviewScrollTarget,
   WalkthroughNote,
 } from '../../lib/app-types.ts';
 import {
@@ -72,42 +74,32 @@ import {
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
 import type {
   ChangedFile,
+  CommitMetadata,
   DiffImageContentResult,
   DiffSection,
   GitIdentity,
   PullRequestExistingReviewComment,
   ReviewSource,
 } from '../../types.ts';
+import { CommitDetailsPanel, type CommitDetailsFile } from './CommitDetails.tsx';
 import { Gravatar } from './Gravatar.tsx';
 import { DiffLineCountBadge } from './Sidebar.tsx';
+import { useCopiedState } from './useCopiedState.ts';
 
 function CopyFilePathButton({ path }: { path: string }) {
-  const [copied, setCopied] = useState(false);
-  const copiedTimerRef = useRef<number | null>(null);
-
-  useEffect(
-    () => () => {
-      if (copiedTimerRef.current != null) {
-        window.clearTimeout(copiedTimerRef.current);
-      }
-    },
-    [],
-  );
+  const [copied, markCopied] = useCopiedState(1600);
 
   const handleClick = useCallback(
     async (event: ReactMouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
-      await navigator.clipboard.writeText(path);
-      setCopied(true);
-      if (copiedTimerRef.current != null) {
-        window.clearTimeout(copiedTimerRef.current);
+      try {
+        await navigator.clipboard.writeText(path);
+      } catch {
+        return;
       }
-      copiedTimerRef.current = window.setTimeout(() => {
-        setCopied(false);
-        copiedTimerRef.current = null;
-      }, 1600);
+      markCopied();
     },
-    [path],
+    [markCopied, path],
   );
 
   return (
@@ -777,15 +769,42 @@ function ReviewAnnotation({
 }
 
 const scrollTargetRetryFrameLimit = 90;
+// Render commit details as a CodeView item so scrolling treats the panel like the diffs.
+const commitDetailsFileName = '__codiff_commit_details__';
+
+// Build an id from commit details that can change the panel height. When the panel first appears,
+// we change only layoutPass to make CodeView measure again; this id still means "same content."
+const getCommitDetailsContentKey = (metadata: CommitMetadata) =>
+  [
+    metadata.ref,
+    metadata.refs.join('\u0000'),
+    metadata.stats.files,
+    metadata.stats.additions,
+    metadata.stats.deletions,
+    metadata.stats.renamedFiles,
+    metadata.stats.binaryFiles,
+  ].join('\u0001');
+
+const getCommitDetailsVersionKey = (
+  metadata: CommitMetadata,
+  layoutPass: number,
+  navigationKey: string,
+) => [getCommitDetailsContentKey(metadata), layoutPass, navigationKey].join('\u0001');
 
 function isScrollTargetRendered(viewer: CodeViewInstance, itemId: string) {
   return viewer.getRenderedItems().some((item) => item.id === itemId);
 }
 
+const getEffectiveScrollBehavior = (behavior: ReviewScrollBehavior) =>
+  behavior === 'smooth' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ? 'instant'
+    : behavior;
+
 export function ReviewCodeView({
   activeSearchMatch,
   collapsed,
   comments,
+  commitMetadata,
   diffStyle,
   files,
   focusCommentId,
@@ -818,6 +837,7 @@ export function ReviewCodeView({
   activeSearchMatch: DiffSearchMatch | null;
   collapsed: ReadonlySet<string>;
   comments: ReadonlyArray<ReviewComment>;
+  commitMetadata: CommitMetadata | null;
   diffStyle: CodiffDiffStyle;
   files: ReadonlyArray<ChangedFile>;
   focusCommentId: string | null;
@@ -838,7 +858,7 @@ export function ReviewCodeView({
   onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean) => void;
   onToggleViewed: (file: ChangedFile, isViewed: boolean) => void;
   onUpdateComment: (commentId: string, body: string) => void;
-  scrollTarget: { path: string; request: number } | null;
+  scrollTarget: ReviewScrollTarget | null;
   searchQuery: string;
   selectedPath: string | null;
   showWhitespace: boolean;
@@ -850,21 +870,25 @@ export function ReviewCodeView({
   const codeViewRef = useRef<CodeViewHandle<ReviewAnnotationMetadata>>(null);
   const deferredTimersRef = useRef<Set<number>>(new Set());
   const handledScrollRequestRef = useRef<number | null>(null);
+  const measuredCommitDetailsLayoutKeyRef = useRef<string | null>(null);
   const emptyCommentDeleteTimersRef = useRef<Map<string, number>>(new Map());
   const highlightFrameRef = useRef<number | null>(null);
   const ignoreNextLineSelectionEndRef = useRef(false);
   const [markdownPreviewSections, setMarkdownPreviewSections] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  // Markdown preview content is rendered through a CodeView annotation portal.
-  // Bump the item version once the portal DOM exists so CodeView measures the real preview height.
+  // Markdown previews render inside a CodeView item. Change the item version once after the
+  // preview appears so CodeView measures the preview height instead of the placeholder height.
   const [markdownPreviewLayoutPassBySection, setMarkdownPreviewLayoutPassBySection] = useState<
     Readonly<Record<string, number>>
   >({});
   const [imagePreviewLayoutPassBySection, setImagePreviewLayoutPassBySection] = useState<
     Readonly<Record<string, number>>
   >({});
+  const [commitDetailsLayoutPass, setCommitDetailsLayoutPass] = useState(0);
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
+  const commitRef = source.type === 'commit' ? source.ref : null;
+  const commitDetailsItemId = commitRef ? `commit-details:${commitRef}` : null;
   const stickyHeaderFrameRef = useRef<number | null>(null);
   const commentsBySection = useMemo(() => {
     const map = new Map<string, Array<ReviewComment>>();
@@ -890,7 +914,24 @@ export function ReviewCodeView({
     }));
   }, []);
 
-  const { firstItemByPath, itemMetadata, items } = useMemo(() => {
+  const markCommitDetailsLayoutReady = useCallback((layoutKey: string) => {
+    // After the panel appears, ask CodeView to measure it once. Repeated renders of the same
+    // commit details should not change the item version again.
+    if (measuredCommitDetailsLayoutKeyRef.current === layoutKey) {
+      return;
+    }
+
+    measuredCommitDetailsLayoutKeyRef.current = layoutKey;
+    setCommitDetailsLayoutPass((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!commitDetailsItemId || !commitMetadata) {
+      measuredCommitDetailsLayoutKeyRef.current = null;
+    }
+  }, [commitDetailsItemId, commitMetadata]);
+
+  const { commitDetailsFiles, firstItemByPath, itemMetadata, items } = useMemo(() => {
     const nextItems: Array<CodeViewItem<ReviewAnnotationMetadata>> = [];
     const nextFirstItemByPath = new Map<string, string>();
     const nextItemMetadata = new Map<string, CodeViewItemMetadata>();
@@ -1037,13 +1078,55 @@ export function ReviewCodeView({
       }
     }
 
+    // Keep all commit files visible, but only rows with rendered diff items can navigate.
+    const nextCommitDetailsFiles: ReadonlyArray<CommitDetailsFile> = commitMetadata
+      ? commitMetadata.files.map((file) => ({
+          ...file,
+          destinationItemId: nextFirstItemByPath.get(file.path) ?? null,
+        }))
+      : [];
+
+    if (commitMetadata && commitDetailsItemId) {
+      const navigationKey = nextCommitDetailsFiles
+        .map(
+          (file) => `${file.oldPath ?? ''}\u0000${file.path}\u0000${file.destinationItemId ?? ''}`,
+        )
+        .join('\u0001');
+      nextItems.unshift({
+        annotations: [
+          {
+            lineNumber: 1,
+            metadata: {
+              metadata: commitMetadata,
+              type: 'commit-details',
+            },
+          } satisfies LineAnnotation<ReviewAnnotationMetadata>,
+        ],
+        file: {
+          cacheKey: `${commitDetailsItemId}:${commitMetadata.ref}`,
+          contents: ' ',
+          lang: 'text',
+          name: commitDetailsFileName,
+        },
+        id: commitDetailsItemId,
+        type: 'file',
+        version: getItemVersion(
+          getCommitDetailsVersionKey(commitMetadata, commitDetailsLayoutPass, navigationKey),
+        ),
+      });
+    }
+
     return {
+      commitDetailsFiles: nextCommitDetailsFiles,
       firstItemByPath: nextFirstItemByPath,
       itemMetadata: nextItemMetadata,
       items: nextItems,
     };
   }, [
     collapsed,
+    commitDetailsItemId,
+    commitDetailsLayoutPass,
+    commitMetadata,
     commentsBySection,
     diffStyle,
     files,
@@ -1184,6 +1267,10 @@ export function ReviewCodeView({
         onPostRender: (node, _instance, _phase, context) => {
           const metadata = itemMetadata.get(context.item.id);
           node.classList.toggle(
+            'codiff-commit-details-item',
+            context.item.id === commitDetailsItemId,
+          );
+          node.classList.toggle(
             'codiff-markdown-preview-item',
             metadata?.isMarkdownPreview === true,
           );
@@ -1214,6 +1301,7 @@ export function ReviewCodeView({
       }) satisfies CodeViewOptions<ReviewAnnotationMetadata>,
     [
       cancelPendingEmptyCommentDeletes,
+      commitDetailsItemId,
       createCommentForRange,
       diffStyle,
       itemMetadata,
@@ -1295,28 +1383,39 @@ export function ReviewCodeView({
     [],
   );
 
-  const requestScrollItemHeaderIntoView = useCallback((itemId: string) => {
-    const handle = codeViewRef.current;
-    const viewer = handle?.getInstance();
-    if (!handle || !viewer || viewer.getTopForItem(itemId) == null) {
-      return false;
-    }
+  const requestScrollItemHeaderIntoView = useCallback(
+    (itemId: string, behavior: ReviewScrollBehavior = 'instant') => {
+      const handle = codeViewRef.current;
+      const viewer = handle?.getInstance();
+      if (!handle || !viewer || viewer.getTopForItem(itemId) == null) {
+        return false;
+      }
 
-    handle.scrollTo({
-      behavior: 'instant',
-      id: itemId,
-      offset: DEFAULT_PADDING,
-      type: 'item',
-    });
+      handle.scrollTo({
+        behavior: getEffectiveScrollBehavior(behavior),
+        id: itemId,
+        offset: DEFAULT_PADDING,
+        type: 'item',
+      });
 
-    return true;
-  }, []);
+      return true;
+    },
+    [],
+  );
+
+  const scrollToCommitDetailsDestination = useCallback(
+    (itemId: string) => {
+      requestScrollItemHeaderIntoView(itemId, 'smooth');
+    },
+    [requestScrollItemHeaderIntoView],
+  );
 
   useLayoutEffect(() => {
     if (!scrollTarget || handledScrollRequestRef.current === scrollTarget.request) {
       return;
     }
 
+    const behavior = scrollTarget.behavior ?? 'instant';
     const itemId = firstItemByPath.get(scrollTarget.path);
     if (!itemId) {
       return;
@@ -1338,7 +1437,10 @@ export function ReviewCodeView({
         return;
       }
 
-      if (requestScrollItemHeaderIntoView(itemId)) {
+      if (
+        (behavior === 'instant' || !requested) &&
+        requestScrollItemHeaderIntoView(itemId, behavior)
+      ) {
         requested = true;
       }
 
@@ -1443,6 +1545,10 @@ export function ReviewCodeView({
 
   const renderCustomHeader = useCallback(
     (item: CodeViewItem<ReviewAnnotationMetadata>) => {
+      if (item.id === commitDetailsItemId) {
+        return null;
+      }
+
       const meta = itemMetadata.get(item.id);
       return meta ? (
         <CodeViewHeader
@@ -1457,6 +1563,7 @@ export function ReviewCodeView({
       ) : null;
     },
     [
+      commitDetailsItemId,
       itemMetadata,
       loadingSectionIds,
       onLoadSection,
@@ -1498,6 +1605,18 @@ export function ReviewCodeView({
         );
       }
 
+      if (annotation.metadata.type === 'commit-details') {
+        return (
+          <CommitDetailsPanel
+            files={commitDetailsFiles}
+            layoutKey={getCommitDetailsContentKey(annotation.metadata.metadata)}
+            metadata={annotation.metadata.metadata}
+            onLayoutReady={markCommitDetailsLayoutReady}
+            onSelectFileDestination={scrollToCommitDetailsDestination}
+          />
+        );
+      }
+
       return item.type === 'diff' ? (
         <ReviewAnnotation
           annotation={annotation as DiffLineAnnotation<ReviewCommentAnnotationMetadata>}
@@ -1519,6 +1638,7 @@ export function ReviewCodeView({
     [
       comments,
       blurComment,
+      commitDetailsFiles,
       deleteComment,
       focusCommentId,
       focusCommentRequest,
@@ -1527,11 +1647,13 @@ export function ReviewCodeView({
       isPullRequest,
       itemMetadata,
       keymap,
+      markCommitDetailsLayoutReady,
       markMarkdownPreviewLayoutReady,
       markImagePreviewLayoutReady,
       onAskCodex,
       onSubmitComment,
       onUpdateComment,
+      scrollToCommitDetailsDestination,
       source,
     ],
   );

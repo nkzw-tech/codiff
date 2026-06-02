@@ -16,6 +16,7 @@ import type { RepositoryLoadError, ReviewComment } from '../../lib/app-types.ts'
 import { getReloadShortcutLabel } from '../../lib/keyboard.ts';
 import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
 import type { ChangedFile, PullRequestReviewEvent } from '../../types.ts';
+import { useCopiedState } from './useCopiedState.ts';
 
 export function ReviewSourceLoading() {
   const [visible, setVisible] = useState(false);
@@ -261,20 +262,10 @@ export function CopyCommentsButton({
   files: ReadonlyArray<ChangedFile>;
   showWhitespace: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
-  const copiedTimerRef = useRef<number | null>(null);
+  const [copied, markCopied] = useCopiedState(2000);
   const pendingCommentCount = comments.filter(
     (comment) => !comment.isReadOnly && comment.body.trim(),
   ).length;
-
-  useEffect(
-    () => () => {
-      if (copiedTimerRef.current != null) {
-        window.clearTimeout(copiedTimerRef.current);
-      }
-    },
-    [],
-  );
 
   const copyComments = useCallback(async () => {
     const markdown = buildReviewCommentsMarkdown(files, comments, showWhitespace);
@@ -283,15 +274,8 @@ export function CopyCommentsButton({
     }
 
     await navigator.clipboard.writeText(markdown);
-    setCopied(true);
-    if (copiedTimerRef.current != null) {
-      window.clearTimeout(copiedTimerRef.current);
-    }
-    copiedTimerRef.current = window.setTimeout(() => {
-      setCopied(false);
-      copiedTimerRef.current = null;
-    }, 2000);
-  }, [comments, files, showWhitespace]);
+    markCopied();
+  }, [comments, files, markCopied, showWhitespace]);
 
   if (pendingCommentCount === 0) {
     return null;

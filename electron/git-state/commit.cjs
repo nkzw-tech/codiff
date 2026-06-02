@@ -16,6 +16,7 @@ const {
   summarizeContent,
   validateRepositoryPath,
 } = require('./common.cjs');
+const { readCommitMetadataForCommit } = require('./commit-metadata.cjs');
 
 /**
  * @typedef {import('../../src/types.ts').ChangedFile} ChangedFile
@@ -447,7 +448,8 @@ const readCommitState = async (launchPath, ref) => {
   const commit = (await git(repoRoot, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
   const [firstParent] = await readCommitParents(repoRoot, commit);
   const status = await readCommitNameStatus(repoRoot, commit, firstParent, { sort: false });
-  const [oldFiles, newFiles] = await Promise.all([
+  const [commitMetadata, oldFiles, newFiles] = await Promise.all([
+    readCommitMetadataForCommit(repoRoot, commit, firstParent, status),
     firstParent
       ? readGitFiles(
           repoRoot,
@@ -486,6 +488,7 @@ const readCommitState = async (launchPath, ref) => {
     .sort(fileSort);
 
   return {
+    commitMetadata,
     files,
     generatedAt: Date.now(),
     launchPath,

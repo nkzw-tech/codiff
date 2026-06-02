@@ -1,6 +1,7 @@
 import type { CodeViewHandle } from '@pierre/diffs/react';
 import type {
   ChangedFile,
+  CommitMetadata,
   DiffSection,
   PullRequestExistingReviewComment,
   ReviewSource,
@@ -30,7 +31,13 @@ type ImagePreviewAnnotationMetadata = {
   type: 'image-preview';
 };
 
+type CommitDetailsAnnotationMetadata = {
+  metadata: CommitMetadata;
+  type: 'commit-details';
+};
+
 export type ReviewAnnotationMetadata =
+  | CommitDetailsAnnotationMetadata
   | ImagePreviewAnnotationMetadata
   | MarkdownPreviewAnnotationMetadata
   | ReviewCommentAnnotationMetadata;
@@ -50,6 +57,14 @@ export type DiffSearchResult = {
   file: ChangedFile;
   matchCount: number;
   matches: ReadonlyArray<DiffSearchMatch>;
+};
+
+export type ReviewScrollBehavior = 'instant' | 'smooth';
+
+export type ReviewScrollTarget = {
+  behavior?: ReviewScrollBehavior;
+  path: string;
+  request: number;
 };
 
 export type DiffLineCount = {
