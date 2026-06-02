@@ -42,6 +42,7 @@ export function Sidebar({
   onSelectPath,
   onSelectSource,
   pullRequestSource,
+  reloadDeltaPaths,
   searchQuery,
   selectedPath,
   showWhitespace,
@@ -67,6 +68,7 @@ export function Sidebar({
   onSelectPath: (path: string) => void;
   onSelectSource: (source: ReviewSource) => void;
   pullRequestSource: PullRequestSource | null;
+  reloadDeltaPaths: ReadonlySet<string>;
   searchQuery: string;
   selectedPath: string | null;
   showWhitespace: boolean;
@@ -94,6 +96,10 @@ export function Sidebar({
   );
   const showTotalLineCount = mode !== 'history' && totalLineCount.countable;
   const lineCountsByPathRef = useRef(lineCountsByPath);
+  const reloadDeltaGitStatusCSS = useMemo(
+    () => getReloadDeltaGitStatusCSS(reloadDeltaPaths),
+    [reloadDeltaPaths],
+  );
   const renderTreeRowDecoration = useCallback<FileTreeRowDecorationRenderer>(({ item }) => {
     const lineCount = lineCountsByPathRef.current.get(item.path);
     return lineCount?.countable
@@ -160,6 +166,18 @@ export function Sidebar({
   });
 
   useEffect(() => {
+    // Tree unsafeCSS is constructor-time; keep reload delta styling dynamic without remounting.
+    if (syncReloadDeltaGitStatusCSS(treeHostRef.current, reloadDeltaGitStatusCSS)) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      syncReloadDeltaGitStatusCSS(treeHostRef.current, reloadDeltaGitStatusCSS);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [reloadDeltaGitStatusCSS]);
+
+  useEffect(() => {
     model.resetPaths(paths);
   }, [model, paths]);
 
@@ -169,7 +187,7 @@ export function Sidebar({
 
   useEffect(() => {
     model.setGitStatus(status);
-  }, [lineCountsByPath, model, status]);
+  }, [model, status]);
 
   const scrollPathIntoView = useCallback(
     (path: string) => {
@@ -345,6 +363,50 @@ export function Sidebar({
     </>
   );
 }
+
+const escapeCSSString = (value: string) =>
+  value
+    .replaceAll('\\', String.raw`\\`)
+    .replaceAll('\n', String.raw`\a `)
+    .replaceAll('\r', String.raw`\d `)
+    .replaceAll('\f', String.raw`\c `)
+    .replaceAll('"', String.raw`\"`);
+
+const getReloadDeltaGitStatusCSS = (paths: ReadonlySet<string>) =>
+  [...paths]
+    .map(
+      (path) => `
+        [data-item-path="${escapeCSSString(path)}"][data-item-git-status] > [data-item-section='git'] {
+          color: var(--sidebar-ref);
+        }
+      `,
+    )
+    .join('\n');
+
+const reloadDeltaGitStatusStyleAttribute = 'data-codiff-reload-delta-git-status';
+
+const syncReloadDeltaGitStatusCSS = (treeHost: HTMLElement | null, css: string) => {
+  const shadowRoot = treeHost?.querySelector('file-tree-container')?.shadowRoot;
+  if (!shadowRoot) {
+    return false;
+  }
+
+  const existingStyle = shadowRoot.querySelector<HTMLStyleElement>(
+    `style[${reloadDeltaGitStatusStyleAttribute}]`,
+  );
+  if (css.length === 0) {
+    existingStyle?.remove();
+    return true;
+  }
+
+  const style = existingStyle ?? document.createElement('style');
+  style.setAttribute(reloadDeltaGitStatusStyleAttribute, '');
+  style.textContent = css;
+  if (!existingStyle) {
+    shadowRoot.append(style);
+  }
+  return true;
+};
 
 const shortDate = (timestamp: number) => {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);

@@ -49,9 +49,9 @@ import {
   shouldLoadDiffSectionContents,
 } from './lib/diff.ts';
 import { compactPath, fuzzyMatches, sortFiles } from './lib/files.ts';
-import { isReloadShortcut } from './lib/keyboard.ts';
 import {
   consumeReloadSelection,
+  getReloadDeltaPaths,
   getReloadSelectionPath,
   writeReloadSelection,
 } from './lib/reload-selection.ts';
@@ -139,6 +139,7 @@ export default function App() {
     useState<CodexSkillStatus>(defaultCodexSkillStatus);
   const [preferences, setPreferences] = useState<CodiffPreferences>(defaultPreferences);
   const [reviewComments, setReviewComments] = useState<ReadonlyArray<ReviewComment>>([]);
+  const [reloadDeltaPaths, setReloadDeltaPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
     useState<PullRequestReviewEvent | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ path: string; request: number } | null>(null);
@@ -315,6 +316,7 @@ export default function App() {
     let canceled = false;
 
     const load = async () => {
+      const reloadSelection = consumeReloadSelection();
       const nextLaunchOptions = await window.codiff.getLaunchOptions();
       if (canceled) {
         return;
@@ -337,7 +339,7 @@ export default function App() {
       }
       setTerminalHelperStatus(nextTerminalHelperStatus);
 
-      const nextState = await window.codiff.getRepositoryState();
+      const nextState = await window.codiff.getRepositoryState(reloadSelection?.source);
 
       if (canceled) {
         return;
@@ -397,7 +399,8 @@ export default function App() {
       const initialFiles = nextLaunchOptions.walkthrough
         ? orderFilesByWalkthrough(orderedState.files, nextWalkthrough)
         : orderedState.files;
-      const reloadSelectedPath = getReloadSelectionPath(consumeReloadSelection(), orderedState);
+      const reloadSelectedPath = getReloadSelectionPath(reloadSelection, orderedState);
+      const nextReloadDeltaPaths = getReloadDeltaPaths(reloadSelection, orderedState);
 
       setHistoryEntries(history.entries);
       setHistoryHasMore(history.entries.length >= HISTORY_PAGE_SIZE);
@@ -419,6 +422,7 @@ export default function App() {
       setItemVersionByPath({});
       setFocusCommentId(null);
       setFocusCommentRequest(0);
+      setReloadDeltaPaths(nextReloadDeltaPaths);
       setReviewComments(getReviewCommentsFromState(orderedState));
       setViewed(nextViewed);
       const nextSelectedPath = reloadSelectedPath ?? initialFiles[0]?.path ?? null;
@@ -897,24 +901,17 @@ export default function App() {
   );
 
   const reloadWindow = useCallback(() => {
-    writeReloadSelection(stateRef.current, selectedPathRef.current);
     window.location.reload();
   }, []);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!isReloadShortcut(event)) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      reloadWindow();
+    const writeCurrentReloadSelection = () => {
+      writeReloadSelection(stateRef.current, selectedPathRef.current);
     };
 
-    window.addEventListener('keydown', handleKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
-  }, [reloadWindow]);
+    window.addEventListener('beforeunload', writeCurrentReloadSelection);
+    return () => window.removeEventListener('beforeunload', writeCurrentReloadSelection);
+  }, []);
 
   const selectSource = useCallback(
     (source: ReviewSource) => {
@@ -932,6 +929,7 @@ export default function App() {
       setLoadError(null);
       setFocusCommentId(null);
       setFocusCommentRequest(0);
+      setReloadDeltaPaths(new Set());
       setDiffSearchQuery('');
       setActiveDiffSearchMatchIndex(0);
       setScrollTarget(null);
@@ -974,6 +972,7 @@ export default function App() {
           setCollapsed(new Set(nextCollapsed));
           setItemVersionByPath({});
           setReviewComments(session?.reviewComments ?? getReviewCommentsFromState(orderedState));
+          setReloadDeltaPaths(new Set());
           setViewed(nextViewed);
           setSelectedPath(nextSelectedPath);
           setWalkthrough(session?.walkthrough ?? null);
@@ -1874,6 +1873,7 @@ export default function App() {
           onSelectPath={selectPath}
           onSelectSource={selectSource}
           pullRequestSource={historySource?.type === 'pull-request' ? historySource : null}
+          reloadDeltaPaths={reloadDeltaPaths}
           searchQuery={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
           selectedPath={visibleSelectedPath}
           showWhitespace={showWhitespace}

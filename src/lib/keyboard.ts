@@ -29,16 +29,3 @@ export const isDiffSearchShortcut = (
 export const getReloadShortcutLabel = () => {
   return isMacPlatform() ? '⌘R' : 'Ctrl+R';
 };
-
-export const isReloadShortcut = (
-  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
-  platform = navigator.platform,
-) => {
-  if (event.altKey || event.shiftKey || event.key.toLowerCase() !== 'r') {
-    return false;
-  }
-
-  return isMacPlatform(platform)
-    ? event.metaKey && !event.ctrlKey
-    : event.ctrlKey && !event.metaKey;
-};

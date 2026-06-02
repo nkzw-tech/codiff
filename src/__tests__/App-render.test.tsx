@@ -4,11 +4,15 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { expect, test, vi } from 'vite-plus/test';
+import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import App from '../App.tsx';
 import { defaultConfig } from '../config/defaults.ts';
-import { writeReloadSelection } from '../lib/reload-selection.ts';
-import type { ChangedFile, RepositoryState } from '../types.ts';
+import {
+  consumeReloadSelection,
+  getReloadSelectionPath,
+  writeReloadSelection,
+} from '../lib/reload-selection.ts';
+import type { ChangedFile, RepositoryState, ReviewSource } from '../types.ts';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -55,6 +59,11 @@ Object.defineProperty(globalThis, 'sessionStorage', {
   value: createMemoryStorage(),
 });
 
+beforeEach(() => {
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+});
+
 const repositoryState = {
   branch: 'main',
   files: [],
@@ -64,9 +73,9 @@ const repositoryState = {
   source: { type: 'working-tree' },
 } satisfies RepositoryState;
 
-const createChangedFile = (path: string) =>
+const createChangedFile = (path: string, fingerprint = `${path}:1`) =>
   ({
-    fingerprint: `${path}:1`,
+    fingerprint,
     path,
     sections: [
       {
@@ -208,6 +217,145 @@ test('repository reload restores the selected file when it still exists', async 
     }
     container.remove();
     window.sessionStorage.clear();
+  }
+});
+
+test('repository reload restores the selected file from the previous source', async () => {
+  const firstFile = createChangedFile('src/first.ts');
+  const secondFile = createChangedFile('src/second.ts');
+  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const nextState = {
+    ...repositoryState,
+    files: [firstFile, secondFile],
+    source,
+  } satisfies RepositoryState;
+  const getRepositoryState = vi.fn(async (requestedSource?: ReviewSource) =>
+    requestedSource?.type === 'commit' ? nextState : repositoryState,
+  );
+
+  writeReloadSelection(nextState, secondFile.path);
+
+  window.codiff = createCodiffMock({
+    getRepositoryState,
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.loading')).toBeNull();
+      expect(
+        container.querySelector('.codiff-file-header.selected .codiff-file-path')?.textContent,
+      ).toBe(secondFile.path);
+    });
+    expect(getRepositoryState).toHaveBeenCalledWith(source);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('repository reload colors only git status glyphs for files changed after reload', async () => {
+  const unchangedFile = createChangedFile('src/unchanged.ts', 'same');
+  const changedFileBeforeReload = createChangedFile('src/changed.ts', 'before');
+  const changedFileAfterReload = createChangedFile('src/changed.ts', 'after');
+  const previousState = {
+    ...repositoryState,
+    files: [unchangedFile, changedFileBeforeReload],
+  } satisfies RepositoryState;
+  const nextState = {
+    ...repositoryState,
+    files: [unchangedFile, changedFileAfterReload],
+  } satisfies RepositoryState;
+
+  writeReloadSelection(previousState, changedFileBeforeReload.path);
+
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => nextState),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      const shadowRoot = container.querySelector('file-tree-container')?.shadowRoot;
+      const styleText =
+        shadowRoot?.querySelector('style[data-codiff-reload-delta-git-status]')?.textContent ?? '';
+      expect(styleText).toContain('[data-item-path="src/changed.ts"][data-item-git-status]');
+      expect(styleText).not.toContain('[data-item-path="src/unchanged.ts"][data-item-git-status]');
+      expect(styleText).toContain("> [data-item-section='git']");
+      expect(
+        shadowRoot?.querySelector(
+          '[data-item-path="src/changed.ts"][data-item-git-status] > [data-item-section="git"]',
+        ),
+      ).toBeTruthy();
+      expect(
+        shadowRoot?.querySelector(
+          '[data-item-path="src/unchanged.ts"][data-item-git-status] > [data-item-section="git"]',
+        ),
+      ).toBeTruthy();
+    });
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('before unload saves the current source and selected file for any reload trigger', async () => {
+  const changedFile = createChangedFile('src/app.ts');
+  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const nextState = {
+    ...repositoryState,
+    files: [changedFile],
+    source,
+  } satisfies RepositoryState;
+
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => nextState),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.loading')).toBeNull();
+    });
+
+    window.dispatchEvent(new Event('beforeunload'));
+
+    const selection = consumeReloadSelection();
+    expect(selection?.source).toEqual(source);
+    expect(getReloadSelectionPath(selection, nextState)).toBe(changedFile.path);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
   }
 });
 
