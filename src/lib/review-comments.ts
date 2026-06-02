@@ -27,9 +27,10 @@ export const getReviewCommentLineSelection = (comment: ReviewComment): CodeViewL
 type ReviewPatchRow = {
   additionLineNumber?: number;
   deletionLineNumber?: number;
+  patchLineIndex: number;
+  patchLines: ReadonlyArray<string>;
   prefix: '+' | '-' | ' ';
   side?: ReviewComment['side'];
-  text: string;
 };
 
 const matchesReviewPatchLine = (
@@ -141,9 +142,11 @@ const indentMarkdown = (value: string) =>
 
 const formatReviewLineNumber = (lineNumber: number | string) => String(lineNumber).padStart(4);
 // @pierre/diffs keeps source line terminators; copied Markdown rows add their own separators.
-const normalizeReviewPatchText = (line: string) => line.replace(/\r?\n$/, '');
+const trimReviewPatchLineTerminator = (line: string) =>
+  line.endsWith('\r\n') ? line.slice(0, -2) : line.endsWith('\n') ? line.slice(0, -1) : line;
+
 const getReviewPatchText = (lines: ReadonlyArray<string>, index: number) =>
-  normalizeReviewPatchText(lines[index] ?? '');
+  trimReviewPatchLineTerminator(lines[index] ?? '');
 
 export const getReviewCommentPatchContext = (
   file: ChangedFile,
@@ -164,8 +167,9 @@ export const getReviewCommentPatchContext = (
           rows.push({
             additionLineNumber: additionLineNumber + index,
             deletionLineNumber: deletionLineNumber + index,
+            patchLineIndex: content.additionLineIndex + index,
+            patchLines: fileDiff.additionLines,
             prefix: ' ',
-            text: getReviewPatchText(fileDiff.additionLines, content.additionLineIndex + index),
           });
         }
         deletionLineNumber += content.lines;
@@ -176,18 +180,20 @@ export const getReviewCommentPatchContext = (
       for (let index = 0; index < content.deletions; index += 1) {
         rows.push({
           deletionLineNumber: deletionLineNumber + index,
+          patchLineIndex: content.deletionLineIndex + index,
+          patchLines: fileDiff.deletionLines,
           prefix: '-',
           side: 'deletions',
-          text: getReviewPatchText(fileDiff.deletionLines, content.deletionLineIndex + index),
         });
       }
 
       for (let index = 0; index < content.additions; index += 1) {
         rows.push({
           additionLineNumber: additionLineNumber + index,
+          patchLineIndex: content.additionLineIndex + index,
+          patchLines: fileDiff.additionLines,
           prefix: '+',
           side: 'additions',
-          text: getReviewPatchText(fileDiff.additionLines, content.additionLineIndex + index),
         });
       }
 
@@ -217,7 +223,10 @@ export const getReviewCommentPatchContext = (
           : row.prefix === '-'
             ? row.deletionLineNumber
             : `${row.deletionLineNumber ?? ''}/${row.additionLineNumber ?? ''}`;
-      return `${row.prefix}${formatReviewLineNumber(lineNumber ?? '')} | ${row.text}`;
+      return `${row.prefix}${formatReviewLineNumber(lineNumber ?? '')} | ${getReviewPatchText(
+        row.patchLines,
+        row.patchLineIndex,
+      )}`;
     });
 
     return [hunk.hunkSpecs?.trim(), ...context].filter(Boolean).join('\n');
