@@ -140,6 +140,10 @@ const indentMarkdown = (value: string) =>
     .join('\n');
 
 const formatReviewLineNumber = (lineNumber: number | string) => String(lineNumber).padStart(4);
+// @pierre/diffs keeps source line terminators; copied Markdown rows add their own separators.
+const normalizeReviewPatchText = (line: string) => line.replace(/\r?\n$/, '');
+const getReviewPatchText = (lines: ReadonlyArray<string>, index: number) =>
+  normalizeReviewPatchText(lines[index] ?? '');
 
 export const getReviewCommentPatchContext = (
   file: ChangedFile,
@@ -161,7 +165,7 @@ export const getReviewCommentPatchContext = (
             additionLineNumber: additionLineNumber + index,
             deletionLineNumber: deletionLineNumber + index,
             prefix: ' ',
-            text: fileDiff.additionLines[content.additionLineIndex + index] ?? '',
+            text: getReviewPatchText(fileDiff.additionLines, content.additionLineIndex + index),
           });
         }
         deletionLineNumber += content.lines;
@@ -174,7 +178,7 @@ export const getReviewCommentPatchContext = (
           deletionLineNumber: deletionLineNumber + index,
           prefix: '-',
           side: 'deletions',
-          text: fileDiff.deletionLines[content.deletionLineIndex + index] ?? '',
+          text: getReviewPatchText(fileDiff.deletionLines, content.deletionLineIndex + index),
         });
       }
 
@@ -183,7 +187,7 @@ export const getReviewCommentPatchContext = (
           additionLineNumber: additionLineNumber + index,
           prefix: '+',
           side: 'additions',
-          text: fileDiff.additionLines[content.additionLineIndex + index] ?? '',
+          text: getReviewPatchText(fileDiff.additionLines, content.additionLineIndex + index),
         });
       }
 

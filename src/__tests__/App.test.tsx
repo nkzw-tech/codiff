@@ -586,6 +586,8 @@ test('review comment markdown includes multi-line ranges', () => {
   expect(markdown).toContain('1. **src/range.ts** (New lines 1-2)');
   expect(markdown).toContain('+   1 | const first = true;');
   expect(markdown).toContain('+   2 | const second = true;');
+  expect(markdown).toContain('+   1 | const first = true;\n   +   2 | const second = true;');
+  expect(markdown).not.toContain('const first = true;\n\n   +');
 });
 
 test('escape discards empty review comments without confirmation', () => {
