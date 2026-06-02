@@ -28,7 +28,7 @@
         "editorCommand": {
           "type": "string",
           "default": "",
-          "description": "Command used to open files from Codiff. Use {file} as the file path placeholder and {repo} as the repository root placeholder, or leave empty to use Codiff's default editor lookup."
+          "description": "Command used to open files from Codiff. Use {file} as the file path placeholder and {repo} as the repository root placeholder, for example \"subl \\\"{repo}\\\" \\\"{file}\\\"\", or leave empty to use Codiff's default editor lookup."
         },
         "lastRepositoryPath": {
           "type": "string",

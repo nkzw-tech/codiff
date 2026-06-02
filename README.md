@@ -111,7 +111,7 @@ is running so changes apply to open windows.
 ```
 
 Set `settings.editorCommand` to customize file opening. Use `{file}` for the selected file and
-`{repo}` for the repository root, for example `"subl {repo} {file}"`.
+`{repo}` for the repository root, for example `"subl \"{repo}\" \"{file}\""`.
 
 Choose `View > Split Diff` or `View > Unified Diff`, use Toggle Diff Layout in the command bar,
 or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.
