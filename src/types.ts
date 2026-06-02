@@ -234,6 +234,7 @@ export type CodiffTheme = 'system' | 'light' | 'dark';
 export type CodiffPreferences = {
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
+  editorCommand: string;
   lastRepositoryPath: string;
   openAIModel: string;
   showOutdated: boolean;

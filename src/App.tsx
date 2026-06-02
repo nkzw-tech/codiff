@@ -19,13 +19,12 @@ import {
 } from './app/components/Panels.tsx';
 import { ReviewCodeView } from './app/components/ReviewCodeView.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
-import { defaultConfig } from './config/defaults.ts';
+import { createDefaultConfig } from './config/defaults.ts';
 import { getShortcutLabel, matchesShortcut } from './config/keymap.ts';
 import type { CodiffConfig } from './config/types.ts';
 import {
   defaultCodexSkillStatus,
   defaultLaunchOptions,
-  defaultPreferences,
   defaultTerminalHelperStatus,
   HISTORY_PAGE_SIZE,
 } from './lib/app-constants.ts';
@@ -49,6 +48,7 @@ import {
   shouldLoadDiffSectionContents,
 } from './lib/diff.ts';
 import { compactPath, fuzzyMatches, sortFiles } from './lib/files.ts';
+import { isNativeInputTarget } from './lib/keyboard.ts';
 import {
   consumeReloadSelection,
   getReloadDeltaPaths,
@@ -115,6 +115,8 @@ const getPreferencesFromConfig = ({ settings }: CodiffConfig): CodiffPreferences
   ...settings,
 });
 
+const defaultPreferences = getPreferencesFromConfig(createDefaultConfig());
+
 export default function App() {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [activeDiffSearchMatchIndex, setActiveDiffSearchMatchIndex] = useState(0);
@@ -133,7 +135,7 @@ export default function App() {
   const [itemVersionByPath, setItemVersionByPath] = useState<Record<string, number>>({});
   const [localChangesDetected, setLocalChangesDetected] = useState(false);
   const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>(defaultLaunchOptions);
-  const [codiffConfig, setCodiffConfig] = useState<CodiffConfig>(defaultConfig);
+  const [codiffConfig, setCodiffConfig] = useState<CodiffConfig>(createDefaultConfig);
   const [codexSkillInstalling, setCodexSkillInstalling] = useState(false);
   const [codexSkillStatus, setCodexSkillStatus] =
     useState<CodexSkillStatus>(defaultCodexSkillStatus);
@@ -798,6 +800,25 @@ export default function App() {
     writeSidebarCollapsed(false);
   }, []);
 
+  const openFile = useCallback((file: ChangedFile) => {
+    // Deleted files are still shown in diffs, but there is no current file to open.
+    if (file.status === 'deleted') {
+      return;
+    }
+
+    void window.codiff.openFile(file.path).catch(() => {});
+  }, []);
+
+  const openSelectedFile = useCallback(() => {
+    const currentState = stateRef.current;
+    const path = selectedPathRef.current;
+    const file = currentState?.files.find((candidate) => candidate.path === path);
+
+    if (file) {
+      openFile(file);
+    }
+  }, [openFile]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (matchesShortcut(event, codiffConfig.keymap, 'commandBar')) {
@@ -813,6 +834,14 @@ export default function App() {
       if (matchesShortcut(event, codiffConfig.keymap, 'diffSearch')) {
         event.preventDefault();
         openDiffSearch();
+        return;
+      }
+      if (
+        !isNativeInputTarget(event.target) &&
+        matchesShortcut(event, codiffConfig.keymap, 'openFile')
+      ) {
+        event.preventDefault();
+        openSelectedFile();
         return;
       }
       if (matchesShortcut(event, codiffConfig.keymap, 'fileFilter')) {
@@ -831,7 +860,14 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [codiffConfig.keymap, expandSidebar, openDiffSearch, sidebarCollapsed, toggleSidebar]);
+  }, [
+    codiffConfig.keymap,
+    expandSidebar,
+    openDiffSearch,
+    openSelectedFile,
+    sidebarCollapsed,
+    toggleSidebar,
+  ]);
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
 
@@ -1243,13 +1279,9 @@ export default function App() {
       }),
       registry.register({
         description: () => selectedPathRef.current,
-        execute: () => {
-          const path = selectedPathRef.current;
-          if (path) {
-            void window.codiff.openFile(path).catch(() => {});
-          }
-        },
+        execute: openSelectedFile,
         id: 'open-file',
+        keymapAction: 'openFile',
         title: 'Open File in Editor',
       }),
       registry.register({
@@ -1302,6 +1334,7 @@ export default function App() {
     changeSidebarMode,
     expandSidebar,
     openDiffSearch,
+    openSelectedFile,
     reloadWindow,
     toggleSidebar,
   ]);
@@ -1321,10 +1354,6 @@ export default function App() {
     },
     [bumpItemVersion],
   );
-
-  const openFile = useCallback((file: ChangedFile) => {
-    void window.codiff.openFile(file.path).catch(() => {});
-  }, []);
 
   const updateSelectedPathFromScroll = useCallback(
     (viewer: CodeViewInstance) => {

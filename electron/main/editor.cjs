@@ -1,14 +1,22 @@
 // @ts-check
 
 const { execFile } = require('node:child_process');
+const { dirname } = require('node:path');
 
 /**
  * @typedef {{args: Array<string>; command: string}} EditorCommand
+ * @typedef {{repoPath?: string}} EditorCommandContext
  */
 
-/** @param {{platform?: NodeJS.Platform; shell: import('electron').Shell}} options */
-const createEditorOpener = ({ platform = process.platform, shell }) => {
+/** @param {{getEditorCommand?: () => string; platform?: NodeJS.Platform; shell: import('electron').Shell}} options */
+const createEditorOpener = ({
+  getEditorCommand = () => '',
+  platform = process.platform,
+  shell,
+}) => {
   /** @param {string} command */
+  // Handles simple editor commands with quoted arguments. Keep this small unless
+  // we need full shell-style escaping semantics.
   const parseEditorCommand = (command) =>
     command.match(/"[^"]+"|'[^']+'|\S+/g)?.map((part) => part.replace(/^['"]|['"]$/g, '')) ?? [];
 
@@ -18,23 +26,42 @@ const createEditorOpener = ({ platform = process.platform, shell }) => {
       execFile(command, args, { windowsHide: true }, (error) => resolveCommand(!error));
     });
 
-  /** @param {string} absolutePath @returns {Array<EditorCommand>} */
-  const getEditorCommands = (absolutePath) => {
+  /**
+   * @param {string} arg
+   * @param {string} absolutePath
+   * @param {EditorCommandContext} context
+   */
+  const replaceEditorPlaceholders = (arg, absolutePath, context) =>
+    arg
+      .replaceAll('{file}', absolutePath)
+      .replaceAll('{repo}', context.repoPath || dirname(absolutePath));
+
+  /**
+   * @param {ReadonlyArray<string>} args
+   * @param {string} absolutePath
+   * @param {EditorCommandContext} context
+   */
+  const getCustomEditorArgs = (args, absolutePath, context) => {
+    if (args.length === 0) {
+      return [absolutePath];
+    }
+
+    const expandedArgs = args.map((arg) => replaceEditorPlaceholders(arg, absolutePath, context));
+    return args.some((arg) => arg.includes('{file}'))
+      ? expandedArgs
+      : [...expandedArgs, absolutePath];
+  };
+
+  /** @param {string} absolutePath @param {EditorCommandContext} [context] @returns {Array<EditorCommand>} */
+  const getEditorCommands = (absolutePath, context = {}) => {
     /** @type {Array<EditorCommand>} */
     const commands = [];
-    const customEditor = process.env.CODIFF_EDITOR;
+    const customEditor = process.env.CODIFF_EDITOR || getEditorCommand();
     if (customEditor) {
       const [command, ...args] = parseEditorCommand(customEditor);
       if (command) {
-        const hasFilePlaceholder = args.some((arg) => arg.includes('{file}'));
         commands.push({
-          args:
-            args.length > 0
-              ? [
-                  ...args.map((arg) => arg.replaceAll('{file}', absolutePath)),
-                  ...(hasFilePlaceholder ? [] : [absolutePath]),
-                ]
-              : [absolutePath],
+          args: getCustomEditorArgs(args, absolutePath, context),
           command,
         });
       }
@@ -61,9 +88,9 @@ const createEditorOpener = ({ platform = process.platform, shell }) => {
     return commands;
   };
 
-  /** @param {string} absolutePath */
-  const openFileInEditor = async (absolutePath) => {
-    for (const { args, command } of getEditorCommands(absolutePath)) {
+  /** @param {string} absolutePath @param {EditorCommandContext} [context] */
+  const openFileInEditor = async (absolutePath, context = {}) => {
+    for (const { args, command } of getEditorCommands(absolutePath, context)) {
       if (await runEditorCommand(command, args)) {
         return;
       }

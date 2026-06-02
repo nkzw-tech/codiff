@@ -6,7 +6,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import App from '../App.tsx';
-import { defaultConfig } from '../config/defaults.ts';
+import { createDefaultConfig, defaultSettings } from '../config/defaults.ts';
 import {
   consumeReloadSelection,
   getReloadSelectionPath,
@@ -115,7 +115,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
   })),
-  getConfig: vi.fn(async () => defaultConfig),
+  getConfig: vi.fn(async () => createDefaultConfig()),
   getDiffImageContent: vi.fn(async () => ({
     reason: 'Unavailable in tests.',
     status: 'unavailable' as const,
@@ -134,8 +134,9 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   getPreferences: vi.fn(async () => ({
     copyCommentsOnClose: true,
     diffStyle: 'split' as const,
+    editorCommand: '',
     lastRepositoryPath: '/repo',
-    openAIModel: defaultConfig.settings.openAIModel,
+    openAIModel: defaultSettings.openAIModel,
     showOutdated: false,
     showWhitespace: false,
     theme: 'system' as const,
@@ -180,6 +181,44 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   submitPullRequestReview: vi.fn(async () => {}),
   ...overrides,
 });
+
+const dispatchModK = () => {
+  const isMac = navigator.platform.toLowerCase().includes('mac');
+  window.dispatchEvent(new KeyboardEvent('keydown', { ctrlKey: !isMac, key: 'k', metaKey: isMac }));
+};
+
+const renderAppForOpenFileShortcut = async (file: ChangedFile) => {
+  const openFile = vi.fn(async () => {});
+
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [file],
+    })),
+    openFile,
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(<App />);
+  });
+
+  await waitFor(() => {
+    expect(container.querySelector('.loading')).toBeNull();
+    expect(container.querySelector('.codiff-file-header.selected')).not.toBeNull();
+  });
+
+  return {
+    cleanup: async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    },
+    openFile,
+  };
+};
 
 test('repository reload restores the selected file when it still exists', async () => {
   const firstFile = createChangedFile('src/first.ts');
@@ -356,6 +395,41 @@ test('before unload saves the current source and selected file for any reload tr
       await act(async () => root?.unmount());
     }
     container.remove();
+  }
+});
+
+test('Mod+K opens the selected file in the editor', async () => {
+  const changedFile = createChangedFile('src/app.ts');
+  const app = await renderAppForOpenFileShortcut(changedFile);
+
+  try {
+    await act(async () => {
+      dispatchModK();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(app.openFile).toHaveBeenCalledWith(changedFile.path);
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test('Mod+K does not open deleted files', async () => {
+  const deletedFile = {
+    ...createChangedFile('src/removed.ts'),
+    status: 'deleted',
+  } satisfies ChangedFile;
+  const app = await renderAppForOpenFileShortcut(deletedFile);
+
+  try {
+    await act(async () => {
+      dispatchModK();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(app.openFile).not.toHaveBeenCalled();
+  } finally {
+    await app.cleanup();
   }
 });
 

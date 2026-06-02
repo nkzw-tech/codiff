@@ -88,6 +88,7 @@ is running so changes apply to open windows.
   "settings": {
     "copyCommentsOnClose": false,
     "diffStyle": "split",
+    "editorCommand": "",
     "lastRepositoryPath": "",
     "openAIModel": "gpt-5.3-codex-spark",
     "showWhitespace": false,
@@ -99,6 +100,7 @@ is running so changes apply to open windows.
     "diffSearch": "Mod+f",
     "fileFilter": "Mod+p",
     "nextSearchMatch": "Enter",
+    "openFile": "Mod+k",
     "prevSearchMatch": "Shift+Enter",
     "closeSearch": "Escape",
     "submitComment": "Mod+Enter",
@@ -107,6 +109,9 @@ is running so changes apply to open windows.
   },
 }
 ```
+
+Set `settings.editorCommand` to customize file opening. Use `{file}` for the selected file and
+`{repo}` for the repository root, for example `"subl {repo} {file}"`.
 
 Choose `View > Split Diff` or `View > Unified Diff`, use Toggle Diff Layout in the command bar,
 or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.

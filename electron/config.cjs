@@ -14,45 +14,21 @@ const { join } = require('node:path');
 /**
  * @typedef {import('../src/config/types.ts').CodiffConfig} CodiffConfig
  * @typedef {import('../src/config/types.ts').CodiffDiffStyle} CodiffDiffStyle
- * @typedef {import('../src/config/types.ts').CodiffKeymap} CodiffKeymap
- * @typedef {import('../src/config/types.ts').CodiffSettings} CodiffSettings
  * @typedef {import('../src/config/types.ts').CodiffTheme} CodiffTheme
  * @typedef {import('../src/types.ts').CodiffPreferences} CodiffPreferences
  */
 
+/** @type {CodiffConfig} */
+const defaultConfigTemplate = require('../config/defaults.json');
+
 const SCHEMA_URL =
   'https://raw.githubusercontent.com/nkzw-tech/codiff/main/src/config/codiff-config.schema.json';
 
-/** @type {CodiffSettings} */
-const defaultSettings = {
-  copyCommentsOnClose: false,
-  diffStyle: 'split',
-  lastRepositoryPath: '',
-  openAIModel: 'gpt-5.3-codex-spark',
-  showOutdated: false,
-  showWhitespace: false,
-  theme: 'system',
-  wordWrap: false,
-};
-
-/** @type {CodiffKeymap} */
-const defaultKeymap = {
-  closeSearch: 'Escape',
-  commandBar: 'Mod+Shift+p',
-  diffSearch: 'Mod+f',
-  discardComment: 'Escape',
-  fileFilter: 'Mod+p',
-  nextSearchMatch: 'Enter',
-  prevSearchMatch: 'Shift+Enter',
-  submitComment: 'Mod+Enter',
-  toggleSidebar: 'Mod+b',
-};
-
-/** @type {CodiffConfig} */
-const defaultConfig = {
-  keymap: defaultKeymap,
-  settings: defaultSettings,
-};
+/** @returns {CodiffConfig} */
+const createDefaultConfig = () => ({
+  keymap: { ...defaultConfigTemplate.keymap },
+  settings: { ...defaultConfigTemplate.settings },
+});
 
 const getConfigDir = () => join(homedir(), '.codiff');
 
@@ -147,8 +123,10 @@ const normalizeLastRepositoryPath = (path) =>
  * @returns {CodiffConfig}
  */
 const mergeConfig = (raw) => {
+  const defaults = createDefaultConfig();
+
   if (typeof raw !== 'object' || raw === null) {
-    return defaultConfig;
+    return defaults;
   }
 
   const obj = /** @type {Record<string, unknown>} */ (raw);
@@ -166,56 +144,70 @@ const mergeConfig = (raw) => {
       closeSearch:
         typeof rawKeymap.closeSearch === 'string'
           ? rawKeymap.closeSearch
-          : defaultKeymap.closeSearch,
+          : defaults.keymap.closeSearch,
       commandBar:
-        typeof rawKeymap.commandBar === 'string' ? rawKeymap.commandBar : defaultKeymap.commandBar,
+        typeof rawKeymap.commandBar === 'string'
+          ? rawKeymap.commandBar
+          : defaults.keymap.commandBar,
       diffSearch:
-        typeof rawKeymap.diffSearch === 'string' ? rawKeymap.diffSearch : defaultKeymap.diffSearch,
+        typeof rawKeymap.diffSearch === 'string'
+          ? rawKeymap.diffSearch
+          : defaults.keymap.diffSearch,
       discardComment:
         typeof rawKeymap.discardComment === 'string'
           ? rawKeymap.discardComment
-          : defaultKeymap.discardComment,
+          : defaults.keymap.discardComment,
       fileFilter:
-        typeof rawKeymap.fileFilter === 'string' ? rawKeymap.fileFilter : defaultKeymap.fileFilter,
+        typeof rawKeymap.fileFilter === 'string'
+          ? rawKeymap.fileFilter
+          : defaults.keymap.fileFilter,
       nextSearchMatch:
         typeof rawKeymap.nextSearchMatch === 'string'
           ? rawKeymap.nextSearchMatch
-          : defaultKeymap.nextSearchMatch,
+          : defaults.keymap.nextSearchMatch,
+      openFile:
+        typeof rawKeymap.openFile === 'string' ? rawKeymap.openFile : defaults.keymap.openFile,
       prevSearchMatch:
         typeof rawKeymap.prevSearchMatch === 'string'
           ? rawKeymap.prevSearchMatch
-          : defaultKeymap.prevSearchMatch,
+          : defaults.keymap.prevSearchMatch,
       submitComment:
         typeof rawKeymap.submitComment === 'string'
           ? rawKeymap.submitComment
-          : defaultKeymap.submitComment,
+          : defaults.keymap.submitComment,
       toggleSidebar:
         typeof rawKeymap.toggleSidebar === 'string'
           ? rawKeymap.toggleSidebar
-          : defaultKeymap.toggleSidebar,
+          : defaults.keymap.toggleSidebar,
     },
     settings: {
       copyCommentsOnClose:
         typeof rawSettings.copyCommentsOnClose === 'boolean'
           ? rawSettings.copyCommentsOnClose
-          : defaultSettings.copyCommentsOnClose,
+          : defaults.settings.copyCommentsOnClose,
       diffStyle: normalizeDiffStyle(rawSettings.diffStyle),
+      editorCommand:
+        typeof rawSettings.editorCommand === 'string'
+          ? rawSettings.editorCommand
+          : defaults.settings.editorCommand,
       lastRepositoryPath: normalizeLastRepositoryPath(rawSettings.lastRepositoryPath),
       openAIModel:
         typeof rawSettings.openAIModel === 'string'
           ? rawSettings.openAIModel
-          : defaultSettings.openAIModel,
+          : defaults.settings.openAIModel,
       showOutdated:
         typeof rawSettings.showOutdated === 'boolean'
           ? rawSettings.showOutdated
-          : defaultSettings.showOutdated,
+          : defaults.settings.showOutdated,
       showWhitespace:
         typeof rawSettings.showWhitespace === 'boolean'
           ? rawSettings.showWhitespace
-          : defaultSettings.showWhitespace,
+          : defaults.settings.showWhitespace,
       theme: normalizeTheme(rawSettings.theme),
       wordWrap:
-        typeof rawSettings.wordWrap === 'boolean' ? rawSettings.wordWrap : defaultSettings.wordWrap,
+        typeof rawSettings.wordWrap === 'boolean'
+          ? rawSettings.wordWrap
+          : defaults.settings.wordWrap,
     },
   };
 };
@@ -228,7 +220,7 @@ const readConfig = () => {
   const configPath = getConfigPath();
 
   if (!existsSync(configPath)) {
-    return defaultConfig;
+    return createDefaultConfig();
   }
 
   try {
@@ -236,7 +228,7 @@ const readConfig = () => {
     const raw = parseJsonc(text);
     return mergeConfig(raw);
   } catch {
-    return defaultConfig;
+    return createDefaultConfig();
   }
 };
 
@@ -268,7 +260,7 @@ const initConfig = () => {
     return false;
   }
 
-  writeConfig(defaultConfig);
+  writeConfig(createDefaultConfig());
   return true;
 };
 
@@ -297,11 +289,12 @@ const migrateFromPreferences = (userDataPath, normalizeOpenAIModel) => {
 
   try {
     const oldPrefs = JSON.parse(readFileSync(oldPath, 'utf8'));
+    const defaults = createDefaultConfig();
     const config = mergeConfig({
       settings: {
         ...oldPrefs,
         lastRepositoryPath: normalizeLastRepositoryPath(oldPrefs?.lastRepositoryPath),
-        openAIModel: normalizeOpenAIModel(oldPrefs?.openAIModel ?? defaultSettings.openAIModel),
+        openAIModel: normalizeOpenAIModel(oldPrefs?.openAIModel ?? defaults.settings.openAIModel),
         theme: normalizeTheme(oldPrefs?.theme),
       },
     });
@@ -364,7 +357,7 @@ const configToPreferences = (config) => ({
 
 module.exports = {
   configToPreferences,
-  defaultConfig,
+  createDefaultConfig,
   getConfigPath,
   initConfig,
   mergeConfig,

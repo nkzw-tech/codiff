@@ -4,6 +4,7 @@ export type CodiffTheme = 'system' | 'light' | 'dark';
 export type CodiffSettings = {
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
+  editorCommand: string;
   lastRepositoryPath: string;
   openAIModel: string;
   showOutdated: boolean;
@@ -21,6 +22,7 @@ export type CodiffKeymap = {
   discardComment: KeyCombo;
   fileFilter: KeyCombo;
   nextSearchMatch: KeyCombo;
+  openFile: KeyCombo;
   prevSearchMatch: KeyCombo;
   submitComment: KeyCombo;
   toggleSidebar: KeyCombo;

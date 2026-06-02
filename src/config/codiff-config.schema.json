@@ -25,6 +25,11 @@
           "default": "split",
           "description": "Diff layout style. 'split' shows deleted and added lines side by side; 'unified' shows them in one column."
         },
+        "editorCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Command used to open files from Codiff. Use {file} as the file path placeholder and {repo} as the repository root placeholder, or leave empty to use Codiff's default editor lookup."
+        },
         "lastRepositoryPath": {
           "type": "string",
           "default": "",
@@ -82,6 +87,11 @@
           "type": "string",
           "default": "Enter",
           "description": "Navigate to the next search match."
+        },
+        "openFile": {
+          "type": "string",
+          "default": "Mod+k",
+          "description": "Open the currently selected file in the configured editor."
         },
         "prevSearchMatch": {
           "type": "string",

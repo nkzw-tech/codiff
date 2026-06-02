@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "copyCommentsOnClose": false,
+    "diffStyle": "split",
+    "editorCommand": "",
+    "lastRepositoryPath": "",
+    "openAIModel": "gpt-5.3-codex-spark",
+    "showOutdated": false,
+    "showWhitespace": false,
+    "theme": "system",
+    "wordWrap": false
+  },
+  "keymap": {
+    "closeSearch": "Escape",
+    "commandBar": "Mod+Shift+p",
+    "diffSearch": "Mod+f",
+    "discardComment": "Escape",
+    "fileFilter": "Mod+p",
+    "nextSearchMatch": "Enter",
+    "openFile": "Mod+k",
+    "prevSearchMatch": "Shift+Enter",
+    "submitComment": "Mod+Enter",
+    "toggleSidebar": "Mod+b"
+  }
+}

@@ -1,29 +1,17 @@
-import type { CodiffConfig, CodiffKeymap, CodiffSettings } from './types.ts';
+import defaults from '../../config/defaults.json' with { type: 'json' };
+import type { CodiffConfig } from './types.ts';
 
-export const defaultSettings: CodiffSettings = {
-  copyCommentsOnClose: false,
-  diffStyle: 'split',
-  lastRepositoryPath: '',
-  openAIModel: 'gpt-5.3-codex-spark',
-  showOutdated: false,
-  showWhitespace: false,
-  theme: 'system',
-  wordWrap: false,
-};
+// TypeScript widens values imported from JSON, so it cannot know that
+// "split" is a valid CodiffDiffStyle or "system" is a valid CodiffTheme.
+// We keep defaults in JSON so Electron and the renderer share one source.
+// If config gets deeper or more complex, replace this cast with runtime
+// validation or a typed source that generates the CJS shape.
+const defaultConfigTemplate = defaults as CodiffConfig;
 
-export const defaultKeymap: CodiffKeymap = {
-  closeSearch: 'Escape',
-  commandBar: 'Mod+Shift+p',
-  diffSearch: 'Mod+f',
-  discardComment: 'Escape',
-  fileFilter: 'Mod+p',
-  nextSearchMatch: 'Enter',
-  prevSearchMatch: 'Shift+Enter',
-  submitComment: 'Mod+Enter',
-  toggleSidebar: 'Mod+b',
-};
+export const createDefaultConfig = (): CodiffConfig => ({
+  keymap: { ...defaultConfigTemplate.keymap },
+  settings: { ...defaultConfigTemplate.settings },
+});
 
-export const defaultConfig: CodiffConfig = {
-  keymap: defaultKeymap,
-  settings: defaultSettings,
-};
+export const defaultKeymap = defaultConfigTemplate.keymap;
+export const defaultSettings = defaultConfigTemplate.settings;

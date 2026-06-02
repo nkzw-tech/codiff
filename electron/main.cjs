@@ -29,7 +29,7 @@ const {
 const { FALLBACK_OPENAI_MODEL, normalizeOpenAIModel, OPENAI_MODELS } = require('./codex.cjs');
 const {
   configToPreferences,
-  defaultConfig,
+  createDefaultConfig,
   getConfigPath,
   initConfig,
   migrateFromPreferences,
@@ -88,7 +88,7 @@ const windowLaunchOptions = new Map();
 const windowInitialRepositoryStates = new Map();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
 /** @type {CodiffConfig} */
-let config = defaultConfig;
+let config = createDefaultConfig();
 
 const { getCodexSkillStatus, installCodexSkill } = createCodexSkillInstaller({
   app,
@@ -100,7 +100,10 @@ const { getTerminalHelperStatus, installTerminalHelper } = createTerminalHelper(
   dialog,
   root,
 });
-const { openFileInEditor } = createEditorOpener({ shell });
+const { openFileInEditor } = createEditorOpener({
+  getEditorCommand: () => config.settings.editorCommand,
+  shell,
+});
 
 const openConfigFile = async () => {
   initConfig();
@@ -874,7 +877,7 @@ ipcMain.handle('codiff:openFile', async (event, filePath) => {
   const absolutePath = resolve(state.root, repositoryFilePath);
 
   if (existsSync(absolutePath)) {
-    await openFileInEditor(absolutePath);
+    await openFileInEditor(absolutePath, { repoPath: state.root });
   } else {
     await shell.openPath(state.root);
   }
