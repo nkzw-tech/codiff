@@ -169,6 +169,7 @@ test('reload scroll target is retried until the selected item renders', async ()
           source={source}
           viewed={{}}
           walkthroughNotes={new Map()}
+          wordWrap={false}
         />,
       );
     });
