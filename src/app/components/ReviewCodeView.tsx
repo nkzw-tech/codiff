@@ -12,7 +12,7 @@ import {
   type LineAnnotation,
 } from '@pierre/diffs';
 import { CodeView, type CodeViewHandle, WorkerPoolContextProvider } from '@pierre/diffs/react';
-import { Bot, Copy as LucideCopy } from 'lucide-react';
+import { Copy as LucideCopy } from 'lucide-react';
 import {
   Fragment,
   useCallback,
@@ -27,6 +27,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from 'react';
+import claudeIconUrl from '../../assets/claude.svg';
 import codexIconUrl from '../../assets/codex.svg';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffDiffStyle, CodiffKeymap } from '../../config/types.ts';
@@ -267,16 +268,13 @@ function ReviewAvatar({
 }
 
 function AgentAvatar({ agentId }: { agentId: 'codex' | 'claude' }) {
-  if (agentId === 'codex') {
-    return (
-      <img alt="" className="review-comment-avatar-codex" draggable={false} src={codexIconUrl} />
-    );
-  }
-
   return (
-    <span aria-hidden className="review-comment-avatar-codex">
-      <Bot size={18} strokeWidth={2} />
-    </span>
+    <img
+      alt=""
+      className="review-comment-avatar-codex"
+      draggable={false}
+      src={agentId === 'claude' ? claudeIconUrl : codexIconUrl}
+    />
   );
 }
 
