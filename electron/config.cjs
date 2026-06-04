@@ -122,6 +122,26 @@ const normalizeLastRepositoryPath = (path) =>
   typeof path === 'string' && path.length > 0 ? path : '';
 
 /**
+ * Accept a single combo string or a non-empty list of combo strings.
+ * @param {unknown} binding
+ * @param {import('../src/config/types.ts').KeyComboBinding} fallback
+ * @returns {import('../src/config/types.ts').KeyComboBinding}
+ */
+const normalizeKeyComboBinding = (binding, fallback) => {
+  if (typeof binding === 'string') {
+    return binding;
+  }
+  if (
+    Array.isArray(binding) &&
+    binding.length > 0 &&
+    binding.every((combo) => typeof combo === 'string')
+  ) {
+    return binding;
+  }
+  return fallback;
+};
+
+/**
  * Merge a partial config object on top of defaults.
  * @param {unknown} raw
  * @returns {CodiffConfig}
@@ -165,12 +185,14 @@ const mergeConfig = (raw) => {
         typeof rawKeymap.fileFilter === 'string'
           ? rawKeymap.fileFilter
           : defaults.keymap.fileFilter,
+      nextHunk: normalizeKeyComboBinding(rawKeymap.nextHunk, defaults.keymap.nextHunk),
       nextSearchMatch:
         typeof rawKeymap.nextSearchMatch === 'string'
           ? rawKeymap.nextSearchMatch
           : defaults.keymap.nextSearchMatch,
       openFile:
         typeof rawKeymap.openFile === 'string' ? rawKeymap.openFile : defaults.keymap.openFile,
+      prevHunk: normalizeKeyComboBinding(rawKeymap.prevHunk, defaults.keymap.prevHunk),
       prevSearchMatch:
         typeof rawKeymap.prevSearchMatch === 'string'
           ? rawKeymap.prevSearchMatch

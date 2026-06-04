@@ -8,8 +8,11 @@ import {
   type CodeViewLineSelection,
   type CodeViewItem,
   type CodeViewOptions,
+  type CodeViewScrollTarget,
   type DiffLineAnnotation,
+  type FileDiffMetadata,
   type LineAnnotation,
+  type SelectedLineRange,
 } from '@pierre/diffs';
 import { CodeView, type CodeViewHandle, WorkerPoolContextProvider } from '@pierre/diffs/react';
 import { Copy as LucideCopy } from 'lucide-react';
@@ -47,6 +50,7 @@ import {
   codeViewLayout,
   codeViewUnsafeCSS,
   DEFAULT_PADDING,
+  DIFF_LINE_HEIGHT,
   diffCollapsedContextThreshold,
   diffContextExpansionLineCount,
   maxWorkerThreads,
@@ -63,6 +67,7 @@ import {
   shouldLoadDiffSectionContents,
 } from '../../lib/diff.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
+import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { renderMarkdown } from '../../lib/markdown.tsx';
 import {
   getCommentKey,
@@ -820,6 +825,83 @@ const getEffectiveScrollBehavior = (behavior: ReviewScrollBehavior) =>
     ? 'instant'
     : behavior;
 
+type HunkNavigationRequest = {
+  direction: 1 | -1;
+  request: number;
+};
+
+// A jumpable, selectable position (a hunk or a review comment) with its
+// estimated absolute Y. The dominant term is the item's real top from
+// getTopForItem; only the within-item line offset is estimated, so cross-item
+// ordering stays exact. `selection` is the line range highlighted while the
+// anchor is the active nav target (null for collapsed/preview header anchors).
+type NavAnchor = {
+  itemId: string;
+  key: string;
+  scrollTarget: CodeViewScrollTarget;
+  selection: SelectedLineRange | null;
+  top: number;
+};
+
+// Estimate the rendered row index of a file line inside a diff item so comment
+// anchors sort against hunk anchors within the same item.
+const estimateRenderedLineIndex = (
+  fileDiff: FileDiffMetadata,
+  lineNumber: number,
+  side: 'additions' | 'deletions',
+  diffStyle: CodiffDiffStyle,
+): number => {
+  for (const hunk of fileDiff.hunks) {
+    const start = side === 'deletions' ? hunk.deletionStart : hunk.additionStart;
+    const count = side === 'deletions' ? hunk.deletionCount : hunk.additionCount;
+    if (lineNumber >= start && lineNumber < start + count) {
+      const lineStart = diffStyle === 'split' ? hunk.splitLineStart : hunk.unifiedLineStart;
+      return lineStart + (lineNumber - start);
+    }
+  }
+  return 0;
+};
+
+// The span of changed lines in a hunk — the green/red bit, excluding the
+// surrounding context — so navigating highlights just the change. Prefers the
+// additions side; falls back to deletions for pure-deletion hunks.
+const getHunkSelectionRange = (
+  hunk: FileDiffMetadata['hunks'][number],
+): SelectedLineRange | null => {
+  const side: 'additions' | 'deletions' | null =
+    hunk.additionLines > 0 ? 'additions' : hunk.deletionLines > 0 ? 'deletions' : null;
+  if (!side) {
+    return null;
+  }
+
+  let additionLine = hunk.additionStart;
+  let deletionLine = hunk.deletionStart;
+  let start: number | null = null;
+  let end: number | null = null;
+
+  for (const content of hunk.hunkContent) {
+    if (content.type === 'context') {
+      additionLine += content.lines;
+      deletionLine += content.lines;
+      continue;
+    }
+
+    const changed = side === 'additions' ? content.additions : content.deletions;
+    if (changed > 0) {
+      const blockStart = side === 'additions' ? additionLine : deletionLine;
+      start = start ?? blockStart;
+      end = blockStart + changed - 1;
+    }
+    additionLine += content.additions;
+    deletionLine += content.deletions;
+  }
+
+  return start != null && end != null ? { end, endSide: side, side, start } : null;
+};
+
+const isSameSelection = (a: SelectedLineRange, b: SelectedLineRange) =>
+  a.start === b.start && a.end === b.end && a.side === b.side;
+
 export function ReviewCodeView({
   activeSearchMatch,
   agentId,
@@ -833,6 +915,7 @@ export function ReviewCodeView({
   focusCommentRequest,
   forceExpandedPaths,
   gitIdentity,
+  hunkNavigation,
   isPullRequest,
   itemVersionByPath,
   keymap,
@@ -868,6 +951,7 @@ export function ReviewCodeView({
   focusCommentRequest: number;
   forceExpandedPaths: ReadonlySet<string>;
   gitIdentity: GitIdentity | null;
+  hunkNavigation: HunkNavigationRequest | null;
   isPullRequest: boolean;
   itemVersionByPath: Readonly<Record<string, number>>;
   keymap: CodiffKeymap;
@@ -894,6 +978,7 @@ export function ReviewCodeView({
   const codeViewRef = useRef<CodeViewHandle<ReviewAnnotationMetadata>>(null);
   const deferredTimersRef = useRef<Set<number>>(new Set());
   const handledScrollRequestRef = useRef<number | null>(null);
+  const handledHunkNavRef = useRef<number | null>(null);
   const measuredCommitDetailsLayoutKeyRef = useRef<string | null>(null);
   const emptyCommentDeleteTimersRef = useRef<Map<string, number>>(new Map());
   const highlightFrameRef = useRef<number | null>(null);
@@ -910,6 +995,7 @@ export function ReviewCodeView({
     Readonly<Record<string, number>>
   >({});
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
+  const selectedLinesRef = useRef<CodeViewLineSelection | null>(null);
   const commitRef = source.type === 'commit' ? source.ref : null;
   const commitDetailsItemId = commitRef ? `commit-details:${commitRef}` : null;
   const [commitDetailsLayoutPass, setCommitDetailsLayoutPass] = useState(0);
@@ -1311,6 +1397,7 @@ export function ReviewCodeView({
             'codiff-commit-details-item',
             context.item.id === commitDetailsItemId,
           );
+          node.classList.toggle('codiff-selected-item', metadata?.isSelected === true);
           node.classList.toggle(
             'codiff-markdown-preview-item',
             metadata?.isMarkdownPreview === true,
@@ -1500,6 +1587,223 @@ export function ReviewCodeView({
       }
     };
   }, [firstItemByPath, requestScrollItemHeaderIntoView, scrollTarget]);
+
+  useEffect(() => {
+    selectedLinesRef.current = selectedLines;
+  }, [selectedLines]);
+
+  useEffect(() => {
+    if (!hunkNavigation || handledHunkNavRef.current === hunkNavigation.request) {
+      return;
+    }
+
+    const handle = codeViewRef.current;
+    const viewer = handle?.getInstance();
+    if (!handle || !viewer) {
+      return;
+    }
+
+    handledHunkNavRef.current = hunkNavigation.request;
+
+    const headerHeight = codeViewItemMetrics.diffHeaderHeight;
+    const anchors: Array<NavAnchor> = [];
+    const seen = new Set<string>();
+    const lineScrollTarget = (
+      id: string,
+      lineNumber: number,
+      side: 'additions' | 'deletions',
+    ): CodeViewScrollTarget => ({
+      align: 'center',
+      behavior: 'smooth-auto',
+      id,
+      lineNumber,
+      offset: DEFAULT_PADDING,
+      side,
+      type: 'line',
+    });
+    const push = (anchor: NavAnchor) => {
+      if (seen.has(anchor.key)) {
+        return;
+      }
+      seen.add(anchor.key);
+      anchors.push(anchor);
+    };
+
+    for (const item of items) {
+      if (item.id === commitDetailsItemId) {
+        continue;
+      }
+
+      const itemTop = viewer.getTopForItem(item.id);
+      if (itemTop == null) {
+        continue;
+      }
+
+      const meta = itemMetadata.get(item.id);
+      // Collapsed files and non-diff previews (markdown/image) jump to the header.
+      if (!meta || meta.isCollapsed || item.type !== 'diff') {
+        push({
+          itemId: item.id,
+          key: `item:${item.id}`,
+          scrollTarget: {
+            align: 'start',
+            behavior: 'smooth-auto',
+            id: item.id,
+            offset: DEFAULT_PADDING,
+            type: 'item',
+          },
+          selection: null,
+          top: itemTop,
+        });
+        continue;
+      }
+
+      // Collect this item's hunks and comments, then order them by rendered row
+      // so navigation matches what's on screen. `items` is already in visual
+      // order, so structural order (item order, then row order) is exactly
+      // top-to-bottom — and stable across keypresses, unlike sorting by the
+      // estimated absolute top, which shifts as items measure.
+      const headerTop = itemTop + headerHeight;
+      const entries: Array<{ anchor: NavAnchor; renderedIndex: number }> = [];
+      const addLineEntry = (
+        lineNumber: number,
+        side: 'additions' | 'deletions',
+        selection: SelectedLineRange,
+      ) => {
+        const renderedIndex = estimateRenderedLineIndex(item.fileDiff, lineNumber, side, diffStyle);
+        entries.push({
+          anchor: {
+            itemId: item.id,
+            key: `line:${item.id}:${side}:${lineNumber}`,
+            scrollTarget: lineScrollTarget(item.id, lineNumber, side),
+            selection,
+            top: headerTop + renderedIndex * DIFF_LINE_HEIGHT,
+          },
+          renderedIndex,
+        });
+      };
+
+      for (const hunk of item.fileDiff.hunks) {
+        const selection = getHunkSelectionRange(hunk);
+        const side = selection?.side ?? (hunk.additionLines > 0 ? 'additions' : 'deletions');
+        const lineNumber =
+          selection?.start ?? (side === 'additions' ? hunk.additionStart : hunk.deletionStart);
+        addLineEntry(
+          lineNumber,
+          side,
+          selection ?? { end: lineNumber, endSide: side, side, start: lineNumber },
+        );
+      }
+
+      for (const comment of commentsBySection.get(meta.section.id) ?? []) {
+        addLineEntry(comment.lineNumber, comment.side, {
+          end: comment.lineNumber,
+          endSide: comment.side,
+          side: comment.side,
+          start: comment.lineNumber,
+        });
+      }
+
+      entries.sort((a, b) => a.renderedIndex - b.renderedIndex);
+      for (const entry of entries) {
+        push(entry.anchor);
+      }
+    }
+
+    if (!anchors.length) {
+      return;
+    }
+
+    // Treat the current line selection as the active anchor so j/k step one hunk
+    // at a time from it. A selection the user made (e.g. dragging to comment)
+    // won't match any anchor, so we fall back to seeding from the scroll offset.
+    const current = selectedLinesRef.current;
+    const activeIndex = current
+      ? anchors.findIndex(
+          (anchor) =>
+            anchor.selection != null &&
+            anchor.itemId === current.id &&
+            isSameSelection(anchor.selection, current.range),
+        )
+      : -1;
+
+    let targetIndex: number;
+    if (activeIndex !== -1) {
+      targetIndex = Math.min(
+        Math.max(activeIndex + hunkNavigation.direction, 0),
+        anchors.length - 1,
+      );
+    } else {
+      const baseTop = viewer.getScrollTop() + DEFAULT_PADDING;
+      const epsilon = 4;
+      if (hunkNavigation.direction === 1) {
+        const found = anchors.findIndex((anchor) => anchor.top > baseTop + epsilon);
+        targetIndex = found === -1 ? anchors.length - 1 : found;
+      } else {
+        targetIndex = 0;
+        for (let index = anchors.length - 1; index >= 0; index -= 1) {
+          if (anchors[index].top < baseTop - epsilon) {
+            targetIndex = index;
+            break;
+          }
+        }
+      }
+    }
+
+    const target = anchors[targetIndex];
+    if (!target) {
+      return;
+    }
+
+    if (target.selection) {
+      setSelectedLines({ id: target.itemId, range: target.selection });
+    } else {
+      clearCommentLineHighlight();
+    }
+    handle.scrollTo(target.scrollTarget);
+  }, [
+    clearCommentLineHighlight,
+    commentsBySection,
+    commitDetailsItemId,
+    diffStyle,
+    hunkNavigation,
+    itemMetadata,
+    items,
+  ]);
+
+  // Enter on a navigated hunk starts a review comment on its selection and moves
+  // focus into the new comment input.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Enter' ||
+        event.repeat ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        isNativeInputTarget(event.target)
+      ) {
+        return;
+      }
+
+      const selection = selectedLinesRef.current;
+      if (!selection) {
+        return;
+      }
+
+      const item = items.find((candidate) => candidate.id === selection.id);
+      if (!item) {
+        return;
+      }
+
+      event.preventDefault();
+      createCommentForRange(selection.range, { item });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [createCommentForRange, items]);
 
   const scheduleSearchHighlights = useCallback(() => {
     const viewer = codeViewRef.current?.getInstance();

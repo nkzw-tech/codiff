@@ -185,7 +185,18 @@ export default function App() {
   const [commandBarVisible, setCommandBarVisible] = useState(false);
   const [commandBarCommands, setCommandBarCommands] = useState<ReadonlyArray<Command>>([]);
   const [shortcutsHelpVisible, setShortcutsHelpVisible] = useState(false);
+  const [hunkNavigation, setHunkNavigation] = useState<{
+    direction: 1 | -1;
+    request: number;
+  } | null>(null);
   const commandRegistryRef = useRef(createCommandRegistry());
+
+  const navigateHunks = useCallback((direction: 1 | -1) => {
+    setHunkNavigation((current) => ({
+      direction,
+      request: (current?.request ?? 0) + 1,
+    }));
+  }, []);
 
   const bumpItemVersion = useCallback((path: string) => {
     setItemVersionByPath((current) => ({
@@ -862,6 +873,18 @@ export default function App() {
         openSelectedFile();
         return;
       }
+      if (!isNativeInputTarget(event.target)) {
+        if (matchesShortcut(event, codiffConfig.keymap, 'nextHunk')) {
+          event.preventDefault();
+          navigateHunks(1);
+          return;
+        }
+        if (matchesShortcut(event, codiffConfig.keymap, 'prevHunk')) {
+          event.preventDefault();
+          navigateHunks(-1);
+          return;
+        }
+      }
       if (matchesShortcut(event, codiffConfig.keymap, 'fileFilter')) {
         if (sidebarCollapsed) {
           event.preventDefault();
@@ -881,6 +904,7 @@ export default function App() {
   }, [
     codiffConfig.keymap,
     expandSidebar,
+    navigateHunks,
     openDiffSearch,
     openSelectedFile,
     sidebarCollapsed,
@@ -2030,6 +2054,7 @@ export default function App() {
             focusCommentRequest={focusCommentRequest}
             forceExpandedPaths={diffSearchMatchPathSet}
             gitIdentity={gitIdentity}
+            hunkNavigation={hunkNavigation}
             isPullRequest={isPullRequest}
             itemVersionByPath={itemVersionByPath}
             keymap={codiffConfig.keymap}

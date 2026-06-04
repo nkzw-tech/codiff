@@ -35,6 +35,10 @@ export const codeViewItemMetrics = {
   diffHeaderHeight: 54,
 };
 
+// Matches --diffs-line-height in codeViewUnsafeCSS. Used to estimate the
+// absolute Y of a hunk or comment when picking the next/previous nav anchor.
+export const DIFF_LINE_HEIGHT = 20;
+
 export const diffContextExpansionLineCount = 100;
 export const diffCollapsedContextThreshold = 12;
 
@@ -149,6 +153,14 @@ export const codeViewUnsafeCSS = `
     --diffs-dark-bg: #1c1c1c;
     --diffs-bg-selection-override: rgb(61 135 245 / 0.34);
     --diffs-bg-selection-number-override: rgb(61 135 245 / 0.46);
+  }
+
+  /* Tint the whole canvas of the currently selected diff. The library derives
+     context/buffer/separator and add/delete backgrounds from --diffs-bg, so
+     nudging the base toward the accent recolours the entire diff cohesively. */
+  :host(.codiff-selected-item) {
+    --diffs-light-bg: color-mix(in srgb, #ffffff 96%, #3d87f5);
+    --diffs-dark-bg: color-mix(in srgb, #1c1c1c 90%, #3d87f5);
   }
 
   [data-diff-type="split"][data-overflow="scroll"] {

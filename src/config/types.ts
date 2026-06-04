@@ -18,14 +18,19 @@ export type CodiffSettings = {
 
 export type KeyCombo = string;
 
+// A shortcut can be a single combo or a list of aliases that all trigger the action.
+export type KeyComboBinding = KeyCombo | ReadonlyArray<KeyCombo>;
+
 export type CodiffKeymap = {
   closeSearch: KeyCombo;
   commandBar: KeyCombo;
   diffSearch: KeyCombo;
   discardComment: KeyCombo;
   fileFilter: KeyCombo;
+  nextHunk: KeyComboBinding;
   nextSearchMatch: KeyCombo;
   openFile: KeyCombo;
+  prevHunk: KeyComboBinding;
   prevSearchMatch: KeyCombo;
   shortcutsHelp: KeyCombo;
   submitComment: KeyCombo;

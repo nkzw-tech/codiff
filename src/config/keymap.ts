@@ -1,4 +1,4 @@
-import type { CodiffKeymap, KeyCombo } from './types.ts';
+import type { CodiffKeymap, KeyCombo, KeyComboBinding } from './types.ts';
 
 type ParsedKeyCombo = {
   altKey: boolean;
@@ -31,12 +31,13 @@ const parseKeyCombo = (combo: KeyCombo): ParsedKeyCombo => {
   };
 };
 
-export const matchesShortcut = (
+const getBindingCombos = (binding: KeyComboBinding): ReadonlyArray<KeyCombo> =>
+  Array.isArray(binding) ? binding : [binding as KeyCombo];
+
+const matchesKeyCombo = (
   event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
-  keymap: CodiffKeymap,
-  action: keyof CodiffKeymap,
+  combo: KeyCombo,
 ): boolean => {
-  const combo = keymap[action];
   const parsed = parseKeyCombo(combo);
 
   return (
@@ -48,8 +49,15 @@ export const matchesShortcut = (
   );
 };
 
+export const matchesShortcut = (
+  event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
+  keymap: CodiffKeymap,
+  action: keyof CodiffKeymap,
+): boolean => getBindingCombos(keymap[action]).some((combo) => matchesKeyCombo(event, combo));
+
 export const getShortcutLabel = (keymap: CodiffKeymap, action: keyof CodiffKeymap): string => {
-  const combo = keymap[action];
+  // Show the primary combo when an action has alias bindings.
+  const combo = getBindingCombos(keymap[action])[0] ?? '';
   const mac = isMac();
 
   return combo
@@ -76,6 +84,18 @@ export const getShortcutLabel = (keymap: CodiffKeymap, action: keyof CodiffKeyma
       }
       if (lower === 'escape') {
         return 'Esc';
+      }
+      if (lower === 'arrowup') {
+        return '↑';
+      }
+      if (lower === 'arrowdown') {
+        return '↓';
+      }
+      if (lower === 'arrowleft') {
+        return '←';
+      }
+      if (lower === 'arrowright') {
+        return '→';
       }
       return part.trim().toUpperCase();
     })

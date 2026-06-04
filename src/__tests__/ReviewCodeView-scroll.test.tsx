@@ -210,6 +210,7 @@ test('reload scroll target is retried until the selected item renders', async ()
           focusCommentRequest={0}
           forceExpandedPaths={new Set()}
           gitIdentity={null}
+          hunkNavigation={null}
           isPullRequest={false}
           itemVersionByPath={{}}
           keymap={defaultKeymap}
@@ -278,6 +279,7 @@ test('commit metadata file rows scroll to the matching diff', async () => {
           focusCommentRequest={0}
           forceExpandedPaths={new Set()}
           gitIdentity={null}
+          hunkNavigation={null}
           isPullRequest={false}
           itemVersionByPath={{}}
           keymap={defaultKeymap}

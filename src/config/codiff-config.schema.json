@@ -94,6 +94,16 @@
           "default": "Mod+p",
           "description": "Focus the file filter search input in the sidebar."
         },
+        "nextHunk": {
+          "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }],
+          "default": ["Ctrl+ArrowDown", "j"],
+          "description": "Jump to the next hunk or review comment. Accepts a single combo or a list of aliases."
+        },
+        "prevHunk": {
+          "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }],
+          "default": ["Ctrl+ArrowUp", "k"],
+          "description": "Jump to the previous hunk or review comment. Accepts a single combo or a list of aliases."
+        },
         "nextSearchMatch": {
           "type": "string",
           "default": "Enter",
