@@ -24,7 +24,9 @@ const run = () => {
   }
 
   const {
+    agentBackend,
     branchRef,
+    claudeSessionId,
     codexSessionId,
     commitRef,
     pullRequestNumber,
@@ -52,7 +54,9 @@ const run = () => {
     detached: true,
     env: {
       ...process.env,
+      CODIFF_AGENT_BACKEND: agentBackend ?? '',
       CODIFF_BRANCH_REF: branchRef ?? '',
+      CODIFF_CLAUDE_SESSION_ID: claudeSessionId ?? '',
       CODIFF_COMMIT_REF: commitRef ?? '',
       CODIFF_CODEX_SESSION_ID: codexSessionId ?? '',
       CODIFF_PULL_REQUEST_URL: pullRequestUrl ?? '',

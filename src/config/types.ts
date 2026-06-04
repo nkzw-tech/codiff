@@ -1,7 +1,10 @@
 export type CodiffDiffStyle = 'split' | 'unified';
 export type CodiffTheme = 'system' | 'light' | 'dark';
+export type CodiffAgentBackend = 'codex' | 'claude';
 
 export type CodiffSettings = {
+  agentBackend: CodiffAgentBackend;
+  claudeModel: string;
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
   editorCommand: string;

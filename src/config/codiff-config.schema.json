@@ -14,6 +14,17 @@
       "description": "Application settings.",
       "additionalProperties": false,
       "properties": {
+        "agentBackend": {
+          "type": "string",
+          "enum": ["codex", "claude"],
+          "default": "codex",
+          "description": "Which agent CLI powers review assistance and walkthroughs. 'codex' uses the OpenAI Codex CLI; 'claude' uses the Claude Code CLI."
+        },
+        "claudeModel": {
+          "type": "string",
+          "default": "claude-sonnet-4-6",
+          "description": "The Claude Code model to use for review assistance and walkthroughs when agentBackend is 'claude'."
+        },
         "copyCommentsOnClose": {
           "type": "boolean",
           "default": false,

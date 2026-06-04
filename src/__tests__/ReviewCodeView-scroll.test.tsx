@@ -199,6 +199,8 @@ test('reload scroll target is retried until the selected item renders', async ()
       root.render(
         <ReviewCodeView
           activeSearchMatch={null}
+          agentId="codex"
+          agentLabel="Codex"
           collapsed={new Set()}
           comments={[]}
           commitMetadata={null}
@@ -265,6 +267,8 @@ test('commit metadata file rows scroll to the matching diff', async () => {
       root.render(
         <ReviewCodeView
           activeSearchMatch={null}
+          agentId="codex"
+          agentLabel="Codex"
           collapsed={new Set()}
           comments={[]}
           commitMetadata={commitMetadata}

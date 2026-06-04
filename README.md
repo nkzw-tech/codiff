@@ -7,7 +7,7 @@ Codiff is a beautiful, minimal, local diff viewer for reviewing staged and unsta
 ## Why Codiff
 
 - **Fast Local Reviews:** See changes in any Git repository to review code before committing.
-- **LLM Walkthroughs:** Run `codiff -w` to ask Codex to give you a review order and more context.
+- **LLM Walkthroughs:** Run `codiff -w` to ask Codex or Claude Code to give you a review order and more context.
 - **Inline Review Comments:** Comment directly on changed lines and copy all review comments as Markdown for follow-ups.
 
 ## Download
@@ -86,6 +86,8 @@ is running so changes apply to open windows.
 {
   "$schema": "https://raw.githubusercontent.com/nkzw-tech/codiff/main/src/config/codiff-config.schema.json",
   "settings": {
+    "agentBackend": "codex",
+    "claudeModel": "claude-sonnet-4-6",
     "copyCommentsOnClose": false,
     "diffStyle": "split",
     "editorCommand": "",
@@ -121,33 +123,47 @@ Use `Mod` for <kbd>Cmd</kbd> on macOS and <kbd>Ctrl</kbd> on other platforms. Sh
 combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Shift+p` or
 `Alt+Enter`.
 
-## Codex Walkthroughs
+## Walkthroughs
 
-Codiff uses the local Codex CLI for walkthroughs and inline review assistance. Install Codex and
-verify it is available before using `codiff -w`:
+Codiff uses a local agent CLI for walkthroughs and inline review assistance. It supports two
+backends, selected with the `settings.agentBackend` config value (or the `--agent` flag for a
+single launch) and the `Agent` application menu:
+
+- `codex` (default) — the OpenAI Codex CLI, configured with `settings.openAIModel`.
+- `claude` — the [Claude Code](https://claude.com/claude-code) CLI, configured with `settings.claudeModel`.
+
+Install the backend you want and verify it is available before using `codiff -w`:
 
 ```bash
 codex --version
+claude --version
 ```
 
-Codiff looks for Codex on `PATH`, `/opt/homebrew/bin/codex`, and `/usr/local/bin/codex`. It does not
-run your shell startup files to discover Codex. If Codex is installed somewhere else, launch Codiff
-with an explicit path:
+Codiff looks for the CLI on `PATH` and the usual install locations. It does not run your shell
+startup files to discover them. If a CLI is installed somewhere else, launch Codiff with an
+explicit path:
 
 ```bash
 CODIFF_CODEX_PATH=/absolute/path/to/codex codiff -w
+CODIFF_CLAUDE_PATH=/absolute/path/to/claude codiff --agent claude -w
 ```
 
-To seed a walkthrough with the Codex conversation that produced the change, choose
-`Codiff > Install Codex Skill`, then invoke it from Codex:
+Claude Code rides your existing `claude` login (subscription or `ANTHROPIC_API_KEY`); run `claude`
+once and complete `/login` if you have not already.
+
+To seed a walkthrough with the agent conversation that produced the change, install its skill from
+the application menu (`Install Codex Skill` or `Install Claude Code Skill`), then invoke it from the
+agent:
 
 ```text
-$codiff
+$codiff   # Codex
+/codiff   # Claude Code
 ```
 
-The skill opens Codiff with `codiff -w --codex-session <id>`. Codiff then generates its normal diff
-digest and runs the walkthrough prompt by ephemerally resuming that Codex session, so the
-walkthrough sees the original conversation without a lossy summary handoff.
+The skill opens Codiff with `codiff -w --codex-session <id>` (or `--agent claude --claude-session
+<id>`). Codiff then generates its normal diff digest and runs the walkthrough prompt seeded with
+that session's conversation, so the walkthrough sees the original context without a lossy summary
+handoff.
 
 ## Development
 

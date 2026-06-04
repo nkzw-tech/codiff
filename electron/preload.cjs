@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 /** @type {Window['codiff']} */
 const codiff = {
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
-  getCodexSkillStatus: () => ipcRenderer.invoke('codiff:getCodexSkillStatus'),
+  getAgentSkillStatus: () => ipcRenderer.invoke('codiff:getAgentSkillStatus'),
   getConfig: () => ipcRenderer.invoke('codiff:getConfig'),
   getDiffSectionContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionContent', request),
   getDiffImageContent: (request) => ipcRenderer.invoke('codiff:getDiffImageContent', request),
@@ -17,7 +17,7 @@ const codiff = {
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getWalkthrough: (source) => ipcRenderer.invoke('codiff:getWalkthrough', source),
-  installCodexSkill: () => ipcRenderer.invoke('codiff:installCodexSkill'),
+  installAgentSkill: () => ipcRenderer.invoke('codiff:installAgentSkill'),
   installTerminalHelper: () => ipcRenderer.invoke('codiff:installTerminalHelper'),
   onConfigChanged: (callback) => {
     /** @param {Electron.IpcRendererEvent} _event @param {import('../src/config/types.ts').CodiffConfig} nextConfig */

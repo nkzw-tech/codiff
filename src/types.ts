@@ -146,13 +146,15 @@ export type WalkthroughContext = {
   source: {
     generatedAt: string;
     threadId?: string;
-    type: 'codex-session' | 'codex-session-excerpt';
+    type: 'codex-session' | 'codex-session-excerpt' | 'claude-session' | 'claude-session-excerpt';
   };
   validation?: ReadonlyArray<string>;
   version: 1;
 };
 
 export type CodiffLaunchOptions = {
+  agentBackend?: 'codex' | 'claude';
+  claudeSessionId?: string;
   codexSessionId?: string;
   repositoryPathProvided: boolean;
   source?: ReviewSource;
@@ -160,10 +162,13 @@ export type CodiffLaunchOptions = {
   walkthroughContext?: WalkthroughContext;
 };
 
-export type CodexSkillStatus = {
+export type AgentSkillStatus = {
   installed: boolean;
   path: string;
 };
+
+/** @deprecated Use {@link AgentSkillStatus}. */
+export type CodexSkillStatus = AgentSkillStatus;
 
 export type TerminalHelperStatus = {
   command: string;
@@ -200,7 +205,7 @@ export type WalkthroughResult =
       walkthrough: Walkthrough;
     }
   | {
-      code?: 'CODEX_NOT_FOUND';
+      code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND';
       reason: string;
       status: 'unavailable';
     };
@@ -232,7 +237,7 @@ export type ReviewAssistantResult =
       status: 'ready';
     }
   | {
-      code?: 'CODEX_NOT_FOUND';
+      code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND';
       reason: string;
       status: 'unavailable';
     };
@@ -277,6 +282,8 @@ export type DiffImageContentResult =
 export type CodiffTheme = 'system' | 'light' | 'dark';
 
 export type CodiffPreferences = {
+  agentBackend: 'codex' | 'claude';
+  claudeModel: string;
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
   editorCommand: string;

@@ -1,15 +1,12 @@
 // @ts-check
 
 const {
-  CODEX_NOT_FOUND_CODE,
   cleanText,
-  isCodexNotFoundError,
   normalizeEnum,
   oneLine,
   parseJSONMessage,
-  runCodex,
   truncate,
-} = require('./codex.cjs');
+} = require('./agent-shared.cjs');
 
 const MAX_TOTAL_PATCH_CHARS = 160_000;
 const MAX_SECTION_PATCH_CHARS = 4_000;
@@ -19,7 +16,8 @@ const MAX_SECTION_PATCH_CHARS = 4_000;
  * @typedef {import('../src/types.ts').DiffSection} DiffSection
  * @typedef {import('../src/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../src/types.ts').WalkthroughContext} WalkthroughContext
- * @typedef {{model?: string; fallbackModel?: string; onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void}} CodexOptions
+ * @typedef {import('./agent.cjs').Agent} Agent
+ * @typedef {import('./agent.cjs').AgentOptions} AgentOptions
  */
 
 const walkthroughSchema = {
@@ -111,10 +109,10 @@ const buildPromptInput = (state) => {
   };
 };
 
-/** @param {WalkthroughContext | null | undefined} context */
-const buildWalkthroughContextInput = (context) =>
+/** @param {WalkthroughContext | null | undefined} context @param {string} agentLabel */
+const buildWalkthroughContextInput = (context, agentLabel) =>
   context
-    ? `Codex conversation context:
+    ? `${agentLabel} conversation context:
 ${JSON.stringify(context, null, 2)}
 
 Use this context as orientation for reviewer intent, implementation rationale, validation, and known risks.
@@ -123,8 +121,12 @@ If the context and digest conflict, trust the digest.
 `
     : '';
 
-/** @param {RepositoryState} state @param {WalkthroughContext | null | undefined} [context] */
-const buildPrompt = (state, context) => `You are helping Codiff order a code review.
+/** @param {RepositoryState} state @param {WalkthroughContext | null | undefined} [context] @param {string} [agentLabel] */
+const buildPrompt = (
+  state,
+  context,
+  agentLabel = 'Codex',
+) => `You are helping Codiff order a code review.
 
 Return a high-leverage review walkthrough order, not review findings.
 Do not inspect the repository or run shell commands; use only the digest below.
@@ -155,13 +157,13 @@ Do not nitpick syntax, naming, style, formatting, or local cleanup unless it aff
 Do not mention files that were not provided.
 Return JSON only.
 
-${buildWalkthroughContextInput(context)}
+${buildWalkthroughContextInput(context, agentLabel)}
 Repository change digest:
 ${JSON.stringify(buildPromptInput(state), null, 2)}
 `;
 
-/** @param {any} input @param {ReadonlyArray<ChangedFile>} files */
-const normalizeWalkthrough = (input, files) => {
+/** @param {any} input @param {ReadonlyArray<ChangedFile>} files @param {string} [agentLabel] */
+const normalizeWalkthrough = (input, files, agentLabel = 'Codex') => {
   const pathSet = new Set(files.map((file) => file.path));
   const seen = new Set();
   const groups = [];
@@ -200,22 +202,22 @@ const normalizeWalkthrough = (input, files) => {
     .filter((file) => !seen.has(file.path))
     .map((file) => ({
       action: 'scan',
-      context: 'Codex did not place this file; scan it after the ranked walkthrough.',
+      context: `${agentLabel} did not place this file; scan it after the ranked walkthrough.`,
       impact: 'contained',
       path: file.path,
-      reason: 'Review after the primary walkthrough; Codex did not place this file.',
+      reason: `Review after the primary walkthrough; ${agentLabel} did not place this file.`,
     }));
 
   if (missingFiles.length > 0) {
     groups.push({
       files: missingFiles,
-      reason: 'Files not included in the Codex walkthrough response.',
+      reason: `Files not included in the ${agentLabel} walkthrough response.`,
       title: 'Other changed files',
     });
   }
 
   if (groups.length === 0 && files.length > 0) {
-    throw new Error('Codex did not return any changed files.');
+    throw new Error(`${agentLabel} did not return any changed files.`);
   }
 
   return {
@@ -231,8 +233,8 @@ const normalizeWalkthrough = (input, files) => {
   };
 };
 
-/** @param {RepositoryState} state @param {CodexOptions} codexOptions @param {WalkthroughContext | null | undefined} [context] */
-const readWalkthrough = async (state, codexOptions, context) => {
+/** @param {RepositoryState} state @param {Agent} agent @param {AgentOptions} agentOptions @param {WalkthroughContext | null | undefined} [context] */
+const readWalkthrough = async (state, agent, agentOptions, context) => {
   if (state.files.length === 0) {
     return {
       status: 'ready',
@@ -248,24 +250,24 @@ const readWalkthrough = async (state, codexOptions, context) => {
   }
 
   try {
-    const response = await runCodex(
+    const response = await agent.run(
       state.root,
-      buildPrompt(state, context),
+      buildPrompt(state, context, agent.label),
       walkthroughSchema,
       'walkthrough.json',
-      'Codex walkthrough timed out.',
-      codexOptions,
+      `${agent.label} walkthrough timed out.`,
+      agentOptions,
     );
     const parsed = parseJSONMessage(response);
 
     return {
       status: 'ready',
-      walkthrough: normalizeWalkthrough(parsed, state.files),
+      walkthrough: normalizeWalkthrough(parsed, state.files, agent.label),
     };
   } catch (error) {
-    if (isCodexNotFoundError(error)) {
+    if (agent.isNotFoundError(error)) {
       return {
-        code: CODEX_NOT_FOUND_CODE,
+        code: agent.notFoundCode,
         reason: error instanceof Error ? error.message : String(error),
         status: 'unavailable',
       };

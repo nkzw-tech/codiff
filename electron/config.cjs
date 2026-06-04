@@ -113,6 +113,10 @@ const normalizeTheme = (theme) =>
 const normalizeDiffStyle = (diffStyle) =>
   diffStyle === 'split' || diffStyle === 'unified' ? diffStyle : 'split';
 
+/** @param {unknown} backend @returns {'codex' | 'claude'} */
+const normalizeAgentBackend = (backend) =>
+  backend === 'codex' || backend === 'claude' ? backend : 'codex';
+
 /** @param {unknown} path */
 const normalizeLastRepositoryPath = (path) =>
   typeof path === 'string' && path.length > 0 ? path : '';
@@ -181,6 +185,11 @@ const mergeConfig = (raw) => {
           : defaults.keymap.toggleSidebar,
     },
     settings: {
+      agentBackend: normalizeAgentBackend(rawSettings.agentBackend),
+      claudeModel:
+        typeof rawSettings.claudeModel === 'string'
+          ? rawSettings.claudeModel
+          : defaults.settings.claudeModel,
       copyCommentsOnClose:
         typeof rawSettings.copyCommentsOnClose === 'boolean'
           ? rawSettings.copyCommentsOnClose

@@ -111,7 +111,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     reason: 'Unavailable in tests.',
     status: 'unavailable' as const,
   })),
-  getCodexSkillStatus: vi.fn(async () => ({
+  getAgentSkillStatus: vi.fn(async () => ({
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
   })),
@@ -132,6 +132,8 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     walkthrough: false,
   })),
   getPreferences: vi.fn(async () => ({
+    agentBackend: 'codex' as const,
+    claudeModel: defaultSettings.claudeModel,
     copyCommentsOnClose: true,
     diffStyle: 'split' as const,
     editorCommand: '',
@@ -156,7 +158,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     reason: 'Unavailable in tests.',
     status: 'unavailable' as const,
   })),
-  installCodexSkill: vi.fn(async () => ({
+  installAgentSkill: vi.fn(async () => ({
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
   })),

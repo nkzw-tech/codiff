@@ -65,16 +65,18 @@ export function RepositoryChangeBanner({
 }
 
 export function FirstRunPanel({
-  codexSkillInstalled,
-  codexSkillInstalling,
+  agentSkillInstalled,
+  agentSkillInstalling,
+  agentSkillLabel,
   installing,
-  onInstallCodexSkill,
+  onInstallAgentSkill,
   onInstallTerminalHelper,
 }: {
-  codexSkillInstalled: boolean;
-  codexSkillInstalling: boolean;
+  agentSkillInstalled: boolean;
+  agentSkillInstalling: boolean;
+  agentSkillLabel: string;
   installing: boolean;
-  onInstallCodexSkill: () => void;
+  onInstallAgentSkill: () => void;
   onInstallTerminalHelper: () => void;
 }) {
   return (
@@ -92,9 +94,9 @@ export function FirstRunPanel({
         <button disabled={installing} onClick={onInstallTerminalHelper} type="button">
           {installing ? 'Installing...' : 'Install Terminal Helper'}
         </button>
-        {!codexSkillInstalled ? (
-          <button disabled={codexSkillInstalling} onClick={onInstallCodexSkill} type="button">
-            {codexSkillInstalling ? 'Installing...' : 'Install Codex Skill'}
+        {!agentSkillInstalled ? (
+          <button disabled={agentSkillInstalling} onClick={onInstallAgentSkill} type="button">
+            {agentSkillInstalling ? 'Installing...' : `Install ${agentSkillLabel}`}
           </button>
         ) : null}
       </div>
@@ -124,26 +126,21 @@ export function RepositoryLoadErrorPanel({ error }: { error: RepositoryLoadError
   );
 }
 
-export function CodexUnavailablePanel({ onShowFiles }: { onShowFiles: () => void }) {
+export function AgentUnavailablePanel({
+  agentLabel,
+  onShowFiles,
+  reason,
+}: {
+  agentLabel: string;
+  onShowFiles: () => void;
+  reason?: string;
+}) {
   return (
     <>
-      <strong>Codex CLI not found</strong>
+      <strong>{agentLabel} CLI not found</strong>
       <p>
-        Install Codex, then verify <code className="walkthrough-inline-code">codex --version</code>{' '}
-        works in Terminal.
-      </p>
-      <p>
-        Codiff checks <code className="walkthrough-inline-code">PATH</code>,{' '}
-        <code className="walkthrough-inline-code">/opt/homebrew/bin/codex</code>, and{' '}
-        <code className="walkthrough-inline-code">/usr/local/bin/codex</code>. It does not run shell
-        startup files.
-      </p>
-      <p>
-        If Codex is somewhere else, launch Codiff with{' '}
-        <code className="walkthrough-inline-code">
-          CODIFF_CODEX_PATH=/absolute/path/to/codex codiff -w
-        </code>
-        .
+        {reason ??
+          `Install ${agentLabel} and verify its CLI works in Terminal, then try the walkthrough again.`}
       </p>
       <div className="empty-panel-actions">
         <button onClick={onShowFiles} type="button">

@@ -189,6 +189,27 @@ test('parseArguments recognizes Codex walkthrough seed options', () => {
   });
 });
 
+test('parseArguments recognizes Claude walkthrough seed options and the agent override', () => {
+  expect(
+    parseArguments([
+      '-w',
+      '--agent',
+      'claude',
+      '--claude-session',
+      '019e5e57-e7d6-7392-9ad1-ad959319d2fb',
+    ]),
+  ).toMatchObject({
+    agentBackend: 'claude',
+    claudeSessionId: '019e5e57-e7d6-7392-9ad1-ad959319d2fb',
+    walkthrough: true,
+  });
+});
+
+test('parseArguments ignores unknown agent backends', () => {
+  const result = parseArguments(['--agent', 'gpt']) as { agentBackend?: string };
+  expect(result.agentBackend).toBeUndefined();
+});
+
 test('parseArguments treats hash-prefixed PR marker values as review sources', () => {
   expect(parseArguments(['pr', '#75'])).toEqual({
     commitRef: null,
@@ -575,6 +596,100 @@ test('Codex skill launcher does not override explicit repository targets', async
     expect((await readFile(logPath, 'utf8')).trim().split('\n')).toEqual([
       '-w',
       explicitRepositoryPath,
+    ]);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('Claude skill launcher uses the session cwd and forwards --agent claude', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-claude-launcher-'));
+  const home = join(directory, 'home');
+  const repositoryPath = join(directory, 'repo');
+  const sessionId = '019e5e57-e7d6-7392-9ad1-ad959319d2fb';
+  const projectDirectory = join(home, '.claude', 'projects', '-tmp-repo');
+  const sessionPath = join(projectDirectory, `${sessionId}.jsonl`);
+  const fakeCodiff = join(directory, 'codiff');
+  const logPath = join(directory, 'args.txt');
+
+  try {
+    await mkdir(repositoryPath, { recursive: true });
+    await mkdir(projectDirectory, { recursive: true });
+    await writeFile(sessionPath, `${JSON.stringify({ cwd: repositoryPath })}\n`);
+    await writeFile(
+      fakeCodiff,
+      '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$OPEN_ARGS_FILE"\ndone\n',
+    );
+    await chmod(fakeCodiff, 0o755);
+
+    await execFileAsync(
+      process.execPath,
+      [resolve('claude/skills/codiff/scripts/open-codiff.mjs'), 'HEAD'],
+      {
+        cwd: resolve('claude/skills/codiff'),
+        env: {
+          ...process.env,
+          CLAUDE_CONFIG_DIR: join(home, '.claude'),
+          CLAUDE_SESSION_ID: sessionId,
+          CODIFF_COMMAND: fakeCodiff,
+          OPEN_ARGS_FILE: logPath,
+        },
+      },
+    );
+
+    expect((await readFile(logPath, 'utf8')).trim().split('\n')).toEqual([
+      '-w',
+      '--agent',
+      'claude',
+      '--claude-session',
+      sessionId,
+      'HEAD',
+      repositoryPath,
+    ]);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('packaged terminal helper forwards the agent and Claude session to Electron', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-app-helper-'));
+  const fakeBin = join(directory, 'bin');
+  const logPath = join(directory, 'open-args.txt');
+  const repositoryPath = join(directory, 'repo');
+  const openPath = join(fakeBin, 'open');
+  const sessionId = '019e5e57-e7d6-7392-9ad1-ad959319d2fb';
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(repositoryPath);
+    await writeFile(
+      openPath,
+      '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$OPEN_ARGS_FILE"\ndone\n',
+    );
+    await chmod(openPath, 0o755);
+
+    await execFileAsync(
+      resolve('bin/codiff-app'),
+      ['-w', '--agent', 'claude', '--claude-session', sessionId, repositoryPath],
+      {
+        env: {
+          ...process.env,
+          OPEN_ARGS_FILE: logPath,
+          PATH: `${fakeBin}:${process.env.PATH}`,
+        },
+      },
+    );
+
+    expect((await readFile(logPath, 'utf8')).trim().split('\n')).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      '--claude-session',
+      sessionId,
+      '--agent',
+      'claude',
+      '--walkthrough',
+      repositoryPath,
     ]);
   } finally {
     await rm(directory, { force: true, recursive: true });

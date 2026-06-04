@@ -194,6 +194,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
         short: 'w',
         type: 'boolean',
       },
+      agent: {
+        type: 'string',
+      },
+      'claude-session': {
+        type: 'string',
+      },
       'codex-session': {
         type: 'string',
       },
@@ -263,6 +269,8 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     : null;
   const envPullRequestUrl = useEnvironment ? process.env.CODIFF_PULL_REQUEST_URL || '' : '';
   const envCodexSessionId = useEnvironment ? process.env.CODIFF_CODEX_SESSION_ID || '' : '';
+  const envClaudeSessionId = useEnvironment ? process.env.CODIFF_CLAUDE_SESSION_ID || '' : '';
+  const envAgentBackend = useEnvironment ? process.env.CODIFF_AGENT_BACKEND || '' : '';
   const envWalkthroughContextPath = useEnvironment
     ? process.env.CODIFF_WALKTHROUGH_CONTEXT || ''
     : '';
@@ -270,6 +278,14 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     (typeof values['codex-session'] === 'string' ? values['codex-session'] : '') ||
     envCodexSessionId ||
     undefined;
+  const claudeSessionId =
+    (typeof values['claude-session'] === 'string' ? values['claude-session'] : '') ||
+    envClaudeSessionId ||
+    undefined;
+  const rawAgentBackend =
+    (typeof values.agent === 'string' ? values.agent : '') || envAgentBackend || '';
+  const agentBackend =
+    rawAgentBackend === 'codex' || rawAgentBackend === 'claude' ? rawAgentBackend : undefined;
   const walkthroughContextPath =
     (typeof values['walkthrough-context'] === 'string' ? values['walkthrough-context'] : '') ||
     envWalkthroughContextPath ||
@@ -283,6 +299,8 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   );
   return {
     launchOptions: {
+      ...(agentBackend ? { agentBackend } : {}),
+      ...(claudeSessionId ? { claudeSessionId } : {}),
       ...(codexSessionId ? { codexSessionId } : {}),
       repositoryPathProvided,
       source: sourcePullRequestUrl

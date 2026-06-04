@@ -4,7 +4,19 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 export const flagDefinitions = [
+  {
+    argument: '<codex|claude>',
+    description: 'Override the agent backend for this session.',
+    name: 'agent',
+    type: 'string',
+  },
   { argument: '<ref>', description: 'Open branch history.', name: 'branch', type: 'string' },
+  {
+    argument: '<id>',
+    description: 'Attach Claude Code session metadata to a walkthrough.',
+    name: 'claude-session',
+    type: 'string',
+  },
   { argument: '<ref>', description: 'Review a specific commit.', name: 'commit', type: 'string' },
   {
     argument: '<id>',
@@ -246,6 +258,9 @@ export const parseArguments = (args) => {
   let branchRef = typeof values.branch === 'string' ? values.branch : null;
   const codexSessionId =
     typeof values['codex-session'] === 'string' ? values['codex-session'] : null;
+  const claudeSessionId =
+    typeof values['claude-session'] === 'string' ? values['claude-session'] : null;
+  const agentBackend = values.agent === 'codex' || values.agent === 'claude' ? values.agent : null;
   let pullRequestNumber = null;
   let pullRequestUrl = null;
   let requestedPath = null;
@@ -297,6 +312,8 @@ export const parseArguments = (args) => {
   }
 
   return {
+    ...(agentBackend ? { agentBackend } : {}),
+    ...(claudeSessionId ? { claudeSessionId } : {}),
     ...(codexSessionId ? { codexSessionId } : {}),
     ...(branchRef ? { branchRef } : {}),
     commitRef,

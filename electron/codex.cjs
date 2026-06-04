@@ -1,9 +1,18 @@
 // @ts-check
 
 const { spawn } = require('node:child_process');
-const { accessSync, constants, promises: fs, statSync } = require('node:fs');
+const { promises: fs } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { delimiter, join } = require('node:path');
+const { join } = require('node:path');
+const {
+  cleanText,
+  findExecutableOnPath,
+  isExecutableFile,
+  normalizeEnum,
+  oneLine,
+  parseJSONMessage,
+  truncate,
+} = require('./agent-shared.cjs');
 
 const CODEX_TIMEOUT_MS = 45_000;
 const DEFAULT_OPENAI_MODEL = 'gpt-5.3-codex-spark';
@@ -43,48 +52,6 @@ const OPENAI_MODELS = Object.freeze([
   },
 ]);
 const OPENAI_MODEL_IDS = new Set(OPENAI_MODELS.map((model) => model.id));
-
-/** @param {string} path */
-const isExecutableFile = (path) => {
-  try {
-    return statSync(path).isFile() && (accessSync(path, constants.X_OK), true);
-  } catch {
-    return false;
-  }
-};
-
-/** @param {string} command */
-const getExecutableNames = (command) => {
-  if (process.platform !== 'win32') {
-    return [command];
-  }
-
-  const extensions = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean);
-  return [command, ...extensions.map((extension) => `${command}${extension.toLowerCase()}`)];
-};
-
-/** @param {string} command */
-const findExecutableOnPath = (command) => {
-  const path = process.env.PATH;
-  if (!path) {
-    return null;
-  }
-
-  for (const directory of path.split(delimiter)) {
-    if (!directory) {
-      continue;
-    }
-
-    for (const executable of getExecutableNames(command)) {
-      const candidate = join(directory, executable);
-      if (isExecutableFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
-};
 
 /** @param {string} [detail] */
 const createCodexNotFoundError = (detail) =>
@@ -190,27 +157,6 @@ const getCodexLaunchError = (error) => {
   return new Error(message);
 };
 
-/** @param {unknown} value @param {string} [fallback] */
-const oneLine = (value, fallback = '') =>
-  (typeof value === 'string' ? value : fallback).replace(/\s+/g, ' ').trim();
-
-/** @param {string} value @param {number} maxLength */
-const truncate = (value, maxLength) => {
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  return `${value.slice(0, maxLength)}\n...[truncated]`;
-};
-
-/** @param {unknown} value @param {string} [fallback] */
-const cleanText = (value, fallback = '') =>
-  oneLine(value, fallback).replace(/\s*\.{3}\[truncated]$/i, '');
-
-/** @template T @param {unknown} value @param {ReadonlySet<T>} allowed @param {T} fallback */
-const normalizeEnum = (value, allowed, fallback) =>
-  allowed.has(/** @type {T} */ (value)) ? /** @type {T} */ (value) : fallback;
-
 /** @param {unknown} value @returns {string} */
 const normalizeOpenAIModel = (value) =>
   normalizeEnum(value, OPENAI_MODEL_IDS, DEFAULT_OPENAI_MODEL);
@@ -220,20 +166,6 @@ const isOpenAIModelAvailabilityError = (value) =>
   /\b(?:model_not_found|unknown model|invalid model|model is not available|not available for|not supported|does not have access|do not have access|don't have access|access to model|403|404)\b/i.test(
     value,
   );
-
-/** @param {string} message @returns {unknown} */
-const parseJSONMessage = (message) => {
-  try {
-    return JSON.parse(message);
-  } catch {
-    const match = message.match(/\{[\s\S]*\}/);
-    if (!match) {
-      throw new Error('Codex did not return JSON.');
-    }
-
-    return JSON.parse(match[0]);
-  }
-};
 
 /**
  * @param {string} repoRoot

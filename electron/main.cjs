@@ -26,7 +26,9 @@ const {
   submitPullRequestReview,
   validateRepositoryPath,
 } = require('./git-state.cjs');
-const { FALLBACK_OPENAI_MODEL, normalizeOpenAIModel, OPENAI_MODELS } = require('./codex.cjs');
+const { normalizeOpenAIModel } = require('./codex.cjs');
+const { normalizeClaudeModel } = require('./claude.cjs');
+const { getAgent, listAgents, normalizeAgentBackend } = require('./agent.cjs');
 const {
   configToPreferences,
   createDefaultConfig,
@@ -38,7 +40,6 @@ const {
   writeConfig,
 } = require('./config.cjs');
 const { readReviewAssistantReply } = require('./review-assist.cjs');
-const { readCodexSessionContext } = require('./codex-session-context.cjs');
 const {
   findMatchingWindowIdentity,
   getWindowIdentity,
@@ -52,7 +53,7 @@ const {
   getLaunchOptions,
   getLaunchPath,
 } = require('./main/command-line.cjs');
-const { createCodexSkillInstaller } = require('./main/codex-skill.cjs');
+const { createSkillInstaller } = require('./main/agent-skill.cjs');
 const { createEditorOpener } = require('./main/editor.cjs');
 const { createTerminalHelper } = require('./main/terminal-helper.cjs');
 const {
@@ -90,11 +91,26 @@ const pendingCommentsClipboardController = createPendingCommentsClipboardControl
 /** @type {CodiffConfig} */
 let config = createDefaultConfig();
 
-const { getCodexSkillStatus, installCodexSkill } = createCodexSkillInstaller({
-  app,
-  dialog,
-  root,
-});
+/** @type {Map<'codex' | 'claude', {agent: import('./agent.cjs').Agent; installer: ReturnType<typeof createSkillInstaller>}>} */
+const skillInstallers = new Map(
+  listAgents().map((agent) => [
+    agent.id,
+    { agent, installer: createSkillInstaller({ app, dialog, root, skill: agent.skill }) },
+  ]),
+);
+
+const getActiveAgent = () => getAgent(config.settings.agentBackend);
+
+/** @param {number} webContentsId */
+const resolveWindowAgent = (webContentsId) => {
+  const override = windowLaunchOptions.get(webContentsId)?.agentBackend;
+  return getAgent(
+    override === 'codex' || override === 'claude' ? override : config.settings.agentBackend,
+  );
+};
+
+/** @param {'codex' | 'claude'} agentId */
+const skillInstallerFor = (agentId) => skillInstallers.get(agentId)?.installer;
 const { getTerminalHelperStatus, installTerminalHelper } = createTerminalHelper({
   app,
   dialog,
@@ -125,6 +141,12 @@ const updateConfig = (nextConfig) => {
     settings: {
       ...config.settings,
       ...nextConfig.settings,
+      agentBackend: normalizeAgentBackend(
+        nextConfig.settings?.agentBackend ?? config.settings.agentBackend,
+      ),
+      claudeModel: normalizeClaudeModel(
+        nextConfig.settings?.claudeModel ?? config.settings.claudeModel,
+      ),
       openAIModel: normalizeOpenAIModel(
         nextConfig.settings?.openAIModel ?? config.settings.openAIModel,
       ),
@@ -136,22 +158,33 @@ const updateConfig = (nextConfig) => {
   Menu.setApplicationMenu(buildApplicationMenu());
 };
 
-/** @param {string} model */
-const selectOpenAIModel = (model) => {
-  const openAIModel = normalizeOpenAIModel(model);
-  if (config.settings.openAIModel === openAIModel) {
+/** @param {'codex' | 'claude'} backend */
+const selectAgentBackend = (backend) => {
+  const agentBackend = normalizeAgentBackend(backend);
+  if (config.settings.agentBackend === agentBackend) {
     return;
   }
 
-  updateConfig({ settings: { ...config.settings, openAIModel } });
+  updateConfig({ settings: { ...config.settings, agentBackend } });
 };
 
-const getCodexOptions = () => ({
-  fallbackModel: FALLBACK_OPENAI_MODEL,
-  model: config.settings.openAIModel,
+/** @param {import('./agent.cjs').Agent} agent @param {string} model */
+const selectAgentModel = (agent, model) => {
+  const normalized = agent.normalizeModel(model);
+  if (config.settings[agent.modelSettingKey] === normalized) {
+    return;
+  }
+
+  updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: normalized } });
+};
+
+/** @param {import('./agent.cjs').Agent} agent */
+const getAgentOptions = (agent) => ({
+  fallbackModel: agent.fallbackModel,
+  model: config.settings[agent.modelSettingKey],
   /** @param {string} fallbackModel */
   onModelFallback: async (fallbackModel) => {
-    updateConfig({ settings: { ...config.settings, openAIModel: fallbackModel } });
+    updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } });
   },
 });
 
@@ -278,12 +311,34 @@ const openRepositoryFolder = async (browserWindow) => {
 };
 
 /** @returns {Array<import('electron').MenuItemConstructorOptions>} */
-const buildOpenAIModelSubmenu = () =>
-  OPENAI_MODELS.map((model) => ({
-    checked: config.settings.openAIModel === model.id,
-    click: () => selectOpenAIModel(model.id),
+const buildAgentSubmenu = () =>
+  listAgents().map((agent) => ({
+    checked: config.settings.agentBackend === agent.id,
+    click: () => selectAgentBackend(agent.id),
+    label: agent.label,
+    type: 'radio',
+  }));
+
+/** @returns {Array<import('electron').MenuItemConstructorOptions>} */
+const buildModelSubmenu = () => {
+  const agent = getActiveAgent();
+  return agent.models.map((model) => ({
+    checked: config.settings[agent.modelSettingKey] === model.id,
+    click: () => selectAgentModel(agent, model.id),
     label: model.label,
     type: 'radio',
+  }));
+};
+
+/** @returns {Array<import('electron').MenuItemConstructorOptions>} */
+const buildSkillMenuItems = () =>
+  listAgents().map((agent) => ({
+    click:
+      /** @type {NonNullable<import('electron').MenuItemConstructorOptions['click']>} */ (
+        (_menuItem, browserWindow) =>
+          void skillInstallers.get(agent.id)?.installer.install(browserWindow)
+      ),
+    label: `Install ${agent.skill.label}`,
   }));
 
 /** @returns {import('electron').Menu} */
@@ -298,8 +353,12 @@ const buildApplicationMenu = () =>
                 { role: 'about' },
                 { type: 'separator' },
                 {
-                  label: 'OpenAI Model',
-                  submenu: buildOpenAIModelSubmenu(),
+                  label: 'Agent',
+                  submenu: buildAgentSubmenu(),
+                },
+                {
+                  label: 'Model',
+                  submenu: buildModelSubmenu(),
                 },
                 { type: 'separator' },
                 {
@@ -316,13 +375,7 @@ const buildApplicationMenu = () =>
                     ),
                   label: 'Install Terminal Helper',
                 },
-                {
-                  click:
-                    /** @type {NonNullable<import('electron').MenuItemConstructorOptions['click']>} */ (
-                      (_menuItem, browserWindow) => installCodexSkill(browserWindow)
-                    ),
-                  label: 'Install Codex Skill',
-                },
+                ...buildSkillMenuItems(),
                 { type: 'separator' },
                 { role: 'hide' },
                 { role: 'hideOthers' },
@@ -340,8 +393,12 @@ const buildApplicationMenu = () =>
             ? []
             : [
                 {
-                  label: 'OpenAI Model',
-                  submenu: buildOpenAIModelSubmenu(),
+                  label: 'Agent',
+                  submenu: buildAgentSubmenu(),
+                },
+                {
+                  label: 'Model',
+                  submenu: buildModelSubmenu(),
                 },
                 { type: 'separator' },
                 {
@@ -358,13 +415,7 @@ const buildApplicationMenu = () =>
                     ),
                   label: 'Install Terminal Helper',
                 },
-                {
-                  click:
-                    /** @type {NonNullable<import('electron').MenuItemConstructorOptions['click']>} */ (
-                      (_menuItem, browserWindow) => installCodexSkill(browserWindow)
-                    ),
-                  label: 'Install Codex Skill',
-                },
+                ...buildSkillMenuItems(),
                 { type: 'separator' },
               ]),
           {
@@ -691,6 +742,8 @@ if (squirrelStartup || !lock) {
     migrateFromPreferences(app.getPath('userData'), normalizeOpenAIModel);
     config = readConfig();
     config.settings.openAIModel = normalizeOpenAIModel(config.settings.openAIModel);
+    config.settings.claudeModel = normalizeClaudeModel(config.settings.claudeModel);
+    config.settings.agentBackend = normalizeAgentBackend(config.settings.agentBackend);
     nativeTheme.themeSource = config.settings.theme;
     Menu.setApplicationMenu(buildApplicationMenu());
     const launchOptions = getLaunchOptions();
@@ -704,6 +757,8 @@ if (squirrelStartup || !lock) {
         ...nextConfig,
         settings: {
           ...nextConfig.settings,
+          agentBackend: normalizeAgentBackend(nextConfig.settings.agentBackend),
+          claudeModel: normalizeClaudeModel(nextConfig.settings.claudeModel),
           openAIModel: normalizeOpenAIModel(nextConfig.settings.openAIModel),
         },
       };
@@ -785,11 +840,19 @@ ipcMain.handle(
     },
 );
 
-ipcMain.handle('codiff:getCodexSkillStatus', () => getCodexSkillStatus());
+ipcMain.handle('codiff:getAgentSkillStatus', (event) => {
+  const installer = skillInstallerFor(resolveWindowAgent(event.sender.id).id);
+  return installer ? installer.getStatus() : { installed: false, path: '' };
+});
 
-ipcMain.handle('codiff:installCodexSkill', async (event) => {
-  await installCodexSkill(BrowserWindow.fromWebContents(event.sender));
-  return getCodexSkillStatus();
+ipcMain.handle('codiff:installAgentSkill', async (event) => {
+  const installer = skillInstallerFor(resolveWindowAgent(event.sender.id).id);
+  if (!installer) {
+    return { installed: false, path: '' };
+  }
+
+  await installer.install(BrowserWindow.fromWebContents(event.sender));
+  return installer.getStatus();
 });
 
 ipcMain.handle('codiff:getTerminalHelperStatus', () => getTerminalHelperStatus());
@@ -803,18 +866,20 @@ ipcMain.handle('codiff:getWalkthrough', async (event, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   const state = await readRepositoryState(repositoryPath, source || launchOptions?.source);
+  const agent = resolveWindowAgent(event.sender.id);
   const walkthroughContext = mergeWalkthroughContexts(
     launchOptions?.walkthroughContext,
-    readCodexSessionContext(launchOptions?.codexSessionId),
+    agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
   );
-  return readWalkthrough(state, getCodexOptions(), walkthroughContext);
+  return readWalkthrough(state, agent, getAgentOptions(agent), walkthroughContext);
 });
 
 ipcMain.handle('codiff:askReviewAssistant', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   const state = await readRepositoryState(repositoryPath, request?.source || launchOptions?.source);
-  return readReviewAssistantReply(state, request, getCodexOptions());
+  const agent = resolveWindowAgent(event.sender.id);
+  return readReviewAssistantReply(state, request, agent, getAgentOptions(agent));
 });
 
 ipcMain.handle('codiff:submitPullRequestComment', async (event, request) => {
