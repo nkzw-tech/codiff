@@ -133,6 +133,11 @@
           "type": "string",
           "default": "Mod+b",
           "description": "Toggle the sidebar between expanded and collapsed states."
+        },
+        "toggleWordWrap": {
+          "type": "string",
+          "default": "Alt+z",
+          "description": "Toggle word wrap for long diff lines."
         }
       }
     }

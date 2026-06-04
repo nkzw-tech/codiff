@@ -187,6 +187,10 @@ const mergeConfig = (raw) => {
         typeof rawKeymap.toggleSidebar === 'string'
           ? rawKeymap.toggleSidebar
           : defaults.keymap.toggleSidebar,
+      toggleWordWrap:
+        typeof rawKeymap.toggleWordWrap === 'string'
+          ? rawKeymap.toggleWordWrap
+          : defaults.keymap.toggleWordWrap,
     },
     settings: {
       agentBackend: normalizeAgentBackend(rawSettings.agentBackend),

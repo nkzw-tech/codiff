@@ -801,6 +801,10 @@ export default function App() {
     });
   }, []);
 
+  const toggleWordWrap = useCallback(() => {
+    void window.codiff.setWordWrap(!preferencesRef.current.wordWrap).catch(() => {});
+  }, []);
+
   const expandSidebar = useCallback(() => {
     setSidebarCollapsed(false);
     writeSidebarCollapsed(false);
@@ -835,6 +839,14 @@ export default function App() {
       if (matchesShortcut(event, codiffConfig.keymap, 'toggleSidebar')) {
         event.preventDefault();
         toggleSidebar();
+        return;
+      }
+      if (
+        !isNativeInputTarget(event.target) &&
+        matchesShortcut(event, codiffConfig.keymap, 'toggleWordWrap')
+      ) {
+        event.preventDefault();
+        toggleWordWrap();
         return;
       }
       if (matchesShortcut(event, codiffConfig.keymap, 'diffSearch')) {
@@ -873,6 +885,7 @@ export default function App() {
     openSelectedFile,
     sidebarCollapsed,
     toggleSidebar,
+    toggleWordWrap,
   ]);
 
   useEffect(() => {
@@ -1347,10 +1360,9 @@ export default function App() {
       registry.register({
         description: () =>
           preferencesRef.current.wordWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
-        execute: () => {
-          void window.codiff.setWordWrap(!preferencesRef.current.wordWrap).catch(() => {});
-        },
+        execute: toggleWordWrap,
         id: 'toggle-word-wrap',
+        keymapAction: 'toggleWordWrap',
         title: 'Toggle Word Wrap',
       }),
       registry.register({
@@ -1374,6 +1386,7 @@ export default function App() {
     openSelectedFile,
     reloadWindow,
     toggleSidebar,
+    toggleWordWrap,
   ]);
 
   const toggleCollapsed = useCallback(

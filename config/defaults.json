@@ -23,6 +23,7 @@
     "prevSearchMatch": "Shift+Enter",
     "shortcutsHelp": "Shift+?",
     "submitComment": "Mod+Enter",
-    "toggleSidebar": "Mod+b"
+    "toggleSidebar": "Mod+b",
+    "toggleWordWrap": "Alt+z"
   }
 }

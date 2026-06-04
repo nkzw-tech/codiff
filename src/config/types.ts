@@ -30,6 +30,7 @@ export type CodiffKeymap = {
   shortcutsHelp: KeyCombo;
   submitComment: KeyCombo;
   toggleSidebar: KeyCombo;
+  toggleWordWrap: KeyCombo;
 };
 
 export type CodiffConfig = {

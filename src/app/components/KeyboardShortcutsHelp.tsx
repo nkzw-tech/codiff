@@ -17,6 +17,7 @@ const SHORTCUT_GROUPS: ReadonlyArray<ShortcutGroup> = [
       { action: 'commandBar', label: 'Command bar' },
       { action: 'fileFilter', label: 'Filter files' },
       { action: 'toggleSidebar', label: 'Toggle sidebar' },
+      { action: 'toggleWordWrap', label: 'Toggle word wrap' },
       { action: 'openFile', label: 'Open file in editor' },
       { action: 'shortcutsHelp', label: 'Show this help' },
     ],
