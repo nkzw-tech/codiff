@@ -109,6 +109,11 @@
           "default": "Shift+Enter",
           "description": "Navigate to the previous search match."
         },
+        "shortcutsHelp": {
+          "type": "string",
+          "default": "Shift+?",
+          "description": "Hold to show the keyboard shortcut overlay."
+        },
         "closeSearch": {
           "type": "string",
           "default": "Escape",

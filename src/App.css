@@ -2473,6 +2473,131 @@
   }
 }
 
+.shortcuts-help-overlay {
+  -webkit-backdrop-filter: blur(4px);
+  align-items: center;
+  backdrop-filter: blur(4px);
+  background: rgb(255 255 255 / 0.28);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 40px;
+  position: fixed;
+  z-index: 100;
+}
+
+:root[data-theme='dark'] .shortcuts-help-overlay {
+  background: rgb(0 0 0 / 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .shortcuts-help-overlay {
+    background: rgb(0 0 0 / 0.16);
+  }
+}
+
+.shortcuts-help {
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  backdrop-filter: blur(28px) saturate(1.4);
+  background: color-mix(in srgb, var(--code-bg) 88%, transparent);
+  border: 1px solid var(--file-border);
+  border-radius: 28px;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.12) inset,
+    0 18px 80px -54px rgb(0 0 0 / 0.78),
+    0 16px 46px -30px rgb(0 0 0 / 0.72),
+    0 12px 24px -18px rgb(0 0 0 / 0.9);
+  corner-shape: squircle;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 80px);
+  max-width: 760px;
+  overflow: hidden;
+  padding: 22px 24px;
+  width: 100%;
+}
+
+.shortcuts-help-header {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.shortcuts-help-title {
+  color: var(--text);
+  font: 600 15px/1.2 var(--font-sans);
+}
+
+.shortcuts-help-hint {
+  color: var(--muted);
+  font: 12px/1.2 var(--font-sans);
+}
+
+.shortcuts-help-grid {
+  display: grid;
+  gap: 14px 28px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  overflow-y: auto;
+}
+
+.shortcuts-help-group {
+  min-width: 0;
+}
+
+.shortcuts-help-group-title {
+  color: var(--muted);
+  font: 600 11px/1 var(--font-sans);
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.shortcuts-help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.shortcuts-help-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 28px;
+}
+
+.shortcuts-help-label {
+  color: var(--text);
+  font: 13px/1.35 var(--font-sans);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcuts-help-keys {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.shortcuts-help-key {
+  background: rgb(127 127 127 / 0.12);
+  border: 1px solid rgb(127 127 127 / 0.14);
+  border-radius: 6px;
+  color: var(--muted);
+  corner-shape: squircle;
+  font: 11px/1 var(--font-mono);
+  min-width: 18px;
+  padding: 4px 6px;
+  text-align: center;
+}
+
 .command-bar-overlay {
   -webkit-backdrop-filter: blur(4px);
   align-items: flex-start;

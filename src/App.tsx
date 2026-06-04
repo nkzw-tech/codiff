@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { CommandBar } from './app/components/CommandBar.tsx';
+import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import {
   AgentUnavailablePanel,
   CopyCommentsButton,
@@ -183,6 +184,7 @@ export default function App() {
   const walkthroughErrorRef = useRef<WalkthroughError | null>(null);
   const [commandBarVisible, setCommandBarVisible] = useState(false);
   const [commandBarCommands, setCommandBarCommands] = useState<ReadonlyArray<Command>>([]);
+  const [shortcutsHelpVisible, setShortcutsHelpVisible] = useState(false);
   const commandRegistryRef = useRef(createCommandRegistry());
 
   const bumpItemVersion = useCallback((path: string) => {
@@ -872,6 +874,37 @@ export default function App() {
     sidebarCollapsed,
     toggleSidebar,
   ]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || isNativeInputTarget(event.target)) {
+        return;
+      }
+      if (matchesShortcut(event, codiffConfig.keymap, 'shortcutsHelp')) {
+        event.preventDefault();
+        setShortcutsHelpVisible(true);
+      }
+    };
+
+    // The overlay is held open while Shift+? is pressed, so dismiss it the
+    // moment either key is released (or the window loses focus mid-hold).
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === '?' || event.key === '/' || event.key === 'Shift') {
+        setShortcutsHelpVisible(false);
+      }
+    };
+
+    const handleBlur = () => setShortcutsHelpVisible(false);
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [codiffConfig.keymap]);
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
 
@@ -1847,6 +1880,7 @@ export default function App() {
         onClose={() => setCommandBarVisible(false)}
         visible={commandBarVisible}
       />
+      <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
       {!isSwitchingSource ? (
         <div className="review-action-bar">
           <CopyCommentsButton

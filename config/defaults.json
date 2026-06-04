@@ -21,6 +21,7 @@
     "nextSearchMatch": "Enter",
     "openFile": "Mod+k",
     "prevSearchMatch": "Shift+Enter",
+    "shortcutsHelp": "Shift+?",
     "submitComment": "Mod+Enter",
     "toggleSidebar": "Mod+b"
   }

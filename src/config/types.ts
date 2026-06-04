@@ -27,6 +27,7 @@ export type CodiffKeymap = {
   nextSearchMatch: KeyCombo;
   openFile: KeyCombo;
   prevSearchMatch: KeyCombo;
+  shortcutsHelp: KeyCombo;
   submitComment: KeyCombo;
   toggleSidebar: KeyCombo;
 };
