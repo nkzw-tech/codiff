@@ -583,7 +583,7 @@ const createWindow = (
   const display = screen.getPrimaryDisplay();
   const { height, width } = display.workAreaSize;
   const window = new BrowserWindow({
-    autoHideMenuBar: true,
+    autoHideMenuBar: process.platform !== 'linux',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#141414' : '#ffffff',
     height: validatedState?.height ?? Math.max(720, Math.floor(height * 0.86)),
     minHeight: 520,
