@@ -14,8 +14,10 @@ const createCodexSkillInstaller = ({ app, dialog, root }) => {
     root,
     skill: {
       label: 'Codex Skill',
-      sourceSubdir: 'codex/skills/codiff',
-      targetSubdir: '.codex/skills/codiff',
+      targets: [
+        { sourceSubdir: 'codex/skills/codiff', targetSubdir: '.codex/skills/codiff' },
+        { sourceSubdir: 'codex/skills/walkthrough', targetSubdir: '.codex/skills/walkthrough' },
+      ],
     },
   });
 

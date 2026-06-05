@@ -34,7 +34,10 @@ const { readClaudeSessionContext } = require('./claude-session-context.cjs');
  *   ) => Promise<string>;
  *   readSessionContext: (sessionId: string | undefined) => WalkthroughContext | null;
  *   sessionLaunchOptionKey: 'codexSessionId' | 'claudeSessionId';
- *   skill: {label: string; sourceSubdir: string; targetSubdir: string};
+ *   skill: {
+ *     label: string;
+ *     targets: Array<{sourceSubdir: string; targetSubdir: string}>;
+ *   };
  * }} Agent
  */
 
@@ -60,8 +63,10 @@ const createCodexAgent = () => ({
   sessionLaunchOptionKey: 'codexSessionId',
   skill: {
     label: 'Codex Skill',
-    sourceSubdir: 'codex/skills/codiff',
-    targetSubdir: '.codex/skills/codiff',
+    targets: [
+      { sourceSubdir: 'codex/skills/codiff', targetSubdir: '.codex/skills/codiff' },
+      { sourceSubdir: 'codex/skills/walkthrough', targetSubdir: '.codex/skills/walkthrough' },
+    ],
   },
 });
 
@@ -83,8 +88,10 @@ const createClaudeAgent = () => ({
   sessionLaunchOptionKey: 'claudeSessionId',
   skill: {
     label: 'Claude Code Skill',
-    sourceSubdir: 'claude/skills/codiff',
-    targetSubdir: '.claude/skills/codiff',
+    targets: [
+      { sourceSubdir: 'claude/skills/codiff', targetSubdir: '.claude/skills/codiff' },
+      { sourceSubdir: 'claude/skills/walkthrough', targetSubdir: '.claude/skills/walkthrough' },
+    ],
   },
 });
 

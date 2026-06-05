@@ -151,19 +151,24 @@ CODIFF_CLAUDE_PATH=/absolute/path/to/claude codiff --agent claude -w
 Claude Code rides your existing `claude` login (subscription or `ANTHROPIC_API_KEY`); run `claude`
 once and complete `/login` if you have not already.
 
-To seed a walkthrough with the agent conversation that produced the change, install its skill from
-the application menu (`Install Codex Skill` or `Install Claude Code Skill`), then invoke it from the
-agent:
+To drive Codiff from your agent, install its skills from the application menu (`Install Codex Skill`
+or `Install Claude Code Skill`). Each action installs both bundled skills for that agent — `codiff`
+and `walkthrough` — so you only install once, and Codiff updates keep them current. Invoke them from
+the agent:
 
 ```text
-$codiff   # Codex
-/codiff   # Claude Code
+$codiff       /codiff        # open Codiff seeded with the current session
+$walkthrough  /walkthrough   # author a narrative walkthrough of the change
 ```
 
-The skill opens Codiff with `codiff -w --codex-session <id>` (or `--agent claude --claude-session
+`codiff` opens Codiff with `codiff -w --codex-session <id>` (or `--agent claude --claude-session
 <id>`). Codiff then generates its normal diff digest and runs the walkthrough prompt seeded with
 that session's conversation, so the walkthrough sees the original context without a lossy summary
 handoff.
+
+`walkthrough` asks Codiff for the current authoring guide (`codiff --walkthrough-guide`), writes a
+narrative walkthrough JSON to a temporary file, and opens Codiff on it with `--walkthrough-file`.
+Because the guidance lives in Codiff, the installed skill stays a thin shim.
 
 ## Development
 

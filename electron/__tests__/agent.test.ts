@@ -40,8 +40,10 @@ test('resolves the Codex agent with its session and skill wiring', () => {
   expect(agent.notFoundCode).toBe('CODEX_NOT_FOUND');
   expect(agent.skill).toEqual({
     label: 'Codex Skill',
-    sourceSubdir: 'codex/skills/codiff',
-    targetSubdir: '.codex/skills/codiff',
+    targets: [
+      { sourceSubdir: 'codex/skills/codiff', targetSubdir: '.codex/skills/codiff' },
+      { sourceSubdir: 'codex/skills/walkthrough', targetSubdir: '.codex/skills/walkthrough' },
+    ],
   });
   expect(typeof agent.run).toBe('function');
   expect(typeof agent.readSessionContext).toBe('function');
@@ -56,8 +58,10 @@ test('resolves the Claude Code agent with its session and skill wiring', () => {
   expect(agent.notFoundCode).toBe('CLAUDE_NOT_FOUND');
   expect(agent.skill).toEqual({
     label: 'Claude Code Skill',
-    sourceSubdir: 'claude/skills/codiff',
-    targetSubdir: '.claude/skills/codiff',
+    targets: [
+      { sourceSubdir: 'claude/skills/codiff', targetSubdir: '.claude/skills/codiff' },
+      { sourceSubdir: 'claude/skills/walkthrough', targetSubdir: '.claude/skills/walkthrough' },
+    ],
   });
 });
 
