@@ -1,10 +1,26 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildOrderView, resolveOrder } from '../../../lib/narrative-walkthrough.ts';
 import type { NarrativeWalkthrough } from '../../../types.ts';
 
-export type NarrativeViewMode = 'stop' | 'rest';
+export type NarrativeViewMode = 'stop' | 'rest' | 'commit';
 
 export type NarrativeNavigation = ReturnType<typeof useNarrativeNavigation>;
+
+/** Every unique changed-file path the walkthrough touches, in segment order. */
+const collectCommitPaths = (walkthrough: NarrativeWalkthrough | null): ReadonlyArray<string> => {
+  if (!walkthrough) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const paths: Array<string> = [];
+  for (const segment of walkthrough.segments) {
+    if (!seen.has(segment.path)) {
+      seen.add(segment.path);
+      paths.push(segment.path);
+    }
+  }
+  return paths;
+};
 
 /**
  * Shared navigation state for the narrative walkthrough, owned by App and passed
@@ -27,6 +43,41 @@ export const useNarrativeNavigation = (walkthrough: NarrativeWalkthrough | null)
       : undefined;
     return new Set(firstSegment ? [firstSegment] : []);
   });
+
+  // Commit composer state, only meaningful when `walkthrough.commit` is present.
+  // All changed files start selected; the subject seeds from the document.
+  const [commitSelected, setCommitSelected] = useState<ReadonlySet<string>>(
+    () => new Set(collectCommitPaths(walkthrough)),
+  );
+  const [commitSubject, setCommitSubject] = useState<string>(
+    () => walkthrough?.commit?.subjectSeed ?? '',
+  );
+  const [commitBody, setCommitBody] = useState<string>(() => walkthrough?.commit?.body ?? '');
+  const [commitAuto, setCommitAuto] = useState(false);
+
+  // The useState initializers above run once, on the first render — which happens
+  // before the walkthrough has loaded (App passes `null`, then sets it). Re-seed the
+  // walkthrough-derived state the first time a walkthrough (or a fresh one, after a
+  // source switch) arrives, so the order is active, the first stop is ticked, and the
+  // commit composer opens with every file selected and the subject seeded.
+  const seededFor = useRef<NarrativeWalkthrough | null>(null);
+  useEffect(() => {
+    if (!walkthrough || seededFor.current === walkthrough) {
+      return;
+    }
+    seededFor.current = walkthrough;
+    const order = resolveOrder(walkthrough);
+    setOrderId(order?.id ?? walkthrough.defaultOrder);
+    setMode('stop');
+    setIndex(0);
+    setRestFileId(null);
+    const firstSegment = order?.sequence[0]?.segmentId;
+    setVisited(new Set(firstSegment ? [firstSegment] : []));
+    setCommitSelected(new Set(collectCommitPaths(walkthrough)));
+    setCommitSubject(walkthrough.commit?.subjectSeed ?? '');
+    setCommitBody(walkthrough.commit?.body ?? '');
+    setCommitAuto(false);
+  }, [walkthrough]);
 
   const orderView = useMemo(
     () => (walkthrough ? buildOrderView(walkthrough, orderId) : null),
@@ -69,6 +120,38 @@ export const useNarrativeNavigation = (walkthrough: NarrativeWalkthrough | null)
     setRestFileId(null);
   }, []);
 
+  const enterCommit = useCallback(() => {
+    setMode('commit');
+    setRestFileId(null);
+  }, []);
+
+  const toggleCommitFile = useCallback((path: string) => {
+    setCommitSelected((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleCommitGroup = useCallback((paths: ReadonlyArray<string>) => {
+    setCommitSelected((current) => {
+      const allOn = paths.every((path) => current.has(path));
+      const next = new Set(current);
+      for (const path of paths) {
+        if (allOn) {
+          next.delete(path);
+        } else {
+          next.add(path);
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const openRestFile = useCallback((segmentId: string) => {
     setMode('rest');
     setRestFileId(segmentId);
@@ -91,6 +174,11 @@ export const useNarrativeNavigation = (walkthrough: NarrativeWalkthrough | null)
   );
 
   return {
+    commitAuto,
+    commitBody,
+    commitSelected,
+    commitSubject,
+    enterCommit,
     goNext,
     goPrev,
     goStop,
@@ -101,7 +189,12 @@ export const useNarrativeNavigation = (walkthrough: NarrativeWalkthrough | null)
     orderId,
     orderView,
     restFileId,
+    setCommitAuto,
+    setCommitBody,
+    setCommitSubject,
     switchOrder,
+    toggleCommitFile,
+    toggleCommitGroup,
     visited,
   };
 };

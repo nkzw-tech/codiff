@@ -111,6 +111,10 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     reason: 'Unavailable in tests.',
     status: 'unavailable' as const,
   })),
+  createWalkthroughCommit: vi.fn(async () => ({
+    hash: '0000000000000000000000000000000000000000',
+    status: 'committed' as const,
+  })),
   getAgentSkillStatus: vi.fn(async () => ({
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
@@ -182,6 +186,10 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     throw new Error('Unexpected pull request comment submit.');
   }),
   submitPullRequestReview: vi.fn(async () => {}),
+  updateWalkthroughCommitMessage: vi.fn(async () => ({
+    reason: 'Unavailable in tests.',
+    status: 'unavailable' as const,
+  })),
   ...overrides,
 });
 

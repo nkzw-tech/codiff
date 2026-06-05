@@ -1,5 +1,10 @@
 import { expect, test } from 'vite-plus/test';
-import { buildOrderView, resolveOrder, resolveSegmentFile } from '../lib/narrative-walkthrough.ts';
+import {
+  buildCommitModel,
+  buildOrderView,
+  resolveOrder,
+  resolveSegmentFile,
+} from '../lib/narrative-walkthrough.ts';
 import type { ChangedFile, NarrativeWalkthrough } from '../types.ts';
 
 const walkthrough = (): NarrativeWalkthrough => ({
@@ -123,6 +128,46 @@ test('the same segment can lead one order and rest in another', () => {
   // 'mirror' rests under keys but isn't referenced by results at all.
   expect(keys.rest.some((item) => item.segmentId === 'mirror')).toBe(true);
   expect(results.rest.map((item) => item.segmentId)).toEqual(['lock']);
+});
+
+test('buildCommitModel collapses the order into phase groups plus the rest', () => {
+  const view = buildOrderView(walkthrough(), 'keys')!;
+  const model = buildCommitModel(view);
+
+  expect(model.groups.map((group) => [group.title, group.isRest])).toEqual([
+    ['The bug', false],
+    ['Proof', false],
+    ['Not in the arc', true],
+  ]);
+  expect(model.groups[2].files.map((file) => file.path)).toEqual(['pnpm-lock.yaml', 'mirror.ts']);
+  expect(model.files.map((file) => file.path)).toEqual([
+    'src/App.tsx',
+    'src/test.ts',
+    'pnpm-lock.yaml',
+    'mirror.ts',
+  ]);
+});
+
+test('buildCommitModel carries per-file change-type tags and notes onto the rows', () => {
+  const base = walkthrough();
+  const tagged: Record<string, Partial<NarrativeWalkthrough['segments'][number]>> = {
+    lock: { changeType: 'lockfile' },
+    s1: { changeType: 'fix', commitNote: 'reorder the hunks' },
+    s2: { changeType: 'test', commitNote: 'lock the regression' },
+  };
+  const wt: NarrativeWalkthrough = {
+    ...base,
+    segments: base.segments.map((segment) => ({ ...segment, ...tagged[segment.id] })),
+  };
+  const model = buildCommitModel(buildOrderView(wt, 'keys')!);
+  const byPath = new Map(model.files.map((file) => [file.path, file]));
+
+  expect(byPath.get('src/App.tsx')).toMatchObject({ changeType: 'fix', note: 'reorder the hunks' });
+  expect(byPath.get('src/test.ts')).toMatchObject({
+    changeType: 'test',
+    note: 'lock the regression',
+  });
+  expect(byPath.get('pnpm-lock.yaml')?.changeType).toBe('lockfile');
 });
 
 test('resolveSegmentFile prefers the anchor section then the first visible one', () => {

@@ -22,6 +22,17 @@ const STATUSES = new Set(['added', 'deleted', 'modified', 'renamed', 'untracked'
 const ICONS = new Set(['bug', 'wrench', 'path', 'flask', 'beaker', 'doc', 'gear']);
 const AGENTS = new Set(['codex', 'claude']);
 const SECTION_KINDS = new Set(['commit', 'pull-request', 'staged', 'unstaged']);
+const CHANGE_TYPES = new Set([
+  'fix',
+  'feature',
+  'refactor',
+  'test',
+  'generated',
+  'lockfile',
+  'snapshot',
+  'i18n',
+  'docs',
+]);
 
 const MAX_PROSE_CHARS = 4_000;
 
@@ -32,6 +43,14 @@ const narrativeWalkthroughSchema = {
   additionalProperties: false,
   properties: {
     agent: { enum: ['codex', 'claude'], type: 'string' },
+    commit: {
+      additionalProperties: false,
+      properties: {
+        body: { type: 'string' },
+        subjectSeed: { type: 'string' },
+      },
+      type: 'object',
+    },
     context: { type: 'object' },
     defaultOrder: { type: 'string' },
     focus: { type: 'string' },
@@ -132,6 +151,7 @@ const narrativeWalkthroughSchema = {
             required: ['display'],
             type: 'object',
           },
+          changeType: { enum: [...CHANGE_TYPES], type: 'string' },
           comments: {
             items: {
               additionalProperties: false,
@@ -149,6 +169,7 @@ const narrativeWalkthroughSchema = {
             },
             type: 'array',
           },
+          commitNote: { type: 'string' },
           deleted: { type: 'number' },
           granularity: { enum: [...GRANULARITIES], type: 'string' },
           id: { type: 'string' },
@@ -346,6 +367,14 @@ const normalizeSegments = (input, files) => {
     if (summary) {
       normalized.summary = summary;
     }
+    const changeType = normalizeEnum(segment?.changeType, CHANGE_TYPES, undefined);
+    if (changeType) {
+      normalized.changeType = changeType;
+    }
+    const commitNote = cleanText(segment?.commitNote);
+    if (commitNote) {
+      normalized.commitNote = commitNote;
+    }
     const comments = (Array.isArray(segment?.comments) ? segment.comments : [])
       .map((comment, index) => normalizeComment(comment, index))
       .filter(Boolean);
@@ -520,6 +549,26 @@ const normalizeNarrativeWalkthrough = (input, files) => {
   }
   if (input.context && typeof input.context === 'object') {
     result.context = input.context;
+  }
+
+  // A commit composer only makes sense for a live staging set — never a past
+  // commit, branch, or pull request — so honor `commit` only for a working tree.
+  if (
+    input.commit &&
+    typeof input.commit === 'object' &&
+    /** @type {{type?: string}} */ (result.source).type === 'working-tree'
+  ) {
+    /** @type {Record<string, unknown>} */
+    const commit = {};
+    const subjectSeed = cleanText(input.commit.subjectSeed);
+    if (subjectSeed) {
+      commit.subjectSeed = subjectSeed;
+    }
+    const body = cleanRich(input.commit.body);
+    if (body) {
+      commit.body = body;
+    }
+    result.commit = commit;
   }
 
   return /** @type {NarrativeWalkthrough} */ (result);

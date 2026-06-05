@@ -1,0 +1,427 @@
+import { useState } from 'react';
+import {
+  buildCommitModel,
+  changeTypeLabel,
+  type CommitFile,
+  type CommitGroup,
+  type WalkthroughOrderView,
+} from '../../../lib/narrative-walkthrough.ts';
+import type {
+  NarrativeWalkthrough,
+  WalkthroughCommitMessageRequest,
+  WalkthroughCommitMessageResult,
+  WalkthroughCommitRequest,
+  WalkthroughCommitResult,
+} from '../../../types.ts';
+import { ArrowsClockwise, Check, GitBranch } from './icons.tsx';
+import { AgentLogo, PhaseIcon, WalkthroughLineCount } from './parts.tsx';
+import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
+
+export type CommitHandler = (request: WalkthroughCommitRequest) => Promise<WalkthroughCommitResult>;
+export type CommitMessageHandler = (
+  request: WalkthroughCommitMessageRequest,
+) => Promise<WalkthroughCommitMessageResult>;
+
+const agentName = (agentId: 'codex' | 'claude') => (agentId === 'claude' ? 'Claude' : 'Codex');
+const agentFullName = (agentId: 'codex' | 'claude') =>
+  agentId === 'claude' ? 'Claude Code' : 'Codex';
+
+type CheckState = 'on' | 'off' | 'partial';
+
+function CommitCheck({ state }: { state: CheckState }) {
+  if (state === 'partial') {
+    return (
+      <span className="wt-check partial">
+        <span className="wt-check-dash" />
+      </span>
+    );
+  }
+  return (
+    <span className={`wt-check${state === 'on' ? ' on' : ''}`}>
+      {state === 'on' ? <Check size={12} weight="bold" /> : null}
+    </span>
+  );
+}
+
+function ChangeTag({ file }: { file: CommitFile }) {
+  if (!file.changeType) {
+    return null;
+  }
+  return (
+    <span className={`wt-ctag wt-ctag-${file.changeType}`}>{changeTypeLabel[file.changeType]}</span>
+  );
+}
+
+function PathLabel({ path }: { path: string }) {
+  const cut = path.lastIndexOf('/');
+  if (cut === -1) {
+    return <span className="wt-stage-file-path">{path}</span>;
+  }
+  return (
+    <span className="wt-stage-file-path">
+      <span className="dir">{path.slice(0, cut + 1)}</span>
+      {path.slice(cut + 1)}
+    </span>
+  );
+}
+
+function StageFileRow({
+  file,
+  on,
+  onToggle,
+}: {
+  file: CommitFile;
+  on: boolean;
+  onToggle: (path: string) => void;
+}) {
+  return (
+    <button
+      className={`wt-stage-file${on ? '' : ' off'}`}
+      onClick={() => onToggle(file.path)}
+      type="button"
+    >
+      <CommitCheck state={on ? 'on' : 'off'} />
+      <span className="wt-stage-file-main">
+        <PathLabel path={file.path} />
+        {file.note ? <span className="wt-stage-file-note">{file.note}</span> : null}
+      </span>
+      <ChangeTag file={file} />
+      <WalkthroughLineCount added={file.added} deleted={file.deleted} />
+    </button>
+  );
+}
+
+function StageGroupRow({
+  group,
+  onToggleFile,
+  onToggleGroup,
+  selected,
+}: {
+  group: CommitGroup;
+  onToggleFile: (path: string) => void;
+  onToggleGroup: (paths: ReadonlyArray<string>) => void;
+  selected: ReadonlySet<string>;
+}) {
+  const paths = group.files.map((file) => file.path);
+  const onCount = paths.filter((path) => selected.has(path)).length;
+  const state: CheckState = onCount === 0 ? 'off' : onCount === paths.length ? 'on' : 'partial';
+  return (
+    <div className="wt-stage-group">
+      <button className="wt-stage-group-head" onClick={() => onToggleGroup(paths)} type="button">
+        <CommitCheck state={state} />
+        <span className="wt-stage-group-icon">
+          <PhaseIcon icon={group.icon} size={14} />
+        </span>
+        <span className="wt-stage-group-title">{group.title}</span>
+        <span className="wt-stage-group-count">
+          {onCount}/{paths.length}
+        </span>
+      </button>
+      {group.files.map((file) => (
+        <StageFileRow
+          file={file}
+          key={file.path}
+          on={selected.has(file.path)}
+          onToggle={onToggleFile}
+        />
+      ))}
+    </div>
+  );
+}
+
+function SubjectInput({
+  agentId,
+  auto,
+  onChange,
+  onToggleAuto,
+  seed,
+  value,
+}: {
+  agentId: 'codex' | 'claude';
+  auto: boolean;
+  onChange: (value: string) => void;
+  onToggleAuto: () => void;
+  seed: string;
+  value: string;
+}) {
+  const shown = auto ? seed : value;
+  const length = shown.length;
+  return (
+    <div className="wt-commit-subject">
+      <span className="wt-commit-eyebrow">Summary</span>
+      <div className="wt-commit-subject-wrap">
+        <input
+          className={`wt-commit-subject-field${auto ? ' auto' : ''}`}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Summarize the change in one line…"
+          readOnly={auto}
+          spellCheck={false}
+          value={shown}
+        />
+        {auto ? (
+          <span className="wt-commit-subject-auto-mark">
+            <AgentLogo agentId={agentId} />
+          </span>
+        ) : null}
+      </div>
+      <div className="wt-commit-subject-foot">
+        <button
+          className={`wt-commit-writefor${auto ? ' on' : ''}`}
+          onClick={onToggleAuto}
+          type="button"
+        >
+          <CommitCheck state={auto ? 'on' : 'off'} />
+          <span>Let {agentName(agentId)} write the summary for me</span>
+        </button>
+        <span className={`wt-commit-count${length > 50 ? ' warn' : ''}`}>{length}/50</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The agent-drafted commit body, editable. When the file selection is narrowed
+ * below the full set, an "Update the message" action asks the agent to rewrite
+ * the prose for exactly the selected files.
+ */
+function MessageDraft({
+  agentId,
+  canUpdate,
+  flash,
+  onChange,
+  onUpdate,
+  updateError,
+  updating,
+  value,
+}: {
+  agentId: 'codex' | 'claude';
+  canUpdate: boolean;
+  flash: boolean;
+  onChange: (value: string) => void;
+  onUpdate: () => void;
+  updateError: string | null;
+  updating: boolean;
+  value: string;
+}) {
+  return (
+    <div className="wt-commit-msg">
+      <div className="wt-commit-msg-head">
+        <span className="wt-commit-msg-avatar">
+          <AgentLogo agentId={agentId} />
+        </span>
+        <span className="wt-commit-msg-by">
+          <strong>{agentFullName(agentId)}</strong>
+          <span>
+            {canUpdate ? 'Selection changed — message may be stale' : 'Drafted body · editable'}
+          </span>
+        </span>
+        {canUpdate ? (
+          <span className="wt-commit-msg-actions">
+            <button
+              className="wt-commit-update"
+              disabled={updating}
+              onClick={onUpdate}
+              type="button"
+            >
+              <ArrowsClockwise size={14} />
+              {updating ? 'Updating…' : 'Update the message'}
+            </button>
+          </span>
+        ) : null}
+      </div>
+      <div className={`wt-commit-msg-body${flash ? ' flash' : ''}`}>
+        <textarea
+          className="wt-commit-msg-input"
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Describe the change in a paragraph or two…"
+          spellCheck={false}
+          value={value}
+        />
+      </div>
+      {updateError ? <div className="wt-commit-msg-foot error">{updateError}</div> : null}
+    </div>
+  );
+}
+
+export function CommitView({
+  branch,
+  navigation,
+  onCommit,
+  onUpdateMessage,
+  walkthrough,
+}: {
+  branch: string | null;
+  navigation: NarrativeNavigation;
+  onCommit: CommitHandler;
+  onUpdateMessage: CommitMessageHandler;
+  walkthrough: NarrativeWalkthrough;
+}) {
+  const orderView = navigation.orderView as WalkthroughOrderView;
+  const model = buildCommitModel(orderView);
+  const selected = navigation.commitSelected;
+  const selectedFiles = model.files.filter((file) => selected.has(file.path));
+  const totals = selectedFiles.reduce(
+    (sum, file) => ({ added: sum.added + file.added, deleted: sum.deleted + file.deleted }),
+    { added: 0, deleted: 0 },
+  );
+  const seed = walkthrough.commit?.subjectSeed ?? '';
+  const subject = navigation.commitAuto ? seed : navigation.commitSubject;
+  const allSelected = selectedFiles.length === model.files.length;
+
+  const [status, setStatus] = useState<'idle' | 'submitting'>('idle');
+  const [result, setResult] = useState<WalkthroughCommitResult | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [bodyFlash, setBodyFlash] = useState(false);
+
+  const committed = result?.status === 'committed';
+  const canCommit =
+    status === 'idle' &&
+    !committed &&
+    !updating &&
+    selectedFiles.length > 0 &&
+    subject.trim().length > 0;
+  const canUpdate = !allSelected && selectedFiles.length > 0 && !committed;
+
+  const updateMessage = async () => {
+    if (!canUpdate || updating) {
+      return;
+    }
+    setUpdating(true);
+    setUpdateError(null);
+    const next = await onUpdateMessage({
+      body: navigation.commitBody,
+      paths: selectedFiles.map((file) => file.path),
+      subject: subject.trim(),
+    });
+    setUpdating(false);
+    if (next.status === 'ready') {
+      navigation.setCommitBody(next.body);
+      if (next.subject) {
+        navigation.setCommitAuto(false);
+        navigation.setCommitSubject(next.subject);
+      }
+      setBodyFlash(true);
+      window.setTimeout(() => setBodyFlash(false), 700);
+    } else {
+      setUpdateError(next.reason);
+    }
+  };
+
+  const submit = async () => {
+    if (!canCommit) {
+      return;
+    }
+    setStatus('submitting');
+    setResult(null);
+    const next = await onCommit({
+      body: navigation.commitBody.trim(),
+      paths: selectedFiles.map((file) => file.path),
+      subject: subject.trim(),
+    });
+    setResult(next);
+    setStatus('idle');
+  };
+
+  return (
+    <div className="wt-commit">
+      <div className="wt-commit-bar">
+        <span className="wt-commit-bar-title">
+          <GitBranch size={16} /> Commit
+        </span>
+        {branch ? (
+          <span className="wt-commit-bar-branch">
+            <GitBranch size={13} /> {branch}
+          </span>
+        ) : null}
+      </div>
+      <div className="wt-commit-scroll">
+        <div className="wt-commit-stage">
+          {committed ? (
+            <div className="wt-commit-recap">
+              <span className="wt-commit-recap-icon">
+                <Check size={17} weight="bold" />
+              </span>
+              <span className="wt-commit-recap-text">
+                <strong>
+                  Committed {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}
+                </strong>
+                <span>
+                  {result && result.status === 'committed' ? result.hash.slice(0, 10) : ''}
+                  {branch ? ` · onto ${branch}` : ''}
+                </span>
+              </span>
+            </div>
+          ) : null}
+          {result?.status === 'failed' ? (
+            <div className="wt-commit-error">{result.reason}</div>
+          ) : null}
+          <SubjectInput
+            agentId={walkthrough.agent}
+            auto={navigation.commitAuto}
+            onChange={navigation.setCommitSubject}
+            onToggleAuto={() => navigation.setCommitAuto(!navigation.commitAuto)}
+            seed={seed}
+            value={navigation.commitSubject}
+          />
+          <MessageDraft
+            agentId={walkthrough.agent}
+            canUpdate={canUpdate}
+            flash={bodyFlash}
+            onChange={navigation.setCommitBody}
+            onUpdate={updateMessage}
+            updateError={updateError}
+            updating={updating}
+            value={navigation.commitBody}
+          />
+          <div className="wt-stage-files">
+            <div className="wt-stage-files-head">
+              <span className="wt-stage-files-title">Files in this commit</span>
+              <span className="wt-stage-files-sel">
+                {selectedFiles.length} of {model.files.length} selected
+              </span>
+            </div>
+            {model.groups.map((group) => (
+              <StageGroupRow
+                group={group}
+                key={group.id}
+                onToggleFile={navigation.toggleCommitFile}
+                onToggleGroup={navigation.toggleCommitGroup}
+                selected={selected}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="wt-commit-foot">
+        <span className="wt-commit-foot-summary">
+          Committing{' '}
+          <strong>
+            {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}
+          </strong>{' '}
+          · <span className="added">+{totals.added}</span>{' '}
+          <span className="deleted">−{totals.deleted}</span>
+          {branch ? (
+            <>
+              {' '}
+              onto <strong>{branch}</strong>
+            </>
+          ) : null}
+        </span>
+        <span className="wt-commit-foot-actions">
+          <button className="wt-commit-btn" disabled={!canCommit} onClick={submit} type="button">
+            <GitBranch size={16} />
+            <span>
+              {committed ? 'Committed' : status === 'submitting' ? 'Committing…' : 'Commit'}
+            </span>
+            {!allSelected && !committed ? (
+              <span className="lc">
+                {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}
+              </span>
+            ) : null}
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}

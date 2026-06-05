@@ -1,10 +1,11 @@
 import { renderInlineMarkdown } from '../../../lib/markdown.tsx';
-import type {
-  WalkthroughOrderView,
-  WalkthroughStopView,
+import {
+  buildCommitModel,
+  type WalkthroughOrderView,
+  type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { NarrativeWalkthrough } from '../../../types.ts';
-import { Check, Path } from './icons.tsx';
+import { Check, GitBranch, Path } from './icons.tsx';
 import { AgentLogo, GranularityChip, PhaseIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
@@ -130,6 +131,17 @@ export function NarrativeSidebar({
   const currentSegmentId =
     navigation.mode === 'stop' ? orderView.sequence[navigation.index]?.segmentId : null;
 
+  const committable = walkthrough.commit != null;
+  const commitModel = committable ? buildCommitModel(orderView) : null;
+  const commitTotals = commitModel
+    ? commitModel.files
+        .filter((file) => navigation.commitSelected.has(file.path))
+        .reduce(
+          (sum, file) => ({ added: sum.added + file.added, deleted: sum.deleted + file.deleted }),
+          { added: 0, deleted: 0 },
+        )
+    : null;
+
   return (
     <div className="walkthrough-list">
       <div className="wt-status">
@@ -180,6 +192,44 @@ export function NarrativeSidebar({
           );
         })}
         <RestGroup navigation={navigation} orderView={orderView} />
+        {committable && commitTotals ? (
+          <div className="wt-toc-chapter">
+            <div className="wt-toc-chapter-head">
+              <span className="wt-toc-chapter-icon commit">
+                <GitBranch size={15} />
+              </span>
+              <span className="wt-toc-chapter-title">Commit</span>
+            </div>
+            <button
+              className={`wt-toc-stop${navigation.mode === 'commit' ? ' current' : ''}`}
+              onClick={navigation.enterCommit}
+              type="button"
+            >
+              <span className="wt-toc-rail">
+                <span className={`wt-toc-node${navigation.mode === 'commit' ? ' current' : ''}`}>
+                  {navigation.mode === 'commit' ? <span className="wt-toc-node-pulse" /> : null}
+                </span>
+              </span>
+              <span className="wt-toc-main">
+                <span className="wt-toc-title-row">
+                  <span className="wt-toc-title">Write the commit</span>
+                </span>
+                <span className="wt-toc-meta">
+                  <span className="wt-toc-file">
+                    {navigation.commitSelected.size} file
+                    {navigation.commitSelected.size === 1 ? '' : 's'}
+                  </span>
+                  <span className="wt-toc-count">
+                    <span className="added">+{commitTotals.added}</span>
+                    {commitTotals.deleted > 0 ? (
+                      <span className="deleted">−{commitTotals.deleted}</span>
+                    ) : null}
+                  </span>
+                </span>
+              </span>
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="sidebar-total-row">

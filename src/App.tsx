@@ -97,6 +97,8 @@ import type {
   TerminalHelperStatus,
   NarrativeWalkthrough,
   Walkthrough,
+  WalkthroughCommitMessageRequest,
+  WalkthroughCommitRequest,
   DiffSection,
 } from './types.ts';
 
@@ -1047,6 +1049,28 @@ export default function App() {
   const reloadWindow = useCallback(() => {
     window.location.reload();
   }, []);
+
+  // Commit the files a reviewer chose from the walkthrough's staging set. The
+  // working-tree watcher surfaces a "reload to see changes" banner afterwards.
+  const commitWalkthrough = useCallback(
+    (request: WalkthroughCommitRequest) =>
+      window.codiff.createWalkthroughCommit({
+        ...request,
+        source: stateRef.current?.source ?? request.source,
+      }),
+    [],
+  );
+
+  // Ask the connected agent to rewrite the commit message for the reviewer's
+  // current file selection (used when files are dropped from the staging set).
+  const updateWalkthroughCommitMessage = useCallback(
+    (request: WalkthroughCommitMessageRequest) =>
+      window.codiff.updateWalkthroughCommitMessage({
+        ...request,
+        source: stateRef.current?.source ?? request.source,
+      }),
+    [],
+  );
 
   useEffect(() => {
     const writeCurrentReloadSelection = () => {
@@ -2087,6 +2111,8 @@ export default function App() {
           <NarrativeWalkthroughView
             files={state.files}
             navigation={narrativeNavigation}
+            onCommit={commitWalkthrough}
+            onUpdateCommitMessage={updateWalkthroughCommitMessage}
             renderStopDiff={renderStopDiff}
             showWhitespace={showWhitespace}
             walkthrough={narrativeWalkthrough}

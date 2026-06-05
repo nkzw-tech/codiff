@@ -5,6 +5,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 /** @type {Window['codiff']} */
 const codiff = {
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
+  createWalkthroughCommit: (request) =>
+    ipcRenderer.invoke('codiff:createWalkthroughCommit', request),
+  updateWalkthroughCommitMessage: (request) =>
+    ipcRenderer.invoke('codiff:updateWalkthroughCommitMessage', request),
   getAgentSkillStatus: () => ipcRenderer.invoke('codiff:getAgentSkillStatus'),
   getConfig: () => ipcRenderer.invoke('codiff:getConfig'),
   getDiffSectionContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionContent', request),

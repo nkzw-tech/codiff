@@ -68,6 +68,21 @@
       "type": "object",
       "description": "The originating agent conversation (Codiff WalkthroughContext), embedded so Codiff can answer questions about the change."
     },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Marks the diff as a committable staging set. When present (and source is a working tree), Codiff adds a commit composer as the walkthrough's terminal stop.",
+      "properties": {
+        "subjectSeed": {
+          "type": "string",
+          "description": "Seed for the human-authored subject line (line 1 of the message)."
+        },
+        "body": {
+          "type": "string",
+          "description": "The agent-drafted commit body — a few paragraphs of prose describing the change as a whole. Shown editable by default."
+        }
+      }
+    },
     "segments": {
       "type": "array",
       "description": "Order-independent atoms: each is an addressable slice of the live diff with its line counts.",
@@ -90,6 +105,25 @@
           },
           "added": { "type": "number" },
           "deleted": { "type": "number" },
+          "changeType": {
+            "type": "string",
+            "enum": [
+              "fix",
+              "feature",
+              "refactor",
+              "test",
+              "generated",
+              "lockfile",
+              "snapshot",
+              "i18n",
+              "docs"
+            ],
+            "description": "Change-type tag shown on the file row in the commit composer."
+          },
+          "commitNote": {
+            "type": "string",
+            "description": "One-line note the generated commit body uses for this file (falls back to summary)."
+          },
           "title": {
             "type": "string",
             "description": "Default framing; an order's stop may override it."

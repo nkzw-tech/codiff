@@ -2,6 +2,8 @@ import type {
   ChangedFile,
   DiffSection,
   NarrativeWalkthrough,
+  WalkthroughChangeType,
+  WalkthroughIcon,
   WalkthroughOrder,
   WalkthroughPhase,
   WalkthroughRestItem,
@@ -167,6 +169,144 @@ export const resolveSegmentFile = (
   }
 
   return { file, section };
+};
+
+/* ------------------------------------------------------------------------- *
+ * Commit composer model
+ *
+ * The walkthrough's stops + "the rest" ARE the staged changeset. When the
+ * document is committable, these helpers collapse that into one list of unique
+ * changed files that reuses the narrative context two ways: files keep their
+ * walkthrough section (the order's phases, plus "the rest" as a final group),
+ * and each carries an optional change-type tag. The body generator reads the
+ * current file selection and rewrites the machine-drafted commit body live.
+ * ------------------------------------------------------------------------- */
+
+/** One unique changed file in the commit composer, with summed line counts. */
+export type CommitFile = {
+  added: number;
+  changeType?: WalkthroughChangeType;
+  deleted: number;
+  name: string;
+  /** The note the generated body uses for this file. */
+  note?: string;
+  path: string;
+  segmentId: string;
+};
+
+/** A group of files in the composer — one per phase, plus a final "rest" group. */
+export type CommitGroup = {
+  files: ReadonlyArray<CommitFile>;
+  icon: WalkthroughIcon;
+  id: string;
+  isRest: boolean;
+  title: string;
+};
+
+export type CommitModel = {
+  /** Every unique file, in group order. */
+  files: ReadonlyArray<CommitFile>;
+  groups: ReadonlyArray<CommitGroup>;
+};
+
+export const changeTypeLabel: Record<WalkthroughChangeType, string> = {
+  docs: 'Docs',
+  feature: 'Feature',
+  fix: 'Bug fix',
+  generated: 'Generated',
+  i18n: 'i18n',
+  lockfile: 'Lockfile',
+  refactor: 'Refactor',
+  snapshot: 'Snapshot',
+  test: 'Test',
+};
+
+const fileBaseName = (path: string) => path.split('/').pop() ?? path;
+
+/**
+ * Collapse one order's view into the unique changed files, grouped by phase with
+ * "the rest" as a final group. Line counts are summed across every segment that
+ * shares a path, and a path is placed in the first group that mentions it.
+ */
+export const buildCommitModel = (orderView: WalkthroughOrderView): CommitModel => {
+  const totalsByPath = new Map<string, NarrativeLineCount>();
+  const addTotals = (segment: WalkthroughSegment) => {
+    const current = totalsByPath.get(segment.path) ?? { added: 0, deleted: 0 };
+    totalsByPath.set(segment.path, {
+      added: current.added + segment.added,
+      deleted: current.deleted + segment.deleted,
+    });
+  };
+  for (const stop of orderView.sequence) {
+    addTotals(stop.segment);
+  }
+  for (const item of orderView.rest) {
+    addTotals(item.segment);
+  }
+
+  const seen = new Set<string>();
+  const toFile = (segment: WalkthroughSegment): CommitFile => {
+    const totals = totalsByPath.get(segment.path) ?? {
+      added: segment.added,
+      deleted: segment.deleted,
+    };
+    return {
+      added: totals.added,
+      changeType: segment.changeType,
+      deleted: totals.deleted,
+      name: fileBaseName(segment.path),
+      note: segment.commitNote ?? segment.summary,
+      path: segment.path,
+      segmentId: segment.id,
+    };
+  };
+
+  const files: Array<CommitFile> = [];
+  const groups: Array<CommitGroup> = [];
+
+  for (const phase of orderView.phases) {
+    const phaseFiles: Array<CommitFile> = [];
+    for (const stop of phase.stops) {
+      if (seen.has(stop.segment.path)) {
+        continue;
+      }
+      seen.add(stop.segment.path);
+      const file = toFile(stop.segment);
+      phaseFiles.push(file);
+      files.push(file);
+    }
+    if (phaseFiles.length > 0) {
+      groups.push({
+        files: phaseFiles,
+        icon: phase.icon,
+        id: phase.id,
+        isRest: false,
+        title: phase.title,
+      });
+    }
+  }
+
+  const restFiles: Array<CommitFile> = [];
+  for (const item of orderView.rest) {
+    if (seen.has(item.segment.path)) {
+      continue;
+    }
+    seen.add(item.segment.path);
+    const file = toFile(item.segment);
+    restFiles.push(file);
+    files.push(file);
+  }
+  if (restFiles.length > 0) {
+    groups.push({
+      files: restFiles,
+      icon: 'path',
+      id: '__rest',
+      isRest: true,
+      title: orderView.order.restLabel,
+    });
+  }
+
+  return { files, groups };
 };
 
 export const granularityLabel: Record<WalkthroughSegment['granularity'], string> = {

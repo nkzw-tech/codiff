@@ -18,6 +18,10 @@ import type {
   PullRequestExistingReviewComment,
   SubmitPullRequestReviewRequest,
   TerminalHelperStatus,
+  WalkthroughCommitMessageRequest,
+  WalkthroughCommitMessageResult,
+  WalkthroughCommitRequest,
+  WalkthroughCommitResult,
   WalkthroughResult,
 } from './types.ts';
 
@@ -25,6 +29,9 @@ declare global {
   interface Window {
     codiff: {
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
+      createWalkthroughCommit: (
+        request: WalkthroughCommitRequest,
+      ) => Promise<WalkthroughCommitResult>;
       getAgentSkillStatus: () => Promise<AgentSkillStatus>;
       getConfig: () => Promise<CodiffConfig>;
       getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
@@ -55,6 +62,9 @@ declare global {
         request: SubmitPullRequestCommentRequest,
       ) => Promise<PullRequestExistingReviewComment>;
       submitPullRequestReview: (request: SubmitPullRequestReviewRequest) => Promise<void>;
+      updateWalkthroughCommitMessage: (
+        request: WalkthroughCommitMessageRequest,
+      ) => Promise<WalkthroughCommitMessageResult>;
     };
   }
 }

@@ -28,6 +28,8 @@ const {
 } = require('./git-state.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
+const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
+const { readCommitMessageReply } = require('./walkthrough-commit-message.cjs');
 const { getAgent, listAgents, normalizeAgentBackend } = require('./agent.cjs');
 const {
   configToPreferences,
@@ -907,6 +909,19 @@ ipcMain.handle('codiff:askReviewAssistant', async (event, request) => {
   const state = await readRepositoryState(repositoryPath, request?.source || launchOptions?.source);
   const agent = resolveWindowAgent(event.sender.id);
   return readReviewAssistantReply(state, request, agent, getAgentOptions(agent));
+});
+
+ipcMain.handle('codiff:createWalkthroughCommit', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return createWalkthroughCommit(repositoryPath, request);
+});
+
+ipcMain.handle('codiff:updateWalkthroughCommitMessage', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  const launchOptions = windowLaunchOptions.get(event.sender.id);
+  const state = await readRepositoryState(repositoryPath, request?.source || launchOptions?.source);
+  const agent = resolveWindowAgent(event.sender.id);
+  return readCommitMessageReply(state, request, agent, getAgentOptions(agent));
 });
 
 ipcMain.handle('codiff:submitPullRequestComment', async (event, request) => {

@@ -38,6 +38,10 @@ _results-first_ without duplicating data.
     so a missing or slightly-off `sectionId` is fine — it's pinned to a real section on load.
   - `title?`, `summary?` — default framing; an order's stop may override the title.
   - `comments?` — review comments to seed, anchored by `side` + `lineNumber` (+ optional range).
+  - `changeType?`, `commitNote?` — only used when the document is committable (see `commit` below).
+    `changeType` tags the file in the commit composer (`fix` | `feature` | `refactor` | `test` |
+    `generated` | `lockfile` | `snapshot` | `i18n` | `docs`); `commitNote` is the one-line note the
+    generated commit body uses for the file (falls back to `summary`).
 
 - **`orders[]`** — one or more reading views over the segments. Each has:
   - `id` (e.g. `"keys"`, `"results"`), `label`, `tagline`.
@@ -55,6 +59,17 @@ _results-first_ without duplicating data.
 - **`context`** — a compact summary of the originating conversation (objective, decisions,
   risks, validation, a few key messages), so Codiff can answer questions without you. Use the
   `WalkthroughContext` shape (`version: 1`, `source: { type: "claude-session" | "codex-session", generatedAt }`).
+
+- **`commit?`** — set this **only when the diff is a staging set the reviewer can commit**
+  (i.e. `source.type` is `working-tree`). It adds a commit composer as the walkthrough's
+  terminal stop. Provide `subjectSeed?` (a suggested first line the reviewer can accept or
+  replace) and `body?` — **a few paragraphs of prose** describing the change as a whole (not a
+  per-file list), shown editable by default. Write the `body` at the level a good commit
+  message would: what changed and why, the shape of the approach, and any caveat worth landing
+  in history. The file rows still reuse the segments' phases (file groups), `changeType` tags,
+  and `commitNote`s; if the reviewer drops files from the staging set, an "Update the message"
+  action asks the agent to rewrite the `body` for exactly the selected files. Omit `commit` for
+  commits, branches, and pull requests — you can't commit those.
 
 ## How to think about it
 

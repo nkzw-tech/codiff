@@ -248,11 +248,30 @@ export type WalkthroughSeedComment = {
   startSide?: 'additions' | 'deletions';
 };
 
+/**
+ * Change-type tag shown on a file row in the commit composer. Mirrors the
+ * walkthrough's narrative roles so a reviewer recognises each file at a glance.
+ */
+export type WalkthroughChangeType =
+  | 'fix'
+  | 'feature'
+  | 'refactor'
+  | 'test'
+  | 'generated'
+  | 'lockfile'
+  | 'snapshot'
+  | 'i18n'
+  | 'docs';
+
 /** Order-independent atom: one addressable slice of the diff with its line counts. */
 export type WalkthroughSegment = {
   added: number;
   anchor: WalkthroughAnchor;
+  /** Change-type tag for the commit composer's file row. */
+  changeType?: WalkthroughChangeType;
   comments?: ReadonlyArray<WalkthroughSeedComment>;
+  /** One-line note the generated commit body uses for this file (falls back to {@link summary}). */
+  commitNote?: string;
   deleted: number;
   granularity: 'line' | 'hunk' | 'file';
   /** Stable within the document, e.g. 's1'. */
@@ -307,8 +326,30 @@ export type WalkthroughOrder = {
   tagline: string;
 };
 
+/**
+ * Marks the walkthrough's diff as a staging set that can be committed and seeds
+ * the commit composer Codiff renders as the walkthrough's terminal stop. Only
+ * honored when {@link NarrativeWalkthrough.source} is a working tree — you can
+ * only commit a live staging set, never a past commit, branch, or pull request.
+ */
+export type WalkthroughCommit = {
+  /**
+   * The agent-drafted commit body — a few paragraphs of prose describing the
+   * change as a whole. Shown editable by default; the reviewer can rewrite it,
+   * or ask the agent to regenerate it for a narrowed file selection.
+   */
+  body?: string;
+  /** Seed for the human-authored subject line (line 1 of the message). */
+  subjectSeed?: string;
+};
+
 export type NarrativeWalkthrough = {
   agent: 'codex' | 'claude';
+  /**
+   * When present, the diff is a committable staging set: Codiff adds a commit
+   * composer at the end of the walkthrough. Stripped unless `source` is a working tree.
+   */
+  commit?: WalkthroughCommit;
   /** The originating conversation, embedded for in-app Q&A. */
   context?: WalkthroughContext;
   /** An id present in {@link orders}. */
@@ -335,6 +376,54 @@ export type NarrativeWalkthroughResult =
   | {
       status: 'ready';
       walkthrough: NarrativeWalkthrough;
+    }
+  | {
+      reason: string;
+      status: 'unavailable';
+    };
+
+/** Commit the selected files from a walkthrough's staging set. */
+export type WalkthroughCommitRequest = {
+  /** Body of the commit message (everything after the subject line). */
+  body: string;
+  /** Repo-relative paths to commit; other staged changes are left untouched. */
+  paths: ReadonlyArray<string>;
+  source?: ReviewSource;
+  /** First line of the commit message. */
+  subject: string;
+};
+
+export type WalkthroughCommitResult =
+  | {
+      /** Full SHA of the new commit. */
+      hash: string;
+      status: 'committed';
+    }
+  | {
+      reason: string;
+      status: 'failed';
+    };
+
+/**
+ * Ask the connected agent to rewrite the commit message for the current file
+ * selection — used when the reviewer drops files from the staging set and the
+ * pre-drafted body no longer matches what is being committed.
+ */
+export type WalkthroughCommitMessageRequest = {
+  /** The current body, given to the agent as the message to revise. */
+  body: string;
+  /** Repo-relative paths still selected for the commit. */
+  paths: ReadonlyArray<string>;
+  source?: ReviewSource;
+  /** The current subject line. */
+  subject: string;
+};
+
+export type WalkthroughCommitMessageResult =
+  | {
+      body: string;
+      status: 'ready';
+      subject: string;
     }
   | {
       reason: string;

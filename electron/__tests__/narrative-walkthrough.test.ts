@@ -220,3 +220,41 @@ test('preserves embedded conversation context for in-app Q&A', () => {
 
   expect(result.context.objective).toBe('Stop hunk navigation skipping collapsed files.');
 });
+
+test('normalizes per-segment commit tags', () => {
+  const input = baseInput() as any;
+  input.segments[0].changeType = 'fix';
+  input.segments[0].commitNote = 'derive a collapse-independent hunk order';
+  input.segments[2].changeType = 'not-a-tag'; // invalid → dropped
+
+  const result = normalizeNarrativeWalkthrough(input, files);
+
+  expect(result.segments[0].changeType).toBe('fix');
+  expect(result.segments[0].commitNote).toBe('derive a collapse-independent hunk order');
+  expect(result.segments[2].changeType).toBeUndefined();
+});
+
+test('keeps the commit composer for a working-tree staging set', () => {
+  const input = baseInput() as any;
+  input.commit = {
+    body: 'Hunk order is now collapse-independent.\n\nNavigation expands a collapsed target before scrolling.',
+    subjectSeed: 'Fix hunk nav',
+  };
+
+  const result = normalizeNarrativeWalkthrough(input, files);
+
+  expect(result.commit).toEqual({
+    body: 'Hunk order is now collapse-independent.\n\nNavigation expands a collapsed target before scrolling.',
+    subjectSeed: 'Fix hunk nav',
+  });
+});
+
+test('strips the commit composer when the source is not a working tree', () => {
+  const input = baseInput() as any;
+  input.commit = { subjectSeed: 'Fix hunk nav' };
+  input.source = { ref: 'abc1234', type: 'commit' };
+
+  const result = normalizeNarrativeWalkthrough(input, files);
+
+  expect(result.commit).toBeUndefined();
+});
