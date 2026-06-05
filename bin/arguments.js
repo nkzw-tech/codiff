@@ -49,6 +49,11 @@ export const flagDefinitions = [
     name: 'walkthrough-file',
     type: 'string',
   },
+  {
+    description: 'Print the narrative walkthrough authoring guide and schema, then exit.',
+    name: 'walkthrough-guide',
+    type: 'boolean',
+  },
 ];
 
 export const usageExamples = [
@@ -331,6 +336,7 @@ export const parseArguments = (args) => {
     requestedPath: resolve(requestedPath ?? process.cwd()),
     version: values.version === true,
     walkthrough: values.walkthrough === true,
+    ...(values['walkthrough-guide'] === true ? { walkthroughGuide: true } : {}),
     ...(walkthroughContextPath ? { walkthroughContextPath: resolve(walkthroughContextPath) } : {}),
     ...(walkthroughFilePath ? { walkthroughFilePath: resolve(walkthroughFilePath) } : {}),
   };

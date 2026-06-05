@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
@@ -9,6 +10,17 @@ import packageJson from '../package.json' with { type: 'json' };
 import { formatHelpText, parseArguments, resolvePullRequestUrl } from './arguments.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Assemble the narrative walkthrough authoring guide: the prose, then the live
+// schema object serialized inline (single-sourced from the validator — no copy).
+const buildWalkthroughGuide = () => {
+  const require = createRequire(import.meta.url);
+  const { narrativeWalkthroughSchema } = require(
+    resolve(root, 'electron/narrative-walkthrough.cjs'),
+  );
+  const guide = readFileSync(resolve(root, 'bin/walkthrough-guide.md'), 'utf8').trimEnd();
+  return `${guide}\n\n\`\`\`json\n${JSON.stringify(narrativeWalkthroughSchema, null, 2)}\n\`\`\`\n`;
+};
 
 const run = () => {
   const parsedArguments = parseArguments(process.argv.slice(2));
@@ -20,6 +32,11 @@ const run = () => {
 
   if (parsedArguments.version) {
     process.stdout.write(`codiff v${packageJson.version}\n`);
+    return;
+  }
+
+  if (parsedArguments.walkthroughGuide) {
+    process.stdout.write(buildWalkthroughGuide());
     return;
   }
 

@@ -40,6 +40,7 @@ show_help() {
   printf '  %-22s%s%s%s\n' "--version, -v" "$gray" "Show version number and exit." "$reset"
   printf '  %-22s%s%s%s\n' "--walkthrough, -w" "$gray" "Start with an LLM-generated review walkthrough." "$reset"
   printf '  %-22s%s%s%s\n' "--walkthrough-context <file>" "$gray" "Seed a walkthrough with Codex conversation context JSON." "$reset"
+  printf '  %-22s%s%s%s\n' "--walkthrough-guide" "$gray" "Print the narrative walkthrough authoring guide and schema, then exit." "$reset"
   printf '\n'
   printf '%s\n' "${blue_bold}Examples:${reset}"
   printf '  %-22s%s%s%s\n' "codiff" "$gray" "Review staged and unstaged changes." "$reset"
@@ -162,6 +163,18 @@ for arg in "$@"; do
       ;;
     --version|-v)
       printf 'codiff v%s\n' "$(codiff_version)"
+      exit 0
+      ;;
+    --walkthrough-guide)
+      # The guide is pure text assembled by the Node entry; run it with the
+      # bundled Electron as Node so no separate node install is required.
+      electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
+      if [ -n "$electron_exec" ] && [ -f "$script_dir/codiff.js" ]; then
+        ELECTRON_RUN_AS_NODE=1 "$app_path/Contents/MacOS/$electron_exec" \
+          "$script_dir/codiff.js" --walkthrough-guide
+      else
+        cat "$script_dir/walkthrough-guide.md"
+      fi
       exit 0
       ;;
     --walkthrough|-w)

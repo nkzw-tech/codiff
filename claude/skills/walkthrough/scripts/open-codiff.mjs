@@ -117,8 +117,27 @@ const readSessionCwd = (sessionId) => {
   return cwd;
 };
 
-// Pull `--file <path>` (or `--file=<path>`) out of the forwarded arguments.
 const rawArgs = process.argv.slice(2);
+
+// `--guide`: print Codiff's current walkthrough authoring guide and exit. The
+// guidance lives in Codiff (not this skill), so it stays current across updates.
+if (rawArgs.includes('--guide')) {
+  const binEntry = join(codiffRoot, 'bin/codiff.js');
+  const guide = existsSync(binEntry)
+    ? { args: [binEntry, '--walkthrough-guide'], command: process.execPath }
+    : (() => {
+        const resolved = getCodiffCommand();
+        return { args: [...resolved.args, '--walkthrough-guide'], command: resolved.command };
+      })();
+  const guideResult = spawnSync(guide.command, guide.args, { encoding: 'utf8', stdio: 'inherit' });
+  if (guideResult.error) {
+    process.stderr.write(`${guideResult.error.message}\n`);
+    process.exit(1);
+  }
+  process.exit(guideResult.status ?? 0);
+}
+
+// Pull `--file <path>` (or `--file=<path>`) out of the forwarded arguments.
 const forwardedArgs = [];
 let walkthroughFile = '';
 for (let index = 0; index < rawArgs.length; index += 1) {
