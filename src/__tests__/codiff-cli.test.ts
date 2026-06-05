@@ -189,6 +189,13 @@ test('parseArguments recognizes Codex walkthrough seed options', () => {
   });
 });
 
+test('parseArguments recognizes a pre-authored walkthrough file', () => {
+  expect(parseArguments(['-w', '--walkthrough-file', '.codiff/walkthrough.json'])).toMatchObject({
+    walkthrough: true,
+    walkthroughFilePath: resolve('.codiff/walkthrough.json'),
+  });
+});
+
 test('parseArguments recognizes Claude walkthrough seed options and the agent override', () => {
   expect(
     parseArguments([

@@ -160,6 +160,8 @@ export type CodiffLaunchOptions = {
   source?: ReviewSource;
   walkthrough: boolean;
   walkthroughContext?: WalkthroughContext;
+  /** Path to a pre-authored {@link NarrativeWalkthrough} JSON file (--walkthrough-file). */
+  walkthroughFile?: string;
 };
 
 export type AgentSkillStatus = {
@@ -206,6 +208,135 @@ export type WalkthroughResult =
     }
   | {
       code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND';
+      reason: string;
+      status: 'unavailable';
+    };
+
+/**
+ * Narrative Walkthrough (version 2). A richer, story-shaped walkthrough than the
+ * file-ordering {@link Walkthrough}. It separates order-independent *segments*
+ * (addressable slices of the live diff) from one or more *orders* (reading views
+ * over those segments — e.g. key-changes-first vs results-first). The diff content
+ * itself is never embedded: a segment anchors into the live diff codiff computes
+ * from the repository.
+ */
+export type WalkthroughIcon = 'bug' | 'wrench' | 'path' | 'flask' | 'beaker' | 'doc' | 'gear';
+
+/** Where a segment points into the live diff. Mirrors the comment-anchor fields. */
+export type WalkthroughAnchor = {
+  /** Human-readable location, e.g. 'src/App.tsx:311' or 'src/hooks/useHunkOrder.ts (new)'. */
+  display: string;
+  /** End line on the {@link side} (inclusive). Omitted for 'file' granularity. */
+  endLine?: number;
+  /** Matches {@link DiffSection.id}, e.g. 'src/App.tsx:staged'. */
+  sectionId?: string;
+  sectionKind?: DiffSection['kind'];
+  side?: 'additions' | 'deletions' | 'both';
+  /** Start line on the {@link side}. Omitted for 'file' granularity. */
+  startLine?: number;
+};
+
+/** A review comment seeded by the walkthrough, anchored like a live comment. */
+export type WalkthroughSeedComment = {
+  author?: string;
+  /** May be '' to seed an empty composer at this anchor. */
+  body: string;
+  id: string;
+  lineNumber: number;
+  side: 'additions' | 'deletions';
+  startLineNumber?: number;
+  startSide?: 'additions' | 'deletions';
+};
+
+/** Order-independent atom: one addressable slice of the diff with its line counts. */
+export type WalkthroughSegment = {
+  added: number;
+  anchor: WalkthroughAnchor;
+  comments?: ReadonlyArray<WalkthroughSeedComment>;
+  deleted: number;
+  granularity: 'line' | 'hunk' | 'file';
+  /** Stable within the document, e.g. 's1'. */
+  id: string;
+  oldPath?: string;
+  path: string;
+  status: GitFileStatus;
+  /** Short, plain-text gist of the slice. */
+  summary?: string;
+  /** Default framing; an order's stop may override it. */
+  title?: string;
+};
+
+/** A named chapter/phase within an order. */
+export type WalkthroughPhase = {
+  blurb: string;
+  icon: WalkthroughIcon;
+  id: string;
+  /** 1-based position. */
+  n: number;
+  title: string;
+};
+
+/** One stop in an order's sequence: a segment plus this order's framing of it. */
+export type WalkthroughStop = {
+  importance: 'critical' | 'normal' | 'context';
+  phaseId: string;
+  /** Agent narration (markdown / inline code). */
+  prose: string;
+  segmentId: string;
+  /** Overrides the segment's title for this order. */
+  title?: string;
+};
+
+/** A file changed alongside the work but kept off the narrative path. */
+export type WalkthroughRestItem = {
+  note?: string;
+  /** Why it is off the path, e.g. 'Generated' | 'Lockfile' | 'Snapshot' | 'Mechanical'. */
+  reason: string;
+  segmentId: string;
+};
+
+/** One reading order — a view over the document's segments. */
+export type WalkthroughOrder = {
+  id: string;
+  label: string;
+  phases: ReadonlyArray<WalkthroughPhase>;
+  rest: ReadonlyArray<WalkthroughRestItem>;
+  restBlurb: string;
+  restLabel: string;
+  sequence: ReadonlyArray<WalkthroughStop>;
+  tagline: string;
+};
+
+export type NarrativeWalkthrough = {
+  agent: 'codex' | 'claude';
+  /** The originating conversation, embedded for in-app Q&A. */
+  context?: WalkthroughContext;
+  /** An id present in {@link orders}. */
+  defaultOrder: string;
+  /** 1–2 sentence summary of the change. */
+  focus: string;
+  /** ISO timestamp. */
+  generatedAt: string;
+  kind: 'narrative';
+  /** Display string, e.g. '6 stops · 4 chapters'. */
+  meta?: string;
+  orders: ReadonlyArray<WalkthroughOrder>;
+  repo: {
+    branch: string | null;
+    root: string;
+  };
+  segments: ReadonlyArray<WalkthroughSegment>;
+  source: ReviewSource;
+  title: string;
+  version: 2;
+};
+
+export type NarrativeWalkthroughResult =
+  | {
+      status: 'ready';
+      walkthrough: NarrativeWalkthrough;
+    }
+  | {
       reason: string;
       status: 'unavailable';
     };

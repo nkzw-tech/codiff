@@ -206,6 +206,9 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       'walkthrough-context': {
         type: 'string',
       },
+      'walkthrough-file': {
+        type: 'string',
+      },
     },
     strict: false,
   });
@@ -274,6 +277,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   const envWalkthroughContextPath = useEnvironment
     ? process.env.CODIFF_WALKTHROUGH_CONTEXT || ''
     : '';
+  const envWalkthroughFilePath = useEnvironment ? process.env.CODIFF_WALKTHROUGH_FILE || '' : '';
   const codexSessionId =
     (typeof values['codex-session'] === 'string' ? values['codex-session'] : '') ||
     envCodexSessionId ||
@@ -289,6 +293,10 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   const walkthroughContextPath =
     (typeof values['walkthrough-context'] === 'string' ? values['walkthrough-context'] : '') ||
     envWalkthroughContextPath ||
+    undefined;
+  const walkthroughFilePath =
+    (typeof values['walkthrough-file'] === 'string' ? values['walkthrough-file'] : '') ||
+    envWalkthroughFilePath ||
     undefined;
   const sourcePullRequestNumber = envPullRequestNumber ?? pullRequestNumber;
   const sourceRef = envCommitRef || commitRef;
@@ -324,6 +332,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       ...(walkthroughContextPath
         ? { walkthroughContext: readWalkthroughContext(walkthroughContextPath, codexSessionId) }
         : {}),
+      ...(walkthroughFilePath ? { walkthroughFile: resolve(walkthroughFilePath) } : {}),
     },
     pullRequestNumber: sourcePullRequestNumber,
     repositoryPath,

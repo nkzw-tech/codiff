@@ -1,6 +1,6 @@
 // @ts-check
 
-const { existsSync } = require('node:fs');
+const { existsSync, readFileSync } = require('node:fs');
 const { dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const {
@@ -62,6 +62,7 @@ const {
   writeWindowState,
 } = require('./window-state.cjs');
 const { readWalkthrough } = require('./walkthrough.cjs');
+const { normalizeNarrativeWalkthrough } = require('./narrative-walkthrough.cjs');
 
 /**
  * @typedef {import('../src/config/types.ts').CodiffConfig} CodiffConfig
@@ -872,6 +873,32 @@ ipcMain.handle('codiff:getWalkthrough', async (event, source) => {
     agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
   );
   return readWalkthrough(state, agent, getAgentOptions(agent), walkthroughContext);
+});
+
+// Load a pre-authored narrative walkthrough (--walkthrough-file) and repair it against the
+// live diff. Returns null when no file was supplied so the renderer can fall back to the
+// agent-ordered walkthrough.
+ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
+  const launchOptions = windowLaunchOptions.get(event.sender.id);
+  const walkthroughFile = launchOptions?.walkthroughFile;
+  if (!walkthroughFile) {
+    return null;
+  }
+
+  try {
+    const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+    const state = await readRepositoryState(repositoryPath, source || launchOptions?.source);
+    const input = JSON.parse(readFileSync(walkthroughFile, 'utf8'));
+    return {
+      status: 'ready',
+      walkthrough: normalizeNarrativeWalkthrough(input, state.files),
+    };
+  } catch (error) {
+    return {
+      reason: error instanceof Error ? error.message : String(error),
+      status: 'unavailable',
+    };
+  }
 });
 
 ipcMain.handle('codiff:askReviewAssistant', async (event, request) => {

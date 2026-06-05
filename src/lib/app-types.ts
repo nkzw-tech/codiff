@@ -3,6 +3,7 @@ import type {
   ChangedFile,
   CommitMetadata,
   DiffSection,
+  NarrativeWalkthrough,
   PullRequestExistingReviewComment,
   ReviewSource,
   Walkthrough,
@@ -114,6 +115,8 @@ export type WalkthroughNote = {
 
 export type SourceSession = {
   collapsed: Set<string>;
+  /** Populated by the interface phase from a --walkthrough-file document. */
+  narrativeWalkthrough?: NarrativeWalkthrough | null;
   reviewComments: ReadonlyArray<ReviewComment>;
   selectedPath: string | null;
   viewed: Record<string, string>;

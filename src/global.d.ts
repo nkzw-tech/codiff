@@ -8,6 +8,7 @@ import type {
   DiffSection,
   DiffSectionContentRequest,
   GitIdentity,
+  NarrativeWalkthroughResult,
   RepositoryHistory,
   RepositoryState,
   ReviewAssistantRequest,
@@ -30,6 +31,9 @@ declare global {
       getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
       getGitIdentity: () => Promise<GitIdentity>;
       getLaunchOptions: () => Promise<CodiffLaunchOptions>;
+      getNarrativeWalkthrough: (
+        source?: ReviewSource,
+      ) => Promise<NarrativeWalkthroughResult | null>;
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;

@@ -33,6 +33,7 @@ const run = () => {
     requestedPath,
     walkthrough,
     walkthroughContextPath,
+    walkthroughFilePath,
   } = parsedArguments;
   let { pullRequestUrl } = parsedArguments;
 
@@ -63,6 +64,7 @@ const run = () => {
       CODIFF_REPOSITORY_PATH: requestedPath,
       CODIFF_WALKTHROUGH: walkthrough ? '1' : '',
       CODIFF_WALKTHROUGH_CONTEXT: walkthroughContextPath ?? '',
+      CODIFF_WALKTHROUGH_FILE: walkthroughFilePath ?? '',
     },
     stdio: 'ignore',
   });

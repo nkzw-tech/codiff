@@ -23,8 +23,16 @@ import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { renderInlineMarkdown } from '../../lib/markdown.tsx';
 import { getShortRef, getSourceKey } from '../../lib/source.ts';
 import { walkthroughActionLabel, walkthroughImpactLabel } from '../../lib/walkthrough.ts';
-import type { ChangedFile, HistoryEntry, ReviewSource, Walkthrough } from '../../types.ts';
+import type {
+  ChangedFile,
+  HistoryEntry,
+  NarrativeWalkthrough,
+  ReviewSource,
+  Walkthrough,
+} from '../../types.ts';
 import { Gravatar } from './Gravatar.tsx';
+import { NarrativeSidebar } from './walkthrough/NarrativeSidebar.tsx';
+import type { NarrativeNavigation } from './walkthrough/useNarrativeNavigation.ts';
 
 export function Sidebar({
   branchSource,
@@ -35,6 +43,8 @@ export function Sidebar({
   historyLoading,
   keymap,
   mode,
+  narrativeNavigation,
+  narrativeWalkthrough,
   onActivatePath,
   onLoadMoreHistory,
   onModeChange,
@@ -61,6 +71,8 @@ export function Sidebar({
   historyLoading: boolean;
   keymap: CodiffKeymap;
   mode: SidebarMode;
+  narrativeNavigation: NarrativeNavigation;
+  narrativeWalkthrough: NarrativeWalkthrough | null;
   onActivatePath: (path: string) => void;
   onLoadMoreHistory: () => void;
   onModeChange: (mode: SidebarMode) => void;
@@ -321,6 +333,8 @@ export function Sidebar({
           pullRequestSource={pullRequestSource}
           searchQuery={searchQuery}
         />
+      ) : mode === 'walkthrough' && narrativeWalkthrough ? (
+        <NarrativeSidebar navigation={narrativeNavigation} walkthrough={narrativeWalkthrough} />
       ) : mode === 'walkthrough' && walkthroughAvailable ? (
         <WalkthroughSidebar
           files={files}

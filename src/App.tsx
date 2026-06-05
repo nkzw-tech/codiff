@@ -20,6 +20,8 @@ import {
 } from './app/components/Panels.tsx';
 import { ReviewCodeView } from './app/components/ReviewCodeView.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
+import { NarrativeWalkthroughView } from './app/components/walkthrough/NarrativeWalkthroughView.tsx';
+import { useNarrativeNavigation } from './app/components/walkthrough/useNarrativeNavigation.ts';
 import { createDefaultConfig } from './config/defaults.ts';
 import { getShortcutLabel, matchesShortcut } from './config/keymap.ts';
 import type { CodiffConfig } from './config/types.ts';
@@ -93,6 +95,7 @@ import type {
   ReviewAssistantRequest,
   ReviewSource,
   TerminalHelperStatus,
+  NarrativeWalkthrough,
   Walkthrough,
   DiffSection,
 } from './types.ts';
@@ -164,6 +167,9 @@ export default function App() {
   );
   const [viewed, setViewed] = useState<Record<string, string>>({});
   const [walkthrough, setWalkthrough] = useState<Walkthrough | null>(null);
+  const [narrativeWalkthrough, setNarrativeWalkthrough] = useState<NarrativeWalkthrough | null>(
+    null,
+  );
   const [walkthroughError, setWalkthroughError] = useState<WalkthroughError | null>(null);
   const [walkthroughLoading, setWalkthroughLoading] = useState(false);
   const [walkthroughUnread, setWalkthroughUnread] = useState(false);
@@ -181,6 +187,8 @@ export default function App() {
   const sourceRequestRef = useRef(0);
   const viewedRef = useRef<Record<string, string>>({});
   const walkthroughRef = useRef<Walkthrough | null>(null);
+  const narrativeWalkthroughRef = useRef<NarrativeWalkthrough | null>(null);
+  const narrativeNavigation = useNarrativeNavigation(narrativeWalkthrough);
   const walkthroughErrorRef = useRef<WalkthroughError | null>(null);
   const [commandBarVisible, setCommandBarVisible] = useState(false);
   const [commandBarCommands, setCommandBarCommands] = useState<ReadonlyArray<Command>>([]);
@@ -323,6 +331,7 @@ export default function App() {
 
     sourceSessionsRef.current.set(getSourceKey(currentState.source), {
       collapsed: new Set(collapsedRef.current),
+      narrativeWalkthrough: narrativeWalkthroughRef.current,
       reviewComments: reviewCommentsRef.current,
       selectedPath: selectedPathRef.current,
       viewed: viewedRef.current,
@@ -379,17 +388,38 @@ export default function App() {
         return;
       }
 
-      const shouldLoadWalkthrough = nextLaunchOptions.walkthrough && orderedState.files.length > 0;
+      const filesPresent = orderedState.files.length > 0;
+      const shouldLoadNarrative = Boolean(nextLaunchOptions.walkthroughFile) && filesPresent;
       const shouldStartInHistory =
         (orderedState.source.type === 'working-tree' || orderedState.source.type === 'branch') &&
         orderedState.files.length === 0;
+
+      // A pre-authored narrative walkthrough fully replaces the agent ordering
+      // call: load it first, and when it's present skip the v1 walkthrough (and its
+      // "Generating walkthrough…" state) entirely.
+      const narrativeResult = shouldLoadNarrative
+        ? await window.codiff.getNarrativeWalkthrough(orderedState.source).catch(() => null)
+        : null;
+      if (canceled) {
+        return;
+      }
+      const loadedNarrative =
+        narrativeResult?.status === 'ready' ? narrativeResult.walkthrough : null;
+      setNarrativeWalkthrough(loadedNarrative);
+
+      const shouldLoadWalkthrough =
+        !loadedNarrative && nextLaunchOptions.walkthrough && filesPresent;
 
       setLaunchOptions({
         ...nextLaunchOptions,
         walkthrough: shouldLoadWalkthrough,
       });
       setSidebarMode(
-        shouldLoadWalkthrough ? 'walkthrough' : shouldStartInHistory ? 'history' : 'tree',
+        loadedNarrative || shouldLoadWalkthrough
+          ? 'walkthrough'
+          : shouldStartInHistory
+            ? 'history'
+            : 'tree',
       );
       setWalkthroughLoading(shouldLoadWalkthrough);
 
@@ -725,6 +755,10 @@ export default function App() {
   useEffect(() => {
     walkthroughRef.current = walkthrough;
   }, [walkthrough]);
+
+  useEffect(() => {
+    narrativeWalkthroughRef.current = narrativeWalkthrough;
+  }, [narrativeWalkthrough]);
 
   useEffect(() => {
     walkthroughErrorRef.current = walkthroughError;
@@ -1086,6 +1120,7 @@ export default function App() {
           setViewed(nextViewed);
           setSelectedPath(nextSelectedPath);
           setWalkthrough(session?.walkthrough ?? null);
+          setNarrativeWalkthrough(session?.narrativeWalkthrough ?? null);
           setWalkthroughError(session?.walkthroughError ?? null);
           setWalkthroughLoading(false);
           setWalkthroughUnread(false);
@@ -1173,7 +1208,8 @@ export default function App() {
 
       setSidebarMode('walkthrough');
       setWalkthroughUnread(false);
-      if (walkthrough || walkthroughError || walkthroughLoading || !state) {
+      // A pre-authored narrative walkthrough replaces the agent ordering call.
+      if (narrativeWalkthrough || walkthrough || walkthroughError || walkthroughLoading || !state) {
         return;
       }
       if (state.files.length === 0) {
@@ -1220,7 +1256,7 @@ export default function App() {
           }
         });
     },
-    [state, walkthrough, walkthroughError, walkthroughLoading],
+    [narrativeWalkthrough, state, walkthrough, walkthroughError, walkthroughLoading],
   );
 
   useEffect(() => {
@@ -1856,6 +1892,53 @@ export default function App() {
   const sidebarSourceLabel =
     state.source.type !== 'working-tree' ? ` · ${getSourceLabel(state.source)}` : '';
 
+  const showNarrativeWalkthrough = narrativeWalkthrough != null && sidebarMode === 'walkthrough';
+  // Props shared by the full review and the per-stop scoped diffs, so the two
+  // render paths can't drift apart.
+  const commonReviewProps = {
+    activeSearchMatch: activeDiffSearchMatch,
+    agentId: activeAgentBackend,
+    agentLabel,
+    collapsed,
+    comments: visibleReviewComments,
+    commitMetadata: state.source.type === 'commit' ? (state.commitMetadata ?? null) : null,
+    diffStyle,
+    focusCommentId,
+    focusCommentRequest,
+    gitIdentity,
+    hunkNavigation,
+    isPullRequest,
+    itemVersionByPath,
+    keymap: codiffConfig.keymap,
+    loadingSectionIds,
+    onAskCodex: askCodex,
+    onCreateComment: createComment,
+    onDeleteComment: deleteComment,
+    onLoadSection: loadDiffSection,
+    onOpenFile: openFile,
+    onSelectPathFromScroll: updateSelectedPathFromScroll,
+    onSubmitComment: submitPullRequestComment,
+    onToggleCollapsed: toggleCollapsed,
+    onToggleViewed: toggleViewed,
+    onUpdateComment: updateComment,
+    searchQuery: diffSearchQuery,
+    showWhitespace,
+    source: state.source,
+    viewed,
+    wordWrap,
+  };
+  // Render one changed file's live diff for a walkthrough stop / full-context reader.
+  const renderStopDiff = (file: ChangedFile) => (
+    <ReviewCodeView
+      {...commonReviewProps}
+      files={[file]}
+      forceExpandedPaths={new Set([file.path])}
+      scrollTarget={null}
+      selectedPath={file.path}
+      walkthroughNotes={emptyWalkthroughNotes}
+    />
+  );
+
   return (
     <div
       className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
@@ -1973,6 +2056,8 @@ export default function App() {
           historyLoading={historyLoading}
           keymap={codiffConfig.keymap}
           mode={sidebarMode}
+          narrativeNavigation={narrativeNavigation}
+          narrativeWalkthrough={narrativeWalkthrough}
           onActivatePath={activatePath}
           onLoadMoreHistory={loadMoreHistory}
           onModeChange={changeSidebarMode}
@@ -1998,6 +2083,14 @@ export default function App() {
       <main className="review">
         {isSwitchingSource ? (
           <ReviewSourceLoading />
+        ) : showNarrativeWalkthrough && narrativeWalkthrough ? (
+          <NarrativeWalkthroughView
+            files={state.files}
+            navigation={narrativeNavigation}
+            renderStopDiff={renderStopDiff}
+            showWhitespace={showWhitespace}
+            walkthrough={narrativeWalkthrough}
+          />
         ) : showAgentUnavailablePanel ? (
           <div className="empty-state">
             <div className="empty-panel squircle">
@@ -2042,43 +2135,14 @@ export default function App() {
           </div>
         ) : (
           <ReviewCodeView
-            activeSearchMatch={activeDiffSearchMatch}
-            agentId={activeAgentBackend}
-            agentLabel={agentLabel}
-            collapsed={collapsed}
-            comments={visibleReviewComments}
-            commitMetadata={state.source.type === 'commit' ? (state.commitMetadata ?? null) : null}
-            diffStyle={diffStyle}
+            {...commonReviewProps}
             files={visibleFiles}
-            focusCommentId={focusCommentId}
-            focusCommentRequest={focusCommentRequest}
             forceExpandedPaths={diffSearchMatchPathSet}
-            gitIdentity={gitIdentity}
-            hunkNavigation={hunkNavigation}
-            isPullRequest={isPullRequest}
-            itemVersionByPath={itemVersionByPath}
-            keymap={codiffConfig.keymap}
-            loadingSectionIds={loadingSectionIds}
-            onAskCodex={askCodex}
-            onCreateComment={createComment}
-            onDeleteComment={deleteComment}
-            onLoadSection={loadDiffSection}
-            onOpenFile={openFile}
-            onSelectPathFromScroll={updateSelectedPathFromScroll}
-            onSubmitComment={submitPullRequestComment}
-            onToggleCollapsed={toggleCollapsed}
-            onToggleViewed={toggleViewed}
-            onUpdateComment={updateComment}
             scrollTarget={scrollTarget}
-            searchQuery={diffSearchQuery}
             selectedPath={visibleSelectedPath}
-            showWhitespace={showWhitespace}
-            source={state.source}
-            viewed={viewed}
             walkthroughNotes={
               sidebarMode === 'walkthrough' ? walkthroughNotes : emptyWalkthroughNotes
             }
-            wordWrap={wordWrap}
           />
         )}
       </main>

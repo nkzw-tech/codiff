@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './walkthrough.css';
 
 @theme {
   --font-mono: 'Fira Code', monospace;
@@ -32,6 +33,7 @@
     --file-bg: rgb(255 255 255 / 0.78);
     --file-border: rgb(17 17 17 / 0.09);
     --inline-code-bg: rgb(242 242 242);
+    --hover-wash: rgb(127 127 127 / 0.1);
     --copy-icon: rgb(17 17 17 / 0.62);
     --muted: rgb(17 17 17 / 0.48);
     --sidebar-bg: rgb(255 255 255 / 0.58);
@@ -55,6 +57,7 @@
       --file-bg: rgb(38 38 38 / 0.72);
       --file-border: rgb(230 230 230 / 0.1);
       --inline-code-bg: rgb(39 39 39);
+      --hover-wash: rgb(127 127 127 / 0.14);
       --copy-icon: rgb(230 230 230 / 0.68);
       --muted: rgb(230 230 230 / 0.48);
       --sidebar-bg: rgb(38 38 38 / 0.58);
@@ -78,6 +81,7 @@
     --file-bg: rgb(255 255 255 / 0.78);
     --file-border: rgb(17 17 17 / 0.09);
     --inline-code-bg: rgb(242 242 242);
+    --hover-wash: rgb(127 127 127 / 0.1);
     --copy-icon: rgb(17 17 17 / 0.62);
     --muted: rgb(17 17 17 / 0.48);
     --sidebar-bg: rgb(255 255 255 / 0.58);
@@ -100,6 +104,7 @@
     --file-bg: rgb(38 38 38 / 0.72);
     --file-border: rgb(230 230 230 / 0.1);
     --inline-code-bg: rgb(39 39 39);
+    --hover-wash: rgb(127 127 127 / 0.14);
     --copy-icon: rgb(230 230 230 / 0.68);
     --muted: rgb(230 230 230 / 0.48);
     --sidebar-bg: rgb(38 38 38 / 0.58);

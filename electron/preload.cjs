@@ -16,6 +16,7 @@ const codiff = {
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
+  getNarrativeWalkthrough: (source) => ipcRenderer.invoke('codiff:getNarrativeWalkthrough', source),
   getWalkthrough: (source) => ipcRenderer.invoke('codiff:getWalkthrough', source),
   installAgentSkill: () => ipcRenderer.invoke('codiff:installAgentSkill'),
   installTerminalHelper: () => ipcRenderer.invoke('codiff:installTerminalHelper'),

@@ -1,0 +1,253 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Codiff Narrative Walkthrough",
+  "description": "A story-shaped walkthrough of a diff (version 2). Separates order-independent segments (addressable slices of the live diff) from one or more reading orders over them. Diff content is never embedded — segments anchor into the diff Codiff computes from the repository.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "kind",
+    "agent",
+    "title",
+    "focus",
+    "repo",
+    "source",
+    "segments",
+    "orders",
+    "defaultOrder"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to this JSON schema, for editor autocompletion."
+    },
+    "version": { "const": 2 },
+    "kind": { "const": "narrative" },
+    "agent": {
+      "type": "string",
+      "enum": ["codex", "claude"],
+      "description": "The agent backend that authored this walkthrough."
+    },
+    "generatedAt": {
+      "type": "string",
+      "description": "ISO 8601 timestamp of when the walkthrough was generated."
+    },
+    "title": {
+      "type": "string",
+      "description": "Short title for the change, e.g. 'Hunk navigation skips collapsed files'."
+    },
+    "focus": {
+      "type": "string",
+      "description": "One to two sentence summary of the change."
+    },
+    "meta": {
+      "type": "string",
+      "description": "Optional display string, e.g. '6 stops · 4 chapters'."
+    },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "branch"],
+      "properties": {
+        "root": { "type": "string" },
+        "branch": { "type": ["string", "null"] }
+      }
+    },
+    "source": {
+      "type": "object",
+      "description": "The Codiff ReviewSource this walkthrough describes (working-tree, commit, branch, or pull-request).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["working-tree", "commit", "branch", "pull-request"]
+        }
+      },
+      "required": ["type"]
+    },
+    "context": {
+      "type": "object",
+      "description": "The originating agent conversation (Codiff WalkthroughContext), embedded so Codiff can answer questions about the change."
+    },
+    "segments": {
+      "type": "array",
+      "description": "Order-independent atoms: each is an addressable slice of the live diff with its line counts.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "path", "status", "granularity", "anchor", "added", "deleted"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable within the document, e.g. 's1'." },
+          "path": { "type": "string" },
+          "oldPath": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["added", "deleted", "modified", "renamed", "untracked"]
+          },
+          "granularity": {
+            "type": "string",
+            "enum": ["line", "hunk", "file"],
+            "description": "How much of the file this segment covers."
+          },
+          "added": { "type": "number" },
+          "deleted": { "type": "number" },
+          "title": {
+            "type": "string",
+            "description": "Default framing; an order's stop may override it."
+          },
+          "summary": { "type": "string", "description": "Short, plain-text gist of the slice." },
+          "anchor": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["display"],
+            "properties": {
+              "display": {
+                "type": "string",
+                "description": "Human-readable location, e.g. 'src/App.tsx:311' or 'src/hooks/useHunkOrder.ts (new)'."
+              },
+              "sectionId": {
+                "type": "string",
+                "description": "Matches a Codiff DiffSection id, e.g. 'src/App.tsx:staged'. Repaired if missing or stale."
+              },
+              "sectionKind": {
+                "type": "string",
+                "enum": ["staged", "unstaged", "commit", "pull-request"]
+              },
+              "side": {
+                "type": "string",
+                "enum": ["additions", "deletions", "both"]
+              },
+              "startLine": {
+                "type": "number",
+                "description": "Start line on `side`. Omit for 'file' granularity."
+              },
+              "endLine": {
+                "type": "number",
+                "description": "End line on `side` (inclusive). Omit for 'file' granularity."
+              }
+            }
+          },
+          "comments": {
+            "type": "array",
+            "description": "Review comments seeded by the walkthrough, anchored like live comments.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "body", "side", "lineNumber"],
+              "properties": {
+                "id": { "type": "string" },
+                "body": { "type": "string", "description": "May be '' to seed an empty composer." },
+                "author": { "type": "string" },
+                "side": { "type": "string", "enum": ["additions", "deletions"] },
+                "lineNumber": { "type": "number" },
+                "startLineNumber": { "type": "number" },
+                "startSide": { "type": "string", "enum": ["additions", "deletions"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "orders": {
+      "type": "array",
+      "description": "One or more reading orders (views) over the same segments, e.g. key-changes-first and results-first.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "tagline",
+          "phases",
+          "sequence",
+          "rest",
+          "restLabel",
+          "restBlurb"
+        ],
+        "properties": {
+          "id": { "type": "string", "description": "e.g. 'keys' or 'results'." },
+          "label": { "type": "string", "description": "e.g. 'Key changes first'." },
+          "tagline": {
+            "type": "string",
+            "description": "e.g. 'Cause leads; the proof comes at the end.'"
+          },
+          "restLabel": {
+            "type": "string",
+            "description": "Label for the off-path bundle, e.g. 'Not in the arc'."
+          },
+          "restBlurb": { "type": "string" },
+          "phases": {
+            "type": "array",
+            "description": "Named chapters/phases for this order.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "title", "icon", "blurb"],
+              "properties": {
+                "id": { "type": "string" },
+                "n": {
+                  "type": "number",
+                  "description": "1-based position; reassigned on normalize."
+                },
+                "title": { "type": "string" },
+                "icon": {
+                  "type": "string",
+                  "enum": ["bug", "wrench", "path", "flask", "beaker", "doc", "gear"]
+                },
+                "blurb": { "type": "string" }
+              }
+            }
+          },
+          "sequence": {
+            "type": "array",
+            "description": "Ordered stops. Each is a segment plus this order's framing of it.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["segmentId", "phaseId", "importance", "prose"],
+              "properties": {
+                "segmentId": { "type": "string", "description": "References a segment id." },
+                "phaseId": {
+                  "type": "string",
+                  "description": "References a phase id in this order."
+                },
+                "importance": {
+                  "type": "string",
+                  "enum": ["critical", "normal", "context"]
+                },
+                "prose": {
+                  "type": "string",
+                  "description": "Agent narration (markdown / inline code)."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Overrides the segment's title for this order."
+                }
+              }
+            }
+          },
+          "rest": {
+            "type": "array",
+            "description": "Files changed alongside the work but kept off the narrative path.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["segmentId", "reason"],
+              "properties": {
+                "segmentId": { "type": "string" },
+                "reason": {
+                  "type": "string",
+                  "description": "Why it is off the path, e.g. 'Generated', 'Lockfile', 'Snapshot', 'Mechanical'."
+                },
+                "note": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "defaultOrder": {
+      "type": "string",
+      "description": "The id of the order to open by default. Falls back to the first order if unknown."
+    }
+  }
+}

@@ -131,6 +131,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     repositoryPathProvided: true,
     walkthrough: false,
   })),
+  getNarrativeWalkthrough: vi.fn(async () => null),
   getPreferences: vi.fn(async () => ({
     agentBackend: 'codex' as const,
     claudeModel: defaultSettings.claudeModel,
