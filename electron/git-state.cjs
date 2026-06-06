@@ -7,6 +7,8 @@ const {
   readCommitImageContent,
   readCommitSectionContent,
   readCommitState,
+  readRangeSectionContent,
+  readRangeState,
 } = require('./git-state/commit.cjs');
 const {
   collectResolvedReviewCommentIds,
@@ -49,9 +51,11 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
       ? await readPullRequestState(launchPath, source)
       : source.type === 'commit'
         ? await readCommitState(launchPath, source.ref)
-        : source.type === 'branch'
-          ? await readBranchState(launchPath, source.ref)
-          : await readWorkingTreeState(launchPath, { eagerContents: false });
+        : source.type === 'range'
+          ? await readRangeState(launchPath, source.base, source.head, source.symmetric)
+          : source.type === 'branch'
+            ? await readBranchState(launchPath, source.ref)
+            : await readWorkingTreeState(launchPath, { eagerContents: false });
   const branch = (await gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD'])).trim() || null;
   return { ...state, branch };
 };
@@ -64,11 +68,20 @@ const readRepositoryHistory = (launchPath, limit, source) =>
 
 /** @param {string} launchPath @param {DiffSectionContentRequest} request */
 const readDiffSectionContent = async (launchPath, request) =>
-  request.kind === 'commit' || request.source?.type === 'commit'
-    ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
-        force: request.force,
-      })
-    : readWorkingTreeDiffSectionContent(launchPath, request);
+  request.source?.type === 'range'
+    ? readRangeSectionContent(
+        launchPath,
+        request.source.base,
+        request.source.head,
+        request.source.symmetric,
+        request.path,
+        { force: request.force },
+      )
+    : request.kind === 'commit' || request.source?.type === 'commit'
+      ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
+          force: request.force,
+        })
+      : readWorkingTreeDiffSectionContent(launchPath, request);
 
 /** @param {string} launchPath @param {DiffImageContentRequest} request @returns {Promise<DiffImageContentResult>} */
 const readDiffImageContent = (launchPath, request) =>

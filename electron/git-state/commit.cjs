@@ -596,6 +596,112 @@ const readBranchState = async (launchPath, ref) => {
   };
 };
 
+/**
+ * Resolve a `base...head` (symmetric → merge-base) or `base..head` range to the
+ * concrete (oldRef, newRef) pair the commit helpers diff against.
+ * @param {string} repoRoot @param {string} base @param {string} head @param {boolean} symmetric
+ * @returns {Promise<{ newRef: string; oldRef: string }>}
+ */
+const resolveRangeRefs = async (repoRoot, base, head, symmetric) => {
+  const newRef = (await git(repoRoot, ['rev-parse', '--verify', `${head}^{commit}`])).trim();
+  const oldRef = symmetric
+    ? (await git(repoRoot, ['merge-base', base, newRef])).trim()
+    : (await git(repoRoot, ['rev-parse', '--verify', `${base}^{commit}`])).trim();
+  return { newRef, oldRef };
+};
+
+/**
+ * Build the diff for a ref range. Mirrors {@link readCommitState} with the range's
+ * base as the "parent" side and head as the "commit" side.
+ * @param {string} launchPath @param {string} base @param {string} head @param {boolean} symmetric
+ * @returns {Promise<RepositoryState>}
+ */
+const readRangeState = async (launchPath, base, head, symmetric) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const { newRef, oldRef } = await resolveRangeRefs(repoRoot, base, head, symmetric);
+  const status = await readCommitNameStatus(repoRoot, newRef, oldRef, { sort: false });
+  const [oldFiles, newFiles] = await Promise.all([
+    readGitFiles(
+      repoRoot,
+      oldRef,
+      status.map((item) => item.oldPath || item.path),
+    ),
+    readGitFiles(
+      repoRoot,
+      newRef,
+      status.map((item) => item.path),
+    ),
+  ]);
+  const readyItems = status.filter((item) => {
+    const oldFile =
+      oldFiles.get(item.oldPath || item.path) || createEmptyFileContent(item.oldPath || item.path);
+    const newFile = newFiles.get(item.path) || createEmptyFileContent(item.path);
+    return summarizeContent(oldFile, newFile).loadState === 'ready';
+  });
+  const patches = await readCommitPatches(repoRoot, newRef, oldRef, readyItems);
+  /** @type {Array<ChangedFile>} */
+  const files = status
+    .map((item) =>
+      createCommitFile(
+        newRef,
+        item,
+        oldFiles.get(item.oldPath || item.path) ||
+          createEmptyFileContent(item.oldPath || item.path),
+        newFiles.get(item.path) || createEmptyFileContent(item.path),
+        patches.get(item.path) || '',
+      ),
+    )
+    .sort(fileSort);
+
+  return {
+    files,
+    generatedAt: Date.now(),
+    launchPath,
+    root: repoRoot,
+    source: {
+      base,
+      head,
+      symmetric,
+      type: 'range',
+    },
+  };
+};
+
+/**
+ * Lazy section content for a ref range. Mirrors {@link readCommitSectionContent}.
+ * @param {string} launchPath @param {string} base @param {string} head @param {boolean} symmetric @param {string} requestedPath @param {{encoding?: BufferEncoding, force?: boolean}} [options]
+ */
+const readRangeSectionContent = async (
+  launchPath,
+  base,
+  head,
+  symmetric,
+  requestedPath,
+  options = {},
+) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const path = validateRepositoryPath(requestedPath);
+  const { newRef, oldRef } = await resolveRangeRefs(repoRoot, base, head, symmetric);
+  const status = await readCommitNameStatus(repoRoot, newRef, oldRef, { sort: false });
+  const item = status.find((candidate) => candidate.path === path);
+  if (!item) {
+    throw new Error('File is not part of this range.');
+  }
+
+  const [oldFiles, newFiles] = await Promise.all([
+    readGitFiles(repoRoot, oldRef, [item.oldPath || item.path], options),
+    readGitFiles(repoRoot, newRef, [item.path], options),
+  ]);
+  const oldFile =
+    oldFiles.get(item.oldPath || item.path) || createEmptyFileContent(item.oldPath || item.path);
+  const newFile = newFiles.get(item.path) || createEmptyFileContent(item.path);
+  const summary = summarizeContent(oldFile, newFile);
+  const patch =
+    summary.loadState === 'ready' ? await readCommitPatch(repoRoot, newRef, oldRef, item.path) : '';
+
+  return createCommitSection(newRef, item, oldFile, newFile, patch);
+};
+
 /** @param {string} launchPath @param {ReviewSource} [source] @returns {Promise<RepositoryState>} */
 const readRepositoryState = async (launchPath, source = { type: 'working-tree' }) =>
   source.type === 'pull-request'
@@ -659,4 +765,6 @@ module.exports = {
   readCommitImageContent,
   readCommitSectionContent,
   readCommitState,
+  readRangeSectionContent,
+  readRangeState,
 };

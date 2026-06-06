@@ -125,6 +125,19 @@ const isCommitRefArgument = (arg) =>
 const isExplicitPathArgument = (arg) =>
   arg.startsWith('/') || arg.startsWith('./') || arg.startsWith('../');
 
+// `base...head` (symmetric / merge-base) or `base..head` (direct) range syntax.
+const rangeArgumentPattern = /^([^.][^\s]*?)(\.\.\.?)([^.][^\s]*)$/;
+const parseRangeArgument = (arg) => {
+  if (isExplicitPathArgument(arg)) {
+    return null;
+  }
+  const match = arg.match(rangeArgumentPattern);
+  if (!match) {
+    return null;
+  }
+  return { base: match[1], head: match[3], symmetric: match[2] === '...' };
+};
+
 const gitSucceeds = (repositoryPath, args) => {
   try {
     execFileSync('git', ['-C', repositoryPath, ...args], {
@@ -276,6 +289,7 @@ export const parseArguments = (args) => {
   let pullRequestUrl = null;
   let requestedPath = null;
   let sourceCandidate = null;
+  let rangeCandidate = null;
   const walkthroughContextPath =
     typeof values['walkthrough-context'] === 'string' ? values['walkthrough-context'] : null;
   const walkthroughFilePath =
@@ -305,6 +319,14 @@ export const parseArguments = (args) => {
       }
     }
 
+    if (!rangeCandidate && !commitRef && !branchRef && !sourceCandidate) {
+      const range = parseRangeArgument(arg);
+      if (range) {
+        rangeCandidate = range;
+        continue;
+      }
+    }
+
     if (!commitRef && !branchRef && !sourceCandidate && !isExplicitPathArgument(arg)) {
       sourceCandidate = arg;
     } else if (requestedPath == null) {
@@ -313,7 +335,17 @@ export const parseArguments = (args) => {
   }
 
   const repositoryPath = resolve(requestedPath ?? process.cwd());
-  if (!commitRef && !branchRef && sourceCandidate) {
+  let range = null;
+  if (rangeCandidate) {
+    // Only honor the range when both ends resolve in this repository; otherwise
+    // fall back so a stray `a..b`-shaped argument isn't silently misread.
+    range =
+      isCommitRef(repositoryPath, rangeCandidate.base) &&
+      isCommitRef(repositoryPath, rangeCandidate.head)
+        ? rangeCandidate
+        : null;
+  }
+  if (!range && !commitRef && !branchRef && sourceCandidate) {
     const source = resolveSourceCandidate(repositoryPath, sourceCandidate);
     if (source?.branchRef) {
       branchRef = source.branchRef;
@@ -329,6 +361,7 @@ export const parseArguments = (args) => {
     ...(claudeSessionId ? { claudeSessionId } : {}),
     ...(codexSessionId ? { codexSessionId } : {}),
     ...(branchRef ? { branchRef } : {}),
+    ...(range ? { range } : {}),
     commitRef,
     help: values.help === true,
     pullRequestNumber,

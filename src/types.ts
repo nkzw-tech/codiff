@@ -49,6 +49,15 @@ export type ReviewSource =
       type: 'branch';
     }
   | {
+      /** Base ref (left side). For symmetric ranges the diff starts at its merge-base with head. */
+      base: string;
+      /** Head ref (right side). */
+      head: string;
+      /** `true` for `base...head` (merge-base), `false` for `base..head` (direct). */
+      symmetric: boolean;
+      type: 'range';
+    }
+  | {
       headSha?: string;
       number?: number;
       owner?: string;

@@ -1269,3 +1269,31 @@ test('readRepositoryState rejects non-repository launch paths', async () => {
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test('readRepositoryState builds a diff for a base...head range', () =>
+  withRepo(async (repo) => {
+    await writeRepoFile(repo, 'keep.txt', 'base\n');
+    await commitAll(repo, 'first');
+    await git(repo, ['branch', 'base']);
+    await writeRepoFile(repo, 'keep.txt', 'base\nmore\n');
+    await writeRepoFile(repo, 'added.txt', 'new file\n');
+    await commitAll(repo, 'second');
+    await git(repo, ['branch', 'head']);
+    // A commit made only on base must not appear in base...head (merge-base diff).
+    await git(repo, ['checkout', 'base']);
+    await writeRepoFile(repo, 'base-only.txt', 'base only\n');
+    await commitAll(repo, 'base-only');
+
+    const state = await readRepositoryState(repo, {
+      base: 'base',
+      head: 'head',
+      symmetric: true,
+      type: 'range',
+    });
+
+    expect(state.source).toEqual({ base: 'base', head: 'head', symmetric: true, type: 'range' });
+    expect(state.files.map((file) => file.path).sort()).toEqual(['added.txt', 'keep.txt']);
+    const added = state.files.find((file) => file.path === 'added.txt');
+    expect(added?.status).toBe('added');
+    expect(added?.sections[0]?.patch).toContain('new file');
+  }));

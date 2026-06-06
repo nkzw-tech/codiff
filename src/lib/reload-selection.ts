@@ -42,6 +42,14 @@ const isReviewSource = (value: unknown): value is ReviewSource => {
     return typeof value.ref === 'string';
   }
 
+  if (value.type === 'range') {
+    return (
+      typeof value.base === 'string' &&
+      typeof value.head === 'string' &&
+      typeof value.symmetric === 'boolean'
+    );
+  }
+
   return (
     value.type === 'pull-request' &&
     typeof value.url === 'string' &&

@@ -13,9 +13,12 @@ with `--walkthrough-file`. Set the document's `"$schema"` to
 `https://raw.githubusercontent.com/nkzw-tech/codiff/main/src/walkthrough/narrative-walkthrough.schema.json`
 for editor validation.
 
-Default to the **staged** diff (`git diff --staged`). If the user named a target (a commit,
-`HEAD`, a PR, a path), use that. If nothing is staged, fall back to the working tree
-(`git diff`) and say so.
+Default to the **staged** diff (`git diff --staged`). If the user named a target, use that —
+Codiff accepts a commit (`HEAD`, a SHA), a branch, a pull request (`#123` or a GitHub URL), a
+**ref range** (`base...head` for the merge-base diff, or `base..head` for the direct diff, e.g.
+`main...my-feature` to review a branch like a PR), or a repository path. If nothing is staged,
+fall back to the working tree (`git diff`) and say so. Anchor the document's `segments` against
+whichever diff you choose; for a range, that is the set of files in `git diff base...head`.
 
 ## The shape, and why it's shaped this way
 

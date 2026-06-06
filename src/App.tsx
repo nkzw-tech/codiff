@@ -220,7 +220,9 @@ export default function App() {
       const currentState = repositoryState;
       if (
         !currentState ||
-        (currentState.source.type !== 'working-tree' && currentState.source.type !== 'commit') ||
+        (currentState.source.type !== 'working-tree' &&
+          currentState.source.type !== 'commit' &&
+          currentState.source.type !== 'range') ||
         !shouldLoadDiffSectionContents(section)
       ) {
         return;
@@ -529,7 +531,9 @@ export default function App() {
   useEffect(() => {
     if (
       !state ||
-      (state.source.type !== 'working-tree' && state.source.type !== 'commit') ||
+      (state.source.type !== 'working-tree' &&
+        state.source.type !== 'commit' &&
+        state.source.type !== 'range') ||
       !selectedPath
     ) {
       return;

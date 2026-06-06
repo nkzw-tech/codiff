@@ -811,3 +811,32 @@ test('the walkthrough authoring guide file exists and is non-trivial', async () 
   expect(guide).toContain('segments');
   expect(guide).toContain('orders');
 });
+
+test('parseArguments reads base...head and base..head as a range', async () => {
+  const repositoryPath = await realpath(await mkdtemp(join(tmpdir(), 'codiff-cli-')));
+  const previousCwd = process.cwd();
+
+  try {
+    await git(repositoryPath, ['init']);
+    await git(repositoryPath, ['config', 'user.email', 'codiff@example.com']);
+    await git(repositoryPath, ['config', 'user.name', 'Codiff Test']);
+    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'first']);
+    await git(repositoryPath, ['branch', 'base']);
+    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'second']);
+    await git(repositoryPath, ['branch', 'head']);
+    process.chdir(repositoryPath);
+
+    expect(parseArguments(['-w', 'base...head'])).toMatchObject({
+      range: { base: 'base', head: 'head', symmetric: true },
+      requestedPath: repositoryPath,
+    });
+    expect(parseArguments(['base..head'])).toMatchObject({
+      range: { base: 'base', head: 'head', symmetric: false },
+    });
+    // Unresolved refs fall back instead of being silently read as a range.
+    expect(parseArguments(['nope...nada']).range).toBeUndefined();
+  } finally {
+    process.chdir(previousCwd);
+    await rm(repositoryPath, { force: true, recursive: true });
+  }
+});

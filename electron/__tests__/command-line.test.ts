@@ -17,6 +17,7 @@ const { getInitialRepositoryPath, parseCommandLineArguments, parseGitHubRemoteUr
         source?:
           | { ref: string; type: 'branch' }
           | { ref: string; type: 'commit' }
+          | { base: string; head: string; symmetric: boolean; type: 'range' }
           | { type: 'pull-request'; url: string };
         walkthrough: boolean;
         walkthroughContext?: unknown;
@@ -31,6 +32,7 @@ const { getInitialRepositoryPath, parseCommandLineArguments, parseGitHubRemoteUr
         source?:
           | { ref: string; type: 'branch' }
           | { ref: string; type: 'commit' }
+          | { base: string; head: string; symmetric: boolean; type: 'range' }
           | { type: 'pull-request'; url: string };
         walkthrough: boolean;
         walkthroughContext?: unknown;
@@ -371,5 +373,34 @@ test('does not restore over explicit launch intent', async () => {
     ).toBe('/fallback');
   } finally {
     await rm(lastRepositoryPath, { force: true, recursive: true });
+  }
+});
+
+test('reads base...head and base..head positionals as a range source', async () => {
+  const repositoryPath = await mkdtemp(join(tmpdir(), 'codiff-range-'));
+
+  try {
+    await git(repositoryPath, ['init']);
+    await git(repositoryPath, ['config', 'user.email', 'codiff@example.com']);
+    await git(repositoryPath, ['config', 'user.name', 'Codiff Test']);
+    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'first']);
+    await git(repositoryPath, ['branch', 'base']);
+    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'second']);
+    await git(repositoryPath, ['branch', 'head']);
+
+    expect(
+      parseCommandLineArguments(['codiff', 'base...head', repositoryPath]).launchOptions.source,
+    ).toEqual({ base: 'base', head: 'head', symmetric: true, type: 'range' });
+
+    expect(
+      parseCommandLineArguments(['codiff', 'base..head', repositoryPath]).launchOptions.source,
+    ).toEqual({ base: 'base', head: 'head', symmetric: false, type: 'range' });
+
+    // A range whose ends don't resolve is not treated as a source.
+    expect(
+      parseCommandLineArguments(['codiff', 'nope...nada', repositoryPath]).launchOptions.source,
+    ).toBeUndefined();
+  } finally {
+    await rm(repositoryPath, { force: true, recursive: true });
   }
 });

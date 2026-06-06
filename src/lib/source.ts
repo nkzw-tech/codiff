@@ -1,14 +1,19 @@
 import type { ReviewSource } from '../types.ts';
 import type { RepositoryLoadError } from './app-types.ts';
 
+const rangeLabel = (source: Extract<ReviewSource, { type: 'range' }>) =>
+  `${source.base}${source.symmetric ? '...' : '..'}${source.head}`;
+
 export const getSourceKey = (source: ReviewSource) =>
   source.type === 'commit'
     ? `commit:${source.ref}`
     : source.type === 'branch'
       ? `branch:${source.ref}`
-      : source.type === 'pull-request'
-        ? `pull-request:${source.owner ?? ''}/${source.repo ?? ''}#${source.number ?? source.url}`
-        : 'working-tree';
+      : source.type === 'range'
+        ? `range:${rangeLabel(source)}`
+        : source.type === 'pull-request'
+          ? `pull-request:${source.owner ?? ''}/${source.repo ?? ''}#${source.number ?? source.url}`
+          : 'working-tree';
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -34,8 +39,10 @@ export const getSourceLabel = (source: ReviewSource) =>
     ? getShortRef(source.ref)
     : source.type === 'branch'
       ? source.ref
-      : source.type === 'pull-request'
-        ? source.number
-          ? `PR #${source.number}`
-          : 'Pull request'
-        : 'Uncommitted';
+      : source.type === 'range'
+        ? rangeLabel(source)
+        : source.type === 'pull-request'
+          ? source.number
+            ? `PR #${source.number}`
+            : 'Pull request'
+          : 'Uncommitted';
