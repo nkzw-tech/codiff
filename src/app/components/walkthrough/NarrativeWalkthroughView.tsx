@@ -37,22 +37,25 @@ function StopAnchorMeta({ segment }: { segment: WalkthroughSegment }) {
   );
 }
 
-function StopFocus({
+/** One stop's narration header above its file diff, as a block in the sequence. */
+function StopBlock({
   agentId,
   files,
+  isCurrent,
   renderStopDiff,
   showWhitespace,
   stop,
 }: {
   agentId: 'codex' | 'claude';
   files: ReadonlyArray<ChangedFile>;
+  isCurrent: boolean;
   renderStopDiff: RenderStopDiff;
   showWhitespace: boolean;
   stop: WalkthroughStopView;
 }) {
   const resolved = resolveSegmentFile(stop.segment, files, showWhitespace);
   return (
-    <>
+    <section className={`wt-stop-block${isCurrent ? ' current' : ''}`}>
       <div className="wt-stop-header">
         <ImportancePill importance={stop.importance} />
         <h2 className="wt-stage-title">
@@ -68,7 +71,109 @@ function StopFocus({
           <div className="wt-empty">This file is no longer part of the current diff.</div>
         )}
       </div>
-    </>
+    </section>
+  );
+}
+
+/**
+ * The whole order as one continuous scroll: every stop's narration and diff
+ * stacked top-to-bottom, so the reader moves through the change hunk by hunk by
+ * scrolling rather than paging file by file. The focused stop is derived from
+ * scroll position (which drives the arc, count and "visited" ticks), and the arc
+ * / Next / Prev / j-k smooth-scroll the requested stop back to the top.
+ */
+function SequenceScroll({
+  agentId,
+  files,
+  navigation,
+  orderView,
+  renderStopDiff,
+  showWhitespace,
+}: {
+  agentId: 'codex' | 'claude';
+  files: ReadonlyArray<ChangedFile>;
+  navigation: NarrativeNavigation;
+  orderView: WalkthroughOrderView;
+  renderStopDiff: RenderStopDiff;
+  showWhitespace: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const blockRefs = useRef<Array<HTMLElement | null>>([]);
+  const { scrollTarget, syncIndexFromScroll } = navigation;
+
+  // Derive the focused stop from scroll: it's the last block whose top has
+  // crossed an activation line a little below the top of the viewport.
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const activation = container.scrollTop + 140;
+      let current = 0;
+      for (let i = 0; i < blockRefs.current.length; i += 1) {
+        const el = blockRefs.current[i];
+        if (!el) {
+          continue;
+        }
+        if (el.offsetTop <= activation) {
+          current = i;
+        } else {
+          break;
+        }
+      }
+      syncIndexFromScroll(current);
+    };
+    const onScroll = () => {
+      if (!frame) {
+        frame = requestAnimationFrame(measure);
+      }
+    };
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      if (frame) {
+        cancelAnimationFrame(frame);
+      }
+    };
+  }, [syncIndexFromScroll]);
+
+  // Command-driven moves bump scrollTarget.nonce; bring that stop to the top.
+  // Scroll-driven updates don't bump the nonce, so this never fights the reader.
+  useEffect(() => {
+    const container = scrollRef.current;
+    const el = blockRefs.current[scrollTarget.index];
+    if (!container || !el) {
+      return;
+    }
+    container.scrollTo({
+      behavior: scrollTarget.nonce === 0 ? 'instant' : 'smooth',
+      top: el.offsetTop,
+    });
+  }, [scrollTarget]);
+
+  return (
+    <div className="wt-stop wt-sequence" ref={scrollRef}>
+      {orderView.sequence.map((stop, i) => (
+        <div
+          key={stop.segmentId}
+          ref={(el) => {
+            blockRefs.current[i] = el;
+          }}
+        >
+          <StopBlock
+            agentId={agentId}
+            files={files}
+            isCurrent={i === navigation.index}
+            renderStopDiff={renderStopDiff}
+            showWhitespace={showWhitespace}
+            stop={stop}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -140,7 +245,7 @@ function FullReader({
 }) {
   const resolved = resolveSegmentFile(restItem.segment, files, showWhitespace);
   return (
-    <>
+    <div className="wt-stop">
       <div className="wt-rest-header">
         <div className="wt-full-banner">
           <span className="wt-full-banner-icon">
@@ -165,7 +270,7 @@ function FullReader({
           <div className="wt-empty">This file is no longer part of the current diff.</div>
         )}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -389,7 +494,6 @@ export function NarrativeWalkthroughView({
     return <div className="wt-empty">This walkthrough has no readable order.</div>;
   }
 
-  const stop = orderView.sequence[navigation.index];
   const next = orderView.sequence[navigation.index + 1];
   const restItem =
     navigation.restFileId != null
@@ -434,13 +538,14 @@ export function NarrativeWalkthroughView({
           onUpdateMessage={onUpdateCommitMessage}
           walkthrough={walkthrough}
         />
-      ) : navigation.mode === 'stop' && stop ? (
-        <StopFocus
+      ) : navigation.mode === 'stop' && orderView.sequence.length > 0 ? (
+        <SequenceScroll
           agentId={walkthrough.agent}
           files={files}
+          navigation={navigation}
+          orderView={orderView}
           renderStopDiff={renderStopDiff}
           showWhitespace={showWhitespace}
-          stop={stop}
         />
       ) : navigation.mode === 'rest' && restItem ? (
         <FullReader

@@ -526,24 +526,65 @@
   overflow: auto;
 }
 
-/* The focused stop: a pinned header above a bounded, scrolling real diff. */
+/* The focused stop / full-context reader: the header and the real diff share a
+   single scroll, so the header scrolls away as you move down into the diff. The
+   stop is the scroll container; the CodeView renders at its natural height
+   instead of scrolling inside its own bounded box. */
+.wt-stop {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  /* Anchor offsetTop for the sequence blocks to this scroll container so the
+     scroll-driven focus maths stay relative to it. */
+  position: relative;
+}
 .wt-stop-header {
+  flex: none;
   margin: 0 auto;
   max-width: 820px;
   padding: 24px 24px 16px;
   width: 100%;
 }
 .wt-rest-header {
+  flex: none;
   margin: 0 auto;
   max-width: 820px;
   padding: 20px 24px 0;
   width: 100%;
 }
 .wt-stop-diff-host {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  flex: none;
   position: relative;
+}
+/* Let the diff grow to its content height so the outer .wt-stop does the
+   scrolling, rather than the CodeView scrolling within a fixed-height box. */
+.wt-stop .code-view {
+  contain: none;
+  height: auto;
+  overflow: visible;
+}
+
+/* The whole order as one continuous scroll: each stop is a block (narration +
+   diff) stacked top-to-bottom, separated by a rule, with the scroll-focused stop
+   lightly accented so the reader can see where the arc's highlight comes from. */
+.wt-stop-block {
+  border-top: 1px solid var(--file-border);
+}
+.wt-stop-block:first-child {
+  border-top: 0;
+}
+.wt-stop-block.current > .wt-stop-header {
+  box-shadow: inset 3px 0 0 var(--tree-selection-focus);
+}
+/* Leave room below the last diff so the final stop can scroll up to the top and
+   become the focused stop, rather than being stuck at the bottom of the page. */
+.wt-sequence::after {
+  content: '';
+  display: block;
+  flex: none;
+  height: 55vh;
 }
 
 .wt-upnext {
