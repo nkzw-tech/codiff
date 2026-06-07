@@ -874,7 +874,13 @@ ipcMain.handle('codiff:getWalkthrough', async (event, source) => {
     launchOptions?.walkthroughContext,
     agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
   );
-  return readWalkthrough(state, agent, getAgentOptions(agent), walkthroughContext);
+  return readWalkthrough(
+    state,
+    agent,
+    getAgentOptions(agent),
+    walkthroughContext,
+    config.settings.walkthroughPrompt,
+  );
 });
 
 // Load a pre-authored narrative walkthrough (--walkthrough-file) and repair it against the

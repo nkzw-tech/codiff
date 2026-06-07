@@ -8,9 +8,10 @@ import schema from '../config/codiff-config.schema.json' with { type: 'json' };
 import { createDefaultConfig } from '../config/defaults.ts';
 
 const require = createRequire(import.meta.url);
-const { createDefaultConfig: createElectronDefaultConfig } =
+const { createDefaultConfig: createElectronDefaultConfig, mergeConfig } =
   require('../../electron/config.cjs') as {
     createDefaultConfig: typeof createDefaultConfig;
+    mergeConfig: (raw: unknown) => ReturnType<typeof createDefaultConfig>;
   };
 
 const getSchemaDefaults = (section: 'keymap' | 'settings') =>
@@ -41,6 +42,24 @@ test('electron defaults load from packaged app shape', () => {
 
   const packageRequire = createRequire(join(packageRoot, 'electron/config.cjs'));
   expect(packageRequire('./config.cjs').createDefaultConfig()).toEqual(createDefaultConfig());
+});
+
+test('config keeps custom walkthrough prompt text only when it is a string', () => {
+  expect(
+    mergeConfig({
+      settings: {
+        walkthroughPrompt: 'Respond in German with product-review terminology.',
+      },
+    }).settings.walkthroughPrompt,
+  ).toBe('Respond in German with product-review terminology.');
+
+  expect(
+    mergeConfig({
+      settings: {
+        walkthroughPrompt: ['Respond in German'],
+      },
+    }).settings.walkthroughPrompt,
+  ).toBe('');
 });
 
 test('npm package includes shared config defaults', () => {

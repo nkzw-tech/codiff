@@ -11,6 +11,8 @@ const { buildPrompt, normalizeWalkthrough } = require('../walkthrough.cjs') as {
       source: { generatedAt: string; threadId?: string; type: string };
       version: 1;
     },
+    agentLabel?: string,
+    customPrompt?: string,
   ) => string;
   normalizeWalkthrough: (
     input: unknown,
@@ -71,6 +73,32 @@ test('includes Codex conversation context in walkthrough prompts', () => {
   expect(prompt).toContain('Make Codiff walkthroughs reuse the creating Codex session.');
   expect(prompt).toContain('The skill should only pass the session id to Codiff.');
   expect(prompt).toContain('Treat the repository change digest as the source of truth');
+});
+
+test('includes custom walkthrough prompt guidance without replacing core constraints', () => {
+  const prompt = buildPrompt(
+    {
+      files: [
+        {
+          fingerprint: 'abc',
+          path: 'README.md',
+          sections: [],
+          status: 'modified',
+        },
+      ],
+      generatedAt: 1,
+      root: '/repo',
+      source: { type: 'working-tree' },
+    },
+    null,
+    'Claude Code',
+    'Answer in Japanese and use concise reviewer-facing explanations.',
+  );
+
+  expect(prompt).toContain('Custom walkthrough instructions:');
+  expect(prompt).toContain('Answer in Japanese and use concise reviewer-facing explanations.');
+  expect(prompt).toContain('Return JSON only.');
+  expect(prompt).toContain('Repository change digest:');
 });
 
 test('normalizes review leverage walkthrough fields', () => {

@@ -521,6 +521,7 @@ export type CodiffPreferences = {
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;
+  walkthroughPrompt: string;
   wordWrap: boolean;
 };
 

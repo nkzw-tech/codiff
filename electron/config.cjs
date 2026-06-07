@@ -243,6 +243,10 @@ const mergeConfig = (raw) => {
           ? rawSettings.showWhitespace
           : defaults.settings.showWhitespace,
       theme: normalizeTheme(rawSettings.theme),
+      walkthroughPrompt:
+        typeof rawSettings.walkthroughPrompt === 'string'
+          ? rawSettings.walkthroughPrompt
+          : defaults.settings.walkthroughPrompt,
       wordWrap:
         typeof rawSettings.wordWrap === 'boolean'
           ? rawSettings.wordWrap

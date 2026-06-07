@@ -121,11 +121,25 @@ If the context and digest conflict, trust the digest.
 `
     : '';
 
-/** @param {RepositoryState} state @param {WalkthroughContext | null | undefined} [context] @param {string} [agentLabel] */
+/** @param {unknown} customPrompt */
+const buildCustomPromptInput = (customPrompt) => {
+  const prompt = typeof customPrompt === 'string' ? customPrompt.trim() : '';
+
+  return prompt
+    ? `Custom walkthrough instructions:
+${prompt}
+
+Use these instructions to customize language, tone, and review detail. If they conflict with the JSON schema, changed file list, or review-order constraints above, keep the schema and digest as the source of truth.
+`
+    : '';
+};
+
+/** @param {RepositoryState} state @param {WalkthroughContext | null | undefined} [context] @param {string} [agentLabel] @param {string} [customPrompt] */
 const buildPrompt = (
   state,
   context,
   agentLabel = 'Codex',
+  customPrompt,
 ) => `You are helping Codiff order a code review.
 
 Return a high-leverage review walkthrough order, not review findings.
@@ -158,6 +172,7 @@ Do not mention files that were not provided.
 Return JSON only.
 
 ${buildWalkthroughContextInput(context, agentLabel)}
+${buildCustomPromptInput(customPrompt)}
 Repository change digest:
 ${JSON.stringify(buildPromptInput(state), null, 2)}
 `;
@@ -233,8 +248,8 @@ const normalizeWalkthrough = (input, files, agentLabel = 'Codex') => {
   };
 };
 
-/** @param {RepositoryState} state @param {Agent} agent @param {AgentOptions} agentOptions @param {WalkthroughContext | null | undefined} [context] */
-const readWalkthrough = async (state, agent, agentOptions, context) => {
+/** @param {RepositoryState} state @param {Agent} agent @param {AgentOptions} agentOptions @param {WalkthroughContext | null | undefined} [context] @param {string} [customPrompt] */
+const readWalkthrough = async (state, agent, agentOptions, context, customPrompt) => {
   if (state.files.length === 0) {
     return {
       status: 'ready',
@@ -252,7 +267,7 @@ const readWalkthrough = async (state, agent, agentOptions, context) => {
   try {
     const response = await agent.run(
       state.root,
-      buildPrompt(state, context, agent.label),
+      buildPrompt(state, context, agent.label, customPrompt),
       walkthroughSchema,
       'walkthrough.json',
       `${agent.label} walkthrough timed out.`,
