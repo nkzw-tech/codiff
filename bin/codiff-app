@@ -32,7 +32,7 @@ show_help() {
   printf '\n'
   printf '%s\n' "${blue_bold}Options:${reset}"
   printf '  %-22s%s%s%s\n' "--agent <codex|claude>" "$gray" "Override the agent backend for this session." "$reset"
-  printf '  %-22s%s%s%s\n' "--branch <ref>" "$gray" "Open branch history." "$reset"
+  printf '  %-22s%s%s%s\n' "--branch <ref>" "$gray" "Review the current branch against a target branch." "$reset"
   printf '  %-22s%s%s%s\n' "--commit <ref>" "$gray" "Review a specific commit." "$reset"
   printf '  %-22s%s%s%s\n' "--codex-session <id>" "$gray" "Attach Codex session metadata to a walkthrough." "$reset"
   printf '  %-22s%s%s%s\n' "--claude-session <id>" "$gray" "Attach Claude Code session metadata to a walkthrough." "$reset"
@@ -45,7 +45,7 @@ show_help() {
   printf '%s\n' "${blue_bold}Examples:${reset}"
   printf '  %-22s%s%s%s\n' "codiff" "$gray" "Review staged and unstaged changes." "$reset"
   printf '  %-22s%s%s%s\n' "codiff /path/to/repo" "$gray" "Review changes in a specific repository." "$reset"
-  printf '  %-22s%s%s%s\n' "codiff branch-name" "$gray" "Review a branch history." "$reset"
+  printf '  %-22s%s%s%s\n' "codiff main" "$gray" "Review the current branch against main." "$reset"
   printf '  %-22s%s%s%s\n' "codiff a1b2c3d" "$gray" "Review a specific commit." "$reset"
   printf '  %-22s%s%s%s\n' "codiff '#75'" "$gray" "Review pull request #75." "$reset"
   printf '  %-22s%s%s%s\n' "codiff pr 75" "$gray" "Review pull request #75 (alternate syntax)." "$reset"

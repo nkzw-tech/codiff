@@ -862,6 +862,12 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   const state = initialState
     ? await initialState
     : await readRepositoryState(repositoryPath, source || launchOptions?.source);
+  if (launchOptions) {
+    windowLaunchOptions.set(event.sender.id, {
+      ...launchOptions,
+      source: state.source,
+    });
+  }
   rememberLastRepositoryPath(state.root);
   const identity = getWindowIdentityForSource(state.root, state.source);
   if (identity) {

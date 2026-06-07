@@ -10,7 +10,12 @@ export const flagDefinitions = [
     name: 'agent',
     type: 'string',
   },
-  { argument: '<ref>', description: 'Open branch history.', name: 'branch', type: 'string' },
+  {
+    argument: '<ref>',
+    description: 'Review the current branch against a target branch.',
+    name: 'branch',
+    type: 'string',
+  },
   {
     argument: '<id>',
     description: 'Attach Claude Code session metadata to a walkthrough.',
@@ -59,7 +64,7 @@ export const flagDefinitions = [
 export const usageExamples = [
   { command: 'codiff', description: 'Review staged and unstaged changes.' },
   { command: 'codiff /path/to/repo', description: 'Review changes in a specific repository.' },
-  { command: 'codiff branch-name', description: 'Review a branch history.' },
+  { command: 'codiff main', description: 'Review the current branch against main.' },
   { command: 'codiff a1b2c3d', description: 'Review a specific commit.' },
   { command: "codiff '#75'", description: 'Review pull request #75.' },
   { command: 'codiff pr 75', description: 'Review pull request #75 (alternate syntax).' },

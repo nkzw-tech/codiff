@@ -48,6 +48,19 @@ const resolveCommitRef = (repositoryRoot, ref) => {
   }
 };
 
+/** @param {string} repositoryRoot @param {string} baseRef @param {string} headRef */
+const resolveMergeBase = (repositoryRoot, baseRef, headRef) => {
+  try {
+    return execFileSync('git', ['-C', repositoryRoot, 'merge-base', baseRef, headRef], {
+      encoding: 'utf8',
+    })
+      .trim()
+      .toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
 /** @param {string} value @returns {ParsedPullRequest | null} */
 const parseGitHubPullRequestUrl = (value) => {
   try {
@@ -99,7 +112,16 @@ const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
   }
 
   if (source.type === 'branch') {
-    return resolveCommitRef(repositoryRoot, source.ref) ? `branch:${source.ref}` : null;
+    const head = resolveCommitRef(repositoryRoot, 'HEAD');
+    const target = resolveCommitRef(repositoryRoot, source.ref);
+    const nextBase = target && head ? resolveMergeBase(repositoryRoot, target, head) : null;
+    return nextBase && head ? `branch-diff:${source.ref}:${nextBase}:${head}` : null;
+  }
+
+  if (source.type === 'branch-diff') {
+    const base = resolveCommitRef(repositoryRoot, source.baseRef);
+    const head = resolveCommitRef(repositoryRoot, source.headRef);
+    return base && head ? `branch-diff:${source.ref}:${base}:${head}` : null;
   }
 
   if (source.type === 'pull-request') {

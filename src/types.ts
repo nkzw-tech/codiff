@@ -49,6 +49,15 @@ export type ReviewSource =
       type: 'branch';
     }
   | {
+      /** Resolved base commit for a branch diff snapshot. */
+      baseRef: string;
+      /** Resolved head commit for a branch diff snapshot. */
+      headRef: string;
+      /** Target branch the current branch was compared against. */
+      ref: string;
+      type: 'branch-diff';
+    }
+  | {
       /** Base ref (left side). For symmetric ranges the diff starts at its merge-base with head. */
       base: string;
       /** Head ref (right side). */

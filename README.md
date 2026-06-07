@@ -40,6 +40,12 @@ Review a specific commit:
 codiff a1b2c3d
 ```
 
+Review the current branch against a target branch:
+
+```bash
+codiff main
+```
+
 Start with an LLM-generated narrative walkthrough:
 
 ```bash

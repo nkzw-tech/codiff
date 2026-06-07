@@ -11,8 +11,9 @@ type ReloadSelectionFile = {
 
 type ReloadSelection = {
   files: ReadonlyArray<ReloadSelectionFile>;
+  historySource?: ReviewSource | null;
   root: string;
-  selectedPath: string;
+  selectedPath: string | null;
   source: ReviewSource;
 };
 
@@ -38,7 +39,7 @@ const isReviewSource = (value: unknown): value is ReviewSource => {
     return true;
   }
 
-  if (value.type === 'commit' || value.type === 'branch') {
+  if (value.type === 'commit') {
     return typeof value.ref === 'string';
   }
 
@@ -47,6 +48,18 @@ const isReviewSource = (value: unknown): value is ReviewSource => {
       typeof value.base === 'string' &&
       typeof value.head === 'string' &&
       typeof value.symmetric === 'boolean'
+    );
+  }
+
+  if (value.type === 'branch') {
+    return typeof value.ref === 'string';
+  }
+
+  if (value.type === 'branch-diff') {
+    return (
+      typeof value.ref === 'string' &&
+      typeof value.baseRef === 'string' &&
+      typeof value.headRef === 'string'
     );
   }
 
@@ -78,8 +91,9 @@ const isReloadSelection = (value: unknown): value is ReloadSelection =>
   isObject(value) &&
   Array.isArray(value.files) &&
   value.files.every(isReloadSelectionFile) &&
+  (value.historySource == null || isReviewSource(value.historySource)) &&
   typeof value.root === 'string' &&
-  typeof value.selectedPath === 'string' &&
+  (value.selectedPath == null || typeof value.selectedPath === 'string') &&
   isReviewSource(value.source);
 
 const getMatchingSelection = (selection: ReloadSelection | null, state: RepositoryState) =>
@@ -117,7 +131,7 @@ export const getReloadSelectionPath = (
   state: RepositoryState,
 ): string | null => {
   const matchedSelection = getMatchingSelection(selection, state);
-  if (!matchedSelection) {
+  if (!matchedSelection || !matchedSelection.selectedPath) {
     return null;
   }
 
@@ -151,12 +165,18 @@ export const getReloadDeltaPaths = (
   return deltaPaths;
 };
 
+export const getReloadHistorySource = (
+  selection: ReloadSelection | null,
+  state: RepositoryState,
+): ReviewSource | null => getMatchingSelection(selection, state)?.historySource ?? null;
+
 export const writeReloadSelection = (
   state: RepositoryState | null,
   selectedPath: string | null,
+  historySource: ReviewSource | null = null,
 ) => {
   const storage = getStorage();
-  if (!storage || !state || !selectedPath) {
+  if (!storage || !state) {
     return;
   }
 
@@ -169,6 +189,7 @@ export const writeReloadSelection = (
           path: file.path,
           status: file.status,
         })),
+        historySource,
         root: state.root,
         selectedPath,
         source: state.source,
