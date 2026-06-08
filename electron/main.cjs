@@ -980,11 +980,29 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
     const state = await readRepositoryState(repositoryPath, source || launchOptions?.source);
     const walkthroughFile = launchOptions?.walkthroughFile;
     if (walkthroughFile) {
-      const input = JSON.parse(readFileSync(walkthroughFile, 'utf8'));
-      return {
-        status: 'ready',
-        walkthrough: normalizeNarrativeWalkthrough(input, state.files),
-      };
+      let input;
+      try {
+        input = JSON.parse(readFileSync(walkthroughFile, 'utf8'));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return {
+          reason: `Could not read walkthrough file: ${detail}`,
+          status: 'unavailable',
+        };
+      }
+
+      try {
+        return {
+          status: 'ready',
+          walkthrough: normalizeNarrativeWalkthrough(input, state.files),
+        };
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return {
+          reason: `Walkthrough file could not be applied to this diff: ${detail}`,
+          status: 'unavailable',
+        };
+      }
     }
 
     const agent = resolveWindowAgent(event.sender.id);

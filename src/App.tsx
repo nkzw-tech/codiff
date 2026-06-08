@@ -23,6 +23,10 @@ import { Sidebar } from './app/components/Sidebar.tsx';
 import { CommitView } from './app/components/walkthrough/CommitView.tsx';
 import { NarrativeWalkthroughView } from './app/components/walkthrough/NarrativeWalkthroughView.tsx';
 import { useNarrativeNavigation } from './app/components/walkthrough/useNarrativeNavigation.ts';
+import {
+  type WalkthroughFileError,
+  WalkthroughFileErrorDialog,
+} from './app/components/WalkthroughFileError.tsx';
 import { createDefaultConfig } from './config/defaults.ts';
 import { getShortcutLabel, matchesShortcut } from './config/keymap.ts';
 import type { CodiffConfig } from './config/types.ts';
@@ -222,6 +226,9 @@ export default function App() {
     null,
   );
   const [walkthroughError, setWalkthroughError] = useState<WalkthroughError | null>(null);
+  const [walkthroughFileError, setWalkthroughFileError] = useState<WalkthroughFileError | null>(
+    null,
+  );
   const [walkthroughLoading, setWalkthroughLoading] = useState(false);
   const [walkthroughUnread, setWalkthroughUnread] = useState(false);
   const [mainMode, setMainMode] = useState<MainMode>('review');
@@ -449,7 +456,12 @@ export default function App() {
       }
 
       const filesPresent = orderedState.files.length > 0;
-      const shouldLoadNarrative = nextLaunchOptions.walkthrough && filesPresent;
+      // A pre-authored `--walkthrough-file` is an explicit request to open in
+      // walkthrough mode, even without the `-w` flag. Treat it like `walkthrough`
+      // so the file is actually loaded instead of being silently ignored.
+      const walkthroughFilePath = nextLaunchOptions.walkthroughFile ?? null;
+      const shouldLoadNarrative =
+        (nextLaunchOptions.walkthrough || walkthroughFilePath != null) && filesPresent;
       const shouldStartInHistory =
         shouldStartInHistoryWhenEmpty(orderedState.source) && orderedState.files.length === 0;
 
@@ -473,6 +485,21 @@ export default function App() {
         setWalkthroughError(narrativeResult);
       } else {
         setWalkthroughError(null);
+      }
+
+      // When a walkthrough file was explicitly passed but did not end up
+      // rendering, surface a modal explaining why rather than failing silently.
+      if (walkthroughFilePath != null && loadedNarrative == null) {
+        setWalkthroughFileError({
+          path: walkthroughFilePath,
+          reason: !filesPresent
+            ? 'No changed files were found for this diff, so the walkthrough file has nothing to anchor to.'
+            : narrativeResult?.status === 'unavailable'
+              ? narrativeResult.reason
+              : 'The walkthrough file could not be loaded.',
+        });
+      } else {
+        setWalkthroughFileError(null);
       }
 
       setWalkthroughLoading(false);
@@ -2131,6 +2158,10 @@ export default function App() {
         visible={commandBarVisible}
       />
       <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
+      <WalkthroughFileErrorDialog
+        error={walkthroughFileError}
+        onDismiss={() => setWalkthroughFileError(null)}
+      />
       {!isSwitchingSource ? (
         <div className="review-action-bar">
           <CopyCommentsButton

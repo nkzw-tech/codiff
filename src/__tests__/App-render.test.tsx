@@ -1043,6 +1043,146 @@ test('narrative walkthrough stops do not repeat commit details', async () => {
   }
 });
 
+test('a walkthrough file loads even without the walkthrough launch flag', async () => {
+  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const narrativeWalkthrough = {
+    agent: 'claude',
+    chapters: [
+      {
+        blurb: 'Review the implementation.',
+        icon: 'gear',
+        id: 'impl',
+        stops: [
+          {
+            anchors: [
+              {
+                added: 1,
+                anchor: { display: 'src/app.ts', sectionId: 'src/app.ts:unstaged', side: 'both' },
+                deleted: 1,
+                granularity: 'file',
+                id: 's1',
+                path: 'src/app.ts',
+                status: 'modified',
+              },
+            ],
+            body: 'Review this file.',
+            id: 'implementation-path',
+            importance: 'critical',
+            summary: 'The implementation path.',
+            title: 'Implementation path',
+          },
+        ],
+        title: 'Implementation',
+      },
+    ],
+    focus: 'Focus.',
+    generatedAt: '2026-06-07T00:00:00.000Z',
+    kind: 'narrative',
+    repo: { branch: 'main', root: '/repo' },
+    source,
+    support: [],
+    title: 'Narrative',
+    version: 3,
+  } satisfies NarrativeWalkthrough;
+
+  const getNarrativeWalkthrough = vi.fn(async () => ({
+    status: 'ready' as const,
+    walkthrough: narrativeWalkthrough,
+  }));
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      source,
+      walkthrough: false,
+      walkthroughFile: '/tmp/walkthrough.json',
+    })),
+    getNarrativeWalkthrough,
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [createChangedFile('src/app.ts')],
+      source,
+    })),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.wt-stop-block')).not.toBeNull();
+    });
+
+    expect(getNarrativeWalkthrough).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('.walkthrough-error')).toBeNull();
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('a walkthrough file that fails to load surfaces an error modal', async () => {
+  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      source,
+      walkthrough: false,
+      walkthroughFile: '/tmp/broken-walkthrough.json',
+    })),
+    getNarrativeWalkthrough: vi.fn(async () => ({
+      reason: 'Walkthrough file could not be applied to this diff: anchor not found.',
+      status: 'unavailable' as const,
+    })),
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [createChangedFile('src/app.ts')],
+      source,
+    })),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.walkthrough-error')).not.toBeNull();
+    });
+
+    const dialog = container.querySelector('.walkthrough-error');
+    expect(dialog?.querySelector('.walkthrough-error-path')?.textContent).toBe(
+      '/tmp/broken-walkthrough.json',
+    );
+    expect(dialog?.querySelector('.walkthrough-error-reason')?.textContent).toContain(
+      'anchor not found',
+    );
+
+    await act(async () => {
+      dialog?.querySelector<HTMLButtonElement>('.walkthrough-error-actions button')?.click();
+    });
+
+    expect(container.querySelector('.walkthrough-error')).toBeNull();
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
 test('repository changes show the update banner without refreshing the working tree', async () => {
   let onRepositoryChanged: ((change: { root: string }) => void) | null = null;
   const getRepositoryState = vi.fn(async () => repositoryState);

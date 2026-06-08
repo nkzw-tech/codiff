@@ -2443,6 +2443,99 @@
   text-align: center;
 }
 
+.walkthrough-error-overlay {
+  -webkit-backdrop-filter: blur(4px);
+  align-items: center;
+  backdrop-filter: blur(4px);
+  background: rgb(255 255 255 / 0.28);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 40px;
+  position: fixed;
+  z-index: 120;
+}
+
+:root[data-theme='dark'] .walkthrough-error-overlay {
+  background: rgb(0 0 0 / 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .walkthrough-error-overlay {
+    background: rgb(0 0 0 / 0.16);
+  }
+}
+
+.walkthrough-error {
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  backdrop-filter: blur(28px) saturate(1.4);
+  background: color-mix(in srgb, var(--code-bg) 88%, transparent);
+  border: 1px solid var(--file-border);
+  border-radius: 28px;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.12) inset,
+    0 18px 80px -54px rgb(0 0 0 / 0.78),
+    0 16px 46px -30px rgb(0 0 0 / 0.72),
+    0 12px 24px -18px rgb(0 0 0 / 0.9);
+  corner-shape: squircle;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 520px;
+  padding: 22px 24px;
+  width: 100%;
+}
+
+.walkthrough-error-header {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.walkthrough-error-title {
+  color: var(--text);
+  font: 600 15px/1.2 var(--font-sans);
+}
+
+.walkthrough-error-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: 18px/1 var(--font-sans);
+  padding: 0 2px;
+}
+
+.walkthrough-error-text {
+  color: var(--text);
+  font: 13px/1.45 var(--font-sans);
+  margin: 0;
+}
+
+.walkthrough-error-path {
+  background: rgb(127 127 127 / 0.12);
+  border-radius: 8px;
+  color: var(--muted);
+  corner-shape: squircle;
+  font: 12px/1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+}
+
+.walkthrough-error-reason {
+  color: var(--muted);
+  font: 12px/1.5 var(--font-mono);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.walkthrough-error-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
 .command-bar-overlay {
   -webkit-backdrop-filter: blur(4px);
   align-items: flex-start;
