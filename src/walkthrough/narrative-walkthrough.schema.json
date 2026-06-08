@@ -53,7 +53,7 @@
                   "items": {
                     "type": "string"
                   },
-                  "maxItems": 3,
+                  "maxItems": 14,
                   "minItems": 1,
                   "type": "array"
                 },
@@ -141,7 +141,7 @@
             "items": {
               "type": "string"
             },
-            "maxItems": 3,
+            "maxItems": 14,
             "minItems": 1,
             "type": "array"
           },

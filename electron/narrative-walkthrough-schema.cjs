@@ -17,7 +17,7 @@ const CHANGE_TYPES = new Set([
 
 const MAX_WALKTHROUGH_CHAPTERS = 6;
 const MAX_WALKTHROUGH_STOPS = 14;
-const MAX_HUNKS_PER_WALKTHROUGH_GROUP = 3;
+const MAX_HUNKS_PER_WALKTHROUGH_GROUP = 14;
 
 const hunkGroupProperties = {
   changeType: { enum: [...CHANGE_TYPES], type: 'string' },

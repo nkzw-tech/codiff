@@ -33,6 +33,7 @@ const hunk = ({
   deletionStart,
   display,
   id,
+  kind,
   path,
   sectionId,
   status,
@@ -45,6 +46,7 @@ const hunk = ({
   deletionStart?: number;
   display: string;
   id: string;
+  kind?: WalkthroughHunk['kind'];
   path: string;
   sectionId: string;
   status: WalkthroughHunk['status'];
@@ -57,6 +59,7 @@ const hunk = ({
   deletionEnd,
   deletionStart,
   id,
+  ...(kind ? { kind } : {}),
   path,
   status,
 });
@@ -440,6 +443,92 @@ test('uncovered walkthrough files keep visible non-hunk sections in support fall
   ]);
 });
 
+test('covered synthetic hunks do not reappear in support fallback', () => {
+  const file: ChangedFile = {
+    fingerprint: 'binary',
+    path: 'public/logo.png',
+    sections: [
+      {
+        binary: true,
+        id: 'public/logo.png:staged',
+        kind: 'staged',
+        loadState: 'binary',
+        patch: '',
+        summary: { reason: 'Binary file changed.' },
+      },
+    ],
+    status: 'modified',
+  };
+  const synthetic = hunk({
+    added: 0,
+    deleted: 0,
+    display: 'public/logo.png',
+    id: 'public/logo.png:staged:h1',
+    kind: 'synthetic',
+    path: 'public/logo.png',
+    sectionId: 'public/logo.png:staged',
+    status: 'modified',
+  });
+  const view = buildWalkthroughView({
+    ...walkthrough(),
+    chapters: [
+      {
+        blurb: 'Assets',
+        icon: 'path',
+        id: 'assets',
+        stops: [
+          {
+            ...group({ hunks: [synthetic], id: 'logo' }),
+            importance: 'normal',
+            prose: 'Review the image asset.',
+          },
+        ],
+        title: 'Assets',
+      },
+    ],
+    support: [],
+  })!;
+
+  expect(getUncoveredWalkthroughFiles([file], view, false)).toEqual([]);
+});
+
+test('covered synthetic sections do not reappear after content loads', () => {
+  const file = multiHunkFile();
+  const section = file.sections[0];
+  const synthetic = hunk({
+    added: 0,
+    deleted: 0,
+    display: file.path,
+    id: `${section.id}:h1`,
+    kind: 'synthetic',
+    path: file.path,
+    sectionId: section.id,
+    status: 'modified',
+  });
+  const view = buildWalkthroughView({
+    ...walkthrough(),
+    chapters: [
+      {
+        blurb: 'Loaded',
+        icon: 'path',
+        id: 'loaded',
+        stops: [
+          {
+            ...group({ hunks: [synthetic], id: 'loaded-section' }),
+            importance: 'normal',
+            prose: 'Review the loaded section.',
+          },
+        ],
+        title: 'Loaded',
+      },
+    ],
+    support: [],
+  })!;
+
+  expect(parseSectionDiffWithOptions(file, section, false).hunks.length).toBeGreaterThan(1);
+  expect(getUncoveredWalkthroughFiles([file], view, false)).toEqual([]);
+});
+
 test('buildGenericCommitModel creates a commit group from live tree files', () => {
   const model = buildGenericCommitModel([
     {
@@ -810,6 +899,32 @@ test('focusChangedFileForHunks keeps deferred hunk sections visible and loadable
   });
 });
 
+test('focusChangedFileForHunks keeps synthetic hunks as whole sections after content loads', () => {
+  const file = multiHunkFile();
+  const section = file.sections[0];
+  const focused = focusChangedFileForHunks(file, section, [
+    hunk({
+      added: 0,
+      deleted: 0,
+      display: 'database_search.py',
+      id: `${section.id}:h1`,
+      kind: 'synthetic',
+      path: file.path,
+      sectionId: section.id,
+      status: 'modified',
+    }),
+  ]);
+
+  expect(focused).not.toBeNull();
+  expect(focused!.sections).toHaveLength(1);
+  expect(focused!.sections[0].patch).toBe(section.patch);
+  expect(focused!.sections[0].newFile).toBe(section.newFile);
+  expect(focused!.sections[0].oldFile).toBe(section.oldFile);
+  expect(
+    parseSectionDiffWithOptions(focused!, focused!.sections[0], false).hunks.length,
+  ).toBeGreaterThan(1);
+});
+
 test('focusChangedFileForHunks fails closed for unresolved hunk ids', () => {
   const file = multiHunkFile();
   const section = file.sections[0];
@@ -936,6 +1051,6 @@ test('getWalkthroughRunNote combines header notes for grouped hunks', () => {
 
   expect(runs).toHaveLength(1);
   expect(getWalkthroughRunNote(item, runs[0])).toBe(
-    'This line turns the widget into a reorderable list. • This hunk persists the final order.',
+    'This line turns the widget into a reorderable list. This hunk persists the final order.',
   );
 });

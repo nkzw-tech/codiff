@@ -72,13 +72,28 @@ const sumHunkLineCounts = (hunks) =>
     { added: 0, deleted: 0 },
   );
 
-/** @param {ReturnType<typeof extractPatchHunks>[number]} hunk */
-const hunkDisplayStart = (hunk) => (hunk.added > 0 ? hunk.additionStart : hunk.deletionStart);
+/** @param {{kind?: string} | null | undefined} hunk */
+const isSyntheticWalkthroughHunk = (hunk) => hunk?.kind === 'synthetic';
 
-/** @param {ReturnType<typeof extractPatchHunks>[number]} hunk */
-const hunkDisplayEnd = (hunk) => (hunk.added > 0 ? hunk.additionEnd : hunk.deletionEnd);
+/** @param {ReturnType<typeof extractPatchHunks>[number] & {kind?: string}} hunk */
+const hunkDisplayStart = (hunk) => {
+  if (isSyntheticWalkthroughHunk(hunk)) {
+    return undefined;
+  }
 
-/** @param {string} path @param {ReadonlyArray<ReturnType<typeof extractPatchHunks>[number]>} hunks */
+  return hunk.added > 0 ? hunk.additionStart : hunk.deletionStart;
+};
+
+/** @param {ReturnType<typeof extractPatchHunks>[number] & {kind?: string}} hunk */
+const hunkDisplayEnd = (hunk) => {
+  if (isSyntheticWalkthroughHunk(hunk)) {
+    return undefined;
+  }
+
+  return hunk.added > 0 ? hunk.additionEnd : hunk.deletionEnd;
+};
+
+/** @param {string} path @param {ReadonlyArray<ReturnType<typeof extractPatchHunks>[number] & {kind?: string}>} hunks */
 const buildAnchorDisplay = (path, hunks) => {
   if (hunks.length === 0) {
     return path;
@@ -88,11 +103,83 @@ const buildAnchorDisplay = (path, hunks) => {
   if (!first || !last) {
     return path;
   }
+  if (isSyntheticWalkthroughHunk(first)) {
+    return path;
+  }
   const startLine = hunkDisplayStart(first);
   const endLine = hunkDisplayEnd(last);
   return startLine && endLine && endLine !== startLine
     ? `${path}:${startLine}-${endLine}`
     : `${path}:${startLine || 1}`;
+};
+
+/** @param {{oldPath?: string; path: string; status?: string}} file */
+const fileHasRenameMetadata = (file) =>
+  file.status === 'renamed' && file.oldPath != null && file.oldPath !== file.path;
+
+/**
+ * @param {{oldPath?: string; path: string; status?: string}} file
+ * @param {{binary?: boolean; loadState?: string; patch?: string; summary?: {reason?: string}}} section
+ */
+const shouldCreateSyntheticHunk = (file, section) => {
+  if (section.binary) {
+    return true;
+  }
+  if (section.loadState != null && section.loadState !== 'ready') {
+    return true;
+  }
+  if (fileHasRenameMetadata(file)) {
+    return true;
+  }
+
+  return typeof section.patch === 'string' && section.patch.trim().length > 0;
+};
+
+/**
+ * @param {{oldPath?: string; path: string; status: string}} file
+ * @param {{binary?: boolean; id: string; kind: string; loadState?: string; patch?: string; summary?: {reason?: string}}} section
+ */
+const createSyntheticSectionHunk = (file, section) => ({
+  added: 0,
+  deleted: 0,
+  id: `${section.id}:h1`,
+  index: 1,
+  kind: 'synthetic',
+  oldPath: file.oldPath,
+  path: file.path,
+  sectionId: section.id,
+  sectionKind: section.kind,
+  status: file.status,
+  summary: section.summary?.reason,
+});
+
+/**
+ * Codiff's walkthrough hunk ids identify the smallest reviewable diff unit.
+ * Most are textual patch hunks; non-text or metadata-only sections get one
+ * synthetic hunk so walkthroughs remain hunk-based for every visible change.
+ *
+ * @param {{oldPath?: string; path: string; status: string}} file
+ * @param {{binary?: boolean; id: string; kind: string; loadState?: string; patch?: string; summary?: {reason?: string}}} section
+ */
+const getSectionWalkthroughHunks = (file, section) => {
+  const patchHunks = extractPatchHunks(section.patch || '');
+  if (patchHunks.length > 0) {
+    return patchHunks.map((hunk, index) => ({
+      ...hunk,
+      id: `${section.id}:h${index + 1}`,
+      index: index + 1,
+      kind: 'patch',
+      oldPath: file.oldPath,
+      path: file.path,
+      sectionId: section.id,
+      sectionKind: section.kind,
+      status: file.status,
+    }));
+  }
+
+  return shouldCreateSyntheticHunk(file, section)
+    ? [createSyntheticSectionHunk(file, section)]
+    : [];
 };
 
 /** @param {string} sectionId @param {string} hunkId */
@@ -171,9 +258,11 @@ module.exports = {
   buildAnchorDisplay,
   extractPatchHunks,
   filterPatchToHunkIds,
+  getSectionWalkthroughHunks,
   HUNK_HEADER,
   hunkDisplayEnd,
   hunkDisplayStart,
+  isSyntheticWalkthroughHunk,
   parseHunkHeader,
   sumHunkLineCounts,
 };

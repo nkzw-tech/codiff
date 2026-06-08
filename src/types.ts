@@ -248,6 +248,8 @@ export type WalkthroughHunk = {
   deletionEnd?: number;
   deletionStart?: number;
   id: string;
+  /** `synthetic` hunks represent binary, deferred, or metadata-only review units. */
+  kind?: 'patch' | 'synthetic';
   oldPath?: string;
   path: string;
   status: GitFileStatus;

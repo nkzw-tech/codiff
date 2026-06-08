@@ -24,9 +24,10 @@ const {
 } = require('./narrative-walkthrough-schema.cjs');
 const {
   buildAnchorDisplay,
-  extractPatchHunks,
+  getSectionWalkthroughHunks,
   hunkDisplayEnd,
   hunkDisplayStart,
+  isSyntheticWalkthroughHunk,
   sumHunkLineCounts,
 } = require('../shared/narrative-walkthrough-diff.cjs');
 
@@ -132,19 +133,9 @@ const indexFiles = (files) => {
   const hunkById = new Map();
   for (const file of files) {
     for (const section of file.sections || []) {
-      extractPatchHunks(section.patch).forEach((hunk, index) => {
-        const id = `${section.id}:h${index + 1}`;
-        hunkById.set(id, {
-          ...hunk,
-          id,
-          index: index + 1,
-          oldPath: file.oldPath,
-          path: file.path,
-          sectionId: section.id,
-          sectionKind: section.kind,
-          status: file.status,
-        });
-      });
+      for (const hunk of getSectionWalkthroughHunks(file, section)) {
+        hunkById.set(hunk.id, hunk);
+      }
     }
   }
 
@@ -197,6 +188,7 @@ const normalizeHunk = (hunk) => {
     deletionEnd: hunk.deletionEnd,
     deletionStart: hunk.deletionStart,
     id: hunk.id,
+    kind: isSyntheticWalkthroughHunk(hunk) ? 'synthetic' : 'patch',
     path: hunk.path,
     status: hunk.status,
   };
@@ -502,6 +494,32 @@ const buildPatchExcerpt = (section, remainingBudget, sectionPatchBudget) => {
   return `${summary}${truncate(patch, maxLength)}`;
 };
 
+/** @param {number} start @param {number} end */
+const formatPromptLineRange = (start, end) => (start === end ? `${start}` : `${start}-${end}`);
+
+/** @param {ReturnType<typeof getSectionWalkthroughHunks>[number]} hunk */
+const buildPromptHunkInput = (hunk) => {
+  if (isSyntheticWalkthroughHunk(hunk)) {
+    return {
+      added: hunk.added,
+      deleted: hunk.deleted,
+      id: hunk.id,
+      kind: 'synthetic',
+      summary: hunk.summary,
+    };
+  }
+
+  return {
+    added: hunk.added,
+    deleted: hunk.deleted,
+    header: hunk.header,
+    id: hunk.id,
+    kind: 'patch',
+    newLines: formatPromptLineRange(hunk.additionStart, hunk.additionEnd),
+    oldLines: formatPromptLineRange(hunk.deletionStart, hunk.deletionEnd),
+  };
+};
+
 /** @param {number} fileCount */
 const getPromptPatchBudgets = (fileCount) =>
   fileCount > 32
@@ -527,20 +545,7 @@ const buildPromptInput = (state) => {
       sections: file.sections.map((section) => {
         const patchExcerpt = buildPatchExcerpt(section, remainingPatchBudget, patchBudget.section);
         remainingPatchBudget = Math.max(0, remainingPatchBudget - patchExcerpt.length);
-        const hunks = extractPatchHunks(section.patch).map((hunk, index) => ({
-          added: hunk.added,
-          deleted: hunk.deleted,
-          header: hunk.header,
-          id: `${section.id}:h${index + 1}`,
-          newLines:
-            hunk.additionStart === hunk.additionEnd
-              ? `${hunk.additionStart}`
-              : `${hunk.additionStart}-${hunk.additionEnd}`,
-          oldLines:
-            hunk.deletionStart === hunk.deletionEnd
-              ? `${hunk.deletionStart}`
-              : `${hunk.deletionStart}-${hunk.deletionEnd}`,
-        }));
+        const hunks = getSectionWalkthroughHunks(file, section).map(buildPromptHunkInput);
 
         return {
           binary: section.binary,

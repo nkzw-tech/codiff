@@ -146,7 +146,7 @@ test('derives an OpenAI strict-compatible response schema', () => {
   expect(stopProperties.changeType.type).toContain('null');
   expect(stopProperties.changeType.enum).toContain(null);
   expect(stopProperties.hunkIds.minItems).toBe(1);
-  expect(stopProperties.hunkIds.maxItems).toBe(3);
+  expect(stopProperties.hunkIds.maxItems).toBe(14);
   expect(stopProperties.notes.items.required).toEqual(['body', 'hunkId']);
   expect(stopProperties.comments).toBeUndefined();
 });
@@ -168,7 +168,7 @@ test('prompts generated walkthroughs to use deterministic hunk groups', () => {
   expect(prompt).toContain('Target 7-12 main-path stops');
   expect(prompt).toContain('Define chapters[] in display order');
   expect(prompt).toContain('Default to one hunkId per stop or support item');
-  expect(prompt).toContain('A stop or support item may contain at most 3 hunkIds');
+  expect(prompt).toContain('A stop or support item may contain at most 14 hunkIds');
   expect(prompt).toContain('Put hunkIds in the exact display order');
   expect(prompt).toContain('Use notes[] on a stop/support item');
   expect(prompt).not.toContain('comments[]');
@@ -190,6 +190,63 @@ test('repository digest exposes deterministic hunk ids and counts', () => {
   expect(prompt).toContain('Do not provide added/deleted counts');
 });
 
+test('repository digest exposes synthetic hunk ids for non-text sections', () => {
+  const prompt = buildNarrativeWalkthroughPrompt({
+    branch: 'main',
+    files: [
+      {
+        path: 'public/logo.png',
+        sections: [
+          {
+            binary: true,
+            id: 'public/logo.png:staged',
+            kind: 'staged',
+            loadState: 'binary',
+            patch: '',
+            summary: { reason: 'Binary file changed.' },
+          },
+        ],
+        status: 'modified',
+      },
+    ],
+    generatedAt: 1,
+    root: '/repo',
+    source: { type: 'working-tree' },
+  });
+
+  expect(prompt).toContain('"id": "public/logo.png:staged:h1"');
+  expect(prompt).toContain('"kind": "synthetic"');
+  expect(prompt).toContain('"summary": "Binary file changed."');
+});
+
+test('repository digest exposes synthetic hunk ids for metadata-only renames', () => {
+  const prompt = buildNarrativeWalkthroughPrompt({
+    branch: 'main',
+    files: [
+      {
+        oldPath: 'old.txt',
+        path: 'new.txt',
+        sections: [
+          {
+            binary: false,
+            id: 'new.txt:staged',
+            kind: 'staged',
+            loadState: 'ready',
+            patch: '',
+          },
+        ],
+        status: 'renamed',
+      },
+    ],
+    generatedAt: 1,
+    root: '/repo',
+    source: { type: 'working-tree' },
+  });
+
+  expect(prompt).toContain('"id": "new.txt:staged:h1"');
+  expect(prompt).toContain('"kind": "synthetic"');
+});
+
 test('normalizes a well-formed narrative walkthrough', () => {
   const result = normalizeNarrativeWalkthrough(baseInput(), files, {
     agent: 'claude',
@@ -208,7 +265,7 @@ test('normalizes a well-formed narrative walkthrough', () => {
   expect(result.meta).toBe('2 stops · 1 chapters');
   expect(result.chapters).toHaveLength(1);
   expect(result.chapters[0].stops.map((stop: any) => stop.id)).toEqual(['s1', 's6']);
-  expect(result.support.map((item: any) => item.id)).toEqual(['lock', 'support-2', 'support-3']);
+  expect(result.support.map((item: any) => item.id)).toEqual(['lock', 'support-2']);
   expect(result.chapters[0].stops[0]).toMatchObject({
     added: 1,
     deleted: 1,
@@ -231,6 +288,87 @@ test('normalizes a well-formed narrative walkthrough', () => {
   });
   expect(result.chapters[0].stops[1]).toMatchObject({ added: 14, deleted: 0 });
   expect(result.chapters[0].stops[1].hunks[0].anchor.startLine).toBe(1);
+});
+
+test('normalizes walkthroughs made only of synthetic hunks', () => {
+  const syntheticFiles = [
+    {
+      path: 'public/logo.png',
+      sections: [
+        {
+          binary: true,
+          id: 'public/logo.png:staged',
+          kind: 'staged',
+          loadState: 'binary',
+          patch: '',
+          summary: { reason: 'Binary file changed.' },
+        },
+      ],
+      status: 'modified',
+    },
+    {
+      path: 'large.txt',
+      sections: [
+        {
+          binary: false,
+          id: 'large.txt:unstaged',
+          kind: 'unstaged',
+          loadState: 'deferred',
+          patch: '',
+          summary: { canLoad: true, reason: 'File is 2 MiB and will be loaded on demand.' },
+        },
+      ],
+      status: 'modified',
+    },
+  ];
+  const result = normalizeNarrativeWalkthrough(
+    {
+      chapters: [
+        {
+          blurb: 'Non-text review units.',
+          icon: 'path',
+          id: 'assets',
+          stops: [
+            {
+              hunkIds: ['public/logo.png:staged:h1'],
+              id: 'logo',
+              importance: 'normal',
+              prose: 'Review the shipped image asset.',
+            },
+            {
+              hunkIds: ['large.txt:unstaged:h1'],
+              id: 'large',
+              importance: 'context',
+              prose: 'Review why this file is summarized.',
+            },
+          ],
+          title: 'Assets',
+        },
+      ],
+      focus: 'Review non-text changes.',
+      kind: 'narrative',
+      support: [],
+      title: 'Synthetic hunk walkthrough',
+      version: 4,
+    },
+    syntheticFiles as any,
+  );
+
+  expect(result.chapters[0].stops.map((stop: any) => stop.hunks[0])).toMatchObject([
+    {
+      added: 0,
+      anchor: { display: 'public/logo.png', sectionId: 'public/logo.png:staged' },
+      deleted: 0,
+      id: 'public/logo.png:staged:h1',
+      kind: 'synthetic',
+    },
+    {
+      anchor: { display: 'large.txt', sectionId: 'large.txt:unstaged' },
+      id: 'large.txt:unstaged:h1',
+      kind: 'synthetic',
+    },
+  ]);
+  expect(result.support).toEqual([]);
 });
 
 test('computes line counts and status from hunkIds instead of trusting agent math', () => {
@@ -276,7 +414,7 @@ test('drops stops and support items with unresolvable hunk ids', () => {
   const result = normalizeNarrativeWalkthrough(input, files);
 
   expect(result.chapters[0].stops.map((stop: any) => stop.id)).toEqual(['s1', 's6']);
-  expect(result.support.map((item: any) => item.id)).toEqual(['lock', 'support-2', 'support-3']);
+  expect(result.support.map((item: any) => item.id)).toEqual(['lock', 'support-2']);
 });
 
 test('drops hunk groups that overlap already-covered hunks', () => {
@@ -296,7 +434,7 @@ test('drops hunk groups that overlap already-covered hunks', () => {
   const result = normalizeNarrativeWalkthrough(input, files);
 
   expect(result.chapters[0].stops.map((stop: any) => stop.id)).toEqual(['s1', 's6']);
-  expect(result.support.map((item: any) => item.id)).toEqual(['lock', 'support-2', 'support-3']);
+  expect(result.support.map((item: any) => item.id)).toEqual(['lock', 'support-2']);
 });
 
 test('adds unreferenced live hunks to support so changed code remains visible', () => {
@@ -308,12 +446,10 @@ test('adds unreferenced live hunks to support so changed code remains visible', 
   expect(result.support.map((item: any) => item.reason)).toEqual([
     'Other changes',
     'Other changes',
-    'Other changes',
   ]);
   expect(result.support.map((item: any) => item.hunkIds)).toEqual([
     ['pnpm-lock.yaml:staged:h1'],
-    ['wide.py:staged:h1', 'wide.py:staged:h2', 'wide.py:staged:h3'],
-    ['wide.py:staged:h4'],
+    ['wide.py:staged:h1', 'wide.py:staged:h2', 'wide.py:staged:h3', 'wide.py:staged:h4'],
   ]);
 });
 
@@ -344,14 +480,23 @@ test('normalizes ordered cross-file hunk groups under one stop', () => {
 
 test('drops hunk groups that exceed the hunk group size limit', () => {
   const input = baseInput();
+  const overLimitPatch = Array.from(
+    { length: 15 },
+    (_, index) => `@@ -${index + 1} +${index + 1} @@\n-old ${index + 1}\n+new ${index + 1}\n`,
+  ).join('');
+  const overLimitFile = {
+    path: 'too-wide.py',
+    sections: [{ id: 'too-wide.py:staged', kind: 'staged', patch: overLimitPatch }],
+    status: 'modified',
+  };
   input.chapters[0].stops.push({
-    hunkIds: ['wide.py:staged:h1', 'wide.py:staged:h2', 'wide.py:staged:h3', 'wide.py:staged:h4'],
+    hunkIds: Array.from({ length: 15 }, (_, index) => `too-wide.py:staged:h${index + 1}`),
     id: 'wide',
     importance: 'normal',
     prose: 'Too broad.',
   });
 
-  const result = normalizeNarrativeWalkthrough(input, files);
+  const result = normalizeNarrativeWalkthrough(input, [...files, overLimitFile]);
 
   expect(result.chapters[0].stops.map((stop: any) => stop.id)).toEqual(['s1', 's6']);
 });

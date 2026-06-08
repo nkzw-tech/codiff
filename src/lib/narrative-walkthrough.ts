@@ -1,6 +1,7 @@
 import {
-  extractPatchHunks,
   filterPatchToHunkIds,
+  getSectionWalkthroughHunks,
+  isSyntheticWalkthroughHunk,
 } from '../../shared/narrative-walkthrough-diff.cjs';
 import type {
   ChangedFile,
@@ -152,8 +153,18 @@ const walkthroughCoveredSectionIds = (view: WalkthroughView): ReadonlySet<string
     ),
   );
 
-const getSectionHunkIds = (section: DiffSection): ReadonlyArray<string> =>
-  extractPatchHunks(section.patch).map((_, index) => `${section.id}:h${index + 1}`);
+const walkthroughCoveredSyntheticSectionIds = (view: WalkthroughView): ReadonlySet<string> =>
+  new Set(
+    [...view.sequence, ...view.support].flatMap((item) =>
+      item.hunks
+        .filter(isSyntheticWalkthroughHunk)
+        .map((hunk) => hunk.anchor.sectionId)
+        .filter((sectionId): sectionId is string => typeof sectionId === 'string'),
+    ),
+  );
+
+const getSectionHunkIds = (file: ChangedFile, section: DiffSection): ReadonlyArray<string> =>
+  getSectionWalkthroughHunks(file, section).map((hunk: { id: string }) => hunk.id);
 
 type UncoveredWalkthroughSection = {
   identity: string;
@@ -161,11 +172,17 @@ type UncoveredWalkthroughSection = {
 };
 
 const getUncoveredWalkthroughSection = (
+  file: ChangedFile,
   section: DiffSection,
   coveredHunkIds: ReadonlySet<string>,
   coveredSectionIds: ReadonlySet<string>,
+  coveredSyntheticSectionIds: ReadonlySet<string>,
 ): UncoveredWalkthroughSection | null => {
-  const hunkIds = getSectionHunkIds(section);
+  if (coveredSyntheticSectionIds.has(section.id)) {
+    return null;
+  }
+
+  const hunkIds = getSectionHunkIds(file, section);
   if (hunkIds.length === 0) {
     return coveredSectionIds.has(section.id) ? null : { identity: section.id, section };
   }
@@ -191,10 +208,19 @@ export const getUncoveredWalkthroughFiles = (
 ): ReadonlyArray<ChangedFile> => {
   const coveredHunkIds = walkthroughCoveredHunkIds(view);
   const coveredSectionIds = walkthroughCoveredSectionIds(view);
+  const coveredSyntheticSectionIds = walkthroughCoveredSyntheticSectionIds(view);
   return files.flatMap((file) => {
     const uncoveredSections = getVisibleDiffSections(file, showWhitespace)
       .map(({ section }) => section)
-      .map((section) => getUncoveredWalkthroughSection(section, coveredHunkIds, coveredSectionIds))
+      .map((section) =>
+        getUncoveredWalkthroughSection(
+          file,
+          section,
+          coveredHunkIds,
+          coveredSectionIds,
+          coveredSyntheticSectionIds,
+        ),
+      )
       .filter((entry): entry is UncoveredWalkthroughSection => entry != null);
     const sections = uncoveredSections.map(({ section }) => section);
     if (sections.length === 0) {
@@ -351,7 +377,7 @@ export const getWalkthroughRunNote = (
   const notes = (item.notes ?? [])
     .filter((note) => hunkIds.has(note.hunkId))
     .map((note) => note.body);
-  return notes.length > 0 ? notes.join(' • ') : undefined;
+  return notes.length > 0 ? notes.join(' ') : undefined;
 };
 
 const focusSignature = (section: DiffSection, hunkIds: ReadonlyArray<string>) =>
@@ -374,7 +400,11 @@ export const focusChangedFileForHunks = (
   }
 
   const hunkIds = sectionHunks.map((hunk) => hunk.id);
-  if (section.binary || (section.loadState != null && section.loadState !== 'ready')) {
+  if (
+    sectionHunks.some(isSyntheticWalkthroughHunk) ||
+    section.binary ||
+    (section.loadState != null && section.loadState !== 'ready')
+  ) {
     const signature = focusSignature(section, hunkIds);
     return {
       ...file,

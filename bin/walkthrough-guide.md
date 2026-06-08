@@ -20,11 +20,13 @@ choose.
   `"Tests"`, `"Docs"`, `"Runtime"`, `"Cleanup"`.
 - **`chapters[].stops[]`** — the main review path. Use 3-6 stops for small changes, 5-9 for
   medium changes, and 7-12 for large changes. Never exceed 14. A stop should represent one
-  review idea and can include up to 3 ordered `hunkIds`.
+  review idea and can include up to 14 ordered `hunkIds`.
 - **`hunkIds[]`** — deterministic hunk ids copied from the repository digest, in the exact order
   Codiff should render them. Default to one hunk id per stop or support item. Use multiple ids
   only when those hunks must be read together; cross-file and out-of-line order is allowed when it
-  improves the review path.
+  improves the review path. Some ids are synthetic hunks for binary, deferred, metadata-only, or
+  otherwise non-textual changes; treat them like normal hunk ids and explain why that review unit
+  matters.
 - **`notes[]`** — optional short header notes for individual focused hunks: `{ hunkId, body }`.
   Use these when a specific hunk needs a label under its file header.
 - **`support[]`** — changed hunks that should stay off the main path. Use it for generated files,
