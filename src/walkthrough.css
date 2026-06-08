@@ -480,6 +480,48 @@
   flex: none;
   position: relative;
 }
+.wt-diff-pager {
+  align-items: center;
+  border-top: 1px solid var(--file-border);
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 6px 12px;
+}
+.wt-diff-pager:first-child {
+  border-top: 0;
+}
+.wt-diff-pager-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--file-border);
+  border-radius: 8px;
+  color: var(--text);
+  corner-shape: squircle;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+.wt-diff-pager-button:hover:not(:disabled) {
+  background: var(--hover-wash);
+}
+.wt-diff-pager-button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.5;
+}
+.wt-diff-pager-label {
+  color: var(--muted);
+  flex: none;
+  font: 700 11px/1 var(--font-mono);
+  min-width: 118px;
+  text-align: center;
+}
 /* Let the diff grow to its content height so the outer .wt-stop does the
    scrolling, rather than the CodeView scrolling within a fixed-height box. */
 .wt-stop .code-view {
