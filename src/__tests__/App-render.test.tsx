@@ -1128,7 +1128,7 @@ test('a walkthrough file loads even without the walkthrough launch flag', async 
   }
 });
 
-test('a walkthrough file that fails to load surfaces an error modal', async () => {
+test('a walkthrough file that no longer anchors surfaces a dismissible banner', async () => {
   const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
@@ -1138,7 +1138,7 @@ test('a walkthrough file that fails to load surfaces an error modal', async () =
       walkthroughFile: '/tmp/broken-walkthrough.json',
     })),
     getNarrativeWalkthrough: vi.fn(async () => ({
-      reason: 'Walkthrough file could not be applied to this diff: anchor not found.',
+      reason: 'These changes were committed since the walkthrough was authored.',
       status: 'unavailable' as const,
     })),
     getRepositoryState: vi.fn(async () => ({
@@ -1159,22 +1159,18 @@ test('a walkthrough file that fails to load surfaces an error modal', async () =
     });
 
     await waitFor(() => {
-      expect(container.querySelector('.walkthrough-error')).not.toBeNull();
+      expect(container.querySelector('.walkthrough-outdated-banner.visible')).not.toBeNull();
     });
 
-    const dialog = container.querySelector('.walkthrough-error');
-    expect(dialog?.querySelector('.walkthrough-error-path')?.textContent).toBe(
-      '/tmp/broken-walkthrough.json',
-    );
-    expect(dialog?.querySelector('.walkthrough-error-reason')?.textContent).toContain(
-      'anchor not found',
-    );
+    const banner = container.querySelector('.walkthrough-outdated-banner');
+    expect(banner?.textContent).toContain('committed since the walkthrough was authored');
+    expect(banner?.textContent).toContain('Showing history instead.');
 
     await act(async () => {
-      dialog?.querySelector<HTMLButtonElement>('.walkthrough-error-actions button')?.click();
+      banner?.querySelector<HTMLButtonElement>('.repository-change-dismiss')?.click();
     });
 
-    expect(container.querySelector('.walkthrough-error')).toBeNull();
+    expect(container.querySelector('.walkthrough-outdated-banner.visible')).toBeNull();
   } finally {
     if (root) {
       await act(async () => root?.unmount());
