@@ -19,12 +19,18 @@ const agentLabel = (agentId: 'codex' | 'claude') =>
 function TocFileRows({
   files,
 }: {
-  files: ReadonlyArray<{ added: number; deleted: number; label: string; title: string }>;
+  files: ReadonlyArray<{
+    added: number;
+    deleted: number;
+    label: string;
+    path?: string;
+    title: string;
+  }>;
 }) {
   return (
     <span className="wt-toc-file-list">
-      {files.map((file) => (
-        <span className="wt-toc-file-row" key={file.title}>
+      {files.map((file, index) => (
+        <span className="wt-toc-file-row" key={file.path ?? `${file.title}:${file.label}:${index}`}>
           <span className="wt-toc-file" title={file.title}>
             {file.label}
           </span>
