@@ -3,7 +3,6 @@ import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { ColumnsIcon as Columns } from '@phosphor-icons/react/Columns';
 import { ImageBrokenIcon as ImageBroken } from '@phosphor-icons/react/ImageBroken';
 import { SquareSplitVerticalIcon as SquareSplitVertical } from '@phosphor-icons/react/SquareSplitVertical';
-import { XIcon as X } from '@phosphor-icons/react/X';
 import {
   type CodeViewLineSelection,
   type CodeViewItem,
@@ -17,7 +16,6 @@ import {
 import { CodeView, type CodeViewHandle, WorkerPoolContextProvider } from '@pierre/diffs/react';
 import { Copy as LucideCopy } from 'lucide-react';
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -30,9 +28,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from 'react';
-import claudeIconUrl from '../../assets/claude.svg';
-import codexIconUrl from '../../assets/codex.svg';
-import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffDiffStyle, CodiffKeymap } from '../../config/types.ts';
 import type {
   CodeViewInstance,
@@ -71,10 +66,8 @@ import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { renderMarkdown } from '../../lib/markdown.tsx';
 import {
   getCommentKey,
-  getReviewCommentLineLabel,
-  getReviewCommentsDigest,
+  getReviewCommentAnchorsDigest,
   isInteractiveReviewEvent,
-  shouldDiscardReviewCommentOnEscape,
   updateStickyHeaderState,
 } from '../../lib/review-comments.ts';
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
@@ -84,7 +77,6 @@ import type {
   DiffImageContentResult,
   DiffSection,
   GitIdentity,
-  PullRequestExistingReviewComment,
   ReviewSource,
 } from '../../types.ts';
 import {
@@ -92,7 +84,7 @@ import {
   CommitDetailsPanel,
   type CommitDetailsFile,
 } from './CommitDetails.tsx';
-import { Gravatar } from './Gravatar.tsx';
+import { ReviewCommentThread } from './ReviewCommentThread.tsx';
 import { DiffLineCountBadge } from './Sidebar.tsx';
 import { useCopiedState } from './useCopiedState.ts';
 
@@ -258,38 +250,6 @@ function CodeViewHeader({
     </div>
   );
 }
-
-function ReviewAvatar({
-  author,
-  identity,
-}: {
-  author?: PullRequestExistingReviewComment['author'];
-  identity: GitIdentity | null;
-}) {
-  const label = author?.login || identity?.name || identity?.email || 'Git user';
-  const avatarUrl = author?.avatarUrl || identity?.gravatarUrl;
-
-  return <Gravatar fallback={label} size="medium" url={avatarUrl} />;
-}
-
-function AgentAvatar({ agentId }: { agentId: 'codex' | 'claude' }) {
-  return (
-    <img
-      alt=""
-      className="review-comment-avatar-codex"
-      draggable={false}
-      src={agentId === 'claude' ? claudeIconUrl : codexIconUrl}
-    />
-  );
-}
-
-const canAskCodexForComment = (comment: ReviewComment) =>
-  !comment.isReadOnly && comment.body.trim().length > 0 && comment.codexReply?.status !== 'loading';
-
-const canSubmitCommentToGitHub = (comment: ReviewComment) =>
-  !comment.isReadOnly &&
-  comment.body.trim().length > 0 &&
-  comment.githubSubmit?.status !== 'submitting';
 
 const getAddedLinesDigest = (lines: ReadonlySet<number>) =>
   lines.size > 0 ? [...lines].join(',') : '';
@@ -591,208 +551,6 @@ function ImageDiffPreview({
   );
 }
 
-function ReviewAnnotation({
-  agentId,
-  agentLabel,
-  annotation,
-  comments,
-  focusCommentId,
-  focusCommentRequest,
-  identity,
-  isPullRequest,
-  keymap,
-  onAskCodex,
-  onCommentBlur,
-  onCommentFocus,
-  onDeleteComment,
-  onSubmitComment,
-  onUpdateComment,
-}: {
-  agentId: 'codex' | 'claude';
-  agentLabel: string;
-  annotation: DiffLineAnnotation<ReviewCommentAnnotationMetadata>;
-  comments: ReadonlyArray<ReviewComment>;
-  focusCommentId: string | null;
-  focusCommentRequest: number;
-  identity: GitIdentity | null;
-  isPullRequest: boolean;
-  keymap: CodiffKeymap;
-  onAskCodex: (commentId: string) => void;
-  onCommentBlur: (comment: ReviewComment, body: string) => void;
-  onCommentFocus: (comment: ReviewComment) => void;
-  onDeleteComment: (commentId: string) => void;
-  onSubmitComment: (commentId: string) => void;
-  onUpdateComment: (commentId: string, body: string) => void;
-}) {
-  const focusTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const annotationComments = annotation.metadata.commentIds
-    .map((commentId) => comments.find((comment) => comment.id === commentId))
-    .filter((comment): comment is ReviewComment => comment != null);
-  const hasFocusedComment =
-    focusCommentId != null && annotationComments.some((comment) => comment.id === focusCommentId);
-
-  useEffect(() => {
-    if (hasFocusedComment) {
-      focusTextareaRef.current?.focus();
-    }
-  }, [focusCommentId, focusCommentRequest, hasFocusedComment]);
-
-  const handleCommentKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLTextAreaElement>, comment: ReviewComment) => {
-      if (matchesShortcut(event, keymap, 'submitComment')) {
-        if (isPullRequest && canSubmitCommentToGitHub(comment)) {
-          event.preventDefault();
-          event.stopPropagation();
-          onSubmitComment(comment.id);
-          return;
-        }
-
-        if (!isPullRequest && canAskCodexForComment(comment)) {
-          event.preventDefault();
-          event.stopPropagation();
-          onAskCodex(comment.id);
-        }
-        return;
-      }
-
-      if (!matchesShortcut(event, keymap, 'discardComment')) {
-        return;
-      }
-
-      if (comment.isReadOnly) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (shouldDiscardReviewCommentOnEscape(comment.body)) {
-        onDeleteComment(comment.id);
-      }
-    },
-    [isPullRequest, keymap, onAskCodex, onDeleteComment, onSubmitComment],
-  );
-
-  if (annotationComments.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="review-comment-thread">
-      {annotationComments.map((comment) => {
-        const canAskCodex = canAskCodexForComment(comment);
-        const canSubmitComment = canSubmitCommentToGitHub(comment);
-        const displayName =
-          comment.author?.login || identity?.name || identity?.email || 'Git user';
-
-        return (
-          <Fragment key={comment.id}>
-            <div className="review-comment">
-              <ReviewAvatar author={comment.author} identity={identity} />
-              <div className="review-comment-body">
-                <div
-                  className={`review-comment-header${
-                    isPullRequest && !comment.isReadOnly ? ' with-comment-action' : ''
-                  }${comment.isReadOnly ? ' read-only' : ''}`}
-                >
-                  <strong>{displayName}</strong>
-                  <span>{getReviewCommentLineLabel(comment)}</span>
-                  {!comment.isReadOnly ? (
-                    <button
-                      className="review-comment-action"
-                      disabled={!canAskCodex}
-                      onClick={() => onAskCodex(comment.id)}
-                      title={
-                        canAskCodex
-                          ? `Ask ${agentLabel}`
-                          : `Write a note before asking ${agentLabel}`
-                      }
-                      type="button"
-                    >
-                      Ask
-                    </button>
-                  ) : null}
-                  {isPullRequest && !comment.isReadOnly ? (
-                    <button
-                      className="review-comment-action"
-                      disabled={!canSubmitComment}
-                      onClick={() => onSubmitComment(comment.id)}
-                      title={
-                        canSubmitComment
-                          ? 'Submit comment to GitHub'
-                          : 'Write a note before commenting'
-                      }
-                      type="button"
-                    >
-                      {comment.githubSubmit?.status === 'submitting' ? 'Sending' : 'Comment'}
-                    </button>
-                  ) : null}
-                  {!comment.isReadOnly ? (
-                    <button
-                      aria-label="Delete comment"
-                      className="review-comment-delete"
-                      onClick={() => onDeleteComment(comment.id)}
-                      title="Delete comment"
-                      type="button"
-                    >
-                      <X
-                        aria-hidden
-                        className="review-comment-delete-icon"
-                        size={14}
-                        weight="bold"
-                      />
-                    </button>
-                  ) : null}
-                </div>
-                <textarea
-                  aria-label={`Comment on ${comment.filePath} ${getReviewCommentLineLabel(comment)}`}
-                  className={`review-comment-input${comment.isReadOnly ? ' read-only' : ''}`}
-                  onBlur={(event) => onCommentBlur(comment, event.currentTarget.value)}
-                  onChange={(event) => onUpdateComment(comment.id, event.currentTarget.value)}
-                  onFocus={() => onCommentFocus(comment)}
-                  onKeyDown={(event) => handleCommentKeyDown(event, comment)}
-                  placeholder="Write a review comment…"
-                  readOnly={comment.isReadOnly}
-                  ref={comment.id === focusCommentId ? focusTextareaRef : undefined}
-                  rows={3}
-                  spellCheck
-                  value={comment.body}
-                />
-                {comment.githubSubmit?.status === 'error' ? (
-                  <div className="review-comment-error">{comment.githubSubmit.error}</div>
-                ) : null}
-              </div>
-            </div>
-            {comment.codexReply ? (
-              <div className="review-comment codex">
-                <AgentAvatar agentId={agentId} />
-                <div className="review-comment-body codex">
-                  <div className="review-comment-header codex">
-                    <strong>{agentLabel}</strong>
-                  </div>
-                  <div
-                    className={`review-comment-codex-reply${
-                      comment.codexReply.status === 'loading' ? ' is-loading' : ''
-                    }${comment.codexReply.status === 'error' ? ' error' : ''}`}
-                  >
-                    {comment.codexReply.status === 'loading' ? (
-                      <span className="review-comment-codex-loading">
-                        Waiting for {agentLabel}…
-                      </span>
-                    ) : (
-                      renderMarkdown(comment.codexReply.body ?? comment.codexReply.error ?? '')
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </Fragment>
-        );
-      })}
-    </div>
-  );
-}
-
 const scrollTargetRetryFrameLimit = 90;
 // Render commit details as a CodeView item so scrolling treats the panel like the diffs.
 const commitDetailsFileName = '__codiff_commit_details__';
@@ -1027,13 +785,13 @@ export function ReviewCodeView({
   itemVersionByPath: Readonly<Record<string, number>>;
   keymap: CodiffKeymap;
   loadingSectionIds: ReadonlySet<string>;
-  onAskCodex: (commentId: string) => void;
+  onAskCodex: (commentId: string, body: string) => void;
   onCreateComment: (comment: Omit<ReviewComment, 'body' | 'id'>) => void;
   onDeleteComment: (commentId: string) => void;
   onLoadSection: (file: ChangedFile, section: DiffSection) => void;
   onOpenFile: (file: ChangedFile) => void;
   onSelectPathFromScroll: (viewer: CodeViewInstance) => void;
-  onSubmitComment: (commentId: string) => void;
+  onSubmitComment: (commentId: string, body: string) => void;
   onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean) => void;
   onToggleViewed: (file: ChangedFile, isViewed: boolean) => void;
   onUpdateComment: (commentId: string, body: string) => void;
@@ -1266,7 +1024,9 @@ export function ReviewCodeView({
               selectedPath === file.path ? 'selected' : 'idle'
             }:${fontLayoutKey}:${walkthroughNotes.get(file.path)?.reason ?? ''}:${
               showWhitespace ? 'ws' : 'ignore-ws'
-            }:${diffStyle}:${getReviewCommentsDigest(commentsBySection.get(section.id) ?? [])}`,
+            }:${diffStyle}:${getReviewCommentAnchorsDigest(
+              commentsBySection.get(section.id) ?? [],
+            )}`,
           ),
         });
       }
@@ -2072,7 +1832,7 @@ export function ReviewCodeView({
       }
 
       return item.type === 'diff' ? (
-        <ReviewAnnotation
+        <ReviewCommentThread
           agentId={agentId}
           agentLabel={agentLabel}
           annotation={annotation as DiffLineAnnotation<ReviewCommentAnnotationMetadata>}

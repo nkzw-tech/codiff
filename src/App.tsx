@@ -1802,13 +1802,14 @@ export default function App() {
   );
 
   const askCodex = useCallback(
-    (commentId: string) => {
+    (commentId: string, body: string) => {
       const currentState = stateRef.current;
       const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
       if (
         !currentState ||
         !comment ||
-        comment.body.trim().length === 0 ||
+        comment.isReadOnly ||
+        body.trim().length === 0 ||
         comment.codexReply?.status === 'loading'
       ) {
         return;
@@ -1816,7 +1817,7 @@ export default function App() {
 
       const request: ReviewAssistantRequest = {
         comment: {
-          body: comment.body,
+          body,
           filePath: comment.filePath,
           lineNumber: comment.lineNumber,
           sectionId: comment.sectionId,
@@ -1826,7 +1827,14 @@ export default function App() {
         source: currentState.source,
       };
 
-      updateCodexReply(comment.id, comment.filePath, { status: 'loading' });
+      setReviewComments((current) =>
+        current.map((candidate) =>
+          candidate.id === comment.id
+            ? { ...candidate, body, codexReply: { status: 'loading' } }
+            : candidate,
+        ),
+      );
+      bumpItemVersion(comment.filePath);
       void window.codiff
         .askReviewAssistant(request)
         .then((result) => {
@@ -1851,27 +1859,35 @@ export default function App() {
           });
         });
     },
-    [updateCodexReply],
+    [bumpItemVersion, updateCodexReply],
   );
 
   const submitPullRequestComment = useCallback(
-    (commentId: string) => {
+    (commentId: string, body: string) => {
       const currentState = stateRef.current;
       const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
       if (
         currentState?.source.type !== 'pull-request' ||
         !comment ||
-        comment.body.trim().length === 0 ||
+        comment.isReadOnly ||
+        body.trim().length === 0 ||
         comment.githubSubmit?.status === 'submitting'
       ) {
         return;
       }
 
-      updateGitHubSubmit(comment.id, { status: 'submitting' });
+      setReviewComments((current) =>
+        current.map((candidate) =>
+          candidate.id === comment.id
+            ? { ...candidate, body, githubSubmit: { status: 'submitting' } }
+            : candidate,
+        ),
+      );
+      bumpItemVersion(comment.filePath);
       void window.codiff
         .submitPullRequestComment({
           comment: {
-            body: comment.body,
+            body,
             filePath: comment.filePath,
             lineNumber: comment.lineNumber,
             side: comment.side,
@@ -2078,16 +2094,20 @@ export default function App() {
     viewed,
     wordWrap,
   };
-  // Render one changed file's live diff for a walkthrough stop / full-context reader.
-  const renderStopDiff = (file: ChangedFile, note?: string) => {
-    const walkthroughNotes = note
-      ? new Map([[file.path, createInlineWalkthroughNote(note)]])
-      : emptyWalkthroughNotes;
+  // Render one walkthrough step's live diff with a single virtualized ReviewCodeView.
+  const renderStopDiff = (
+    files: ReadonlyArray<ChangedFile>,
+    notes: ReadonlyMap<string, string>,
+  ) => {
+    const walkthroughNotes =
+      notes.size > 0
+        ? new Map([...notes].map(([path, note]) => [path, createInlineWalkthroughNote(note)]))
+        : emptyWalkthroughNotes;
     return (
       <ReviewCodeView
         {...commonReviewProps}
         commitMetadata={null}
-        files={[file]}
+        files={files}
         forceExpandedPaths={diffSearchMatchPathSet}
         scrollTarget={null}
         selectedPath={null}

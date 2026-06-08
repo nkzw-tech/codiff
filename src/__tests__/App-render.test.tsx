@@ -19,6 +19,7 @@ import type {
   RepositoryState,
   ReviewSource,
 } from '../types.ts';
+import { createLargeWalkthrough } from './fixtures/narrative-walkthrough.ts';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -98,69 +99,6 @@ const createChangedFile = (path: string, fingerprint = `${path}:1`) =>
     ],
     status: 'modified',
   }) satisfies ChangedFile;
-
-const createWalkthroughAnchor = (id: string, path: string) => ({
-  added: 1,
-  anchor: { display: path, sectionId: `${path}:unstaged`, side: 'both' as const },
-  deleted: 1,
-  granularity: 'file' as const,
-  id,
-  path,
-  status: 'modified' as const,
-});
-
-const createLargeWalkthrough = ({
-  source,
-  stopFileCount,
-  supportFileCount,
-}: {
-  source: ReviewSource;
-  stopFileCount: number;
-  supportFileCount: number;
-}) =>
-  ({
-    agent: 'codex',
-    chapters: [
-      {
-        blurb: 'Review the implementation.',
-        icon: 'gear',
-        id: 'impl',
-        stops: [
-          {
-            anchors: Array.from({ length: stopFileCount }, (_, index) =>
-              createWalkthroughAnchor(`stop-${index}`, `src/stop-${index}.ts`),
-            ),
-            body: 'Review these files.',
-            id: 'implementation-path',
-            importance: 'critical',
-            summary: 'The implementation path carries several files.',
-            title: 'Implementation path',
-          },
-        ],
-        title: 'Implementation',
-      },
-    ],
-    focus: 'Focus.',
-    generatedAt: '2026-06-07T00:00:00.000Z',
-    kind: 'narrative',
-    repo: { branch: 'main', root: '/repo' },
-    source,
-    support:
-      supportFileCount > 0
-        ? [
-            {
-              files: Array.from({ length: supportFileCount }, (_, index) =>
-                createWalkthroughAnchor(`support-${index}`, `src/support-${index}.ts`),
-              ),
-              id: 'support',
-              note: 'Supporting.',
-              title: 'Support',
-            },
-          ]
-        : [],
-    title: 'Narrative',
-    version: 3,
-  }) satisfies NarrativeWalkthrough;
 
 const waitFor = async (assertion: () => void) => {
   let lastError: unknown;
@@ -1191,11 +1129,12 @@ test('a walkthrough file loads even without the walkthrough launch flag', async 
   }
 });
 
-test('walkthrough stops mount only the active file window', async () => {
+test('walkthrough stops mount one code view for the active step', async () => {
   const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
   const narrativeWalkthrough = createLargeWalkthrough({
     source,
-    stopFileCount: 8,
+    stopCount: 2,
+    stopFileCount: 2,
     supportFileCount: 0,
   });
   window.codiff = createCodiffMock({
@@ -1211,7 +1150,9 @@ test('walkthrough stops mount only the active file window', async () => {
     })),
     getRepositoryState: vi.fn(async () => ({
       ...repositoryState,
-      files: Array.from({ length: 8 }, (_, index) => createChangedFile(`src/stop-${index}.ts`)),
+      files: Array.from({ length: 4 }, (_, index) =>
+        createChangedFile(`src/stop-${Math.floor(index / 2)}-${index % 2}.ts`),
+      ),
       source,
     })),
   });
@@ -1230,15 +1171,19 @@ test('walkthrough stops mount only the active file window', async () => {
       expect(container.querySelector('.wt-stop-block')).not.toBeNull();
     });
 
-    expect(container.querySelectorAll('.code-view')).toHaveLength(3);
-    expect(container.querySelector('.wt-diff-pager-label')?.textContent).toBe('File set 1 of 3');
+    expect(container.querySelectorAll('.code-view')).toHaveLength(1);
+    expect(container.querySelector('.wt-stage-title')?.textContent).toBe('Implementation path 1');
+    expect(container.querySelector('.wt-diff-pager-label')).toBeNull();
 
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('.wt-diff-pager-button:last-child')?.click();
+      container.querySelector<HTMLButtonElement>('.wt-upnext')?.click();
     });
 
-    expect(container.querySelectorAll('.code-view')).toHaveLength(3);
-    expect(container.querySelector('.wt-diff-pager-label')?.textContent).toBe('File set 2 of 3');
+    await waitFor(() => {
+      expect(container.querySelector('.wt-stage-title')?.textContent).toBe('Implementation path 2');
+    });
+
+    expect(container.querySelectorAll('.code-view')).toHaveLength(1);
   } finally {
     if (root) {
       await act(async () => root?.unmount());
@@ -1247,7 +1192,7 @@ test('walkthrough stops mount only the active file window', async () => {
   }
 });
 
-test('walkthrough support mounts one support diff at a time', async () => {
+test('walkthrough support mounts one code view for the support step', async () => {
   const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
   const narrativeWalkthrough = createLargeWalkthrough({
     source,
@@ -1294,24 +1239,11 @@ test('walkthrough support mounts one support diff at a time', async () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector('.wt-support-diff')).not.toBeNull();
+      expect(container.querySelectorAll('.code-view')).toHaveLength(1);
     });
 
-    expect(container.querySelectorAll('.wt-support-diff')).toHaveLength(1);
     expect(container.querySelectorAll('.code-view')).toHaveLength(1);
-    expect(container.querySelector('.wt-diff-pager-label')?.textContent).toBe(
-      'Support file 1 of 6',
-    );
-
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('.wt-diff-pager-button:last-child')?.click();
-    });
-
-    expect(container.querySelectorAll('.wt-support-diff')).toHaveLength(1);
-    expect(container.querySelectorAll('.code-view')).toHaveLength(1);
-    expect(container.querySelector('.wt-diff-pager-label')?.textContent).toBe(
-      'Support file 2 of 6',
-    );
+    expect(container.querySelector('.wt-diff-pager-label')).toBeNull();
   } finally {
     if (root) {
       await act(async () => root?.unmount());

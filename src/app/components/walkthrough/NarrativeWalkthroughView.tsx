@@ -3,7 +3,6 @@ import {
   Fragment,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -13,7 +12,6 @@ import {
   getStopSegments,
   isWalkthroughCommittable,
   resolveSegmentFile,
-  type ResolvedSegmentFile,
   type WalkthroughOrderView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
@@ -24,74 +22,15 @@ import { ImportancePill, Narration, PhaseIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
 const fileName = (path: string) => path.split('/').pop() ?? path;
-const STOP_FILE_WINDOW_SIZE = 3;
 
 const countUniqueRestFiles = (orderView: WalkthroughOrderView) =>
   new Set(orderView.rest.map((item) => item.segment.path)).size;
 
-const stopEstimateHeight = (stop: WalkthroughStopView) => {
-  const segments = getStopSegments(stop);
-  const files = new Set(segments.map((segment) => segment.path)).size;
-  const changedLines = segments.reduce(
-    (total, segment) => total + segment.added + segment.deleted,
-    0,
-  );
-  return Math.max(520, Math.min(1600, 260 + files * 120 + changedLines * 14));
-};
-
-const createVisibleIndexSet = (length: number, index: number) => {
-  const indexes = [index].filter((item) => item >= 0 && item < length);
-  return new Set(indexes);
-};
-
-const clampIndex = (value: number, length: number) => Math.max(0, Math.min(length - 1, value));
-
-/** Renders the live diff for one changed file via the real ReviewCodeView. */
-export type RenderStopDiff = (file: ChangedFile, note?: string) => ReactNode;
-
-function DiffPager({
-  count,
-  index,
-  label,
-  onChange,
-}: {
-  count: number;
-  index: number;
-  label: string;
-  onChange: (index: number) => void;
-}) {
-  if (count <= 1) {
-    return null;
-  }
-
-  const changeIndex = (direction: -1 | 1) => onChange(clampIndex(index + direction, count));
-
-  return (
-    <div className="wt-diff-pager">
-      <button
-        className="wt-diff-pager-button"
-        disabled={index === 0}
-        onClick={() => changeIndex(-1)}
-        title={`Previous ${label}`}
-        type="button"
-      >
-        <CaretLeft size={15} />
-      </button>
-      <span className="wt-diff-pager-label">
-        {label} {index + 1} of {count}
-      </span>
-      <button
-        className="wt-diff-pager-button"
-        disabled={index === count - 1}
-        onClick={() => changeIndex(1)}
-        title={`Next ${label}`}
-        type="button"
-      >
-        <CaretRight size={15} />
-      </button>
-    </div>
-  );
-}
+/** Renders one walkthrough step's live diff via the real ReviewCodeView. */
+export type RenderStopDiff = (
+  files: ReadonlyArray<ChangedFile>,
+  notes: ReadonlyMap<string, string>,
+) => ReactNode;
 
 /** One stop's narration header above its file diff, as a block in the sequence. */
 function StopBlock({
@@ -107,9 +46,9 @@ function StopBlock({
   showWhitespace: boolean;
   stop: WalkthroughStopView;
 }) {
-  const [fileWindowIndex, setFileWindowIndex] = useState(0);
   const renderedPaths = new Set<string>();
-  const resolvedFiles: Array<{ note?: string; resolved: ResolvedSegmentFile }> = [];
+  const resolvedFiles: Array<ChangedFile> = [];
+  const notes = new Map<string, string>();
   for (const segment of getStopSegments(stop)) {
     if (renderedPaths.has(segment.path)) {
       continue;
@@ -117,18 +56,12 @@ function StopBlock({
     renderedPaths.add(segment.path);
     const resolved = resolveSegmentFile(segment, files, showWhitespace);
     if (resolved) {
-      resolvedFiles.push({
-        note: segment === stop.segment ? undefined : (segment.summary ?? segment.title),
-        resolved,
-      });
+      resolvedFiles.push(resolved.file);
+      if (segment !== stop.segment) {
+        notes.set(resolved.file.path, segment.summary ?? segment.title ?? fileName(segment.path));
+      }
     }
   }
-  const fileWindowCount = Math.max(1, Math.ceil(resolvedFiles.length / STOP_FILE_WINDOW_SIZE));
-  const effectiveWindowIndex = clampIndex(fileWindowIndex, fileWindowCount);
-  const visibleResolvedFiles = resolvedFiles.slice(
-    effectiveWindowIndex * STOP_FILE_WINDOW_SIZE,
-    effectiveWindowIndex * STOP_FILE_WINDOW_SIZE + STOP_FILE_WINDOW_SIZE,
-  );
   return (
     <section className={`wt-stop-block${isCurrent ? ' current' : ''}`}>
       <div className="wt-stop-header">
@@ -141,18 +74,8 @@ function StopBlock({
         <Narration prose={stop.body} />
       </div>
       <div className="wt-stop-diff-host">
-        {visibleResolvedFiles.length > 0 ? (
-          <>
-            <DiffPager
-              count={fileWindowCount}
-              index={effectiveWindowIndex}
-              label="File set"
-              onChange={setFileWindowIndex}
-            />
-            {visibleResolvedFiles.map(({ note, resolved }) => (
-              <Fragment key={resolved.file.path}>{renderStopDiff(resolved.file, note)}</Fragment>
-            ))}
-          </>
+        {resolvedFiles.length > 0 ? (
+          renderStopDiff(resolvedFiles, notes)
         ) : (
           <div className="wt-empty">These files are no longer part of the current diff.</div>
         )}
@@ -179,73 +102,7 @@ const flattenRestFiles = (orderView: WalkthroughOrderView): ReadonlyArray<RestFi
     })),
   );
 
-function MeasuredStop({
-  children,
-  index,
-  onHeight,
-  onRef,
-}: {
-  children: ReactNode;
-  index: number;
-  onHeight: (index: number, height: number) => void;
-  onRef: (index: number, el: HTMLElement | null) => void;
-}) {
-  const [node, setNode] = useState<HTMLDivElement | null>(null);
-  const setRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      onRef(index, el);
-      setNode(el);
-    },
-    [index, onRef],
-  );
-
-  useLayoutEffect(() => {
-    if (!node) {
-      return;
-    }
-    const measure = () => onHeight(index, node.getBoundingClientRect().height);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [index, node, onHeight]);
-
-  return <div ref={setRef}>{children}</div>;
-}
-
-function StopPlaceholder({
-  children,
-  height,
-  index,
-  onRef,
-}: {
-  children?: ReactNode;
-  height: number;
-  index: number;
-  onRef: (index: number, el: HTMLElement | null) => void;
-}) {
-  const setRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      onRef(index, el);
-    },
-    [index, onRef],
-  );
-
-  return (
-    <div aria-hidden className="wt-stop-placeholder" ref={setRef} style={{ height }}>
-      {children}
-    </div>
-  );
-}
-
-/**
- * The whole order as one continuous scroll: every stop's narration and diff
- * stacked top-to-bottom, so the reader moves through the change hunk by hunk by
- * scrolling rather than paging file by file. The focused stop is derived from
- * scroll position (which drives the arc and "visited" ticks), and command
- * navigation jumps the requested stop back to the top.
- */
-function SequenceScroll({
+function ActiveStop({
   files,
   navigation,
   orderView,
@@ -258,134 +115,24 @@ function SequenceScroll({
   renderStopDiff: RenderStopDiff;
   showWhitespace: boolean;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const blockRefs = useRef<Array<HTMLElement | null>>([]);
-  const commandScrollIgnoreUntilRef = useRef(0);
-  const { scrollTarget, syncIndexFromScroll } = navigation;
-  const [heightBySegment, setHeightBySegment] = useState<Readonly<Record<string, number>>>({});
-  const visibleIndexes = createVisibleIndexSet(orderView.sequence.length, navigation.index);
-
-  const getStopHeight = useCallback(
-    (stop: WalkthroughStopView) => heightBySegment[stop.segmentId] ?? stopEstimateHeight(stop),
-    [heightBySegment],
-  );
-
-  const setBlockRef = useCallback((index: number, el: HTMLElement | null) => {
-    blockRefs.current[index] = el;
-  }, []);
-
-  const updateStopHeight = useCallback(
-    (index: number, height: number) => {
-      const stop = orderView.sequence[index];
-      if (!stop || height <= 0) {
-        return;
-      }
-      setHeightBySegment((current) =>
-        current[stop.segmentId] != null && Math.abs(current[stop.segmentId] - height) < 1
-          ? current
-          : { ...current, [stop.segmentId]: height },
-      );
-    },
-    [orderView],
-  );
-
-  useEffect(() => {
-    blockRefs.current = blockRefs.current.slice(0, orderView.sequence.length);
-  }, [orderView.sequence.length]);
-
-  // Derive the focused stop from scroll: it's the last block whose top has
-  // crossed an activation line a little below the top of the viewport.
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) {
-      return;
-    }
-    let frame = 0;
-    const measure = () => {
-      frame = 0;
-      const activation = container.scrollTop + 140;
-      let current = 0;
-      for (let i = 0; i < blockRefs.current.length; i += 1) {
-        const el = blockRefs.current[i];
-        if (!el) {
-          continue;
-        }
-        if (el.offsetTop <= activation) {
-          current = i;
-        } else {
-          break;
-        }
-      }
-      syncIndexFromScroll(current);
-    };
-    const onScroll = () => {
-      if (performance.now() < commandScrollIgnoreUntilRef.current) {
-        return;
-      }
-      if (!frame) {
-        frame = requestAnimationFrame(measure);
-      }
-    };
-    container.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      container.removeEventListener('scroll', onScroll);
-      if (frame) {
-        cancelAnimationFrame(frame);
-      }
-    };
-  }, [syncIndexFromScroll]);
-
-  // Command-driven moves bump scrollTarget.nonce; bring that stop to the top
-  // instantly. Smooth scrolling makes the active stop walk through every
-  // intermediate item because scroll position is the source of truth while the
-  // animation is in flight.
-  useEffect(() => {
-    const container = scrollRef.current;
-    const el = blockRefs.current[scrollTarget.index];
-    if (!container || !el) {
-      return;
-    }
-    commandScrollIgnoreUntilRef.current = performance.now() + 80;
-    container.scrollTo({
-      behavior: 'instant',
-      top: el.offsetTop,
-    });
-  }, [scrollTarget]);
+  const stop = orderView.sequence[navigation.index];
 
   return (
-    <div className="wt-stop wt-sequence" ref={scrollRef}>
-      {orderView.sequence.map((stop, i) => {
-        const isVisible = visibleIndexes.has(i);
-        if (isVisible) {
-          return (
-            <MeasuredStop
-              index={i}
-              key={stop.segmentId}
-              onHeight={updateStopHeight}
-              onRef={setBlockRef}
-            >
-              <Activity mode="visible" name={`walkthrough-stop-${i + 1}`}>
-                <StopBlock
-                  files={files}
-                  isCurrent={i === navigation.index}
-                  renderStopDiff={renderStopDiff}
-                  showWhitespace={showWhitespace}
-                  stop={stop}
-                />
-              </Activity>
-            </MeasuredStop>
-          );
-        }
-
-        return (
-          <StopPlaceholder
-            height={getStopHeight(stop)}
-            index={i}
+    <div className="wt-stop">
+      {stop ? (
+        <Activity mode="visible" name={`walkthrough-stop-${navigation.index + 1}`}>
+          <StopBlock
+            files={files}
+            isCurrent
             key={stop.segmentId}
-            onRef={setBlockRef}
+            renderStopDiff={renderStopDiff}
+            showWhitespace={showWhitespace}
+            stop={stop}
           />
-        );
-      })}
+        </Activity>
+      ) : (
+        <div className="wt-empty">This walkthrough step is no longer available.</div>
+      )}
     </div>
   );
 }
@@ -401,11 +148,20 @@ function RestOverview({
   renderStopDiff: RenderStopDiff;
   showWhitespace: boolean;
 }) {
-  const restFiles = flattenRestFiles(orderView);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const effectiveIndex = clampIndex(activeIndex, restFiles.length || 1);
-  const active = restFiles[effectiveIndex] ?? null;
-  const resolved = active ? resolveSegmentFile(active.item.segment, files, showWhitespace) : null;
+  const renderedPaths = new Set<string>();
+  const resolvedFiles: Array<ChangedFile> = [];
+  const notes = new Map<string, string>();
+  for (const { item, reason } of flattenRestFiles(orderView)) {
+    if (renderedPaths.has(item.segment.path)) {
+      continue;
+    }
+    renderedPaths.add(item.segment.path);
+    const resolved = resolveSegmentFile(item.segment, files, showWhitespace);
+    if (resolved) {
+      resolvedFiles.push(resolved.file);
+      notes.set(resolved.file.path, item.note ?? reason);
+    }
+  }
 
   return (
     <div className="wt-stop">
@@ -416,22 +172,8 @@ function RestOverview({
         {orderView.order.restBlurb ? <Narration prose={orderView.order.restBlurb} /> : null}
       </div>
       <div className="wt-support-diffs">
-        <DiffPager
-          count={restFiles.length}
-          index={effectiveIndex}
-          label="Support file"
-          onChange={setActiveIndex}
-        />
-        {active ? (
-          <section className="wt-support-diff" key={active.item.segmentId}>
-            <div className="wt-stop-diff-host">
-              {resolved ? (
-                renderStopDiff(resolved.file, active.item.note ?? active.reason)
-              ) : (
-                <div className="wt-empty">This file is no longer part of the current diff.</div>
-              )}
-            </div>
-          </section>
+        {resolvedFiles.length > 0 ? (
+          <div className="wt-stop-diff-host">{renderStopDiff(resolvedFiles, notes)}</div>
         ) : (
           <div className="wt-empty">These files are no longer part of the current diff.</div>
         )}
@@ -748,7 +490,7 @@ export function NarrativeWalkthroughView({
           onUpdateMessage={onUpdateCommitMessage}
         />
       ) : navigation.mode === 'stop' && orderView.sequence.length > 0 ? (
-        <SequenceScroll
+        <ActiveStop
           files={files}
           navigation={navigation}
           orderView={orderView}

@@ -258,16 +258,6 @@
   gap: 12px;
   margin: 0 0 12px;
 }
-/* ---- The focused stop's diff (the real ReviewCodeView, scoped) ------------ */
-.wt-stop-diff {
-  border: 1px solid var(--file-border);
-  border-radius: 14px;
-  overflow: clip;
-}
-.wt-stop-diff .review {
-  height: auto;
-}
-
 /* ---- Variation C — hybrid arc timeline ------------------------------------ */
 .wt-hybrid {
   display: flex;
@@ -449,24 +439,14 @@
 .wt-arc-node.current:active {
   transform: scale(1.04);
 }
-.wt-hybrid-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
-/* The focused stop / full-context reader: the header and the real diff share a
-   single scroll, so the header scrolls away as you move down into the diff. The
-   stop is the scroll container; the CodeView renders at its natural height
-   instead of scrolling inside its own bounded box. */
+/* The focused stop / support reader: keep one bounded ReviewCodeView mounted so
+   walkthrough mode uses the same virtualized diff surface as the main review. */
 .wt-stop {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
-  /* Anchor offsetTop for the sequence blocks to this scroll container so the
-     scroll-driven focus maths stay relative to it. */
   position: relative;
 }
 .wt-stop-header {
@@ -477,87 +457,20 @@
   width: 100%;
 }
 .wt-stop-diff-host {
-  flex: none;
+  display: flex;
+  flex: 1;
+  min-height: 0;
   position: relative;
 }
-.wt-diff-pager {
-  align-items: center;
-  border-top: 1px solid var(--file-border);
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  min-height: 38px;
-  padding: 6px 12px;
-}
-.wt-diff-pager:first-child {
-  border-top: 0;
-}
-.wt-diff-pager-button {
-  align-items: center;
-  background: transparent;
-  border: 1px solid var(--file-border);
-  border-radius: 8px;
-  color: var(--text);
-  corner-shape: squircle;
-  cursor: pointer;
-  display: inline-flex;
-  flex: none;
-  height: 26px;
-  justify-content: center;
-  padding: 0;
-  width: 30px;
-}
-.wt-diff-pager-button:hover:not(:disabled) {
-  background: var(--hover-wash);
-}
-.wt-diff-pager-button:disabled {
-  color: var(--muted);
-  cursor: default;
-  opacity: 0.5;
-}
-.wt-diff-pager-label {
-  color: var(--muted);
-  flex: none;
-  font: 700 11px/1 var(--font-mono);
-  min-width: 118px;
-  text-align: center;
-}
-/* Let the diff grow to its content height so the outer .wt-stop does the
-   scrolling, rather than the CodeView scrolling within a fixed-height box. */
-.wt-stop .code-view {
-  contain: none;
-  height: auto;
-  overflow: visible;
-}
 
-/* The whole order as one continuous scroll: each stop is a block (narration +
-   diff) stacked top-to-bottom, separated by a rule, with the scroll-focused stop
-   lightly accented so the reader can see where the arc's highlight comes from. */
 .wt-stop-block {
-  border-top: 1px solid var(--file-border);
-}
-.wt-stop-block:first-child {
-  border-top: 0;
-}
-.wt-stop-placeholder {
-  border-top: 1px solid var(--file-border);
-  contain: layout paint;
-  flex: none;
-  pointer-events: none;
-}
-.wt-stop-placeholder:first-child {
-  border-top: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 .wt-stop-block.current > .wt-stop-header {
   box-shadow: inset 3px 0 0 var(--tree-selection-focus);
-}
-/* Leave room below the last diff so the final stop can scroll up to the top and
-   become the focused stop, rather than being stuck at the bottom of the page. */
-.wt-sequence::after {
-  content: '';
-  display: block;
-  flex: none;
-  height: 55vh;
 }
 
 .wt-upnext {
@@ -632,7 +545,9 @@
 
 /* ---- "The rest" — overview (bundle landing) ------------------------------- */
 .wt-support-diffs {
-  flex: none;
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ---- Arc bundle node ("supporting files") --------------------------------- */

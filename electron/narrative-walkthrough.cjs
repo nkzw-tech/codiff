@@ -678,11 +678,6 @@ const normalizeNarrativeWalkthrough = (input, files) => {
   if (!input || typeof input !== 'object') {
     throw new Error('Narrative walkthrough is not an object.');
   }
-  if (input.version === 2 || Array.isArray(input.segments) || Array.isArray(input.orders)) {
-    throw new Error(
-      'Narrative walkthrough uses the old segments/orders format. Regenerate it with the current --walkthrough-guide before opening it in this version of Codiff.',
-    );
-  }
 
   const usedIds = new Set();
   const usedPaths = new Set();

@@ -194,35 +194,6 @@ test('normalizes a well-formed narrative walkthrough', () => {
   expect(result.chapters[0].stops[1].anchors[0].anchor.startLine).toBeUndefined();
 });
 
-test('rejects old segments and orders walkthrough files instead of degrading to support', () => {
-  expect(() =>
-    normalizeNarrativeWalkthrough(
-      {
-        agent: 'codex',
-        defaultOrder: 'keys',
-        focus: 'Focus.',
-        kind: 'narrative',
-        orders: [
-          {
-            id: 'keys',
-            phases: [],
-            rest: [],
-            restBlurb: '',
-            restLabel: 'Support',
-            sequence: [],
-          },
-        ],
-        repo: { branch: 'main', root: '/repo' },
-        segments: [anchor('old', 'src/App.tsx')],
-        source: { type: 'working-tree' },
-        title: 'Old walkthrough',
-        version: 2,
-      },
-      files,
-    ),
-  ).toThrow(/old segments\/orders format/i);
-});
-
 test('coerces flat anchor fields into the nested anchor shape', () => {
   const input = baseInput();
   input.chapters[0].stops[0].anchors[0] = {

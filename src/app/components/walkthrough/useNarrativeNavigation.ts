@@ -51,14 +51,6 @@ export const useNarrativeNavigation = (
   );
   const [mode, setMode] = useState<NarrativeViewMode>('stop');
   const [index, setIndex] = useState(0);
-  // A nonce-tagged scroll request. The continuous sequence view watches this and
-  // jumps to `index` whenever `nonce` bumps — i.e. for command-driven moves
-  // (Next/Prev, the arc, j/k), but NOT for the scroll-driven index updates the
-  // view feeds back in, which would otherwise fight the user's scrolling.
-  const [scrollTarget, setScrollTarget] = useState<{ index: number; nonce: number }>({
-    index: 0,
-    nonce: 0,
-  });
   const [restVisited, setRestVisited] = useState(false);
   const [visited, setVisited] = useState<ReadonlySet<string>>(() => {
     const firstSegment = walkthrough
@@ -106,7 +98,6 @@ export const useNarrativeNavigation = (
     setOrderId(order?.id ?? 'walkthrough');
     setMode('stop');
     setIndex(0);
-    setScrollTarget({ index: 0, nonce: 0 });
     setRestVisited(false);
     const firstSegment = order?.sequence[0]?.segmentIds[0];
     setVisited(new Set(firstSegment ? [firstSegment] : []));
@@ -186,29 +177,12 @@ export const useNarrativeNavigation = (
       setMode('stop');
       setIndex(clamped);
       markVisited(orderView.sequence[clamped]?.segmentId);
-      // Ask the sequence view to scroll this stop into view.
-      setScrollTarget((current) => ({ index: clamped, nonce: current.nonce + 1 }));
     },
     [orderView, markVisited],
   );
 
   const goNext = useCallback(() => goStop(index + 1), [goStop, index]);
   const goPrev = useCallback(() => goStop(index - 1), [goStop, index]);
-
-  // The continuous sequence view calls this as the reader scrolls, to keep the
-  // arc, count and "visited" ticks in step with what's on screen. It updates the
-  // focused stop WITHOUT issuing a scroll request, so it never fights the scroll.
-  const syncIndexFromScroll = useCallback(
-    (target: number) => {
-      if (!orderView) {
-        return;
-      }
-      const clamped = Math.max(0, Math.min(orderView.sequence.length - 1, target));
-      setIndex((current) => (current === clamped ? current : clamped));
-      markVisited(orderView.sequence[clamped]?.segmentId);
-    },
-    [orderView, markVisited],
-  );
 
   const openRest = useCallback(() => {
     if (orderView?.sequence.length) {
@@ -259,7 +233,6 @@ export const useNarrativeNavigation = (
       setOrderId(resolvedOrderId);
       setMode('stop');
       setIndex(0);
-      setScrollTarget((current) => ({ index: 0, nonce: current.nonce + 1 }));
       setRestVisited(false);
       markVisited(
         walkthrough
@@ -296,11 +269,9 @@ export const useNarrativeNavigation = (
     orderId,
     orderView,
     restVisited,
-    scrollTarget,
     setCommitBody,
     setCommitSubject,
     switchOrder,
-    syncIndexFromScroll,
     toggleCommitFile,
     toggleCommitGroup,
     visited,

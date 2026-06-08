@@ -114,22 +114,13 @@ export const getCommentKey = (
     comment.startSide ?? comment.side
   }`;
 
-const getCommentTextDigest = (value: string | null | undefined) =>
-  value ? `${value.length},${value.split('\n').length}` : '0,0';
-
-export const getReviewCommentsDigest = (comments: ReadonlyArray<ReviewComment>) =>
+export const getReviewCommentAnchorsDigest = (comments: ReadonlyArray<ReviewComment>) =>
   comments
     .map(
       (comment) =>
         `${comment.id}:${comment.sectionId}:${comment.side}:${comment.lineNumber}:${
           comment.startLineNumber ?? ''
-        }:${comment.startSide ?? ''}:${getCommentTextDigest(
-          comment.body,
-        )}:${comment.codexReply?.status ?? ''}:${getCommentTextDigest(
-          comment.codexReply?.body,
-        )}:${getCommentTextDigest(comment.codexReply?.error)}:${
-          comment.githubSubmit?.status ?? ''
-        }:${comment.githubSubmit?.error ?? ''}`,
+        }:${comment.startSide ?? ''}`,
     )
     .join('\0');
 
