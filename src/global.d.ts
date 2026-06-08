@@ -55,7 +55,6 @@ declare global {
       resetCodeFontSize: () => Promise<void>;
       setDiffStyle: (value: CodiffPreferences['diffStyle']) => Promise<void>;
       setShowOutdated: (value: boolean) => Promise<void>;
-      setWalkthroughOrder: (value: string) => Promise<void>;
       setWordWrap: (value: boolean) => Promise<void>;
       showInFolder: (path: string) => Promise<void>;
       submitPullRequestComment: (

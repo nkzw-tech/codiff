@@ -30,6 +30,14 @@ export default defineConfig({
     extends: [nkzw],
     ignorePatterns: ['bin/', 'dist/', 'electron/', 'vite.config.ts.timestamp-*'],
     options: { typeAware: true, typeCheck: true },
+    overrides: [
+      {
+        env: {
+          node: true,
+        },
+        files: ['shared/narrative-walkthrough-diff.cjs'],
+      },
+    ],
   },
   plugins: [
     babel({

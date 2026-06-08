@@ -19,13 +19,13 @@ import type {
   RepositoryState,
   ReviewSource,
 } from '../types.ts';
+import { createChangedFile } from './helpers/fixtures.ts';
+import { waitFor } from './helpers/react.tsx';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean;
   ResizeObserver?: typeof ResizeObserver;
   Worker?: typeof Worker;
 };
-reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 reactActEnvironment.ResizeObserver ??= class ResizeObserver {
   disconnect() {}
   observe() {}
@@ -84,39 +84,6 @@ const repositoryState = {
   source: { type: 'working-tree' },
 } satisfies RepositoryState;
 
-const createChangedFile = (path: string, fingerprint = `${path}:1`) =>
-  ({
-    fingerprint,
-    path,
-    sections: [
-      {
-        binary: false,
-        id: `${path}:unstaged`,
-        kind: 'unstaged',
-        patch: `diff --git a/${path} b/${path}\n@@ -1 +1 @@\n-old\n+new\n`,
-      },
-    ],
-    status: 'modified',
-  }) satisfies ChangedFile;
-
-const waitFor = async (assertion: () => void) => {
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      lastError = error;
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
-    }
-  }
-
-  throw lastError;
-};
-
 const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['codiff'] => ({
   askReviewAssistant: vi.fn(async () => ({
     reason: 'Unavailable in tests.',
@@ -164,7 +131,6 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     showOutdated: false,
     showWhitespace: false,
     theme: 'system' as const,
-    walkthroughOrder: 'keys',
     wordWrap: false,
   })),
   getRepositoryHistory: vi.fn(async () => ({
@@ -196,7 +162,6 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   resetCodeFontSize: vi.fn(async () => {}),
   setDiffStyle: vi.fn(async () => {}),
   setShowOutdated: vi.fn(async () => {}),
-  setWalkthroughOrder: vi.fn(async () => {}),
   setWordWrap: vi.fn(async () => {}),
   showInFolder: vi.fn(async () => {}),
   submitPullRequestComment: vi.fn(async () => {
@@ -659,9 +624,9 @@ test('repository reload does not let stale selection override launch source', as
 });
 
 test('repository reload colors only git status glyphs for files changed after reload', async () => {
-  const unchangedFile = createChangedFile('src/unchanged.ts', 'same');
-  const changedFileBeforeReload = createChangedFile('src/changed.ts', 'before');
-  const changedFileAfterReload = createChangedFile('src/changed.ts', 'after');
+  const unchangedFile = createChangedFile('src/unchanged.ts', { fingerprint: 'same' });
+  const changedFileBeforeReload = createChangedFile('src/changed.ts', { fingerprint: 'before' });
+  const changedFileAfterReload = createChangedFile('src/changed.ts', { fingerprint: 'after' });
   const previousState = {
     ...repositoryState,
     files: [unchangedFile, changedFileBeforeReload],
@@ -714,8 +679,8 @@ test('repository reload colors only git status glyphs for files changed after re
 });
 
 test('tree sidebar subtly mutes files currently marked viewed', async () => {
-  const viewedFile = createChangedFile('src/viewed.ts', 'viewed-current');
-  const staleViewedFile = createChangedFile('src/stale.ts', 'stale-current');
+  const viewedFile = createChangedFile('src/viewed.ts', { fingerprint: 'viewed-current' });
+  const staleViewedFile = createChangedFile('src/stale.ts', { fingerprint: 'stale-current' });
   const nextState = {
     ...repositoryState,
     files: [viewedFile, staleViewedFile],
@@ -1015,21 +980,22 @@ test('narrative walkthrough stops do not repeat commit details', async () => {
         id: 'impl',
         stops: [
           {
-            anchors: [
+            added: 1,
+            deleted: 1,
+            hunkIds: ['src/app.ts:unstaged:h1'],
+            hunks: [
               {
                 added: 1,
                 anchor: { display: 'src/app.ts', sectionId: 'src/app.ts:unstaged', side: 'both' },
                 deleted: 1,
-                granularity: 'file',
-                id: 's1',
+                id: 'src/app.ts:unstaged:h1',
                 path: 'src/app.ts',
                 status: 'modified',
               },
             ],
-            body: 'Review this file without repeating the commit header.',
-            id: 'implementation-path',
+            id: 's1',
             importance: 'critical',
-            summary: 'The implementation path carries the commit review.',
+            prose: 'Review this file without repeating the commit header.',
             title: 'Implementation path',
           },
         ],
@@ -1043,7 +1009,7 @@ test('narrative walkthrough stops do not repeat commit details', async () => {
     source,
     support: [],
     title: 'Narrative',
-    version: 3,
+    version: 4,
   } satisfies NarrativeWalkthrough;
 
   window.codiff = createCodiffMock({
@@ -1104,20 +1070,22 @@ test('a walkthrough file loads even without the walkthrough launch flag', async 
         id: 'impl',
         stops: [
           {
-            anchors: [
+            added: 1,
+            deleted: 1,
+            hunkIds: ['src/app.ts:unstaged:h1'],
+            hunks: [
               {
                 added: 1,
                 anchor: { display: 'src/app.ts', sectionId: 'src/app.ts:unstaged', side: 'both' },
                 deleted: 1,
-                granularity: 'file',
-                id: 's1',
+                id: 'src/app.ts:unstaged:h1',
                 path: 'src/app.ts',
                 status: 'modified',
               },
             ],
-            body: 'Review this file.',
             id: 'implementation-path',
             importance: 'critical',
+            prose: 'Review this file.',
             summary: 'The implementation path.',
             title: 'Implementation path',
           },
@@ -1132,7 +1100,7 @@ test('a walkthrough file loads even without the walkthrough launch flag', async 
     source,
     support: [],
     title: 'Narrative',
-    version: 3,
+    version: 4,
   } satisfies NarrativeWalkthrough;
 
   const getNarrativeWalkthrough = vi.fn(async () => ({

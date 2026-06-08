@@ -20,7 +20,8 @@
     "config",
     "codex",
     "dist",
-    "electron"
+    "electron",
+    "shared"
   ],
   "type": "module",
   "main": "./electron/main.cjs",

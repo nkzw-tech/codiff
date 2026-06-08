@@ -14,7 +14,7 @@ const {
   truncate,
 } = require('./agent-shared.cjs');
 
-const CODEX_TIMEOUT_MS = 45_000;
+const CODEX_TIMEOUT_MS = 90_000;
 const DEFAULT_OPENAI_MODEL = 'gpt-5.3-codex-spark';
 const FALLBACK_OPENAI_MODEL = 'gpt-5.5';
 const CODEX_REASONING_EFFORT = 'high';

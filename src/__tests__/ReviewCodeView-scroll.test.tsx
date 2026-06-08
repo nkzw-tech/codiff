@@ -2,208 +2,127 @@
  * @vitest-environment jsdom
  */
 
-import type { CodeViewItem } from '@pierre/diffs';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { expect, test, vi } from 'vite-plus/test';
-import { ReviewCodeView } from '../app/components/ReviewCodeView.tsx';
-import { defaultKeymap } from '../config/defaults.ts';
-import type { ReviewComment } from '../lib/app-types.ts';
-import type { ChangedFile, CommitMetadata, ReviewSource } from '../types.ts';
+import { beforeEach, expect, test, vi } from 'vite-plus/test';
+import type { ReviewComment, ReviewIdentity } from '../lib/app-types.ts';
+import {
+  updateReviewIdentityCollapsed,
+  updateReviewIdentityViewed,
+} from '../lib/review-identity.ts';
+import type { ChangedFile } from '../types.ts';
+import { createChangedFile, createChangedFileWithPatch } from './helpers/fixtures.ts';
+import { setInputValue, waitFor } from './helpers/react.tsx';
+import {
+  codeViewMock,
+  commitMetadata,
+  commitSource,
+  resetCodeViewMock,
+  ReviewCodeViewHarness,
+  type ReviewDiffBlock,
+} from './helpers/review-code-view.tsx';
 
-const codeViewMock = vi.hoisted(() => ({
-  scrollTo: vi.fn(),
-}));
-
-vi.mock('@pierre/diffs/react', async () => {
-  const React = await import('react');
-
-  return {
-    CodeView: React.forwardRef(function MockCodeView(
-      props: {
-        className?: string;
-        items: Array<CodeViewItem<unknown>>;
-        onScroll?: (scrollTop: number, viewer: unknown) => void;
-        renderAnnotation?: (
-          annotation: { metadata: unknown },
-          item: CodeViewItem<unknown>,
-        ) => React.ReactNode;
-        renderCustomHeader?: (item: CodeViewItem<unknown>) => React.ReactNode;
-      },
-      ref: React.ForwardedRef<unknown>,
-    ) {
-      const itemsRef = React.useRef(props.items);
-      const renderedIdsRef = React.useRef(new Set<string>());
-      const scrollAttemptByIdRef = React.useRef(new Map<string, number>());
-      const scrollTopRef = React.useRef(0);
-      itemsRef.current = props.items;
-
-      const viewer = React.useMemo(
-        () => ({
-          getRenderedItems: () =>
-            itemsRef.current
-              .filter((item) => renderedIdsRef.current.has(item.id))
-              .map((item) => ({
-                element: document.createElement('div'),
-                id: item.id,
-                instance: {},
-                item,
-                type: item.type,
-                version: item.version,
-              })),
-          getScrollTop: () => scrollTopRef.current,
-          getTopForItem: (id: string) => {
-            const index = itemsRef.current.findIndex((item) => item.id === id);
-            return index === -1 ? undefined : index * 200 + 20;
-          },
-        }),
-        [],
-      );
-
-      React.useImperativeHandle(
-        ref,
-        () => ({
-          clearSelectedLines: () => {},
-          getInstance: () => viewer,
-          scrollTo: (target: { behavior?: string; id: string; offset?: number }) => {
-            codeViewMock.scrollTo(target);
-            const attempts = (scrollAttemptByIdRef.current.get(target.id) ?? 0) + 1;
-            scrollAttemptByIdRef.current.set(target.id, attempts);
-            const itemTop = viewer.getTopForItem(target.id) ?? 0;
-            scrollTopRef.current = Math.max(0, itemTop - (target.offset ?? 0));
-            if (attempts >= 2) {
-              renderedIdsRef.current.add(target.id);
-            }
-            props.onScroll?.(scrollTopRef.current, viewer);
-          },
-        }),
-        [props, viewer],
-      );
-
-      return React.createElement(
-        'div',
-        { className: props.className },
-        props.items.map((item) =>
-          React.createElement(
-            'div',
-            { key: item.id },
-            props.renderCustomHeader ? props.renderCustomHeader(item) : null,
-            'annotations' in item && Array.isArray(item.annotations)
-              ? item.annotations.map((annotation, index) =>
-                  React.createElement(
-                    React.Fragment,
-                    { key: index },
-                    props.renderAnnotation?.(annotation, item),
-                  ),
-                )
-              : null,
-          ),
-        ),
-      );
-    }),
-    WorkerPoolContextProvider: ({ children }: { children: React.ReactNode }) =>
-      React.createElement(React.Fragment, null, children),
-  };
+beforeEach(() => {
+  resetCodeViewMock();
 });
 
-const createChangedFile = (path: string) =>
-  ({
-    fingerprint: `${path}:1`,
-    path,
-    sections: [
-      {
-        binary: false,
-        id: `${path}:unstaged`,
-        kind: 'unstaged',
-        patch: `diff --git a/${path} b/${path}\n@@ -1 +1 @@\n-old\n+new\n`,
-      },
-    ],
-    status: 'modified',
-  }) satisfies ChangedFile;
+test('walkthrough header chrome does not leak inline styles onto reused diff nodes', async () => {
+  const file = createChangedFile('src/reused.ts');
+  const headerBlock: ReviewDiffBlock = {
+    file,
+    header: <div>Header</div>,
+    id: 'walkthrough-stop',
+  };
 
-const createChangedFileWithPatch = (path: string, patch: string) =>
-  ({
-    fingerprint: `${path}:1`,
-    path,
-    sections: [
-      {
-        binary: false,
-        id: `${path}:unstaged`,
-        kind: 'unstaged',
-        patch,
-      },
-    ],
-    status: 'modified',
-  }) satisfies ChangedFile;
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
 
-const source = { type: 'working-tree' } satisfies ReviewSource;
-const commitSource = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
-const commitMetadata = {
-  author: {
-    date: '2026-01-01T12:00:00Z',
-    email: 'author@example.com',
-    name: 'Author',
-  },
-  body: '',
-  committer: {
-    date: '2026-01-01T12:00:00Z',
-    email: 'committer@example.com',
-    name: 'Committer',
-  },
-  files: [
-    {
-      additions: 1,
-      binary: false,
-      deletions: 1,
-      path: 'src/second.ts',
-      status: 'modified' as const,
-    },
-    {
-      additions: 1,
-      binary: false,
-      deletions: 0,
-      path: 'src/hidden.ts',
-      status: 'modified' as const,
-    },
-  ],
-  parents: ['parent-sha'],
-  ref: 'abc1234',
-  refs: ['main'],
-  shortRef: 'abc1234',
-  signature: {
-    status: 'N',
-  },
-  stats: {
-    additions: 2,
-    binaryFiles: 0,
-    deletions: 1,
-    files: 2,
-    renamedFiles: 0,
-  },
-  subject: 'Commit subject',
-  trailers: [],
-} satisfies CommitMetadata;
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<ReviewCodeViewHarness blocks={[headerBlock]} files={[file]} />);
+    });
 
-const waitFor = async (assertion: () => void) => {
-  let lastError: unknown;
+    expect(
+      codeViewMock.postRenderNodes[0]?.classList.contains('codiff-walkthrough-header-item'),
+    ).toBe(true);
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      lastError = error;
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
+    await act(async () => {
+      root?.render(<ReviewCodeViewHarness files={[file]} />);
+    });
+
+    const reusedNode = codeViewMock.postRenderNodes[0];
+    expect(reusedNode?.classList.contains('codiff-walkthrough-header-item')).toBe(false);
+    expect(container.textContent).not.toContain('Header');
+    expect(container.querySelector('.codiff-file-header')).not.toBeNull();
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
     }
+    container.remove();
   }
+});
 
-  throw lastError;
-};
+test('header-only walkthrough blocks render and can be scroll targets', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
 
-test('reload scroll target is retried until the selected item renders', async () => {
-  codeViewMock.scrollTo.mockClear();
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <ReviewCodeViewHarness
+          blocks={[
+            {
+              header: <div>Missing stop</div>,
+              id: 'walkthrough:s1:missing',
+              selected: true,
+            },
+          ]}
+          files={[]}
+          scrollTarget={{ blockId: 'walkthrough:s1:missing', request: 1 }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Missing stop');
+    await waitFor(() => {
+      expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'walkthrough:s1:missing:walkthrough-header',
+          type: 'item',
+        }),
+      );
+    });
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('focused walkthrough blocks render only global comments visible in the focused patch', async () => {
+  const file = createChangedFileWithPatch(
+    'src/commented.ts',
+    'diff --git a/src/commented.ts b/src/commented.ts\n@@ -1 +1 @@\n-old\n+focused\n',
+  );
+  const visibleComment = {
+    body: 'Visible focused comment.',
+    filePath: file.path,
+    id: 'visible-comment',
+    lineNumber: 1,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+  } satisfies ReviewComment;
+  const offHunkComment = {
+    ...visibleComment,
+    body: 'Off-hunk comment should stay out.',
+    id: 'off-hunk-comment',
+    lineNumber: 20,
+  } satisfies ReviewComment;
 
   const container = document.createElement('div');
   document.body.append(container);
@@ -213,48 +132,267 @@ test('reload scroll target is retried until the selected item renders', async ()
     await act(async () => {
       root = createRoot(container);
       root.render(
-        <ReviewCodeView
-          activeSearchMatch={null}
-          agentId="codex"
-          agentLabel="Codex"
-          collapsed={new Set()}
-          comments={[]}
-          commitMetadata={null}
-          diffStyle="split"
-          files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
-          focusCommentId={null}
-          focusCommentRequest={0}
-          forceExpandedPaths={new Set()}
-          gitIdentity={null}
-          hunkNavigation={null}
-          isPullRequest={false}
-          itemVersionByPath={{}}
-          keymap={defaultKeymap}
-          loadingSectionIds={new Set()}
-          onAskCodex={() => {}}
-          onCreateComment={() => {}}
-          onDeleteComment={() => {}}
-          onLoadSection={() => {}}
-          onOpenFile={() => {}}
-          onSelectPathFromScroll={() => {}}
-          onSubmitComment={() => {}}
-          onToggleCollapsed={() => {}}
-          onToggleViewed={() => {}}
-          onUpdateComment={() => {}}
-          scrollTarget={{ path: 'src/second.ts', request: 1 }}
-          searchQuery=""
-          selectedPath="src/second.ts"
-          showWhitespace={false}
-          source={source}
-          viewed={{}}
-          walkthroughNotes={new Map()}
-          wordWrap={false}
+        <ReviewCodeViewHarness
+          blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
+          comments={[visibleComment, offHunkComment]}
+          files={[file]}
+        />,
+      );
+    });
+
+    const textareas = [...container.querySelectorAll<HTMLTextAreaElement>('textarea')];
+    expect(textareas.map((textarea) => textarea.value)).toEqual([visibleComment.body]);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('focused walkthrough blocks keep cross-side comments when their rendered anchor is visible', async () => {
+  const file = createChangedFileWithPatch(
+    'src/ranged-comment.ts',
+    'diff --git a/src/ranged-comment.ts b/src/ranged-comment.ts\n@@ -8,3 +8,3 @@\n context\n-old\n+new\n',
+  );
+  const rangedComment = {
+    body: 'Cross-side comment.',
+    filePath: file.path,
+    id: 'cross-side-comment',
+    lineNumber: 10,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+    startLineNumber: 7,
+    startSide: 'deletions',
+  } satisfies ReviewComment;
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <ReviewCodeViewHarness
+          blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
+          comments={[rangedComment]}
+          files={[file]}
+        />,
+      );
+    });
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea');
+    expect(textarea?.value).toBe(rangedComment.body);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('focused walkthrough blocks resolve active search matches to rendered item ids', async () => {
+  const file = createChangedFileWithPatch(
+    'src/search.ts',
+    'diff --git a/src/search.ts b/src/search.ts\n@@ -1 +1 @@\n-old\n+needle\n',
+  );
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <ReviewCodeViewHarness
+          activeSearchMatch={{
+            filePath: file.path,
+            itemId: `diff:${file.sections[0].id}`,
+            lineNumber: 1,
+            side: 'additions',
+          }}
+          blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
+          files={[file]}
         />,
       );
     });
 
     await waitFor(() => {
-      expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(2);
+      expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: `walkthrough:s1:0:diff:${file.sections[0].id}`,
+          lineNumber: 1,
+          side: 'additions',
+          type: 'line',
+        }),
+      );
+    });
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('review comment drafts resync clean external updates and reset on comment switch', async () => {
+  const file = createChangedFile('src/draft.ts');
+  const baseComment = {
+    body: 'Original body',
+    filePath: file.path,
+    id: 'comment-1',
+    lineNumber: 1,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+  } satisfies ReviewComment;
+  const onUpdateComment = vi.fn();
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+  const renderComment = (comment: ReviewComment) =>
+    root?.render(
+      <ReviewCodeViewHarness
+        comments={[comment]}
+        files={[file]}
+        focusCommentId={comment.id}
+        onUpdateComment={onUpdateComment}
+      />,
+    );
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      renderComment(baseComment);
+    });
+
+    const textarea = () => container.querySelector<HTMLTextAreaElement>('textarea')!;
+    expect(textarea().value).toBe('Original body');
+
+    await act(async () => {
+      renderComment({ ...baseComment, body: 'Clean external body' });
+    });
+    expect(textarea().value).toBe('Clean external body');
+
+    await setInputValue(textarea(), 'Unsaved local draft');
+    expect(textarea().value).toBe('Unsaved local draft');
+
+    await act(async () => {
+      renderComment({ ...baseComment, body: 'Ignored while dirty' });
+    });
+    expect(textarea().value).toBe('Unsaved local draft');
+
+    await act(async () => {
+      renderComment({ ...baseComment, body: 'Second comment body', id: 'comment-2' });
+    });
+    expect(textarea().value).toBe('Second comment body');
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('walkthrough hunk viewed state is keyed independently from file path', async () => {
+  const filePath = 'src/shared.ts';
+  const firstFile = { ...createChangedFile(filePath), fingerprint: 'first-hunk' };
+  const secondFile = { ...createChangedFile(filePath), fingerprint: 'second-hunk' };
+  const firstIdentity = { fingerprint: firstFile.fingerprint, key: 'walkthrough:s1:h1' };
+  const secondIdentity = { fingerprint: secondFile.fingerprint, key: 'walkthrough:s2:h2' };
+
+  function Harness() {
+    const [viewed, setViewed] = useState<Record<string, string>>({});
+    const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+    const [itemVersionByKey, setItemVersionByKey] = useState<Record<string, number>>({});
+
+    const toggleViewed = (
+      _file: ChangedFile,
+      isViewed: boolean,
+      reviewIdentity: ReviewIdentity,
+    ) => {
+      setViewed((current) => updateReviewIdentityViewed(current, reviewIdentity, isViewed));
+      setCollapsed((current) => updateReviewIdentityCollapsed(current, reviewIdentity, isViewed));
+      setItemVersionByKey((current) => ({
+        ...current,
+        [reviewIdentity.key]: (current[reviewIdentity.key] ?? 0) + 1,
+      }));
+    };
+
+    return (
+      <>
+        <ReviewCodeViewHarness
+          collapsed={collapsed}
+          files={[firstFile]}
+          itemVersionByKey={itemVersionByKey}
+          onToggleViewed={toggleViewed}
+          reviewIdentityByPath={new Map([[filePath, firstIdentity]])}
+          viewed={viewed}
+        />
+        <ReviewCodeViewHarness
+          collapsed={collapsed}
+          files={[secondFile]}
+          itemVersionByKey={itemVersionByKey}
+          onToggleViewed={toggleViewed}
+          reviewIdentityByPath={new Map([[filePath, secondIdentity]])}
+          viewed={viewed}
+        />
+      </>
+    );
+  }
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<Harness />);
+    });
+
+    const viewedButtons = () => [
+      ...container.querySelectorAll<HTMLButtonElement>('.codiff-viewed-button'),
+    ];
+    expect(viewedButtons()).toHaveLength(2);
+
+    await act(async () => {
+      viewedButtons()[0].click();
+    });
+
+    await waitFor(() => {
+      expect(viewedButtons()[0].getAttribute('aria-pressed')).toBe('true');
+      expect(viewedButtons()[1].getAttribute('aria-pressed')).toBe('false');
+    });
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('reload scroll target is retried until the selected item renders', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <ReviewCodeViewHarness
+          files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
+          scrollTarget={{ path: 'src/second.ts', request: 1 }}
+          selectedPath="src/second.ts"
+        />,
+      );
+    });
+
+    await waitFor(() => {
+      expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
     });
     expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -271,9 +409,47 @@ test('reload scroll target is retried until the selected item renders', async ()
   }
 });
 
-test('commit metadata file rows scroll to the matching diff', async () => {
-  codeViewMock.scrollTo.mockClear();
+test('scroll targets issue one command per request even before render visibility catches up', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+  const scrollTarget = { behavior: 'smooth' as const, path: 'src/second.ts', request: 1 };
 
+  const renderView = () => (
+    <ReviewCodeViewHarness
+      files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
+      scrollTarget={scrollTarget}
+    />
+  );
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(renderView());
+    });
+
+    await waitFor(() => {
+      expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      root?.render(renderView());
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('commit metadata file rows scroll to the matching diff', async () => {
   const container = document.createElement('div');
   document.body.append(container);
   let root: Root | null = null;
@@ -282,42 +458,10 @@ test('commit metadata file rows scroll to the matching diff', async () => {
     await act(async () => {
       root = createRoot(container);
       root.render(
-        <ReviewCodeView
-          activeSearchMatch={null}
-          agentId="codex"
-          agentLabel="Codex"
-          collapsed={new Set()}
-          comments={[]}
+        <ReviewCodeViewHarness
           commitMetadata={commitMetadata}
-          diffStyle="split"
           files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
-          focusCommentId={null}
-          focusCommentRequest={0}
-          forceExpandedPaths={new Set()}
-          gitIdentity={null}
-          hunkNavigation={null}
-          isPullRequest={false}
-          itemVersionByPath={{}}
-          keymap={defaultKeymap}
-          loadingSectionIds={new Set()}
-          onAskCodex={() => {}}
-          onCreateComment={() => {}}
-          onDeleteComment={() => {}}
-          onLoadSection={() => {}}
-          onOpenFile={() => {}}
-          onSelectPathFromScroll={() => {}}
-          onSubmitComment={() => {}}
-          onToggleCollapsed={() => {}}
-          onToggleViewed={() => {}}
-          onUpdateComment={() => {}}
-          scrollTarget={null}
-          searchQuery=""
-          selectedPath={null}
-          showWhitespace={false}
           source={commitSource}
-          viewed={{}}
-          walkthroughNotes={new Map()}
-          wordWrap={false}
         />,
       );
     });
@@ -363,8 +507,6 @@ test('commit metadata file rows scroll to the matching diff', async () => {
 });
 
 test('hunk navigation skips stale requests when the review view remounts', async () => {
-  codeViewMock.scrollTo.mockClear();
-
   const container = document.createElement('div');
   document.body.append(container);
   let root: Root | null = null;
@@ -373,42 +515,10 @@ test('hunk navigation skips stale requests when the review view remounts', async
     await act(async () => {
       root = createRoot(container);
       root.render(
-        <ReviewCodeView
-          activeSearchMatch={null}
-          agentId="codex"
-          agentLabel="Codex"
-          collapsed={new Set()}
-          comments={[]}
-          commitMetadata={null}
+        <ReviewCodeViewHarness
           diffStyle="unified"
           files={[createChangedFile('src/first.ts')]}
-          focusCommentId={null}
-          focusCommentRequest={0}
-          forceExpandedPaths={new Set()}
-          gitIdentity={null}
           hunkNavigation={{ direction: 1, request: 1 }}
-          isPullRequest={false}
-          itemVersionByPath={{}}
-          keymap={defaultKeymap}
-          loadingSectionIds={new Set()}
-          onAskCodex={() => {}}
-          onCreateComment={() => {}}
-          onDeleteComment={() => {}}
-          onLoadSection={() => {}}
-          onOpenFile={() => {}}
-          onSelectPathFromScroll={() => {}}
-          onSubmitComment={() => {}}
-          onToggleCollapsed={() => {}}
-          onToggleViewed={() => {}}
-          onUpdateComment={() => {}}
-          scrollTarget={null}
-          searchQuery=""
-          selectedPath={null}
-          showWhitespace={false}
-          source={source}
-          viewed={{}}
-          walkthroughNotes={new Map()}
-          wordWrap={false}
         />,
       );
     });
@@ -421,42 +531,10 @@ test('hunk navigation skips stale requests when the review view remounts', async
 
     await act(async () => {
       root?.render(
-        <ReviewCodeView
-          activeSearchMatch={null}
-          agentId="codex"
-          agentLabel="Codex"
-          collapsed={new Set()}
-          comments={[]}
-          commitMetadata={null}
+        <ReviewCodeViewHarness
           diffStyle="unified"
           files={[createChangedFile('src/first.ts')]}
-          focusCommentId={null}
-          focusCommentRequest={0}
-          forceExpandedPaths={new Set()}
-          gitIdentity={null}
           hunkNavigation={{ direction: 1, request: 2 }}
-          isPullRequest={false}
-          itemVersionByPath={{}}
-          keymap={defaultKeymap}
-          loadingSectionIds={new Set()}
-          onAskCodex={() => {}}
-          onCreateComment={() => {}}
-          onDeleteComment={() => {}}
-          onLoadSection={() => {}}
-          onOpenFile={() => {}}
-          onSelectPathFromScroll={() => {}}
-          onSubmitComment={() => {}}
-          onToggleCollapsed={() => {}}
-          onToggleViewed={() => {}}
-          onUpdateComment={() => {}}
-          scrollTarget={null}
-          searchQuery=""
-          selectedPath={null}
-          showWhitespace={false}
-          source={source}
-          viewed={{}}
-          walkthroughNotes={new Map()}
-          wordWrap={false}
         />,
       );
     });
@@ -478,8 +556,6 @@ test('hunk navigation skips stale requests when the review view remounts', async
 });
 
 test('hunk navigation orders deletion comments before added rows in unified changes', async () => {
-  codeViewMock.scrollTo.mockClear();
-
   const file = createChangedFileWithPatch(
     'src/first.ts',
     'diff --git a/src/first.ts b/src/first.ts\n@@ -1 +1 @@\n-old\n+new\n',
@@ -499,42 +575,11 @@ test('hunk navigation orders deletion comments before added rows in unified chan
 
   const render = (request: number) =>
     root?.render(
-      <ReviewCodeView
-        activeSearchMatch={null}
-        agentId="codex"
-        agentLabel="Codex"
-        collapsed={new Set()}
+      <ReviewCodeViewHarness
         comments={[comment]}
-        commitMetadata={null}
         diffStyle="unified"
         files={[file]}
-        focusCommentId={null}
-        focusCommentRequest={0}
-        forceExpandedPaths={new Set()}
-        gitIdentity={null}
         hunkNavigation={{ direction: 1, request }}
-        isPullRequest={false}
-        itemVersionByPath={{}}
-        keymap={defaultKeymap}
-        loadingSectionIds={new Set()}
-        onAskCodex={() => {}}
-        onCreateComment={() => {}}
-        onDeleteComment={() => {}}
-        onLoadSection={() => {}}
-        onOpenFile={() => {}}
-        onSelectPathFromScroll={() => {}}
-        onSubmitComment={() => {}}
-        onToggleCollapsed={() => {}}
-        onToggleViewed={() => {}}
-        onUpdateComment={() => {}}
-        scrollTarget={null}
-        searchQuery=""
-        selectedPath={null}
-        showWhitespace={false}
-        source={source}
-        viewed={{}}
-        walkthroughNotes={new Map()}
-        wordWrap={false}
       />,
     );
 
@@ -576,9 +621,67 @@ test('hunk navigation orders deletion comments before added rows in unified chan
   }
 });
 
-test('Enter on a focused review control is not converted into a hunk comment', async () => {
-  codeViewMock.scrollTo.mockClear();
+test('review comment typing stays local until a comment action commits it', async () => {
+  const file = createChangedFile('src/comment.ts');
+  const comment = {
+    body: '',
+    filePath: file.path,
+    id: 'comment-1',
+    lineNumber: 1,
+    sectionId: 'src/comment.ts:unstaged',
+    side: 'additions',
+  } satisfies ReviewComment;
+  const onAskCodex = vi.fn();
+  const onUpdateComment = vi.fn();
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
 
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <ReviewCodeViewHarness
+          comments={[comment]}
+          diffStyle="unified"
+          files={[file]}
+          onAskCodex={onAskCodex}
+          onUpdateComment={onUpdateComment}
+        />,
+      );
+    });
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('.review-comment-input');
+    if (!textarea) {
+      throw new Error('Expected review comment textarea.');
+    }
+
+    await setInputValue(textarea, 'Please check this.');
+
+    expect(onUpdateComment).not.toHaveBeenCalled();
+
+    const askButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Ask',
+    );
+    if (!askButton) {
+      throw new Error('Expected Ask button.');
+    }
+
+    await act(async () => {
+      askButton.click();
+    });
+
+    expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Please check this.');
+    expect(onAskCodex).toHaveBeenCalledWith('comment-1');
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('Enter on a focused review control is not converted into a hunk comment', async () => {
   const onCreateComment = vi.fn();
   const onOpenFile = vi.fn();
   const container = document.createElement('div');
@@ -587,42 +690,12 @@ test('Enter on a focused review control is not converted into a hunk comment', a
 
   const render = (request: number) =>
     root?.render(
-      <ReviewCodeView
-        activeSearchMatch={null}
-        agentId="codex"
-        agentLabel="Codex"
-        collapsed={new Set()}
-        comments={[]}
-        commitMetadata={null}
+      <ReviewCodeViewHarness
         diffStyle="unified"
         files={[createChangedFile('src/first.ts')]}
-        focusCommentId={null}
-        focusCommentRequest={0}
-        forceExpandedPaths={new Set()}
-        gitIdentity={null}
         hunkNavigation={{ direction: 1, request }}
-        isPullRequest={false}
-        itemVersionByPath={{}}
-        keymap={defaultKeymap}
-        loadingSectionIds={new Set()}
-        onAskCodex={() => {}}
         onCreateComment={onCreateComment}
-        onDeleteComment={() => {}}
-        onLoadSection={() => {}}
         onOpenFile={onOpenFile}
-        onSelectPathFromScroll={() => {}}
-        onSubmitComment={() => {}}
-        onToggleCollapsed={() => {}}
-        onToggleViewed={() => {}}
-        onUpdateComment={() => {}}
-        scrollTarget={null}
-        searchQuery=""
-        selectedPath={null}
-        showWhitespace={false}
-        source={source}
-        viewed={{}}
-        walkthroughNotes={new Map()}
-        wordWrap={false}
       />,
     );
 

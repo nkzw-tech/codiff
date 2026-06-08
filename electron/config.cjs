@@ -136,10 +136,6 @@ const normalizeCodeFontSize = (size) => {
 const normalizeLastRepositoryPath = (path) =>
   typeof path === 'string' && path.length > 0 ? path : '';
 
-/** @param {unknown} order */
-const normalizeWalkthroughOrder = (order) =>
-  typeof order === 'string' && order.length > 0 ? order : 'keys';
-
 /**
  * Accept a single combo string or a non-empty list of combo strings.
  * @param {unknown} binding
@@ -264,7 +260,6 @@ const mergeConfig = (raw) => {
           ? rawSettings.showWhitespace
           : defaults.settings.showWhitespace,
       theme: normalizeTheme(rawSettings.theme),
-      walkthroughOrder: normalizeWalkthroughOrder(rawSettings.walkthroughOrder),
       wordWrap:
         typeof rawSettings.wordWrap === 'boolean'
           ? rawSettings.wordWrap

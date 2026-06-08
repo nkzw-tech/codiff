@@ -27,7 +27,8 @@
   gap: 12px;
   min-height: 0;
   overflow: auto;
-  padding: 12px 8px 0;
+  padding: 12px 8px 16px;
+  scroll-padding-block-end: 16px;
 }
 .wt-toc-chapter {
   display: flex;
@@ -159,16 +160,22 @@
 .wt-toc-stop.visited .wt-toc-num {
   color: var(--muted);
 }
-.wt-toc-meta {
-  align-items: center;
-  display: flex;
-  gap: 6px;
+.wt-toc-file-list {
+  display: grid;
+  gap: 3px;
   margin-top: 4px;
+  min-width: 0;
+  width: 100%;
+}
+.wt-toc-file-row {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
   min-width: 0;
 }
 .wt-toc-file {
   color: var(--muted);
-  flex: 1;
   font: 11px/1 var(--font-mono);
   min-width: 0;
   overflow: hidden;
@@ -178,10 +185,9 @@
 .wt-toc-count {
   color: var(--muted);
   display: inline-flex;
-  flex: none;
   font: 700 10px/1 var(--font-mono);
   gap: 4px;
-  margin-left: auto;
+  justify-self: end;
 }
 .wt-toc-count .added {
   color: var(--diff-addition);
@@ -258,16 +264,6 @@
   gap: 12px;
   margin: 0 0 12px;
 }
-/* ---- The focused stop's diff (the real ReviewCodeView, scoped) ------------ */
-.wt-stop-diff {
-  border: 1px solid var(--file-border);
-  border-radius: 14px;
-  overflow: clip;
-}
-.wt-stop-diff .review {
-  height: auto;
-}
-
 /* ---- Variation C — hybrid arc timeline ------------------------------------ */
 .wt-hybrid {
   display: flex;
@@ -297,7 +293,7 @@
   height: 32px;
   justify-content: center;
   position: relative;
-  top: 11px;
+  top: 16px;
   transition:
     background 120ms ease,
     color 120ms ease;
@@ -354,7 +350,7 @@
 .wt-arc-join {
   align-self: flex-start;
   border-top: 2px solid var(--file-border);
-  margin-top: 33px;
+  margin-top: 44px;
   width: 26px;
 }
 .wt-arc-join.dashed {
@@ -367,21 +363,23 @@
   flex-direction: column;
   gap: 8px;
 }
-.wt-arc-chapter.rest {
+.wt-arc-chapter.support {
   align-items: center;
 }
 .wt-arc-chapter-label {
   align-items: center;
   color: var(--muted);
   display: flex;
+  flex-wrap: nowrap;
   font: 700 10px/1 var(--font-sans);
   gap: 4px;
   justify-content: center;
   letter-spacing: 0.03em;
-  max-width: 92px;
+  line-height: 1;
+  max-width: none;
   min-height: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-align: center;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -455,37 +453,30 @@
   overflow: auto;
 }
 
-/* The focused stop / full-context reader: the header and the real diff share a
-   single scroll, so the header scrolls away as you move down into the diff. The
-   stop is the scroll container; the CodeView renders at its natural height
-   instead of scrolling inside its own bounded box. */
 .wt-stop {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
-  /* Anchor offsetTop for the sequence blocks to this scroll container so the
-     scroll-driven focus maths stay relative to it. */
+  overflow: hidden;
   position: relative;
 }
-.wt-stop-header {
+.wt-diff-surface .code-view {
+  contain: layout paint;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+.wt-stop-block-header {
   flex: none;
   margin: 16px auto;
   max-width: 820px;
   padding: 0 24px;
   width: 100%;
 }
-.wt-stop-diff-host {
-  flex: none;
-  position: relative;
-}
-/* Let the diff grow to its content height so the outer .wt-stop does the
-   scrolling, rather than the CodeView scrolling within a fixed-height box. */
-.wt-stop .code-view {
-  contain: none;
-  height: auto;
-  overflow: visible;
+.wt-stop-block-header.current {
+  box-shadow: inset 3px 0 0 var(--tree-selection-focus);
 }
 
 /* The whole order as one continuous scroll: each stop is a block (narration +
@@ -496,26 +487,6 @@
 }
 .wt-stop-block:first-child {
   border-top: 0;
-}
-.wt-stop-placeholder {
-  border-top: 1px solid var(--file-border);
-  contain: layout paint;
-  flex: none;
-  pointer-events: none;
-}
-.wt-stop-placeholder:first-child {
-  border-top: 0;
-}
-.wt-stop-block.current > .wt-stop-header {
-  box-shadow: inset 3px 0 0 var(--tree-selection-focus);
-}
-/* Leave room below the last diff so the final stop can scroll up to the top and
-   become the focused stop, rather than being stuck at the bottom of the page. */
-.wt-sequence::after {
-  content: '';
-  display: block;
-  flex: none;
-  height: 55vh;
 }
 
 .wt-upnext {
@@ -586,11 +557,6 @@
 }
 .wt-upnext-action > .wt-upnext-back-icon {
   margin-left: 0;
-}
-
-/* ---- "The rest" — overview (bundle landing) ------------------------------- */
-.wt-support-diffs {
-  flex: none;
 }
 
 /* ---- Arc bundle node ("supporting files") --------------------------------- */

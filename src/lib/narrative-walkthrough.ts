@@ -1,102 +1,233 @@
+import {
+  extractPatchHunks,
+  filterPatchToHunkIds,
+} from '../../shared/narrative-walkthrough-diff.cjs';
 import type {
   ChangedFile,
   DiffSection,
   NarrativeWalkthrough,
   WalkthroughChangeType,
+  WalkthroughChapter,
+  WalkthroughHunk,
+  WalkthroughHunkGroup,
   WalkthroughIcon,
-  WalkthroughOrder,
-  WalkthroughOrderStop,
-  WalkthroughPhase,
-  WalkthroughRestItem,
-  WalkthroughSegment,
+  WalkthroughSupportGroup,
+  WalkthroughStop,
 } from '../types.ts';
-import { getFirstVisibleSection } from './diff.ts';
+import { getDiffLineCount, getVisibleDiffSections } from './diff.ts';
 
 export type NarrativeLineCount = {
   added: number;
   deleted: number;
 };
 
-/** A stop resolved to its segment and given a global position in the order. */
-export type WalkthroughStopView = WalkthroughOrderStop & {
+/** A stop with a global position in the walkthrough. */
+export type WalkthroughStopView = WalkthroughStop & {
+  chapterId: string;
   index: number;
-  relatedSegments: ReadonlyArray<WalkthroughSegment>;
-  segment: WalkthroughSegment;
-  segmentId: string;
 };
 
-/** A phase with the stops that belong to it, in order. */
-export type WalkthroughPhaseView = WalkthroughPhase & {
+/** A chapter with indexed stops. */
+export type WalkthroughChapterView = Omit<WalkthroughChapter, 'stops'> & {
   stops: ReadonlyArray<WalkthroughStopView>;
 };
 
-/** A "rest" item resolved to its segment. */
-export type WalkthroughRestView = WalkthroughRestItem & {
-  segment: WalkthroughSegment;
-};
-
-/** The "rest" grouped by reason, preserving first-seen order. */
-export type WalkthroughRestReason = {
-  files: ReadonlyArray<WalkthroughRestView>;
+/** Support grouped by reason, preserving first-seen order. */
+export type WalkthroughSupportReason = {
+  files: ReadonlyArray<WalkthroughSupportGroup>;
   reason: string;
 };
 
-/** Everything a narrative order needs to render, derived from the document. */
-export type WalkthroughOrderView = {
-  order: WalkthroughOrder;
-  phases: ReadonlyArray<WalkthroughPhaseView>;
-  rest: ReadonlyArray<WalkthroughRestView>;
-  restByReason: ReadonlyArray<WalkthroughRestReason>;
-  restTotals: NarrativeLineCount;
+/** Everything a narrative walkthrough needs to render. */
+export type WalkthroughView = {
+  chapters: ReadonlyArray<WalkthroughChapterView>;
   sequence: ReadonlyArray<WalkthroughStopView>;
-  totals: NarrativeLineCount;
+  support: ReadonlyArray<WalkthroughSupportGroup>;
+  supportByReason: ReadonlyArray<WalkthroughSupportReason>;
 };
 
-export const getStopSegments = (stop: WalkthroughStopView): ReadonlyArray<WalkthroughSegment> => [
-  stop.segment,
-  ...stop.relatedSegments,
-];
+export type WalkthroughFileList = {
+  label: string;
+  title: string;
+};
 
-const sumSegments = (segments: ReadonlyArray<WalkthroughSegment>): NarrativeLineCount =>
-  segments.reduce(
-    (totals, segment) => ({
-      added: totals.added + segment.added,
-      deleted: totals.deleted + segment.deleted,
-    }),
-    { added: 0, deleted: 0 },
+export type WalkthroughFileLineRow = {
+  added: number;
+  deleted: number;
+  label: string;
+  path?: string;
+  title: string;
+};
+
+export const walkthroughFileName = (path: string): string => path.split('/').pop() ?? path;
+
+const uniquePaths = (paths: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const seen = new Set<string>();
+  const unique: Array<string> = [];
+  for (const path of paths) {
+    if (!seen.has(path)) {
+      seen.add(path);
+      unique.push(path);
+    }
+  }
+  return unique;
+};
+
+export const walkthroughItemPaths = (item: WalkthroughHunkGroup): ReadonlyArray<string> =>
+  uniquePaths(item.hunks.map((hunk) => hunk.path));
+
+export const walkthroughItemTitleFallback = (item: WalkthroughHunkGroup): string =>
+  item.title ?? walkthroughFileName(item.hunks[0]?.path ?? item.id);
+
+export const formatWalkthroughFileList = (
+  paths: ReadonlyArray<string>,
+  maxVisibleFiles = 5,
+): WalkthroughFileList => {
+  const unique = uniquePaths(paths);
+  const count = unique.length;
+  return {
+    label:
+      count === 0
+        ? '0 files'
+        : count > maxVisibleFiles
+          ? `${count} files`
+          : unique.map(walkthroughFileName).join(', '),
+    title: unique.join('\n'),
+  };
+};
+
+export const formatWalkthroughFileLineRows = (
+  items: ReadonlyArray<{ added: number; deleted: number; path: string }>,
+  maxVisibleFiles = 5,
+): ReadonlyArray<WalkthroughFileLineRow> => {
+  const order: Array<string> = [];
+  const totalsByPath = new Map<string, NarrativeLineCount>();
+  for (const item of items) {
+    if (!totalsByPath.has(item.path)) {
+      order.push(item.path);
+      totalsByPath.set(item.path, { added: 0, deleted: 0 });
+    }
+    const current = totalsByPath.get(item.path)!;
+    totalsByPath.set(item.path, {
+      added: current.added + item.added,
+      deleted: current.deleted + item.deleted,
+    });
+  }
+
+  if (order.length === 0) {
+    return [{ added: 0, deleted: 0, label: '0 files', title: '' }];
+  }
+
+  if (order.length > maxVisibleFiles) {
+    const totals = [...totalsByPath.values()].reduce(
+      (sum, item) => ({ added: sum.added + item.added, deleted: sum.deleted + item.deleted }),
+      { added: 0, deleted: 0 },
+    );
+    return [
+      {
+        ...totals,
+        label: `${order.length} files`,
+        title: order.join('\n'),
+      },
+    ];
+  }
+
+  return order.map((path) => ({
+    ...totalsByPath.get(path)!,
+    label: walkthroughFileName(path),
+    path,
+    title: path,
+  }));
+};
+
+const walkthroughCoveredHunkIds = (view: WalkthroughView): ReadonlySet<string> =>
+  new Set([...view.sequence, ...view.support].flatMap((item) => item.hunkIds));
+
+const walkthroughCoveredSectionIds = (view: WalkthroughView): ReadonlySet<string> =>
+  new Set(
+    [...view.sequence, ...view.support].flatMap((item) =>
+      item.hunks
+        .map((hunk) => hunk.anchor.sectionId)
+        .filter((sectionId): sectionId is string => typeof sectionId === 'string'),
+    ),
   );
 
-const sumLineCount = (items: ReadonlyArray<{ segment: WalkthroughSegment }>): NarrativeLineCount =>
-  items.reduce(
-    (totals, { segment }) => ({
-      added: totals.added + segment.added,
-      deleted: totals.deleted + segment.deleted,
-    }),
-    { added: 0, deleted: 0 },
-  );
+const getSectionHunkIds = (section: DiffSection): ReadonlyArray<string> =>
+  extractPatchHunks(section.patch).map((_, index) => `${section.id}:h${index + 1}`);
 
-const sumStopLineCount = (stops: ReadonlyArray<WalkthroughStopView>): NarrativeLineCount =>
-  sumSegments(stops.flatMap((stop) => getStopSegments(stop)));
+const getUncoveredWalkthroughSection = (
+  section: DiffSection,
+  coveredHunkIds: ReadonlySet<string>,
+  coveredSectionIds: ReadonlySet<string>,
+): DiffSection | null => {
+  const hunkIds = getSectionHunkIds(section);
+  if (hunkIds.length === 0) {
+    return coveredSectionIds.has(section.id) ? null : section;
+  }
 
-export const getStopLineCount = (stop: WalkthroughStopView): NarrativeLineCount =>
-  sumSegments(getStopSegments(stop));
+  const uncoveredHunkIds = hunkIds.filter((hunkId) => !coveredHunkIds.has(hunkId));
+  if (uncoveredHunkIds.length === 0) {
+    return null;
+  }
+
+  if (uncoveredHunkIds.length === hunkIds.length) {
+    return section;
+  }
+
+  const patch = filterPatchToHunkIds(section.patch, section.id, uncoveredHunkIds);
+  return patch ? { ...section, patch } : null;
+};
+
+export const getUncoveredWalkthroughFiles = (
+  files: ReadonlyArray<ChangedFile>,
+  view: WalkthroughView,
+  showWhitespace: boolean,
+): ReadonlyArray<ChangedFile> => {
+  const coveredHunkIds = walkthroughCoveredHunkIds(view);
+  const coveredSectionIds = walkthroughCoveredSectionIds(view);
+  return files.flatMap((file) => {
+    const sections = getVisibleDiffSections(file, showWhitespace)
+      .map(({ section }) => section)
+      .map((section) => getUncoveredWalkthroughSection(section, coveredHunkIds, coveredSectionIds))
+      .filter((section): section is DiffSection => section != null);
+    if (sections.length === 0) {
+      return [];
+    }
+    return [
+      {
+        ...file,
+        fingerprint: `${file.fingerprint}:walkthrough-uncovered:${sections
+          .map((section) => section.id)
+          .join(',')}`,
+        sections,
+      },
+    ];
+  });
+};
+
+export const getUncoveredWalkthroughFileLineItems = (
+  files: ReadonlyArray<ChangedFile>,
+  view: WalkthroughView,
+  showWhitespace: boolean,
+): ReadonlyArray<{ added: number; deleted: number; path: string }> =>
+  getUncoveredWalkthroughFiles(files, view, showWhitespace).map((file) => {
+    const lineCount = getDiffLineCount(file, showWhitespace);
+    return {
+      added: lineCount.countable ? lineCount.additions : 0,
+      deleted: lineCount.countable ? lineCount.deletions : 0,
+      path: file.path,
+    };
+  });
 
 export const isWalkthroughCommittable = (walkthrough: NarrativeWalkthrough): boolean =>
   walkthrough.source.type === 'working-tree';
 
-export const collectWalkthroughSegments = (
-  walkthrough: NarrativeWalkthrough,
-): ReadonlyArray<WalkthroughSegment> => [
-  ...walkthrough.chapters.flatMap((chapter) => chapter.stops.flatMap((stop) => stop.anchors)),
-  ...walkthrough.support.flatMap((group) => group.files),
-];
-
-const groupRestByReason = (
-  rest: ReadonlyArray<WalkthroughRestView>,
-): ReadonlyArray<WalkthroughRestReason> => {
-  const groups: Array<{ files: Array<WalkthroughRestView>; reason: string }> = [];
-  const byReason = new Map<string, { files: Array<WalkthroughRestView>; reason: string }>();
-  for (const item of rest) {
+const groupSupportByReason = (
+  support: ReadonlyArray<WalkthroughSupportGroup>,
+): ReadonlyArray<WalkthroughSupportReason> => {
+  const groups: Array<{ files: Array<WalkthroughSupportGroup>; reason: string }> = [];
+  const byReason = new Map<string, { files: Array<WalkthroughSupportGroup>; reason: string }>();
+  for (const item of support) {
     let group = byReason.get(item.reason);
     if (!group) {
       group = { files: [], reason: item.reason };
@@ -108,163 +239,59 @@ const groupRestByReason = (
   return groups;
 };
 
-/** Build the UI adapter order from the direct v3 document shape. */
-export const resolveOrder = (
-  walkthrough: NarrativeWalkthrough,
-  _orderId?: string | null,
-): WalkthroughOrder | null => {
-  const phases: Array<WalkthroughPhase> = [];
-  const sequence: Array<WalkthroughOrderStop> = [];
-  const rest: Array<WalkthroughRestItem> = [];
-
-  for (const [chapterIndex, chapter] of walkthrough.chapters.entries()) {
-    phases.push({
-      blurb: chapter.blurb,
-      icon: chapter.icon,
-      id: chapter.id,
-      n: chapterIndex + 1,
-      title: chapter.title,
-    });
-    for (const stop of chapter.stops) {
-      const segmentIds = stop.anchors.map((segment) => segment.id);
-      if (segmentIds.length === 0) {
-        continue;
-      }
-      sequence.push({
-        body: stop.body,
-        id: stop.id,
-        importance: stop.importance,
-        phaseId: chapter.id,
-        segmentIds,
-        summary: stop.summary,
-        title: stop.title,
-      });
-    }
-  }
-
-  for (const group of walkthrough.support) {
-    for (const file of group.files) {
-      rest.push({
-        note: group.note ?? file.summary,
-        reason: group.title,
-        segmentId: file.id,
-      });
-    }
-  }
-
-  if (sequence.length === 0 && rest.length === 0) {
+/** Build the walkthrough view-model with globally indexed stops. */
+export const buildWalkthroughView = (walkthrough: NarrativeWalkthrough): WalkthroughView | null => {
+  if (walkthrough.chapters.length === 0) {
     return null;
   }
-
-  return {
-    id: 'walkthrough',
-    label: 'Walkthrough',
-    phases,
-    rest,
-    restBlurb: 'Changed alongside the main review path.',
-    restLabel: 'Support',
-    sequence,
-    tagline: '',
-  };
-};
-
-/**
- * Build the full view-model for one reading order: stops resolved to their
- * segments and indexed, phases populated with their stops, and "the rest"
- * resolved and grouped by reason. Stops/rest whose segment can't be found are
- * dropped (the normalizer should prevent this, but the UI stays defensive).
- */
-export const buildOrderView = (
-  walkthrough: NarrativeWalkthrough,
-  orderId?: string | null,
-): WalkthroughOrderView | null => {
-  const order = resolveOrder(walkthrough, orderId);
-  if (!order) {
-    return null;
-  }
-
-  const segmentsById = new Map(
-    collectWalkthroughSegments(walkthrough).map((segment) => [segment.id, segment]),
-  );
 
   const sequence: Array<WalkthroughStopView> = [];
-  for (const stop of order.sequence) {
-    const [segmentId, ...relatedSegmentIds] = stop.segmentIds;
-    const segment = segmentsById.get(segmentId);
-    if (segment) {
-      const relatedSegments: Array<WalkthroughSegment> = [];
-      for (const relatedSegmentId of relatedSegmentIds) {
-        const relatedSegment = segmentsById.get(relatedSegmentId);
-        if (relatedSegment) {
-          relatedSegments.push(relatedSegment);
-        }
-      }
-      sequence.push({
-        ...stop,
-        index: sequence.length,
-        relatedSegments,
-        segment,
-        segmentId,
-      });
-    }
-  }
+  const chapters = walkthrough.chapters.map((chapter) => {
+    const stops = chapter.stops.map((stop) => {
+      const view = { ...stop, chapterId: chapter.id, index: sequence.length };
+      sequence.push(view);
+      return view;
+    });
+    return { ...chapter, stops };
+  });
 
-  const phases: Array<WalkthroughPhaseView> = order.phases
-    .map((phase, phaseIndex) => ({
-      ...phase,
-      phaseIndex,
-      stops: sequence.filter((stop) => stop.phaseId === phase.id),
-    }))
-    .sort((a, b) => {
-      const aIndex = a.stops[0]?.index ?? Number.MAX_SAFE_INTEGER;
-      const bIndex = b.stops[0]?.index ?? Number.MAX_SAFE_INTEGER;
-      return aIndex === bIndex ? a.phaseIndex - b.phaseIndex : aIndex - bIndex;
-    })
-    .map(({ phaseIndex, ...phase }) => phase);
-
-  const rest: Array<WalkthroughRestView> = [];
-  for (const item of order.rest) {
-    const segment = segmentsById.get(item.segmentId);
-    if (segment) {
-      rest.push({ ...item, segment });
-    }
+  if (sequence.length === 0) {
+    return null;
   }
 
   return {
-    order,
-    phases,
-    rest,
-    restByReason: groupRestByReason(rest),
-    restTotals: sumLineCount(rest),
+    chapters,
     sequence,
-    totals: sumStopLineCount(sequence),
+    support: walkthrough.support,
+    supportByReason: groupSupportByReason(walkthrough.support),
   };
 };
 
-/** The changed file + diff section a segment anchors into, if present in the diff. */
-export type ResolvedSegmentFile = {
+/** The changed file + diff section a resolved hunk anchors into, if present in the diff. */
+export type ResolvedWalkthroughHunkFile = {
   file: ChangedFile;
   section: DiffSection;
 };
 
-/**
- * Resolve a segment to its live `ChangedFile` and `DiffSection`. Prefers the
- * anchor's `sectionId`, then falls back to the file's first visible section.
- */
-export const resolveSegmentFile = (
-  segment: WalkthroughSegment,
+export type WalkthroughHunkRun = {
+  hunks: ReadonlyArray<WalkthroughHunk>;
+  key: string;
+  resolved: ResolvedWalkthroughHunkFile;
+};
+
+/** Resolve one normalized hunk to its exact live `ChangedFile` and `DiffSection`. */
+export const resolveWalkthroughHunkFile = (
+  hunk: WalkthroughHunk,
   files: ReadonlyArray<ChangedFile>,
-  showWhitespace: boolean,
-): ResolvedSegmentFile | null => {
-  const file = files.find((candidate) => candidate.path === segment.path);
+): ResolvedWalkthroughHunkFile | null => {
+  const file = files.find((candidate) => candidate.path === hunk.path);
   if (!file) {
     return null;
   }
 
-  const section =
-    (segment.anchor.sectionId
-      ? file.sections.find((candidate) => candidate.id === segment.anchor.sectionId)
-      : undefined) ?? getFirstVisibleSection(file, showWhitespace);
+  const section = hunk.anchor.sectionId
+    ? file.sections.find((candidate) => candidate.id === hunk.anchor.sectionId)
+    : undefined;
   if (!section) {
     return null;
   }
@@ -272,15 +299,139 @@ export const resolveSegmentFile = (
   return { file, section };
 };
 
+const walkthroughHunkRunKey = (item: WalkthroughHunkGroup, hunks: ReadonlyArray<WalkthroughHunk>) =>
+  `${item.id}:${hunks.map((hunk) => hunk.id).join(',')}`;
+
+/** Resolve item hunks in authored order, coalescing adjacent hunks from the same file section. */
+export const resolveWalkthroughHunkRuns = (
+  item: WalkthroughHunkGroup,
+  files: ReadonlyArray<ChangedFile>,
+): ReadonlyArray<WalkthroughHunkRun> => {
+  const runs: Array<WalkthroughHunkRun> = [];
+  for (const hunk of item.hunks) {
+    const resolved = resolveWalkthroughHunkFile(hunk, files);
+    if (!resolved) {
+      continue;
+    }
+    const previous = runs.at(-1);
+    if (
+      previous &&
+      previous.resolved.file.path === resolved.file.path &&
+      previous.resolved.section.id === resolved.section.id
+    ) {
+      const hunks = [...previous.hunks, hunk];
+      runs[runs.length - 1] = {
+        ...previous,
+        hunks,
+        key: walkthroughHunkRunKey(item, hunks),
+      };
+    } else {
+      runs.push({
+        hunks: [hunk],
+        key: walkthroughHunkRunKey(item, [hunk]),
+        resolved,
+      });
+    }
+  }
+  return runs;
+};
+
+export const getWalkthroughRunNote = (
+  item: WalkthroughHunkGroup,
+  run: WalkthroughHunkRun,
+): string | undefined => {
+  const hunkIds = new Set(run.hunks.map((hunk) => hunk.id));
+  const notes = (item.notes ?? [])
+    .filter((note) => hunkIds.has(note.hunkId))
+    .map((note) => note.body);
+  return notes.length > 0 ? notes.join(' • ') : undefined;
+};
+
+const focusSignature = (
+  section: DiffSection,
+  hunkIds: ReadonlyArray<string>,
+  contentIdentity: string,
+) => `walkthrough:${section.id}:${hunkIds.join(',')}:${contentIdentity.length}`;
+
+/**
+ * Return the changed-file view a walkthrough stop should render for one live diff
+ * section. The patch contains exactly the provided hunk ids, in that order.
+ */
+export const focusChangedFileForHunks = (
+  file: ChangedFile,
+  section: DiffSection,
+  hunks: ReadonlyArray<WalkthroughHunk>,
+): ChangedFile | null => {
+  const sectionHunks = hunks.filter(
+    (hunk) => hunk.path === file.path && hunk.anchor.sectionId === section.id,
+  );
+  if (sectionHunks.length === 0) {
+    return null;
+  }
+
+  const hunkIds = sectionHunks.map((hunk) => hunk.id);
+  if (section.binary || (section.loadState != null && section.loadState !== 'ready')) {
+    const signature = focusSignature(
+      section,
+      hunkIds,
+      `${section.loadState ?? 'binary'}:${section.summary?.fingerprint ?? ''}:${
+        section.summary?.reason ?? ''
+      }:${section.patch.length}`,
+    );
+    return {
+      ...file,
+      fingerprint: `${file.fingerprint}:${signature}`,
+      sections: [
+        {
+          ...section,
+          summary: section.summary
+            ? {
+                ...section.summary,
+                fingerprint: section.summary.fingerprint ?? signature,
+              }
+            : undefined,
+        },
+      ],
+    };
+  }
+
+  if (section.patch.trim().length === 0) {
+    return null;
+  }
+
+  const focusedPatch = filterPatchToHunkIds(section.patch, section.id, hunkIds);
+  if (!focusedPatch) {
+    return null;
+  }
+
+  const signature = focusSignature(section, hunkIds, focusedPatch);
+
+  return {
+    ...file,
+    fingerprint: `${file.fingerprint}:${signature}`,
+    sections: [
+      {
+        ...section,
+        newFile: undefined,
+        oldFile: undefined,
+        patch: focusedPatch,
+        summary: {
+          ...section.summary,
+          fingerprint: signature,
+          reason: section.summary?.reason ?? 'Focused walkthrough hunk.',
+        },
+      },
+    ],
+  };
+};
+
 /* ------------------------------------------------------------------------- *
- * Commit composer model
+ * Commit composer model.
  *
- * The walkthrough's stops + "the rest" ARE the staged changeset. When the
- * document is committable, these helpers collapse that into one list of unique
- * changed files that reuses the narrative context two ways: files keep their
- * walkthrough section (the order's phases, plus "the rest" as a final group),
- * and each carries an optional change-type tag. The body generator reads the
- * current file selection and rewrites the machine-drafted commit body live.
+ * The walkthrough's stops + support items are the staged changeset. When the
+ * document is committable, these helpers collapse them into one list of unique
+ * changed files, grouped by the authored chapters plus a final support group.
+ * Each file can carry an optional change-type tag and commit note.
  * ------------------------------------------------------------------------- */
 
 /** One unique changed file in the commit composer, with summed line counts. */
@@ -288,19 +439,19 @@ export type CommitFile = {
   added: number;
   changeType?: WalkthroughChangeType;
   deleted: number;
+  itemId: string;
   name: string;
   /** The note the generated body uses for this file. */
   note?: string;
   path: string;
-  segmentId: string;
 };
 
-/** A group of files in the composer — one per phase, plus a final "rest" group. */
+/** A group of files in the composer — one per chapter, plus a final support group. */
 export type CommitGroup = {
   files: ReadonlyArray<CommitFile>;
   icon: WalkthroughIcon;
   id: string;
-  isRest: boolean;
+  isSupport: boolean;
   title: string;
 };
 
@@ -359,9 +510,9 @@ export const buildGenericCommitModel = (changedFiles: ReadonlyArray<ChangedFile>
     return {
       added: totals.added,
       deleted: totals.deleted,
+      itemId: `__file:${changedFile.path}`,
       name: fileBaseName(changedFile.path),
       path: changedFile.path,
-      segmentId: `__file:${changedFile.path}`,
     };
   });
 
@@ -374,7 +525,7 @@ export const buildGenericCommitModel = (changedFiles: ReadonlyArray<ChangedFile>
               files,
               icon: 'path',
               id: '__changed',
-              isRest: false,
+              isSupport: false,
               title: 'Changed files',
             },
           ]
@@ -383,92 +534,91 @@ export const buildGenericCommitModel = (changedFiles: ReadonlyArray<ChangedFile>
 };
 
 /**
- * Collapse one order's view into the unique changed files, grouped by phase with
- * "the rest" as a final group. Line counts are summed across every segment that
- * shares a path, and a path is placed in the first group that mentions it.
+ * Collapse the walkthrough view into unique changed files. Line counts are
+ * summed across every item that shares a path, and a path is placed in the first
+ * group that mentions it.
  */
 export const buildCommitModel = (
-  orderView: WalkthroughOrderView,
+  view: WalkthroughView,
   changedFiles: ReadonlyArray<ChangedFile> = [],
 ): CommitModel => {
   const totalsByPath = new Map<string, NarrativeLineCount>();
-  const addTotals = (segment: WalkthroughSegment) => {
-    const current = totalsByPath.get(segment.path) ?? { added: 0, deleted: 0 };
-    totalsByPath.set(segment.path, {
-      added: current.added + segment.added,
-      deleted: current.deleted + segment.deleted,
-    });
-  };
-  for (const stop of orderView.sequence) {
-    for (const segment of getStopSegments(stop)) {
-      addTotals(segment);
+  const addTotals = (item: WalkthroughHunkGroup) => {
+    for (const hunk of item.hunks) {
+      const current = totalsByPath.get(hunk.path) ?? { added: 0, deleted: 0 };
+      totalsByPath.set(hunk.path, {
+        added: current.added + hunk.added,
+        deleted: current.deleted + hunk.deleted,
+      });
     }
+  };
+  for (const stop of view.sequence) {
+    addTotals(stop);
   }
-  for (const item of orderView.rest) {
-    addTotals(item.segment);
+  for (const item of view.support) {
+    addTotals(item);
   }
 
   const seen = new Set<string>();
-  const toFile = (segment: WalkthroughSegment): CommitFile => {
-    const totals = totalsByPath.get(segment.path) ?? {
-      added: segment.added,
-      deleted: segment.deleted,
-    };
+  const toFile = (item: WalkthroughHunkGroup, path: string): CommitFile => {
+    const totals = totalsByPath.get(path) ?? { added: 0, deleted: 0 };
     return {
       added: totals.added,
-      changeType: segment.changeType,
+      changeType: item.changeType,
       deleted: totals.deleted,
-      name: fileBaseName(segment.path),
-      note: segment.commitNote ?? segment.summary,
-      path: segment.path,
-      segmentId: segment.id,
+      itemId: item.id,
+      name: walkthroughFileName(path),
+      note: item.commitNote ?? item.summary,
+      path,
     };
   };
 
   const files: Array<CommitFile> = [];
   const groups: Array<CommitGroup> = [];
 
-  for (const phase of orderView.phases) {
-    const phaseFiles: Array<CommitFile> = [];
-    for (const stop of phase.stops) {
-      for (const segment of getStopSegments(stop)) {
-        if (seen.has(segment.path)) {
+  for (const chapter of view.chapters) {
+    const chapterFiles: Array<CommitFile> = [];
+    for (const stop of chapter.stops) {
+      for (const path of walkthroughItemPaths(stop)) {
+        if (seen.has(path)) {
           continue;
         }
-        seen.add(segment.path);
-        const file = toFile(segment);
-        phaseFiles.push(file);
+        seen.add(path);
+        const file = toFile(stop, path);
+        chapterFiles.push(file);
         files.push(file);
       }
     }
-    if (phaseFiles.length > 0) {
+    if (chapterFiles.length > 0) {
       groups.push({
-        files: phaseFiles,
-        icon: phase.icon,
-        id: phase.id,
-        isRest: false,
-        title: phase.title,
+        files: chapterFiles,
+        icon: chapter.icon,
+        id: chapter.id,
+        isSupport: false,
+        title: chapter.title,
       });
     }
   }
 
-  const restFiles: Array<CommitFile> = [];
-  for (const item of orderView.rest) {
-    if (seen.has(item.segment.path)) {
-      continue;
+  const supportFiles: Array<CommitFile> = [];
+  for (const item of view.support) {
+    for (const path of walkthroughItemPaths(item)) {
+      if (seen.has(path)) {
+        continue;
+      }
+      seen.add(path);
+      const file = toFile(item, path);
+      supportFiles.push(file);
+      files.push(file);
     }
-    seen.add(item.segment.path);
-    const file = toFile(item.segment);
-    restFiles.push(file);
-    files.push(file);
   }
-  if (restFiles.length > 0) {
+  if (supportFiles.length > 0) {
     groups.push({
-      files: restFiles,
+      files: supportFiles,
       icon: 'path',
-      id: '__rest',
-      isRest: true,
-      title: orderView.order.restLabel,
+      id: '__support',
+      isSupport: true,
+      title: 'Support',
     });
   }
 
@@ -482,10 +632,10 @@ export const buildCommitModel = (
     const file = {
       added: totals.added,
       deleted: totals.deleted,
+      itemId: `__file:${changedFile.path}`,
       name: fileBaseName(changedFile.path),
       note: 'Not included in the generated walkthrough.',
       path: changedFile.path,
-      segmentId: `__file:${changedFile.path}`,
     };
     missingFiles.push(file);
     files.push(file);
@@ -495,7 +645,7 @@ export const buildCommitModel = (
       files: missingFiles,
       icon: 'path',
       id: '__missing',
-      isRest: true,
+      isSupport: true,
       title: 'Other changes',
     });
   }
@@ -503,13 +653,15 @@ export const buildCommitModel = (
   return { files, groups };
 };
 
-export const granularityLabel: Record<WalkthroughSegment['granularity'], string> = {
-  file: 'whole file',
-  hunk: 'hunk',
-  line: 'line',
-};
+export const getCommitSelectionPaths = (
+  view: WalkthroughView | null,
+  changedFiles: ReadonlyArray<ChangedFile>,
+): ReadonlyArray<string> =>
+  (view ? buildCommitModel(view, changedFiles) : buildGenericCommitModel(changedFiles)).files.map(
+    (file) => file.path,
+  );
 
-export const importanceLabel: Record<WalkthroughOrderStop['importance'], string> = {
+export const importanceLabel: Record<WalkthroughStop['importance'], string> = {
   context: 'Context',
   critical: 'Critical',
   normal: 'Review',

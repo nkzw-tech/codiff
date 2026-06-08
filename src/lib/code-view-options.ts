@@ -145,6 +145,8 @@ export const maxWorkerThreads = 3;
 
 export const codeViewUnsafeCSS = `
   :host {
+    border-radius: var(--codiff-diff-radius, 28px);
+    corner-shape: squircle;
     --diffs-font-family: var(--font-diff-mono, var(--font-mono));
     --diffs-header-font-family: var(--font-sans);
     --diffs-font-size: var(--font-diff-size, 13px);
@@ -169,7 +171,34 @@ export const codeViewUnsafeCSS = `
 
   [data-diffs-header="custom"][data-sticky] {
     background-color: transparent;
-    border-radius: 28px 28px 0 0;
+    border-radius: 0;
+  }
+
+  :host(.codiff-walkthrough-header-item) {
+    background: var(--app-bg);
+    border-radius: 0;
+    box-shadow: none;
+    corner-shape: initial;
+    overflow: visible;
+  }
+
+  :host(.codiff-walkthrough-header-item) [data-file],
+  :host(.codiff-walkthrough-header-item) pre,
+  :host(.codiff-walkthrough-header-item) code,
+  :host(.codiff-walkthrough-header-item) [data-code],
+  :host(.codiff-walkthrough-header-item) [data-line-annotation] {
+    background: var(--app-bg);
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  :host(.codiff-walkthrough-header-item) [data-column-number],
+  :host(.codiff-walkthrough-header-item) [data-line-number],
+  :host(.codiff-walkthrough-header-item) [data-gutter],
+  :host(.codiff-walkthrough-header-item) [data-gutter-buffer],
+  :host(.codiff-walkthrough-header-item) [data-content] > [data-line] {
+    display: none;
   }
 
   /* Commit details render through CodeView's file layout; hide the file UI around the panel. */

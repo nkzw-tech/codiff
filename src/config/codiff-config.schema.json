@@ -79,11 +79,6 @@
           "default": "system",
           "description": "Application color theme. 'system' follows OS preference."
         },
-        "walkthroughOrder": {
-          "type": "string",
-          "default": "keys",
-          "description": "Preferred narrative walkthrough order. 'keys' opens key changes first; 'results' opens results first when that order exists."
-        },
         "wordWrap": {
           "type": "boolean",
           "default": false,

@@ -21,8 +21,8 @@ type IconProps = {
   weight?: 'thin' | 'light' | 'regular' | 'bold' | 'fill' | 'duotone';
 };
 
-/** Phosphor components for the icon names a walkthrough phase may use. */
-export const phaseIcons: Record<WalkthroughIcon, ComponentType<IconProps>> = {
+/** Phosphor components for the icon names a walkthrough chapter may use. */
+export const chapterIcons: Record<WalkthroughIcon, ComponentType<IconProps>> = {
   beaker: Flask,
   bug: Bug,
   doc: Doc,

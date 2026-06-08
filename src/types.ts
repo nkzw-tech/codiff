@@ -197,37 +197,30 @@ export type TerminalHelperStatus = {
 };
 
 /**
- * Narrative Walkthrough. The authored shape is deliberately direct: chapters
- * contain stops, and stops point at one or more slices of the live diff. The
- * diff content itself is never embedded: an anchor target points into the live
- * diff Codiff computes from the repository.
+ * Narrative Walkthrough. The agent authors chapters, stops, and support groups
+ * around deterministic hunk ids. Codiff resolves those ids against the live diff
+ * and computes file paths, anchors, and line counts.
  */
 export type WalkthroughIcon = 'bug' | 'wrench' | 'path' | 'flask' | 'beaker' | 'doc' | 'gear';
 
-/** Where a segment points into the live diff. Mirrors the comment-anchor fields. */
+/** Where a walkthrough hunk points into the live diff. */
 export type WalkthroughAnchor = {
   /** Human-readable location, e.g. 'src/App.tsx:311' or 'src/hooks/useHunkOrder.ts (new)'. */
   display: string;
-  /** End line on the {@link side} (inclusive). Omitted for 'file' granularity. */
+  /** End line on the {@link side} (inclusive). */
   endLine?: number;
   /** Matches {@link DiffSection.id}, e.g. 'src/App.tsx:staged'. */
   sectionId?: string;
   sectionKind?: DiffSection['kind'];
   side?: 'additions' | 'deletions' | 'both';
-  /** Start line on the {@link side}. Omitted for 'file' granularity. */
+  /** Start line on the {@link side}. */
   startLine?: number;
 };
 
-/** A review comment seeded by the walkthrough, anchored like a live comment. */
-export type WalkthroughSeedComment = {
-  author?: string;
-  /** May be '' to seed an empty composer at this anchor. */
+/** A short header note rendered above one focused walkthrough hunk diff. */
+export type WalkthroughHunkNote = {
   body: string;
-  id: string;
-  lineNumber: number;
-  side: 'additions' | 'deletions';
-  startLineNumber?: number;
-  startSide?: 'additions' | 'deletions';
+  hunkId: string;
 };
 
 /**
@@ -245,29 +238,55 @@ export type WalkthroughChangeType =
   | 'i18n'
   | 'docs';
 
-/** One addressable slice of the live diff with its line counts. */
-export type WalkthroughAnchorTarget = {
+/** One resolved hunk selected by a walkthrough item, in agent-requested order. */
+export type WalkthroughHunk = {
   added: number;
+  additionEnd?: number;
+  additionStart?: number;
   anchor: WalkthroughAnchor;
-  /** Change-type tag for the commit composer's file row. */
-  changeType?: WalkthroughChangeType;
-  comments?: ReadonlyArray<WalkthroughSeedComment>;
-  /** One-line note the generated commit body uses for this file (falls back to {@link summary}). */
-  commitNote?: string;
   deleted: number;
-  granularity: 'line' | 'hunk' | 'file';
-  /** Stable within the document, e.g. 's1'. */
+  deletionEnd?: number;
+  deletionStart?: number;
   id: string;
   oldPath?: string;
   path: string;
   status: GitFileStatus;
+};
+
+/** Shared hunk-backed fields for a stop or support group. */
+export type WalkthroughHunkGroup = {
+  added: number;
+  /** Change-type tag for the commit composer's file row. */
+  changeType?: WalkthroughChangeType;
+  /** One-line note the generated commit body uses for this file (falls back to {@link summary}). */
+  commitNote?: string;
+  deleted: number;
+  /** Deterministic hunk ids selected by the authoring agent, in display order. */
+  hunkIds: ReadonlyArray<string>;
+  /** Resolved hunks with Codiff-computed anchors, file paths, status, and line counts. */
+  hunks: ReadonlyArray<WalkthroughHunk>;
+  /** Stable within the document, e.g. 's1'. */
+  id: string;
+  /** Optional header notes for individual hunk ids in this item. */
+  notes?: ReadonlyArray<WalkthroughHunkNote>;
   /** Short, plain-text gist of the slice. */
   summary?: string;
-  /** Default framing; an order's stop may override it. */
   title?: string;
 };
 
-export type WalkthroughSegment = WalkthroughAnchorTarget;
+/** One stop in the main walkthrough path. */
+export type WalkthroughStop = WalkthroughHunkGroup & {
+  importance: 'critical' | 'normal' | 'context';
+  /** Agent narration (markdown / inline code). */
+  prose: string;
+};
+
+/** A changed hunk group kept off the main path. */
+export type WalkthroughSupportGroup = WalkthroughHunkGroup & {
+  note?: string;
+  /** Why it is off the path, e.g. 'Generated' | 'Lockfile' | 'Snapshot' | 'Mechanical'. */
+  reason: string;
+};
 
 /** A named chapter in the walkthrough. */
 export type WalkthroughChapter = {
@@ -276,66 +295,6 @@ export type WalkthroughChapter = {
   id: string;
   stops: ReadonlyArray<WalkthroughStop>;
   title: string;
-};
-
-/** One stop in the walkthrough: prose plus the live diff anchors it covers. */
-export type WalkthroughStop = {
-  anchors: ReadonlyArray<WalkthroughAnchorTarget>;
-  /** Short narration shown above the live diff. */
-  body: string;
-  id: string;
-  importance: 'critical' | 'normal' | 'context';
-  /** One-line scan label shown in the sidebar and above the diff. */
-  summary: string;
-  title: string;
-};
-
-/** A file changed alongside the work but kept off the narrative path. */
-export type WalkthroughSupportGroup = {
-  files: ReadonlyArray<WalkthroughAnchorTarget>;
-  id: string;
-  note?: string;
-  title: string;
-};
-
-/** Adapter type used by the current walkthrough UI. */
-export type WalkthroughPhase = {
-  blurb: string;
-  icon: WalkthroughIcon;
-  id: string;
-  /** 1-based position. */
-  n: number;
-  title: string;
-};
-
-/** Adapter type used by the current walkthrough UI. */
-export type WalkthroughOrderStop = {
-  body: string;
-  id: string;
-  importance: 'critical' | 'normal' | 'context';
-  phaseId: string;
-  segmentIds: ReadonlyArray<string>;
-  summary: string;
-  title: string;
-};
-
-/** Adapter type used by the current walkthrough UI. */
-export type WalkthroughRestItem = {
-  note?: string;
-  reason: string;
-  segmentId: string;
-};
-
-/** Adapter type used by the current walkthrough UI. */
-export type WalkthroughOrder = {
-  id: string;
-  label: string;
-  phases: ReadonlyArray<WalkthroughPhase>;
-  rest: ReadonlyArray<WalkthroughRestItem>;
-  restBlurb: string;
-  restLabel: string;
-  sequence: ReadonlyArray<WalkthroughOrderStop>;
-  tagline: string;
 };
 
 /**
@@ -379,7 +338,7 @@ export type NarrativeWalkthrough = {
   source: ReviewSource;
   support: ReadonlyArray<WalkthroughSupportGroup>;
   title: string;
-  version: 3;
+  version: 4;
 };
 
 export type NarrativeWalkthroughResult =
@@ -525,7 +484,6 @@ export type CodiffPreferences = {
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;
-  walkthroughOrder: string;
   wordWrap: boolean;
 };
 

@@ -19,10 +19,14 @@ import {
   ReviewSourceLoading,
   WalkthroughOutdatedBanner,
 } from './app/components/Panels.tsx';
-import { ReviewCodeView } from './app/components/ReviewCodeView.tsx';
+import { ReviewCodeView, type ReviewDiffBlock } from './app/components/ReviewCodeView.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
 import { CommitView } from './app/components/walkthrough/CommitView.tsx';
-import { NarrativeWalkthroughView } from './app/components/walkthrough/NarrativeWalkthroughView.tsx';
+import {
+  NarrativeWalkthroughView,
+  type WalkthroughBlockScrollTarget,
+  type WalkthroughReviewTarget,
+} from './app/components/walkthrough/NarrativeWalkthroughView.tsx';
 import { useNarrativeNavigation } from './app/components/walkthrough/useNarrativeNavigation.ts';
 import type { WalkthroughFileError } from './app/components/WalkthroughFileError.tsx';
 import { createDefaultConfig } from './config/defaults.ts';
@@ -40,6 +44,7 @@ import {
   type DiffSearchResult,
   type RepositoryLoadError,
   type ReviewComment,
+  type ReviewIdentity,
   type ReviewScrollBehavior,
   type ReviewScrollTarget,
   type SidebarMode,
@@ -68,12 +73,23 @@ import {
   writeReloadSelection,
 } from './lib/reload-selection.ts';
 import {
+  createReviewCommandTarget,
+  resolveReviewCommandTarget,
+  type ReviewCommandTarget,
+} from './lib/review-command-target.ts';
+import {
   buildReviewCommentsMarkdown,
   getCommentKey,
   getReviewCommentRangeProps,
   getReviewCommentsFromState,
   getVisibleReviewComments,
 } from './lib/review-comments.ts';
+import {
+  getFileReviewIdentity,
+  isReviewIdentityViewed,
+  updateReviewIdentityCollapsed,
+  updateReviewIdentityViewed,
+} from './lib/review-identity.ts';
 import {
   SIDEBAR_COLLAPSE_THRESHOLD,
   clampSidebarWidth,
@@ -115,6 +131,7 @@ import type {
 
 const emptyWalkthroughNotes = new Map<string, WalkthroughNote>();
 const emptyFiles: ReadonlyArray<ChangedFile> = [];
+const walkthroughCodeViewBottomInset = 96;
 type MainMode = 'review' | 'commit';
 const CODE_FONT_SIZE_DEFAULT = 13;
 const CODE_FONT_SIZE_MAX = 32;
@@ -149,15 +166,7 @@ const normalizeCodeFontSizePreference = (size: number) =>
 
 const getCodeFontLineHeight = (size: number) => Math.round((size * 20) / 13);
 
-const createInlineWalkthroughNote = (reason: string): WalkthroughNote => ({
-  action: 'review',
-  context: reason,
-  groupReason: 'Walkthrough',
-  groupTitle: 'Walkthrough',
-  impact: 'contained',
-  order: 0,
-  reason,
-});
+const ignoreWalkthroughPathScroll = () => {};
 
 const defaultPreferences = getPreferencesFromConfig(createDefaultConfig());
 
@@ -193,7 +202,7 @@ export default function App() {
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySource, setHistorySource] = useState<ReviewSource | null>(null);
-  const [itemVersionByPath, setItemVersionByPath] = useState<Record<string, number>>({});
+  const [itemVersionByKey, setItemVersionByKey] = useState<Record<string, number>>({});
   const [localChangesDetected, setLocalChangesDetected] = useState(false);
   const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>(defaultLaunchOptions);
   const [codiffConfig, setCodiffConfig] = useState<CodiffConfig>(createDefaultConfig);
@@ -237,11 +246,13 @@ export default function App() {
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const sourceSessionsRef = useRef<Map<string, SourceSession>>(new Map());
   const stateRef = useRef<RepositoryState | null>(null);
+  const activeReviewCommandTargetRef = useRef<ReviewCommandTarget | null>(null);
   const collapsedRef = useRef<Set<string>>(new Set());
   const preferencesRef = useRef<CodiffPreferences>(defaultPreferences);
   const reviewCommentsRef = useRef<ReadonlyArray<ReviewComment>>([]);
   const selectedPathRef = useRef<string | null>(null);
   const sidebarModeRef = useRef<SidebarMode>('tree');
+  const mainModeRef = useRef<MainMode>('review');
   const sourceRequestRef = useRef(0);
   const viewedRef = useRef<Record<string, string>>({});
   const narrativeWalkthroughRef = useRef<NarrativeWalkthrough | null>(null);
@@ -249,7 +260,6 @@ export default function App() {
   const narrativeNavigation = useNarrativeNavigation(
     narrativeWalkthrough,
     state?.files ?? emptyFiles,
-    preferences.walkthroughOrder,
     navigationResetKey,
   );
   const walkthroughErrorRef = useRef<WalkthroughError | null>(null);
@@ -269,10 +279,10 @@ export default function App() {
     }));
   }, []);
 
-  const bumpItemVersion = useCallback((path: string) => {
-    setItemVersionByPath((current) => ({
+  const bumpItemVersion = useCallback((key: string) => {
+    setItemVersionByKey((current) => ({
       ...current,
-      [path]: (current[path] ?? 0) + 1,
+      [key]: (current[key] ?? 0) + 1,
     }));
   }, []);
 
@@ -564,7 +574,7 @@ export default function App() {
             .map((file) => file.path),
         ),
       );
-      setItemVersionByPath({});
+      setItemVersionByKey({});
       setFocusCommentId(null);
       setFocusCommentRequest(0);
       setReloadDeltaPaths(nextReloadDeltaPaths);
@@ -866,6 +876,14 @@ export default function App() {
   }, [selectedPath]);
 
   useEffect(() => {
+    mainModeRef.current = mainMode;
+  }, [mainMode]);
+
+  useEffect(() => {
+    activeReviewCommandTargetRef.current = null;
+  }, [navigationResetKey]);
+
+  useEffect(() => {
     viewedRef.current = viewed;
   }, [viewed]);
 
@@ -968,15 +986,31 @@ export default function App() {
     void window.codiff.openFile(file.path).catch(() => {});
   }, []);
 
-  const openSelectedFile = useCallback(() => {
+  const getReviewCommandTarget = useCallback(() => {
     const currentState = stateRef.current;
-    const path = selectedPathRef.current;
-    const file = currentState?.files.find((candidate) => candidate.path === path);
-
-    if (file) {
-      openFile(file);
+    if (!currentState) {
+      return null;
     }
-  }, [openFile]);
+
+    return resolveReviewCommandTarget({
+      activeTarget: activeReviewCommandTargetRef.current,
+      files: currentState.files,
+      selectedPath: selectedPathRef.current,
+      source: currentState.source,
+      useActiveTarget:
+        mainModeRef.current === 'review' &&
+        sidebarModeRef.current === 'walkthrough' &&
+        narrativeWalkthroughRef.current != null,
+    });
+  }, []);
+
+  const openSelectedFile = useCallback(() => {
+    const target = getReviewCommandTarget();
+
+    if (target) {
+      openFile(target.file);
+    }
+  }, [getReviewCommandTarget, openFile]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1246,7 +1280,7 @@ export default function App() {
           setState(orderedState);
           setHistorySource(getHistorySource(orderedState.source) ?? historySource);
           setCollapsed(new Set(nextCollapsed));
-          setItemVersionByPath({});
+          setItemVersionByKey({});
           setReviewComments(session?.reviewComments ?? getReviewCommentsFromState(orderedState));
           setReloadDeltaPaths(new Set());
           setViewed(nextViewed);
@@ -1411,6 +1445,42 @@ export default function App() {
     setMainMode('review');
   }, []);
 
+  const toggleViewed = useCallback(
+    (
+      file: ChangedFile,
+      isViewed: boolean,
+      reviewIdentity: ReviewIdentity = getFileReviewIdentity(file),
+    ) => {
+      const currentState = stateRef.current;
+      if (!currentState) {
+        return;
+      }
+
+      setViewed((current) => {
+        const next = updateReviewIdentityViewed(current, reviewIdentity, isViewed);
+        if (currentState.source.type === 'working-tree') {
+          writeViewed(currentState.root, next);
+        }
+        return next;
+      });
+
+      setCollapsed((current) => updateReviewIdentityCollapsed(current, reviewIdentity, isViewed));
+      bumpItemVersion(reviewIdentity.key);
+    },
+    [bumpItemVersion],
+  );
+
+  const updateActiveWalkthroughReviewTarget = useCallback(
+    (target: WalkthroughReviewTarget | null) => {
+      const currentState = stateRef.current;
+      activeReviewCommandTargetRef.current =
+        target && currentState
+          ? createReviewCommandTarget(currentState.source, target.file, target.reviewIdentity)
+          : null;
+    },
+    [],
+  );
+
   useEffect(() => {
     const registry = commandRegistryRef.current;
     const unregisterFns = [
@@ -1491,27 +1561,21 @@ export default function App() {
         title: 'Copy Review Comments and Close',
       }),
       registry.register({
-        description: () => selectedPathRef.current,
+        description: () => getReviewCommandTarget()?.file.path ?? null,
         execute: () => {
-          const currentState = stateRef.current;
-          const path = selectedPathRef.current;
-          if (!currentState || !path) {
+          const target = getReviewCommandTarget();
+          if (!target) {
             return;
           }
 
-          const file = currentState.files.find((f) => f.path === path);
-          if (!file) {
-            return;
-          }
-
-          const isViewed = viewedRef.current[file.path] === file.fingerprint;
-          setFileViewedState(currentState, file, !isViewed);
+          const isViewed = isReviewIdentityViewed(viewedRef.current, target.reviewIdentity);
+          toggleViewed(target.file, isViewed, target.reviewIdentity);
         },
         id: 'toggle-viewed',
         title: 'Toggle Viewed',
       }),
       registry.register({
-        description: () => selectedPathRef.current,
+        description: () => getReviewCommandTarget()?.file.path ?? null,
         execute: openSelectedFile,
         id: 'open-file',
         keymapAction: 'openFile',
@@ -1590,29 +1654,30 @@ export default function App() {
       }
     };
   }, [
-    bumpItemVersion,
     changeSidebarMode,
     expandSidebar,
+    getReviewCommandTarget,
     openDiffSearch,
     openSelectedFile,
     reloadWindow,
     setFileViewedState,
     toggleSidebar,
+    toggleViewed,
     toggleWordWrap,
   ]);
 
   const toggleCollapsed = useCallback(
-    (file: ChangedFile, isCollapsed: boolean) => {
+    (file: ChangedFile, isCollapsed: boolean, reviewKey = file.path) => {
       setCollapsed((current) => {
         const next = new Set(current);
         if (isCollapsed) {
-          next.delete(file.path);
+          next.delete(reviewKey);
         } else {
-          next.add(file.path);
+          next.add(reviewKey);
         }
         return next;
       });
-      bumpItemVersion(file.path);
+      bumpItemVersion(reviewKey);
     },
     [bumpItemVersion],
   );
@@ -1661,17 +1726,6 @@ export default function App() {
       }
     },
     [showWhitespace, visibleFiles],
-  );
-
-  const toggleViewed = useCallback(
-    (file: ChangedFile, isViewed: boolean) => {
-      if (!state) {
-        return;
-      }
-
-      setFileViewedState(state, file, !isViewed);
-    },
-    [setFileViewedState, state],
   );
 
   const createComment = useCallback(
@@ -1727,11 +1781,20 @@ export default function App() {
   );
 
   const updateComment = useCallback((commentId: string, body: string) => {
-    setReviewComments((current) =>
-      current.map((comment) =>
-        comment.id === commentId && !comment.isReadOnly ? { ...comment, body } : comment,
-      ),
-    );
+    const applyCommentBody = (current: ReadonlyArray<ReviewComment>) => {
+      let changed = false;
+      const next = current.map((comment) => {
+        if (comment.id !== commentId || comment.isReadOnly || comment.body === body) {
+          return comment;
+        }
+        changed = true;
+        return { ...comment, body };
+      });
+      return changed ? next : current;
+    };
+
+    reviewCommentsRef.current = applyCommentBody(reviewCommentsRef.current);
+    setReviewComments(applyCommentBody);
   }, []);
 
   const deleteComment = useCallback(
@@ -2017,8 +2080,8 @@ export default function App() {
   const emptySourceDetail = getEmptySourceDetail(state.source, state.root);
 
   const showNarrativeWalkthrough = narrativeWalkthrough != null && sidebarMode === 'walkthrough';
-  const plainCommitModel = narrativeNavigation.orderView
-    ? buildCommitModel(narrativeNavigation.orderView, state.files)
+  const plainCommitModel = narrativeNavigation.walkthroughView
+    ? buildCommitModel(narrativeNavigation.walkthroughView, state.files)
     : buildGenericCommitModel(state.files);
   const showPlainCommitView =
     mainMode === 'commit' && state.source.type === 'working-tree' && state.files.length > 0;
@@ -2041,7 +2104,7 @@ export default function App() {
     gitIdentity,
     hunkNavigation,
     isPullRequest,
-    itemVersionByPath,
+    itemVersionByKey,
     keymap: codiffConfig.keymap,
     loadingSectionIds,
     onAskCodex: askCodex,
@@ -2060,21 +2123,27 @@ export default function App() {
     viewed,
     wordWrap,
   };
-  // Render one changed file's live diff for a walkthrough stop / full-context reader.
-  const renderStopDiff = (file: ChangedFile, note?: string) => {
-    const walkthroughNotes = note
-      ? new Map([[file.path, createInlineWalkthroughNote(note)]])
-      : emptyWalkthroughNotes;
+  const renderWalkthroughDiffBlocks = (
+    blocks: ReadonlyArray<ReviewDiffBlock>,
+    blockScrollTarget: WalkthroughBlockScrollTarget | null,
+    onActiveBlockChange: (blockId: string) => void,
+  ) => {
     return (
-      <ReviewCodeView
-        {...commonReviewProps}
-        commitMetadata={null}
-        files={[file]}
-        forceExpandedPaths={diffSearchMatchPathSet}
-        scrollTarget={null}
-        selectedPath={null}
-        walkthroughNotes={walkthroughNotes}
-      />
+      <div className="wt-stop wt-diff-surface">
+        <ReviewCodeView
+          {...commonReviewProps}
+          blocks={blocks}
+          bottomInset={walkthroughCodeViewBottomInset}
+          commitMetadata={null}
+          files={[]}
+          forceExpandedPaths={diffSearchMatchPathSet}
+          onActiveBlockChange={onActiveBlockChange}
+          onSelectPathFromScroll={ignoreWalkthroughPathScroll}
+          scrollTarget={blockScrollTarget}
+          selectedPath={null}
+          walkthroughNotes={emptyWalkthroughNotes}
+        />
+      </div>
     );
   };
 
@@ -2239,9 +2308,10 @@ export default function App() {
           <NarrativeWalkthroughView
             files={state.files}
             navigation={narrativeNavigation}
+            onActiveReviewTargetChange={updateActiveWalkthroughReviewTarget}
             onCommit={commitWalkthrough}
             onUpdateCommitMessage={updateWalkthroughCommitMessage}
-            renderStopDiff={renderStopDiff}
+            renderDiffBlocks={renderWalkthroughDiffBlocks}
             showWhitespace={showWhitespace}
             walkthrough={narrativeWalkthrough}
           />

@@ -324,6 +324,7 @@ export function Sidebar({
         <NarrativeSidebar
           files={commitFiles}
           navigation={narrativeNavigation}
+          showWhitespace={showWhitespace}
           walkthrough={narrativeWalkthrough}
         />
       ) : mode === 'walkthrough' ? (

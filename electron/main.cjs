@@ -558,31 +558,6 @@ const buildApplicationMenu = () =>
             ],
           },
           {
-            label: 'Walkthrough',
-            submenu: [
-              {
-                checked: config.settings.walkthroughOrder !== 'results',
-                click: () => {
-                  updateConfig({
-                    settings: { ...config.settings, walkthroughOrder: 'keys' },
-                  });
-                },
-                label: 'Key Changes',
-                type: 'radio',
-              },
-              {
-                checked: config.settings.walkthroughOrder === 'results',
-                click: () => {
-                  updateConfig({
-                    settings: { ...config.settings, walkthroughOrder: 'results' },
-                  });
-                },
-                label: 'Results First',
-                type: 'radio',
-              },
-            ],
-          },
-          {
             label: 'Comments',
             submenu: [
               {
@@ -995,7 +970,12 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
       try {
         return {
           status: 'ready',
-          walkthrough: normalizeNarrativeWalkthrough(input, state.files),
+          walkthrough: normalizeNarrativeWalkthrough(input, state.files, {
+            branch: state.branch,
+            generatedAt: state.generatedAt,
+            root: state.root,
+            source: state.source,
+          }),
         };
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -1094,15 +1074,6 @@ ipcMain.handle('codiff:setDiffStyle', (_event, value) => {
 
 ipcMain.handle('codiff:setShowOutdated', (_event, value) => {
   updateConfig({ settings: { ...config.settings, showOutdated: Boolean(value) } });
-});
-
-ipcMain.handle('codiff:setWalkthroughOrder', (_event, value) => {
-  updateConfig({
-    settings: {
-      ...config.settings,
-      walkthroughOrder: typeof value === 'string' && value.length > 0 ? value : 'keys',
-    },
-  });
 });
 
 ipcMain.handle('codiff:setWordWrap', (_event, value) => {

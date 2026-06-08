@@ -1,9 +1,17 @@
 {
   "additionalProperties": false,
   "properties": {
-    "agent": {
-      "enum": ["codex", "claude"],
-      "type": "string"
+    "commit": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "chapters": {
       "items": {
@@ -23,149 +31,67 @@
             "items": {
               "additionalProperties": false,
               "properties": {
-                "anchors": {
-                  "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "added": {
-                        "type": "number"
-                      },
-                      "anchor": {
-                        "additionalProperties": false,
-                        "properties": {
-                          "display": {
-                            "type": "string"
-                          },
-                          "endLine": {
-                            "type": "number"
-                          },
-                          "sectionId": {
-                            "type": "string"
-                          },
-                          "sectionKind": {
-                            "enum": ["commit", "pull-request", "staged", "unstaged"],
-                            "type": "string"
-                          },
-                          "side": {
-                            "enum": ["additions", "deletions", "both"],
-                            "type": "string"
-                          },
-                          "startLine": {
-                            "type": "number"
-                          }
-                        },
-                        "required": ["display"],
-                        "type": "object"
-                      },
-                      "changeType": {
-                        "enum": [
-                          "fix",
-                          "feature",
-                          "refactor",
-                          "test",
-                          "generated",
-                          "lockfile",
-                          "snapshot",
-                          "i18n",
-                          "docs"
-                        ],
-                        "type": "string"
-                      },
-                      "comments": {
-                        "items": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "author": {
-                              "type": "string"
-                            },
-                            "body": {
-                              "type": "string"
-                            },
-                            "id": {
-                              "type": "string"
-                            },
-                            "lineNumber": {
-                              "type": "number"
-                            },
-                            "side": {
-                              "enum": ["additions", "deletions"],
-                              "type": "string"
-                            },
-                            "startLineNumber": {
-                              "type": "number"
-                            },
-                            "startSide": {
-                              "enum": ["additions", "deletions"],
-                              "type": "string"
-                            }
-                          },
-                          "required": ["id", "body", "side", "lineNumber"],
-                          "type": "object"
-                        },
-                        "type": "array"
-                      },
-                      "commitNote": {
-                        "type": "string"
-                      },
-                      "deleted": {
-                        "type": "number"
-                      },
-                      "granularity": {
-                        "enum": ["line", "hunk", "file"],
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "oldPath": {
-                        "type": "string"
-                      },
-                      "path": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "enum": ["added", "deleted", "modified", "renamed", "untracked"],
-                        "type": "string"
-                      },
-                      "summary": {
-                        "type": "string"
-                      },
-                      "title": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "path",
-                      "status",
-                      "granularity",
-                      "anchor",
-                      "added",
-                      "deleted"
-                    ],
-                    "type": "object"
-                  },
-                  "maxItems": 8,
-                  "type": "array"
-                },
-                "body": {
+                "changeType": {
+                  "enum": [
+                    "fix",
+                    "feature",
+                    "refactor",
+                    "test",
+                    "generated",
+                    "lockfile",
+                    "snapshot",
+                    "i18n",
+                    "docs"
+                  ],
                   "type": "string"
+                },
+                "commitNote": {
+                  "type": "string"
+                },
+                "hunkIds": {
+                  "description": "Deterministic hunk ids from the repository digest, in the display order Codiff should render them.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 3,
+                  "minItems": 1,
+                  "type": "array"
                 },
                 "id": {
                   "type": "string"
                 },
-                "importance": {
-                  "enum": ["critical", "normal", "context"],
-                  "type": "string"
+                "notes": {
+                  "description": "Optional short header notes for selected hunk ids. Codiff renders each note under that focused diff header.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "body": {
+                        "type": "string"
+                      },
+                      "hunkId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["hunkId", "body"],
+                    "type": "object"
+                  },
+                  "type": "array"
                 },
                 "summary": {
                   "type": "string"
                 },
                 "title": {
                   "type": "string"
+                },
+                "importance": {
+                  "enum": ["critical", "normal", "context"],
+                  "type": "string"
+                },
+                "prose": {
+                  "type": "string"
                 }
               },
-              "required": ["id", "title", "summary", "body", "importance", "anchors"],
+              "required": ["id", "hunkIds", "importance", "prose"],
               "type": "object"
             },
             "maxItems": 14,
@@ -182,181 +108,77 @@
       "maxItems": 6,
       "type": "array"
     },
-    "commit": {
-      "additionalProperties": false,
-      "properties": {
-        "body": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "context": {
-      "type": "object"
-    },
     "focus": {
-      "type": "string"
-    },
-    "generatedAt": {
       "type": "string"
     },
     "kind": {
       "const": "narrative",
       "type": "string"
     },
-    "meta": {
-      "type": "string"
-    },
-    "repo": {
-      "additionalProperties": false,
-      "properties": {
-        "branch": {
-          "type": ["string", "null"]
-        },
-        "root": {
-          "type": "string"
-        }
-      },
-      "required": ["root", "branch"],
-      "type": "object"
-    },
-    "source": {
-      "type": "object"
-    },
     "support": {
       "items": {
         "additionalProperties": false,
         "properties": {
+          "changeType": {
+            "enum": [
+              "fix",
+              "feature",
+              "refactor",
+              "test",
+              "generated",
+              "lockfile",
+              "snapshot",
+              "i18n",
+              "docs"
+            ],
+            "type": "string"
+          },
+          "commitNote": {
+            "type": "string"
+          },
+          "hunkIds": {
+            "description": "Deterministic hunk ids from the repository digest, in the display order Codiff should render them.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "type": "array"
+          },
           "id": {
             "type": "string"
           },
-          "files": {
+          "notes": {
+            "description": "Optional short header notes for selected hunk ids. Codiff renders each note under that focused diff header.",
             "items": {
               "additionalProperties": false,
               "properties": {
-                "added": {
-                  "type": "number"
-                },
-                "anchor": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "display": {
-                      "type": "string"
-                    },
-                    "endLine": {
-                      "type": "number"
-                    },
-                    "sectionId": {
-                      "type": "string"
-                    },
-                    "sectionKind": {
-                      "enum": ["commit", "pull-request", "staged", "unstaged"],
-                      "type": "string"
-                    },
-                    "side": {
-                      "enum": ["additions", "deletions", "both"],
-                      "type": "string"
-                    },
-                    "startLine": {
-                      "type": "number"
-                    }
-                  },
-                  "required": ["display"],
-                  "type": "object"
-                },
-                "changeType": {
-                  "enum": [
-                    "fix",
-                    "feature",
-                    "refactor",
-                    "test",
-                    "generated",
-                    "lockfile",
-                    "snapshot",
-                    "i18n",
-                    "docs"
-                  ],
+                "body": {
                   "type": "string"
                 },
-                "comments": {
-                  "items": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "author": {
-                        "type": "string"
-                      },
-                      "body": {
-                        "type": "string"
-                      },
-                      "id": {
-                        "type": "string"
-                      },
-                      "lineNumber": {
-                        "type": "number"
-                      },
-                      "side": {
-                        "enum": ["additions", "deletions"],
-                        "type": "string"
-                      },
-                      "startLineNumber": {
-                        "type": "number"
-                      },
-                      "startSide": {
-                        "enum": ["additions", "deletions"],
-                        "type": "string"
-                      }
-                    },
-                    "required": ["id", "body", "side", "lineNumber"],
-                    "type": "object"
-                  },
-                  "type": "array"
-                },
-                "commitNote": {
-                  "type": "string"
-                },
-                "deleted": {
-                  "type": "number"
-                },
-                "granularity": {
-                  "enum": ["line", "hunk", "file"],
-                  "type": "string"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "oldPath": {
-                  "type": "string"
-                },
-                "path": {
-                  "type": "string"
-                },
-                "status": {
-                  "enum": ["added", "deleted", "modified", "renamed", "untracked"],
-                  "type": "string"
-                },
-                "summary": {
-                  "type": "string"
-                },
-                "title": {
+                "hunkId": {
                   "type": "string"
                 }
               },
-              "required": ["id", "path", "status", "granularity", "anchor", "added", "deleted"],
+              "required": ["hunkId", "body"],
               "type": "object"
             },
             "type": "array"
           },
-          "note": {
+          "summary": {
             "type": "string"
           },
           "title": {
             "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
           }
         },
-        "required": ["id", "title", "files"],
+        "required": ["id", "hunkIds", "reason"],
         "type": "object"
       },
       "type": "array"
@@ -365,20 +187,10 @@
       "type": "string"
     },
     "version": {
-      "const": 3,
+      "const": 4,
       "type": "number"
     }
   },
-  "required": [
-    "version",
-    "kind",
-    "agent",
-    "title",
-    "focus",
-    "repo",
-    "source",
-    "chapters",
-    "support"
-  ],
+  "required": ["version", "kind", "title", "focus", "chapters"],
   "type": "object"
 }

@@ -1,4 +1,5 @@
 import type { CodeViewHandle } from '@pierre/diffs/react';
+import type { ReactNode } from 'react';
 import type {
   ChangedFile,
   CommitMetadata,
@@ -36,11 +37,17 @@ type CommitDetailsAnnotationMetadata = {
   type: 'commit-details';
 };
 
+type WalkthroughHeaderAnnotationMetadata = {
+  header: ReactNode;
+  type: 'walkthrough-header';
+};
+
 export type ReviewAnnotationMetadata =
   | CommitDetailsAnnotationMetadata
   | ImagePreviewAnnotationMetadata
   | MarkdownPreviewAnnotationMetadata
-  | ReviewCommentAnnotationMetadata;
+  | ReviewCommentAnnotationMetadata
+  | WalkthroughHeaderAnnotationMetadata;
 
 export type CodeViewInstance = NonNullable<
   ReturnType<CodeViewHandle<ReviewAnnotationMetadata>['getInstance']>
@@ -63,8 +70,14 @@ export type ReviewScrollBehavior = 'instant' | 'smooth';
 
 export type ReviewScrollTarget = {
   behavior?: ReviewScrollBehavior;
-  path: string;
+  blockId?: string;
+  path?: string;
   request: number;
+};
+
+export type ReviewIdentity = {
+  fingerprint: string;
+  key: string;
 };
 
 export type DiffLineCount = {
@@ -128,13 +141,16 @@ export type RepositoryLoadError = {
 };
 
 export type CodeViewItemMetadata = {
+  blockId: string;
   canRenderMarkdown: boolean;
+  comments: ReadonlyArray<ReviewComment>;
   file: ChangedFile;
   isCollapsed: boolean;
   isMarkdownPreview: boolean;
   isSelected: boolean;
   isViewed: boolean;
   lineCount: DiffLineCount;
+  reviewIdentity: ReviewIdentity;
   section: DiffSection;
   sectionCount: number;
   walkthroughNote?: WalkthroughNote;

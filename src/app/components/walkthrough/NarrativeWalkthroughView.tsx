@@ -1,507 +1,291 @@
-import {
-  Activity,
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { ReviewIdentity } from '../../../lib/app-types.ts';
+import type { ReviewScrollBehavior } from '../../../lib/app-types.ts';
 import {
   buildCommitModel,
-  getStopSegments,
+  focusChangedFileForHunks,
+  formatWalkthroughFileList,
+  getUncoveredWalkthroughFiles,
+  getWalkthroughRunNote,
   isWalkthroughCommittable,
-  resolveSegmentFile,
-  type ResolvedSegmentFile,
-  type WalkthroughOrderView,
+  resolveWalkthroughHunkRuns,
+  walkthroughItemPaths,
+  walkthroughItemTitleFallback,
+  walkthroughFileName,
+  type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, NarrativeWalkthrough } from '../../../types.ts';
+import type { ChangedFile, NarrativeWalkthrough, WalkthroughHunkGroup } from '../../../types.ts';
+import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import { CommitView, type CommitHandler, type CommitMessageHandler } from './CommitView.tsx';
 import { ArrowLeft, ArrowRight, CaretLeft, CaretRight, Check, GitBranch, Path } from './icons.tsx';
-import { ImportancePill, Narration, PhaseIcon } from './parts.tsx';
+import { ChapterIcon, ImportancePill, Narration } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
-const fileName = (path: string) => path.split('/').pop() ?? path;
+type FocusedRunDiff = {
+  file: ChangedFile;
+  note?: string;
+  reviewIdentity: ReviewIdentity;
+};
 
-const countUniqueRestFiles = (orderView: WalkthroughOrderView) =>
-  new Set(orderView.rest.map((item) => item.segment.path)).size;
+export type WalkthroughReviewTarget = {
+  file: ChangedFile;
+  reviewIdentity: ReviewIdentity;
+};
 
-const stopEstimateHeight = (stop: WalkthroughStopView) => {
-  const segments = getStopSegments(stop);
-  const files = new Set(segments.map((segment) => segment.path)).size;
-  const changedLines = segments.reduce(
-    (total, segment) => total + segment.added + segment.deleted,
-    0,
+export type WalkthroughBlockScrollTarget = {
+  behavior?: ReviewScrollBehavior;
+  blockId: string;
+  request: number;
+};
+
+const getFocusedRunDiffs = (
+  item: WalkthroughHunkGroup,
+  files: ReadonlyArray<ChangedFile>,
+): ReadonlyArray<FocusedRunDiff> =>
+  resolveWalkthroughHunkRuns(item, files).flatMap((run) => {
+    const focused = focusChangedFileForHunks(run.resolved.file, run.resolved.section, run.hunks);
+    return focused
+      ? [
+          {
+            file: focused,
+            note: getWalkthroughRunNote(item, run),
+            reviewIdentity: {
+              fingerprint: focused.fingerprint,
+              key: `walkthrough:${run.key}`,
+            },
+          },
+        ]
+      : [];
+  });
+
+export type RenderWalkthroughDiffBlocks = (
+  blocks: ReadonlyArray<ReviewDiffBlock>,
+  scrollTarget: WalkthroughBlockScrollTarget | null,
+  onActiveBlockChange: (blockId: string) => void,
+) => ReactNode;
+
+type WalkthroughBlockSet = {
+  blocks: ReadonlyArray<ReviewDiffBlock>;
+  firstBlockIdByStop: ReadonlyArray<string | null>;
+  stopIndexByBlockId: ReadonlyMap<string, number>;
+};
+
+type WalkthroughNavigationKeyEvent = Pick<
+  KeyboardEvent,
+  'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'
+>;
+
+export const getWalkthroughNavigationKeyDirection = (
+  event: WalkthroughNavigationKeyEvent,
+): -1 | 0 | 1 => {
+  const hasAnyModifier = event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
+  if (!hasAnyModifier) {
+    if (event.key === 'j') {
+      return 1;
+    }
+    if (event.key === 'k') {
+      return -1;
+    }
+  }
+
+  const isCtrlOnly = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
+  if (isCtrlOnly && event.key === 'ArrowDown') {
+    return 1;
+  }
+  if (isCtrlOnly && event.key === 'ArrowUp') {
+    return -1;
+  }
+
+  return 0;
+};
+
+const emptyWalkthroughBlockSet: WalkthroughBlockSet = {
+  blocks: [],
+  firstBlockIdByStop: [],
+  stopIndexByBlockId: new Map(),
+};
+
+function StopHeader({ current, stop }: { current: boolean; stop: WalkthroughStopView }) {
+  return (
+    <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
+      <div className="wt-stage-title-row">
+        <h2 className="wt-stage-title">{stop.title ?? walkthroughItemTitleFallback(stop)}</h2>
+        <ImportancePill importance={stop.importance} />
+      </div>
+      <Narration prose={stop.prose} />
+    </div>
   );
-  return Math.max(520, Math.min(1600, 260 + files * 120 + changedLines * 14));
-};
+}
 
-const createVisibleIndexSet = (length: number, index: number) => {
-  const indexes = [index - 1, index, index + 1].filter((item) => item >= 0 && item < length);
-  return new Set(indexes);
-};
+function SupportHeader() {
+  return (
+    <div className="wt-stop-block wt-stop-block-header current">
+      <div className="wt-stage-title-row">
+        <h2 className="wt-stage-title">Support</h2>
+        <ImportancePill importance="normal" />
+      </div>
+      <Narration prose="Supporting changes grouped outside the main sequence." />
+    </div>
+  );
+}
 
-/** Renders the live diff for one changed file via the real ReviewCodeView. */
-export type RenderStopDiff = (file: ChangedFile, note?: string) => ReactNode;
+const createWalkthroughBlocks = (
+  files: ReadonlyArray<ChangedFile>,
+  walkthroughView: WalkthroughView,
+  currentIndex: number,
+): WalkthroughBlockSet => {
+  const blocks: Array<ReviewDiffBlock> = [];
+  const firstBlockIdByStop: Array<string | null> = [];
+  const stopIndexByBlockId = new Map<string, number>();
 
-/** One stop's narration header above its file diff, as a block in the sequence. */
-function StopBlock({
-  files,
-  isCurrent,
-  renderStopDiff,
-  showWhitespace,
-  stop,
-}: {
-  files: ReadonlyArray<ChangedFile>;
-  isCurrent: boolean;
-  renderStopDiff: RenderStopDiff;
-  showWhitespace: boolean;
-  stop: WalkthroughStopView;
-}) {
-  const renderedPaths = new Set<string>();
-  const resolvedFiles: Array<{ note?: string; resolved: ResolvedSegmentFile }> = [];
-  for (const segment of getStopSegments(stop)) {
-    if (renderedPaths.has(segment.path)) {
+  for (const stop of walkthroughView.sequence) {
+    const focusedRuns = getFocusedRunDiffs(stop, files);
+    if (focusedRuns.length === 0) {
+      const blockId = `walkthrough:${stop.id}:missing`;
+      firstBlockIdByStop[stop.index] = blockId;
+      stopIndexByBlockId.set(blockId, stop.index);
+      blocks.push({
+        header: <StopHeader current={stop.index === currentIndex} stop={stop} />,
+        id: blockId,
+        selected: stop.index === currentIndex,
+      });
       continue;
     }
-    renderedPaths.add(segment.path);
-    const resolved = resolveSegmentFile(segment, files, showWhitespace);
-    if (resolved) {
-      resolvedFiles.push({
-        note: segment === stop.segment ? undefined : (segment.summary ?? segment.title),
-        resolved,
+
+    firstBlockIdByStop[stop.index] = `walkthrough:${stop.id}:0`;
+
+    focusedRuns.forEach(({ file, note, reviewIdentity }, runIndex) => {
+      const blockId = `walkthrough:${stop.id}:${runIndex}`;
+      stopIndexByBlockId.set(blockId, stop.index);
+      blocks.push({
+        file,
+        header:
+          runIndex === 0 ? <StopHeader current={stop.index === currentIndex} stop={stop} /> : null,
+        id: blockId,
+        itemIdPrefix: blockId,
+        note,
+        reviewIdentity,
+        selected: stop.index === currentIndex,
+      });
+    });
+  }
+
+  return { blocks, firstBlockIdByStop, stopIndexByBlockId };
+};
+
+const getBlockReviewTarget = (
+  blocks: ReadonlyArray<ReviewDiffBlock>,
+  blockId: string | null | undefined,
+): WalkthroughReviewTarget | null => {
+  const block = blockId ? blocks.find((candidate) => candidate.id === blockId) : null;
+  return block?.file && block.reviewIdentity
+    ? {
+        file: block.file,
+        reviewIdentity: block.reviewIdentity,
+      }
+    : null;
+};
+
+const createSupportBlocks = (
+  files: ReadonlyArray<ChangedFile>,
+  walkthroughView: WalkthroughView,
+  showWhitespace: boolean,
+): ReadonlyArray<ReviewDiffBlock> => {
+  const blocks: Array<ReviewDiffBlock> = [];
+  for (const group of walkthroughView.supportByReason) {
+    for (const item of group.files) {
+      getFocusedRunDiffs(item, files).forEach(({ file, note, reviewIdentity }, runIndex) => {
+        const blockId = `walkthrough:support:${item.id}:${runIndex}`;
+        const isFirstBlock = blocks.length === 0;
+        blocks.push({
+          file,
+          header: isFirstBlock ? <SupportHeader /> : null,
+          id: blockId,
+          itemIdPrefix: blockId,
+          note: note ?? item.note ?? group.reason,
+          reviewIdentity,
+          selected: true,
+        });
       });
     }
   }
-  return (
-    <section className={`wt-stop-block${isCurrent ? ' current' : ''}`}>
-      <div className="wt-stop-header">
-        <div className="wt-stage-title-row">
-          <h2 className="wt-stage-title">
-            {stop.title ?? stop.segment.title ?? fileName(stop.segment.path)}
-          </h2>
-          <ImportancePill importance={stop.importance} />
-        </div>
-        <Narration prose={stop.body} />
-      </div>
-      <div className="wt-stop-diff-host">
-        {resolvedFiles.length > 0 ? (
-          resolvedFiles.map(({ note, resolved }) => (
-            <Fragment key={resolved.file.path}>{renderStopDiff(resolved.file, note)}</Fragment>
-          ))
-        ) : (
-          <div className="wt-empty">These files are no longer part of the current diff.</div>
-        )}
-      </div>
-    </section>
-  );
-}
 
-function MeasuredStop({
-  children,
-  index,
-  onHeight,
-  onRef,
-}: {
-  children: ReactNode;
-  index: number;
-  onHeight: (index: number, height: number) => void;
-  onRef: (index: number, el: HTMLElement | null) => void;
-}) {
-  const [node, setNode] = useState<HTMLDivElement | null>(null);
-  const setRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      onRef(index, el);
-      setNode(el);
-    },
-    [index, onRef],
-  );
-
-  useLayoutEffect(() => {
-    if (!node) {
-      return;
-    }
-    const measure = () => onHeight(index, node.getBoundingClientRect().height);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [index, node, onHeight]);
-
-  return <div ref={setRef}>{children}</div>;
-}
-
-function StopPlaceholder({
-  children,
-  height,
-  index,
-  onRef,
-}: {
-  children?: ReactNode;
-  height: number;
-  index: number;
-  onRef: (index: number, el: HTMLElement | null) => void;
-}) {
-  const setRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      onRef(index, el);
-    },
-    [index, onRef],
-  );
-
-  return (
-    <div aria-hidden className="wt-stop-placeholder" ref={setRef} style={{ height }}>
-      {children}
-    </div>
-  );
-}
-
-/**
- * The whole order as one continuous scroll: every stop's narration and diff
- * stacked top-to-bottom, so the reader moves through the change hunk by hunk by
- * scrolling rather than paging file by file. The focused stop is derived from
- * scroll position (which drives the arc and "visited" ticks), and command
- * navigation jumps the requested stop back to the top.
- */
-function SequenceScroll({
-  files,
-  navigation,
-  orderView,
-  renderStopDiff,
-  showWhitespace,
-}: {
-  files: ReadonlyArray<ChangedFile>;
-  navigation: NarrativeNavigation;
-  orderView: WalkthroughOrderView;
-  renderStopDiff: RenderStopDiff;
-  showWhitespace: boolean;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const blockRefs = useRef<Array<HTMLElement | null>>([]);
-  const commandScrollIgnoreUntilRef = useRef(0);
-  const { scrollTarget, syncIndexFromScroll } = navigation;
-  const [heightBySegment, setHeightBySegment] = useState<Readonly<Record<string, number>>>({});
-  const orderKey = orderView.sequence.map((stop) => stop.segmentId).join('\0');
-  const [visibleIndexState, setVisibleIndexState] = useState<{
-    indexes: ReadonlySet<number>;
-    orderKey: string;
-  }>(() => ({
-    indexes: createVisibleIndexSet(orderView.sequence.length, navigation.index),
-    orderKey,
-  }));
-  const visibleIndexes =
-    visibleIndexState.orderKey === orderKey
-      ? visibleIndexState.indexes
-      : createVisibleIndexSet(orderView.sequence.length, scrollTarget.index);
-
-  const getStopHeight = useCallback(
-    (stop: WalkthroughStopView) => heightBySegment[stop.segmentId] ?? stopEstimateHeight(stop),
-    [heightBySegment],
-  );
-
-  const setBlockRef = useCallback((index: number, el: HTMLElement | null) => {
-    blockRefs.current[index] = el;
-  }, []);
-
-  const updateStopHeight = useCallback(
-    (index: number, height: number) => {
-      const stop = orderView.sequence[index];
-      if (!stop || height <= 0) {
-        return;
-      }
-      setHeightBySegment((current) =>
-        current[stop.segmentId] != null && Math.abs(current[stop.segmentId] - height) < 1
-          ? current
-          : { ...current, [stop.segmentId]: height },
-      );
-    },
-    [orderView],
-  );
-
-  useEffect(() => {
-    blockRefs.current = blockRefs.current.slice(0, orderView.sequence.length);
-  }, [orderView.sequence.length]);
-
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) {
-      return;
-    }
-    if (typeof IntersectionObserver === 'undefined') {
-      return;
-    }
-    const elements: Array<HTMLElement> = [];
-    for (const element of blockRefs.current) {
-      if (element) {
-        elements.push(element);
-      }
-    }
-    if (elements.length === 0) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        setVisibleIndexState((current) => {
-          const currentIndexes =
-            current.orderKey === orderKey
-              ? current.indexes
-              : createVisibleIndexSet(orderView.sequence.length, scrollTarget.index);
-          const next = new Set(currentIndexes);
-          let changed = false;
-          for (const entry of entries) {
-            const index = blockRefs.current.indexOf(entry.target as HTMLElement);
-            if (index === -1) {
-              continue;
-            }
-            if (entry.isIntersecting) {
-              if (!next.has(index)) {
-                next.add(index);
-                changed = true;
-              }
-            } else if (next.delete(index)) {
-              changed = true;
-            }
-          }
-          return changed ? { indexes: next, orderKey } : current;
-        });
+  for (const file of getUncoveredWalkthroughFiles(files, walkthroughView, showWhitespace)) {
+    const blockId = `walkthrough:uncovered:${file.path}`;
+    const isFirstBlock = blocks.length === 0;
+    blocks.push({
+      file,
+      header: isFirstBlock ? <SupportHeader /> : null,
+      id: blockId,
+      itemIdPrefix: blockId,
+      note: 'Not included in the generated walkthrough.',
+      reviewIdentity: {
+        fingerprint: file.fingerprint,
+        key: blockId,
       },
-      {
-        root: container,
-        rootMargin: '640px 0px',
-        threshold: 0,
-      },
-    );
-
-    for (const element of elements) {
-      observer.observe(element);
-    }
-    return () => observer.disconnect();
-  }, [heightBySegment, orderKey, orderView.sequence.length, scrollTarget.index, visibleIndexes]);
-
-  // Derive the focused stop from scroll: it's the last block whose top has
-  // crossed an activation line a little below the top of the viewport.
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) {
-      return;
-    }
-    let frame = 0;
-    const measure = () => {
-      frame = 0;
-      const activation = container.scrollTop + 140;
-      let current = 0;
-      for (let i = 0; i < blockRefs.current.length; i += 1) {
-        const el = blockRefs.current[i];
-        if (!el) {
-          continue;
-        }
-        if (el.offsetTop <= activation) {
-          current = i;
-        } else {
-          break;
-        }
-      }
-      syncIndexFromScroll(current);
-    };
-    const onScroll = () => {
-      if (performance.now() < commandScrollIgnoreUntilRef.current) {
-        return;
-      }
-      if (!frame) {
-        frame = requestAnimationFrame(measure);
-      }
-    };
-    container.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      container.removeEventListener('scroll', onScroll);
-      if (frame) {
-        cancelAnimationFrame(frame);
-      }
-    };
-  }, [syncIndexFromScroll]);
-
-  // Command-driven moves bump scrollTarget.nonce; bring that stop to the top
-  // instantly. Smooth scrolling makes the active stop walk through every
-  // intermediate item because scroll position is the source of truth while the
-  // animation is in flight.
-  useEffect(() => {
-    const container = scrollRef.current;
-    const el = blockRefs.current[scrollTarget.index];
-    if (!container || !el) {
-      return;
-    }
-    setVisibleIndexState((current) => {
-      const currentIndexes =
-        current.orderKey === orderKey
-          ? current.indexes
-          : createVisibleIndexSet(orderView.sequence.length, scrollTarget.index);
-      const next = new Set(currentIndexes);
-      for (const index of createVisibleIndexSet(orderView.sequence.length, scrollTarget.index)) {
-        next.add(index);
-      }
-      return { indexes: next, orderKey };
+      selected: true,
     });
-    commandScrollIgnoreUntilRef.current = performance.now() + 80;
-    container.scrollTo({
-      behavior: 'instant',
-      top: el.offsetTop,
-    });
-  }, [orderKey, orderView.sequence.length, scrollTarget]);
+  }
 
-  const currentIndex = navigation.mode === 'stop' ? navigation.index : scrollTarget.index;
-
-  return (
-    <div className="wt-stop wt-sequence" ref={scrollRef}>
-      {orderView.sequence.map((stop, i) => {
-        const isVisible = visibleIndexes.has(i);
-        if (isVisible) {
-          return (
-            <MeasuredStop
-              index={i}
-              key={stop.segmentId}
-              onHeight={updateStopHeight}
-              onRef={setBlockRef}
-            >
-              <Activity mode="visible" name={`walkthrough-stop-${i + 1}`}>
-                <StopBlock
-                  files={files}
-                  isCurrent={i === navigation.index}
-                  renderStopDiff={renderStopDiff}
-                  showWhitespace={showWhitespace}
-                  stop={stop}
-                />
-              </Activity>
-            </MeasuredStop>
-          );
-        }
-
-        const isWarm = Math.abs(i - currentIndex) <= 2;
-        return (
-          <StopPlaceholder
-            height={getStopHeight(stop)}
-            index={i}
-            key={stop.segmentId}
-            onRef={setBlockRef}
-          >
-            {isWarm ? (
-              <Activity mode="hidden" name={`walkthrough-stop-${i + 1}`}>
-                <StopBlock
-                  files={files}
-                  isCurrent={false}
-                  renderStopDiff={renderStopDiff}
-                  showWhitespace={showWhitespace}
-                  stop={stop}
-                />
-              </Activity>
-            ) : null}
-          </StopPlaceholder>
-        );
-      })}
-    </div>
-  );
-}
-
-function RestOverview({
-  files,
-  orderView,
-  renderStopDiff,
-  showWhitespace,
-}: {
-  files: ReadonlyArray<ChangedFile>;
-  orderView: WalkthroughOrderView;
-  renderStopDiff: RenderStopDiff;
-  showWhitespace: boolean;
-}) {
-  return (
-    <div className="wt-stop">
-      <div className="wt-stop-header">
-        <div className="wt-stage-title-row">
-          <h2 className="wt-stage-title">{orderView.order.restLabel || 'Supporting files'}</h2>
-        </div>
-        {orderView.order.restBlurb ? <Narration prose={orderView.order.restBlurb} /> : null}
-      </div>
-      <div className="wt-support-diffs">
-        {orderView.restByReason.map((group) => (
-          <Fragment key={group.reason}>
-            {group.files.map((item) => {
-              const resolved = resolveSegmentFile(item.segment, files, showWhitespace);
-              return (
-                <section className="wt-support-diff" key={item.segmentId}>
-                  <div className="wt-stop-diff-host">
-                    {resolved ? (
-                      renderStopDiff(resolved.file, item.note ?? group.reason)
-                    ) : (
-                      <div className="wt-empty">
-                        This file is no longer part of the current diff.
-                      </div>
-                    )}
-                  </div>
-                </section>
-              );
-            })}
-          </Fragment>
-        ))}
-      </div>
-    </div>
-  );
-}
+  return blocks;
+};
 
 function Arc({
   committable,
   navigation,
-  orderView,
+  supportAvailable,
+  walkthroughView,
 }: {
   committable: boolean;
   navigation: NarrativeNavigation;
-  orderView: WalkthroughOrderView;
+  supportAvailable: boolean;
+  walkthroughView: WalkthroughView;
 }) {
   const currentIndex =
     navigation.mode === 'stop'
       ? navigation.index
-      : navigation.mode === 'rest'
-        ? orderView.sequence.length
+      : navigation.mode === 'support'
+        ? walkthroughView.sequence.length
         : -1;
   const trackRef = useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = useState({ end: false, start: false });
   const goArcNext = useCallback(() => {
     if (navigation.mode === 'stop') {
-      if (navigation.index < orderView.sequence.length - 1) {
+      if (navigation.index < walkthroughView.sequence.length - 1) {
         navigation.goNext();
-      } else if (orderView.rest.length > 0) {
-        navigation.openRest();
+      } else if (supportAvailable) {
+        navigation.openSupport();
       } else if (committable) {
         navigation.enterCommit();
       }
-    } else if (navigation.mode === 'rest' && committable) {
+    } else if (navigation.mode === 'support' && committable) {
       navigation.enterCommit();
     }
-  }, [committable, navigation, orderView]);
+  }, [committable, navigation, supportAvailable, walkthroughView]);
   const goArcPrev = useCallback(() => {
     if (navigation.mode === 'stop') {
       navigation.goPrev();
-    } else if (navigation.mode === 'rest') {
-      navigation.goStop(orderView.sequence.length - 1);
+    } else if (navigation.mode === 'support') {
+      navigation.goStop(walkthroughView.sequence.length - 1);
     } else if (navigation.mode === 'commit') {
-      if (orderView.rest.length > 0) {
-        navigation.openRest();
+      if (supportAvailable) {
+        navigation.openSupport();
       } else {
-        navigation.goStop(orderView.sequence.length - 1);
+        navigation.goStop(walkthroughView.sequence.length - 1);
       }
     }
-  }, [navigation, orderView]);
+  }, [navigation, supportAvailable, walkthroughView]);
   const canGoPrev =
     navigation.mode === 'stop'
       ? navigation.index > 0
-      : navigation.mode === 'rest'
-        ? orderView.sequence.length > 0
-        : navigation.mode === 'commit' && orderView.sequence.length > 0;
+      : navigation.mode === 'support'
+        ? walkthroughView.sequence.length > 0
+        : navigation.mode === 'commit' && walkthroughView.sequence.length > 0;
   const canGoNext =
     navigation.mode === 'stop'
-      ? navigation.index < orderView.sequence.length - 1 || orderView.rest.length > 0 || committable
-      : navigation.mode === 'rest' && committable;
+      ? navigation.index < walkthroughView.sequence.length - 1 || supportAvailable || committable
+      : navigation.mode === 'support' && committable;
 
   // The arc never shows a scrollbar; instead it fades the side that has more.
   const updateOverflow = useCallback(() => {
@@ -547,7 +331,7 @@ function Arc({
     }
     const timer = window.setTimeout(updateOverflow, 220);
     return () => window.clearTimeout(timer);
-  }, [currentIndex, navigation.mode, orderView.order.id, updateOverflow]);
+  }, [currentIndex, navigation.mode, updateOverflow]);
 
   return (
     <div className="wt-arc">
@@ -560,28 +344,28 @@ function Arc({
         }`}
         ref={trackRef}
       >
-        {orderView.phases.map((phase, phaseIndex) => (
-          <Fragment key={phase.id}>
-            {phaseIndex > 0 ? <span className="wt-arc-join" /> : null}
+        {walkthroughView.chapters.map((chapter, chapterIndex) => (
+          <Fragment key={chapter.id}>
+            {chapterIndex > 0 ? <span className="wt-arc-join" /> : null}
             <div className="wt-arc-chapter">
               <span className="wt-arc-chapter-label">
-                <PhaseIcon icon={phase.icon} size={13} />
-                {phase.title}
+                <ChapterIcon icon={chapter.icon} size={13} />
+                {chapter.title}
               </span>
               <div className="wt-arc-nodes">
-                {phase.stops.map((stop) => {
+                {chapter.stops.map((stop) => {
                   const state =
                     stop.index === currentIndex
                       ? 'current'
-                      : navigation.visited.has(stop.segmentId)
+                      : navigation.visited.has(stop.id)
                         ? 'visited'
                         : 'upcoming';
                   return (
                     <button
                       className={`wt-arc-node ${state}`}
-                      key={stop.segmentId}
+                      key={stop.id}
                       onClick={() => navigation.goStop(stop.index)}
-                      title={stop.title ?? stop.segment.title ?? stop.segment.path}
+                      title={stop.title ?? walkthroughItemTitleFallback(stop)}
                       type="button"
                     >
                       {state === 'visited' ? (
@@ -596,27 +380,27 @@ function Arc({
             </div>
           </Fragment>
         ))}
-        {orderView.rest.length > 0 ? (
+        {supportAvailable ? (
           <>
             <span className="wt-arc-join" />
-            <div className="wt-arc-chapter rest">
+            <div className="wt-arc-chapter support">
               <span className="wt-arc-chapter-label">
                 <Path size={13} />
-                {orderView.order.restLabel}
+                Support
               </span>
               <button
                 className={`wt-arc-bundle ${
-                  navigation.mode === 'rest'
+                  navigation.mode === 'support'
                     ? 'current'
-                    : navigation.restVisited
+                    : navigation.supportVisited
                       ? 'visited'
                       : 'upcoming'
                 }`}
-                onClick={navigation.openRest}
+                onClick={navigation.openSupport}
                 title="Review supporting files"
                 type="button"
               >
-                <span>{orderView.sequence.length + 1}</span>
+                <span>{walkthroughView.sequence.length + 1}</span>
               </button>
             </div>
           </>
@@ -651,22 +435,84 @@ function Arc({
 export function NarrativeWalkthroughView({
   files,
   navigation,
+  onActiveReviewTargetChange,
   onCommit,
   onUpdateCommitMessage,
-  renderStopDiff,
+  renderDiffBlocks,
   showWhitespace,
   walkthrough,
 }: {
   files: ReadonlyArray<ChangedFile>;
   navigation: NarrativeNavigation;
+  onActiveReviewTargetChange: (target: WalkthroughReviewTarget | null) => void;
   onCommit: CommitHandler;
   onUpdateCommitMessage: CommitMessageHandler;
-  renderStopDiff: RenderStopDiff;
+  renderDiffBlocks: RenderWalkthroughDiffBlocks;
   showWhitespace: boolean;
   walkthrough: NarrativeWalkthrough;
 }) {
-  const { orderView } = navigation;
+  const { walkthroughView } = navigation;
   const committable = isWalkthroughCommittable(walkthrough);
+  const walkthroughBlocks = useMemo(
+    () =>
+      walkthroughView
+        ? createWalkthroughBlocks(files, walkthroughView, navigation.index)
+        : emptyWalkthroughBlockSet,
+    [files, navigation.index, walkthroughView],
+  );
+  const supportBlocks = useMemo(
+    () => (walkthroughView ? createSupportBlocks(files, walkthroughView, showWhitespace) : []),
+    [files, showWhitespace, walkthroughView],
+  );
+  const supportAvailable = supportBlocks.length > 0;
+  const activeBlockId = walkthroughBlocks.firstBlockIdByStop[navigation.scrollTarget.index];
+  const activeBlockScrollTarget: WalkthroughBlockScrollTarget | null =
+    navigation.mode === 'stop' && activeBlockId
+      ? {
+          behavior: 'smooth',
+          blockId: activeBlockId,
+          request: navigation.scrollTarget.nonce,
+        }
+      : null;
+  const supportBlockScrollTarget: WalkthroughBlockScrollTarget | null =
+    navigation.mode === 'support' && supportBlocks[0]
+      ? {
+          behavior: 'smooth',
+          blockId: supportBlocks[0].id,
+          request: navigation.supportScrollRequest,
+        }
+      : null;
+  const handleActiveBlockChange = useCallback(
+    (blockId: string) => {
+      onActiveReviewTargetChange(getBlockReviewTarget(walkthroughBlocks.blocks, blockId));
+      const stopIndex = walkthroughBlocks.stopIndexByBlockId.get(blockId);
+      if (stopIndex != null) {
+        navigation.syncIndexFromScroll(stopIndex);
+      }
+    },
+    [navigation, onActiveReviewTargetChange, walkthroughBlocks],
+  );
+  const handleSupportActiveBlockChange = useCallback(
+    (blockId: string) => {
+      onActiveReviewTargetChange(getBlockReviewTarget(supportBlocks, blockId));
+    },
+    [onActiveReviewTargetChange, supportBlocks],
+  );
+  useEffect(() => {
+    if (navigation.mode === 'stop') {
+      onActiveReviewTargetChange(getBlockReviewTarget(walkthroughBlocks.blocks, activeBlockId));
+    } else if (navigation.mode === 'support') {
+      onActiveReviewTargetChange(getBlockReviewTarget(supportBlocks, supportBlocks[0]?.id));
+    } else {
+      onActiveReviewTargetChange(null);
+    }
+  }, [
+    activeBlockId,
+    navigation.mode,
+    onActiveReviewTargetChange,
+    supportBlocks,
+    walkthroughBlocks.blocks,
+  ]);
 
   // j/k and Ctrl+↑/↓ move between stops, matching the prototype and Codiff's
   // hunk navigation. Ignore while typing into a comment or input.
@@ -679,40 +525,39 @@ export function NarrativeWalkthroughView({
       ) {
         return;
       }
-      if (!orderView) {
+      if (!walkthroughView) {
         return;
       }
-      const isNext = event.key === 'j' || (event.ctrlKey && event.key === 'ArrowDown');
-      const isPrev = event.key === 'k' || (event.ctrlKey && event.key === 'ArrowUp');
-      if (isNext) {
+      const direction = getWalkthroughNavigationKeyDirection(event);
+      if (direction === 1) {
         event.preventDefault();
         if (navigation.mode === 'stop') {
-          if (navigation.index < orderView.sequence.length - 1) {
+          if (navigation.index < walkthroughView.sequence.length - 1) {
             navigation.goNext();
-          } else if (orderView.rest.length > 0) {
-            navigation.openRest();
+          } else if (supportAvailable) {
+            navigation.openSupport();
           } else if (committable) {
             navigation.enterCommit();
           }
-        } else if (navigation.mode === 'rest' && committable) {
+        } else if (navigation.mode === 'support' && committable) {
           navigation.enterCommit();
         }
-      } else if (isPrev) {
+      } else if (direction === -1) {
         event.preventDefault();
         if (navigation.mode === 'stop') {
           navigation.goPrev();
-        } else if (navigation.mode === 'rest') {
+        } else if (navigation.mode === 'support') {
           navigation.goStop(navigation.index);
         } else if (navigation.mode === 'commit') {
-          if (orderView.rest.length > 0) {
-            navigation.openRest();
+          if (supportAvailable) {
+            navigation.openSupport();
           } else {
             navigation.goStop(navigation.index);
           }
         }
       }
     },
-    [committable, navigation, orderView],
+    [committable, navigation, supportAvailable, walkthroughView],
   );
 
   useEffect(() => {
@@ -720,17 +565,19 @@ export function NarrativeWalkthroughView({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  if (!orderView) {
-    return <div className="wt-empty">This walkthrough has no readable order.</div>;
+  if (!walkthroughView) {
+    return <div className="wt-empty">This walkthrough has no readable sequence.</div>;
   }
 
-  const next = orderView.sequence[navigation.index + 1];
-  const restFileCount = countUniqueRestFiles(orderView);
+  const next = walkthroughView.sequence[navigation.index + 1];
+  const supportFiles = formatWalkthroughFileList(
+    supportBlocks.flatMap((block) => (block.file ? [block.file.path] : [])),
+  );
   const allStopsVisited =
-    orderView.sequence.length > 0 &&
-    orderView.sequence.every((stop) => navigation.visited.has(stop.segmentId)) &&
-    (orderView.rest.length === 0 || navigation.restVisited);
-  const totalSteps = orderView.sequence.length + (orderView.rest.length > 0 ? 1 : 0);
+    walkthroughView.sequence.length > 0 &&
+    walkthroughView.sequence.every((stop) => navigation.visited.has(stop.id)) &&
+    (!supportAvailable || navigation.supportVisited);
+  const totalSteps = walkthroughView.sequence.length + (supportAvailable ? 1 : 0);
   const completionAction = allStopsVisited
     ? committable
       ? {
@@ -738,39 +585,38 @@ export function NarrativeWalkthroughView({
           title: 'Commit the change',
         }
       : {
-          file: `${totalSteps} chapters`,
+          file: `${totalSteps} steps`,
           onClick: null,
           title: 'All chapters reviewed',
         }
     : null;
 
   return (
-    <div className="wt-hybrid">
-      <Arc committable={committable} navigation={navigation} orderView={orderView} />
+    <div
+      className="wt-hybrid"
+      onPointerDownCapture={navigation.releaseStopScrollLock}
+      onTouchStartCapture={navigation.releaseStopScrollLock}
+      onWheelCapture={navigation.releaseStopScrollLock}
+    >
+      <Arc
+        committable={committable}
+        navigation={navigation}
+        supportAvailable={supportAvailable}
+        walkthroughView={walkthroughView}
+      />
 
       {navigation.mode === 'commit' ? (
         <CommitView
           branch={walkthrough.repo.branch}
           draft={navigation}
-          model={buildCommitModel(orderView, files)}
+          model={buildCommitModel(walkthroughView, files)}
           onCommit={onCommit}
           onUpdateMessage={onUpdateCommitMessage}
         />
-      ) : navigation.mode === 'stop' && orderView.sequence.length > 0 ? (
-        <SequenceScroll
-          files={files}
-          navigation={navigation}
-          orderView={orderView}
-          renderStopDiff={renderStopDiff}
-          showWhitespace={showWhitespace}
-        />
+      ) : navigation.mode === 'stop' && walkthroughView.sequence.length > 0 ? (
+        renderDiffBlocks(walkthroughBlocks.blocks, activeBlockScrollTarget, handleActiveBlockChange)
       ) : (
-        <RestOverview
-          files={files}
-          orderView={orderView}
-          renderStopDiff={renderStopDiff}
-          showWhitespace={showWhitespace}
-        />
+        renderDiffBlocks(supportBlocks, supportBlockScrollTarget, handleSupportActiveBlockChange)
       )}
 
       {navigation.mode === 'commit' ? null : completionAction ? (
@@ -799,22 +645,24 @@ export function NarrativeWalkthroughView({
             <span className="wt-upnext-main">
               <span className="wt-upnext-label">Next:</span>{' '}
               <span className="wt-upnext-title">
-                {next.title ?? next.segment.title ?? fileName(next.segment.path)}
+                {next.title ?? walkthroughItemTitleFallback(next)}
               </span>
             </span>
-            <span className="wt-upnext-file">{fileName(next.segment.path)}</span>
+            <span className="wt-upnext-file">
+              {walkthroughFileName(walkthroughItemPaths(next)[0] ?? '')}
+            </span>
             <ArrowRight size={17} />
           </span>
         </button>
-      ) : navigation.mode === 'stop' && orderView.rest.length > 0 ? (
-        <button className="wt-upnext" onClick={navigation.openRest} type="button">
+      ) : navigation.mode === 'stop' && supportAvailable ? (
+        <button className="wt-upnext" onClick={navigation.openSupport} type="button">
           <span className="wt-upnext-action">
             <span className="wt-upnext-main">
               <span className="wt-upnext-label">Next:</span>{' '}
-              <span className="wt-upnext-title">{orderView.order.restLabel}</span>
+              <span className="wt-upnext-title">Support</span>
             </span>
-            <span className="wt-upnext-file">
-              {restFileCount} file{restFileCount === 1 ? '' : 's'}
+            <span className="wt-upnext-file" title={supportFiles.title}>
+              {supportFiles.label}
             </span>
             <ArrowRight size={17} />
           </span>
@@ -829,7 +677,7 @@ export function NarrativeWalkthroughView({
             <ArrowRight size={17} />
           </span>
         </button>
-      ) : navigation.mode === 'rest' && committable ? (
+      ) : navigation.mode === 'support' && committable ? (
         <button className="wt-upnext commit" onClick={navigation.enterCommit} type="button">
           <span className="wt-upnext-action">
             <span className="wt-upnext-main">
@@ -839,7 +687,7 @@ export function NarrativeWalkthroughView({
             <ArrowRight size={17} />
           </span>
         </button>
-      ) : navigation.mode === 'rest' ? (
+      ) : navigation.mode === 'support' ? (
         <button
           className="wt-upnext"
           onClick={() => navigation.goStop(navigation.index)}
@@ -850,9 +698,10 @@ export function NarrativeWalkthroughView({
             <span className="wt-upnext-main">
               <span className="wt-upnext-label">Previous:</span>{' '}
               <span className="wt-upnext-title">
-                {orderView.sequence[navigation.index]?.title ??
-                  orderView.sequence[navigation.index]?.segment.title ??
-                  fileName(orderView.sequence[navigation.index]?.segment.path ?? '')}
+                {walkthroughView.sequence[navigation.index]?.title ??
+                  (walkthroughView.sequence[navigation.index]
+                    ? walkthroughItemTitleFallback(walkthroughView.sequence[navigation.index])
+                    : '')}
               </span>
             </span>
             <span className="wt-upnext-file">Chapter {navigation.index + 1}</span>

@@ -2,19 +2,19 @@ import claudeIconUrl from '../../../assets/claude.svg';
 import codexIconUrl from '../../../assets/codex.svg';
 import { renderInlineMarkdown } from '../../../lib/markdown.tsx';
 import { importanceLabel } from '../../../lib/narrative-walkthrough.ts';
-import type { WalkthroughIcon, WalkthroughOrderStop } from '../../../types.ts';
-import { phaseIcons } from './icons.tsx';
+import type { WalkthroughIcon, WalkthroughStop } from '../../../types.ts';
+import { chapterIcons } from './icons.tsx';
 
 export function AgentLogo({ agentId }: { agentId: 'codex' | 'claude' }) {
   return <img alt="" draggable={false} src={agentId === 'claude' ? claudeIconUrl : codexIconUrl} />;
 }
 
-export function PhaseIcon({ icon, size = 13 }: { icon: WalkthroughIcon; size?: number }) {
-  const Icon = phaseIcons[icon] ?? phaseIcons.path;
+export function ChapterIcon({ icon, size = 13 }: { icon: WalkthroughIcon; size?: number }) {
+  const Icon = chapterIcons[icon] ?? chapterIcons.path;
   return <Icon size={size} />;
 }
 
-export function ImportancePill({ importance }: { importance: WalkthroughOrderStop['importance'] }) {
+export function ImportancePill({ importance }: { importance: WalkthroughStop['importance'] }) {
   return <span className={`wt-importance ${importance}`}>{importanceLabel[importance]}</span>;
 }
 

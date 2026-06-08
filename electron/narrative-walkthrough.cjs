@@ -1,10 +1,9 @@
 // @ts-check
 
-// Validation, generation, and normalization for the Narrative Walkthrough
-// (version 2) document. This module is the trust boundary: it validates and
-// repairs agent-authored documents against the live diff so the renderer always
-// gets a walkthrough whose references resolve.
+// Narrative walkthrough generation and normalization trust boundary.
 
+const { readFileSync } = require('node:fs');
+const { dirname, join } = require('node:path');
 const {
   cleanText,
   normalizeEnum,
@@ -12,6 +11,24 @@ const {
   parseJSONMessage,
   truncate,
 } = require('./agent-shared.cjs');
+const {
+  AGENTS,
+  CHANGE_TYPES,
+  ICONS,
+  IMPORTANCES,
+  MAX_HUNKS_PER_WALKTHROUGH_GROUP,
+  MAX_WALKTHROUGH_CHAPTERS,
+  MAX_WALKTHROUGH_STOPS,
+  narrativeWalkthroughResponseSchema,
+  narrativeWalkthroughSchema,
+} = require('./narrative-walkthrough-schema.cjs');
+const {
+  buildAnchorDisplay,
+  extractPatchHunks,
+  hunkDisplayEnd,
+  hunkDisplayStart,
+  sumHunkLineCounts,
+} = require('../shared/narrative-walkthrough-diff.cjs');
 
 /**
  * @typedef {import('../src/types.ts').ChangedFile} ChangedFile
@@ -24,242 +41,12 @@ const {
  * @typedef {import('./agent.cjs').AgentOptions} AgentOptions
  */
 
-const GRANULARITIES = new Set(['line', 'hunk', 'file']);
-const IMPORTANCES = new Set(['critical', 'normal', 'context']);
-const SIDES = new Set(['additions', 'deletions', 'both']);
-const COMMENT_SIDES = new Set(['additions', 'deletions']);
-const STATUSES = new Set(['added', 'deleted', 'modified', 'renamed', 'untracked']);
-const ICONS = new Set(['bug', 'wrench', 'path', 'flask', 'beaker', 'doc', 'gear']);
-const AGENTS = new Set(['codex', 'claude']);
-const SECTION_KINDS = new Set(['commit', 'pull-request', 'staged', 'unstaged']);
-const CHANGE_TYPES = new Set([
-  'fix',
-  'feature',
-  'refactor',
-  'test',
-  'generated',
-  'lockfile',
-  'snapshot',
-  'i18n',
-  'docs',
-]);
-
+const root = dirname(__dirname);
 const MAX_PROSE_CHARS = 4_000;
 const MAX_TOTAL_PATCH_CHARS = 60_000;
 const MAX_LARGE_TOTAL_PATCH_CHARS = 35_000;
 const MAX_SECTION_PATCH_CHARS = 2_500;
 const MAX_LARGE_SECTION_PATCH_CHARS = 700;
-const MAX_WALKTHROUGH_PHASES = 6;
-const MAX_WALKTHROUGH_STOPS = 14;
-
-const anchorTargetSchema = {
-  additionalProperties: false,
-  properties: {
-    added: { type: 'number' },
-    anchor: {
-      additionalProperties: false,
-      properties: {
-        display: { type: 'string' },
-        endLine: { type: 'number' },
-        sectionId: { type: 'string' },
-        sectionKind: { enum: [...SECTION_KINDS], type: 'string' },
-        side: { enum: [...SIDES], type: 'string' },
-        startLine: { type: 'number' },
-      },
-      required: ['display'],
-      type: 'object',
-    },
-    changeType: { enum: [...CHANGE_TYPES], type: 'string' },
-    comments: {
-      items: {
-        additionalProperties: false,
-        properties: {
-          author: { type: 'string' },
-          body: { type: 'string' },
-          id: { type: 'string' },
-          lineNumber: { type: 'number' },
-          side: { enum: [...COMMENT_SIDES], type: 'string' },
-          startLineNumber: { type: 'number' },
-          startSide: { enum: [...COMMENT_SIDES], type: 'string' },
-        },
-        required: ['id', 'body', 'side', 'lineNumber'],
-        type: 'object',
-      },
-      type: 'array',
-    },
-    commitNote: { type: 'string' },
-    deleted: { type: 'number' },
-    granularity: { enum: [...GRANULARITIES], type: 'string' },
-    id: { type: 'string' },
-    oldPath: { type: 'string' },
-    path: { type: 'string' },
-    status: { enum: [...STATUSES], type: 'string' },
-    summary: { type: 'string' },
-    title: { type: 'string' },
-  },
-  required: ['id', 'path', 'status', 'granularity', 'anchor', 'added', 'deleted'],
-  type: 'object',
-};
-
-// The narrative walkthrough JSON schema, kept in sync with src/walkthrough/
-// narrative-walkthrough.schema.json. Authoring agents constrain output to it; the
-// renderer trusts only the normalized result, not the raw schema-valid input.
-const narrativeWalkthroughSchema = {
-  additionalProperties: false,
-  properties: {
-    agent: { enum: ['codex', 'claude'], type: 'string' },
-    chapters: {
-      items: {
-        additionalProperties: false,
-        properties: {
-          blurb: { type: 'string' },
-          icon: { enum: [...ICONS], type: 'string' },
-          id: { type: 'string' },
-          stops: {
-            items: {
-              additionalProperties: false,
-              properties: {
-                anchors: {
-                  items: anchorTargetSchema,
-                  maxItems: 8,
-                  type: 'array',
-                },
-                body: { type: 'string' },
-                id: { type: 'string' },
-                importance: { enum: [...IMPORTANCES], type: 'string' },
-                summary: { type: 'string' },
-                title: { type: 'string' },
-              },
-              required: ['id', 'title', 'summary', 'body', 'importance', 'anchors'],
-              type: 'object',
-            },
-            maxItems: MAX_WALKTHROUGH_STOPS,
-            type: 'array',
-          },
-          title: { maxLength: 16, type: 'string' },
-        },
-        required: ['id', 'title', 'icon', 'blurb', 'stops'],
-        type: 'object',
-      },
-      maxItems: MAX_WALKTHROUGH_PHASES,
-      type: 'array',
-    },
-    commit: {
-      additionalProperties: false,
-      properties: {
-        body: { type: 'string' },
-        title: { type: 'string' },
-      },
-      type: 'object',
-    },
-    context: { type: 'object' },
-    focus: { type: 'string' },
-    generatedAt: { type: 'string' },
-    kind: { const: 'narrative', type: 'string' },
-    meta: { type: 'string' },
-    repo: {
-      additionalProperties: false,
-      properties: {
-        branch: { type: ['string', 'null'] },
-        root: { type: 'string' },
-      },
-      required: ['root', 'branch'],
-      type: 'object',
-    },
-    source: { type: 'object' },
-    support: {
-      items: {
-        additionalProperties: false,
-        properties: {
-          id: { type: 'string' },
-          files: {
-            items: anchorTargetSchema,
-            type: 'array',
-          },
-          note: { type: 'string' },
-          title: { type: 'string' },
-        },
-        required: ['id', 'title', 'files'],
-        type: 'object',
-      },
-      type: 'array',
-    },
-    title: { type: 'string' },
-    version: { const: 3, type: 'number' },
-  },
-  required: ['version', 'kind', 'agent', 'title', 'focus', 'repo', 'source', 'chapters', 'support'],
-  type: 'object',
-};
-
-const toArray = (value) => (Array.isArray(value) ? value : value == null ? [] : [value]);
-
-/**
- * OpenAI structured outputs require every object key to be listed in `required`.
- * Keep Codiff's public schema ergonomic, and derive the stricter response-format
- * schema only for agent calls. Originally optional properties become nullable.
- * @param {any} schema
- * @param {boolean} [optional]
- */
-const strictResponseSchema = (schema, optional = false) => {
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
-    return schema;
-  }
-
-  const next = { ...schema };
-  const typeValues = toArray(next.type);
-  const isObject = typeValues.includes('object') || next.properties;
-
-  if (next.properties && typeof next.properties === 'object') {
-    const originalRequired = new Set(Array.isArray(next.required) ? next.required : []);
-    const properties = {};
-    for (const [key, value] of Object.entries(next.properties)) {
-      properties[key] = strictResponseSchema(value, !originalRequired.has(key));
-    }
-    next.properties = properties;
-  }
-
-  if (next.items) {
-    next.items = strictResponseSchema(next.items, false);
-  }
-
-  if (isObject) {
-    next.additionalProperties = false;
-    next.required = Object.keys(next.properties || {});
-  }
-
-  if (optional) {
-    if (next.type) {
-      next.type = [...new Set([...toArray(next.type), 'null'])];
-    } else if (next.const !== undefined) {
-      next.anyOf = [{ const: next.const }, { type: 'null' }];
-      delete next.const;
-    }
-  }
-
-  return next;
-};
-
-/**
- * @param {any} schema
- * @param {ReadonlyArray<string>} keys
- */
-const omitSchemaProperties = (schema, keys) => {
-  const next = {
-    ...schema,
-    properties: { ...schema.properties },
-  };
-  for (const key of keys) {
-    delete next.properties[key];
-  }
-  next.required = (Array.isArray(schema.required) ? schema.required : []).filter(
-    (key) => !keys.includes(key),
-  );
-  return next;
-};
-
-const narrativeWalkthroughResponseSchema = strictResponseSchema(
-  omitSchemaProperties(narrativeWalkthroughSchema, ['context', 'source']),
-);
 
 /** @param {unknown} value @param {string} [fallback] */
 const cleanRich = (value, fallback = '') => {
@@ -296,12 +83,36 @@ const stripLeadingCommitTitle = (body, title) => {
 };
 
 /** @param {unknown} value */
-const coerceLine = (value) =>
-  typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : undefined;
+const normalizeStringArray = (value) => {
+  const strings = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const text = oneLine(item);
+    if (text && !strings.includes(text)) {
+      strings.push(text);
+    }
+  }
+  return strings;
+};
 
 /** @param {unknown} value */
-const coerceCount = (value) =>
-  typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+const normalizeGeneratedAt = (value) => {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  return '';
+};
+
+/** @param {any} input */
+const isLegacyV3Walkthrough = (input) =>
+  input?.version === 3 ||
+  (Array.isArray(input?.chapters) &&
+    input.chapters.some((chapter) =>
+      (chapter?.stops || []).some((stop) => Array.isArray(stop?.anchors)),
+    )) ||
+  (Array.isArray(input?.support) && input.support.some((item) => Array.isArray(item?.files)));
 
 /** @param {string} status */
 const defaultSideForStatus = (status) => {
@@ -318,54 +129,53 @@ const defaultSideForStatus = (status) => {
 
 /** @param {ReadonlyArray<ChangedFile>} files */
 const indexFiles = (files) => {
-  const byPath = new Map();
+  const hunkById = new Map();
   for (const file of files) {
-    const sections = (file.sections || []).map((section) => ({
-      id: section.id,
-      kind: section.kind,
-    }));
-    byPath.set(file.path, {
-      firstSection: sections[0],
-      oldPath: file.oldPath,
-      sectionById: new Map(sections.map((section) => [section.id, section])),
-      sections,
-      status: file.status,
-    });
+    for (const section of file.sections || []) {
+      extractPatchHunks(section.patch).forEach((hunk, index) => {
+        const id = `${section.id}:h${index + 1}`;
+        hunkById.set(id, {
+          ...hunk,
+          id,
+          index: index + 1,
+          oldPath: file.oldPath,
+          path: file.path,
+          sectionId: section.id,
+          sectionKind: section.kind,
+          status: file.status,
+        });
+      });
+    }
   }
 
-  return byPath;
+  return { hunkById };
 };
 
-/**
- * Pin an anchor to a real DiffSection for `path`, repairing a missing or stale
- * sectionId. Prefers a section whose kind matches the requested sectionKind.
- * @param {any} anchor @param {ReturnType<typeof indexFiles> extends Map<any, infer V> ? V : never} entry @param {string} status @param {string} granularity
- */
-const normalizeAnchor = (anchor, entry, status, granularity) => {
-  const requestedId = oneLine(anchor?.sectionId);
-  const requestedKind = normalizeEnum(anchor?.sectionKind, SECTION_KINDS, undefined);
-
-  let section = requestedId ? entry.sectionById.get(requestedId) : undefined;
-  if (!section && requestedKind) {
-    section = entry.sections.find((candidate) => candidate.kind === requestedKind);
+const resolveHunks = (hunkIds, index) => {
+  const hunks = [];
+  for (const hunkId of hunkIds) {
+    const hunk = index.hunkById.get(hunkId);
+    if (!hunk) {
+      return null;
+    }
+    hunks.push(hunk);
   }
-  if (!section) {
-    section = entry.firstSection;
-  }
+  return hunks;
+};
 
-  const side = normalizeEnum(anchor?.side, SIDES, defaultSideForStatus(status));
-  const startLine = granularity === 'file' ? undefined : coerceLine(anchor?.startLine);
-  const endLine = granularity === 'file' ? undefined : coerceLine(anchor?.endLine);
+const normalizeAnchor = (hunk) => {
+  const path = hunk.path;
+  const side = defaultSideForStatus(hunk.status);
+  const startLine = hunkDisplayStart(hunk);
+  const endLine = hunkDisplayEnd(hunk);
 
   /** @type {Record<string, unknown>} */
   const normalized = {
-    display: cleanText(anchor?.display),
+    display: buildAnchorDisplay(path, [hunk]),
     side,
+    sectionId: hunk.sectionId,
+    sectionKind: hunk.sectionKind,
   };
-  if (section) {
-    normalized.sectionId = section.id;
-    normalized.sectionKind = section.kind;
-  }
   if (startLine !== undefined) {
     normalized.startLine = startLine;
   }
@@ -376,175 +186,145 @@ const normalizeAnchor = (anchor, entry, status, granularity) => {
   return normalized;
 };
 
-/** @param {any} comment */
-const normalizeComment = (comment, index) => {
-  const lineNumber = coerceLine(comment?.lineNumber);
-  if (lineNumber === undefined) {
+const normalizeHunk = (hunk) => {
+  /** @type {Record<string, unknown>} */
+  const normalized = {
+    added: hunk.added,
+    anchor: normalizeAnchor(hunk),
+    additionEnd: hunk.additionEnd,
+    additionStart: hunk.additionStart,
+    deleted: hunk.deleted,
+    deletionEnd: hunk.deletionEnd,
+    deletionStart: hunk.deletionStart,
+    id: hunk.id,
+    path: hunk.path,
+    status: hunk.status,
+  };
+  if (hunk.oldPath) {
+    normalized.oldPath = hunk.oldPath;
+  }
+  return normalized;
+};
+
+/** @param {any} note @param {ReadonlySet<string>} hunkIds */
+const normalizeHunkNote = (note, hunkIds) => {
+  const hunkId = oneLine(note?.hunkId);
+  const body = cleanText(note?.body);
+  if (!hunkId || !body || !hunkIds.has(hunkId)) {
+    return null;
+  }
+  return { body, hunkId };
+};
+
+/** @param {any} item @param {string} fallbackId @param {ReturnType<typeof indexFiles>} index */
+const normalizeHunkGroup = (item, fallbackId, index) => {
+  const id = oneLine(item?.id) || fallbackId;
+  const hunkIds = normalizeStringArray(item?.hunkIds);
+  if (!id || hunkIds.length === 0 || hunkIds.length > MAX_HUNKS_PER_WALKTHROUGH_GROUP) {
     return null;
   }
 
+  const selectedHunks = resolveHunks(hunkIds, index);
+  if (!selectedHunks || selectedHunks.length !== hunkIds.length) {
+    return null;
+  }
+
+  const lineCount = sumHunkLineCounts(selectedHunks);
+  const selectedHunkIds = new Set(selectedHunks.map((hunk) => hunk.id));
+
   /** @type {Record<string, unknown>} */
   const normalized = {
-    body: typeof comment?.body === 'string' ? comment.body : '',
-    id: oneLine(comment?.id) || `c${index + 1}`,
-    lineNumber,
-    side: normalizeEnum(comment?.side, COMMENT_SIDES, 'additions'),
+    added: lineCount.added,
+    deleted: lineCount.deleted,
+    hunkIds: selectedHunks.map((hunk) => hunk.id),
+    hunks: selectedHunks.map(normalizeHunk),
+    id,
   };
 
-  const author = oneLine(comment?.author);
-  if (author) {
-    normalized.author = author;
+  const title = cleanText(item?.title);
+  if (title) {
+    normalized.title = title;
   }
-  const startLineNumber = coerceLine(comment?.startLineNumber);
-  if (startLineNumber !== undefined) {
-    normalized.startLineNumber = startLineNumber;
+  const summary = cleanText(item?.summary);
+  if (summary) {
+    normalized.summary = summary;
   }
-  const startSide = normalizeEnum(comment?.startSide, COMMENT_SIDES, undefined);
-  if (startSide) {
-    normalized.startSide = startSide;
+  const changeType = normalizeEnum(item?.changeType, CHANGE_TYPES, undefined);
+  if (changeType) {
+    normalized.changeType = changeType;
+  }
+  const commitNote = cleanText(item?.commitNote);
+  if (commitNote) {
+    normalized.commitNote = commitNote;
+  }
+
+  const notes = [];
+  const notedHunkIds = new Set();
+  for (const note of Array.isArray(item?.notes) ? item.notes : []) {
+    const normalizedNote = normalizeHunkNote(note, selectedHunkIds);
+    if (!normalizedNote || notedHunkIds.has(normalizedNote.hunkId)) {
+      continue;
+    }
+    notes.push(normalizedNote);
+    notedHunkIds.add(normalizedNote.hunkId);
+  }
+  if (notes.length > 0) {
+    normalized.notes = notes;
   }
 
   return normalized;
 };
 
-/** @param {any} segment */
-const getSegmentAnchor = (segment) => {
-  if (segment?.anchor && typeof segment.anchor === 'object') {
-    return segment.anchor;
-  }
+const hunkGroupKey = (group) => (group.hunkIds || []).join('\n');
 
-  return {
-    display: oneLine(segment?.display) || oneLine(segment?.path),
-    endLine: segment?.endLine,
-    sectionId: segment?.sectionId,
-    sectionKind: segment?.sectionKind,
-    side: segment?.side,
-    startLine: segment?.startLine,
-  };
-};
-
-/**
- * @param {ReadonlyArray<any>} targets
- * @param {ReadonlyArray<ChangedFile>} files
- * @param {Set<string>} usedIds
- * @param {Set<string>} usedPaths
- */
-const normalizeAnchorTargets = (targets, files, usedIds, usedPaths) => {
-  const byPath = indexFiles(files);
-  const normalizedTargets = [];
-
-  for (const segment of Array.isArray(targets) ? targets : []) {
-    const id = oneLine(segment?.id);
-    const path = oneLine(segment?.path);
-    const entry = byPath.get(path);
-    if (!id || usedIds.has(id) || usedPaths.has(path) || !entry) {
-      // Drop unidentified, duplicate, or stale-path anchors.
-      continue;
-    }
-
-    const granularity = normalizeEnum(segment?.granularity, GRANULARITIES, 'hunk');
-    const status = normalizeEnum(segment?.status, STATUSES, entry.status);
-
-    /** @type {Record<string, unknown>} */
-    const normalized = {
-      added: coerceCount(segment?.added),
-      anchor: normalizeAnchor(getSegmentAnchor(segment), entry, status, granularity),
-      deleted: coerceCount(segment?.deleted),
-      granularity,
-      id,
-      path,
-      status,
-    };
-
-    const oldPath = oneLine(segment?.oldPath) || entry.oldPath;
-    if (oldPath) {
-      normalized.oldPath = oldPath;
-    }
-    const title = cleanText(segment?.title);
-    if (title) {
-      normalized.title = title;
-    }
-    const summary = cleanText(segment?.summary);
-    if (summary) {
-      normalized.summary = summary;
-    }
-    const changeType = normalizeEnum(segment?.changeType, CHANGE_TYPES, undefined);
-    if (changeType) {
-      normalized.changeType = changeType;
-    }
-    const commitNote = cleanText(segment?.commitNote);
-    if (commitNote) {
-      normalized.commitNote = commitNote;
-    }
-    const comments = (Array.isArray(segment?.comments) ? segment.comments : [])
-      .map((comment, index) => normalizeComment(comment, index))
-      .filter(Boolean);
-    if (comments.length > 0) {
-      normalized.comments = comments;
-    }
-
-    normalizedTargets.push(normalized);
-    usedIds.add(id);
-    usedPaths.add(path);
-  }
-
-  return normalizedTargets;
-};
-
-/**
- * @param {any} input
- * @param {ReadonlyArray<ChangedFile>} files
- */
-const normalizeChapters = (input, files, usedIds, usedPaths) => {
+const normalizeChapters = (input, index, coveredHunkIds) => {
   const chapters = [];
   const chapterIds = new Set();
-  const stopIds = new Set();
+  const itemIds = new Set();
   let stopCount = 0;
 
-  for (const [chapterIndex, chapter] of (Array.isArray(input?.chapters)
-    ? input.chapters
-    : []
-  ).entries()) {
-    if (chapters.length >= MAX_WALKTHROUGH_PHASES) {
+  for (const chapter of Array.isArray(input?.chapters) ? input.chapters : []) {
+    if (chapters.length >= MAX_WALKTHROUGH_CHAPTERS || stopCount >= MAX_WALKTHROUGH_STOPS) {
       break;
     }
-    const id = oneLine(chapter?.id) || `chapter-${chapterIndex + 1}`;
-    if (chapterIds.has(id)) {
+
+    const id = oneLine(chapter?.id);
+    if (!id || chapterIds.has(id)) {
       continue;
     }
 
     const stops = [];
-    for (const [stopIndex, stop] of (Array.isArray(chapter?.stops)
-      ? chapter.stops
-      : []
-    ).entries()) {
+    const seenStopHunkGroups = new Set();
+    for (const stop of Array.isArray(chapter?.stops) ? chapter.stops : []) {
       if (stopCount >= MAX_WALKTHROUGH_STOPS) {
         break;
       }
-      const stopId = oneLine(stop?.id) || `${id}-stop-${stopIndex + 1}`;
-      if (stopIds.has(stopId)) {
+
+      const group = normalizeHunkGroup(stop, `${id}-stop-${stops.length + 1}`, index);
+      if (!group || itemIds.has(group.id)) {
         continue;
       }
-      const anchors = normalizeAnchorTargets(stop?.anchors, files, usedIds, usedPaths);
-      if (anchors.length === 0) {
+
+      const key = hunkGroupKey(group);
+      const overlapsCoveredHunk = group.hunkIds.some((hunkId) => coveredHunkIds.has(hunkId));
+      if (seenStopHunkGroups.has(key) || overlapsCoveredHunk) {
         continue;
       }
-      stopIds.add(stopId);
+
+      const prose = cleanRich(stop?.prose);
+      if (!prose) {
+        continue;
+      }
+
+      group.importance = normalizeEnum(stop?.importance, IMPORTANCES, 'normal');
+      group.prose = prose;
+      stops.push(group);
+      itemIds.add(group.id);
+      seenStopHunkGroups.add(key);
       stopCount += 1;
-      const title =
-        cleanText(stop?.title) ||
-        cleanText(anchors[0]?.title) ||
-        cleanText(anchors[0]?.path) ||
-        `Stop ${stopCount}`;
-      const summary = cleanText(stop?.summary) || cleanText(anchors[0]?.summary) || title;
-      stops.push({
-        anchors,
-        body: cleanRich(stop?.body || stop?.prose || summary),
-        id: stopId,
-        importance: normalizeEnum(stop?.importance, IMPORTANCES, 'normal'),
-        summary,
-        title,
-      });
+      for (const hunkId of group.hunkIds) {
+        coveredHunkIds.add(hunkId);
+      }
     }
 
     if (stops.length === 0) {
@@ -557,168 +337,125 @@ const normalizeChapters = (input, files, usedIds, usedPaths) => {
       icon: normalizeEnum(chapter?.icon, ICONS, 'path'),
       id,
       stops,
-      title: cleanText(chapter?.title, 'Review'),
+      title: cleanText(chapter?.title, 'Chapter'),
     });
   }
 
-  return chapters;
+  return { chapters, itemIds, stopCount };
 };
 
-/**
- * @param {any} input
- * @param {ReadonlyArray<ChangedFile>} files
- * @param {Set<string>} usedIds
- * @param {Set<string>} usedPaths
- */
-const normalizeSupport = (input, files, usedIds, usedPaths) => {
-  const groups = [];
-  const groupIds = new Set();
+const normalizeAuthoredSupport = (input, index, coveredHunkIds, itemIds) => {
+  const support = [];
+  const seenSupportHunkGroups = new Set();
+  for (const item of Array.isArray(input?.support) ? input.support : []) {
+    const group = normalizeHunkGroup(item, `support-${support.length + 1}`, index);
+    if (!group || itemIds.has(group.id)) {
+      continue;
+    }
 
-  for (const [groupIndex, group] of (Array.isArray(input?.support)
-    ? input.support
-    : []
-  ).entries()) {
-    const id = oneLine(group?.id) || `support-${groupIndex + 1}`;
-    if (groupIds.has(id)) {
+    const key = hunkGroupKey(group);
+    if (
+      seenSupportHunkGroups.has(key) ||
+      group.hunkIds.some((hunkId) => coveredHunkIds.has(hunkId))
+    ) {
       continue;
     }
-    const filesForGroup = normalizeAnchorTargets(group?.files, files, usedIds, usedPaths);
-    if (filesForGroup.length === 0) {
+
+    group.reason = cleanText(item?.reason, 'Other changes');
+    const note = cleanText(item?.note);
+    if (note) {
+      group.note = note;
+    }
+    support.push(group);
+    itemIds.add(group.id);
+    seenSupportHunkGroups.add(key);
+    for (const hunkId of group.hunkIds) {
+      coveredHunkIds.add(hunkId);
+    }
+  }
+  return support;
+};
+
+const addUnreferencedSupport = (support, index, coveredHunkIds, itemIds) => {
+  const groupsByPath = new Map();
+  for (const hunk of index.hunkById.values()) {
+    if (coveredHunkIds.has(hunk.id)) {
       continue;
     }
-    groupIds.add(id);
-    groups.push({
-      files: filesForGroup,
-      id,
-      note: cleanText(group?.note),
-      title: cleanText(group?.title, 'Other changes'),
-    });
+    const groups = groupsByPath.get(hunk.path) || [];
+    groups.push(hunk);
+    groupsByPath.set(hunk.path, groups);
   }
 
-  return groups;
-};
-
-/**
- * @param {ReadonlyArray<ChangedFile>} files
- * @param {ReadonlyArray<any>} chapters
- * @param {Array<any>} support
- */
-const addMissingFilesToSupport = (files, chapters, support) => {
-  const coveredPaths = new Set();
-  for (const chapter of chapters) {
-    for (const stop of chapter.stops || []) {
-      for (const target of stop.anchors || []) {
-        coveredPaths.add(target.path);
+  for (const [path, hunks] of groupsByPath) {
+    for (let start = 0; start < hunks.length; start += MAX_HUNKS_PER_WALKTHROUGH_GROUP) {
+      const chunk = hunks.slice(start, start + MAX_HUNKS_PER_WALKTHROUGH_GROUP);
+      const lineCount = sumHunkLineCounts(chunk);
+      let counter = support.length + 1;
+      let id = `support-${counter}`;
+      while (itemIds.has(id)) {
+        counter += 1;
+        id = `support-${counter}`;
+      }
+      support.push({
+        added: lineCount.added,
+        deleted: lineCount.deleted,
+        hunkIds: chunk.map((hunk) => hunk.id),
+        hunks: chunk.map(normalizeHunk),
+        id,
+        reason: 'Other changes',
+        title: path,
+      });
+      itemIds.add(id);
+      for (const hunk of chunk) {
+        coveredHunkIds.add(hunk.id);
       }
     }
   }
-  for (const group of support) {
-    for (const target of group.files || []) {
-      coveredPaths.add(target.path);
-    }
-  }
-
-  const missing = [];
-  for (const file of files) {
-    if (coveredPaths.has(file.path)) {
-      continue;
-    }
-    const section = file.sections?.[0];
-    const totals = (file.sections || []).reduce(
-      (sum, section) => {
-        const count = countPatchLines(section.patch || '');
-        return { added: sum.added + count.added, deleted: sum.deleted + count.deleted };
-      },
-      { added: 0, deleted: 0 },
-    );
-    missing.push({
-      added: totals.added,
-      anchor: normalizeAnchor(
-        { display: file.path, sectionId: section?.id, sectionKind: section?.kind },
-        {
-          firstSection: section,
-          oldPath: file.oldPath,
-          sectionById: new Map((file.sections || []).map((section) => [section.id, section])),
-          sections: (file.sections || []).map((section) => ({
-            id: section.id,
-            kind: section.kind,
-          })),
-          status: file.status,
-        },
-        file.status,
-        'file',
-      ),
-      deleted: totals.deleted,
-      granularity: 'file',
-      id: `__file:${file.path}`,
-      oldPath: file.oldPath,
-      path: file.path,
-      status: normalizeEnum(file.status, STATUSES, 'modified'),
-      summary: 'Not included in the generated walkthrough.',
-    });
-  }
-
-  if (missing.length > 0) {
-    support.push({
-      files: missing,
-      id: '__missing',
-      note: 'Not included in the generated walkthrough.',
-      title: 'Other changes',
-    });
-  }
 };
 
-/**
- * Validate and repair a narrative walkthrough against the current diff.
- * @param {any} input
- * @param {ReadonlyArray<ChangedFile>} files
- * @returns {NarrativeWalkthrough}
- */
-const normalizeNarrativeWalkthrough = (input, files) => {
+const normalizeNarrativeWalkthrough = (input, files, facts = {}) => {
   if (!input || typeof input !== 'object') {
     throw new Error('Narrative walkthrough is not an object.');
   }
-
-  const usedIds = new Set();
-  const usedPaths = new Set();
-  const chapters = normalizeChapters(input, files, usedIds, usedPaths);
-  const support = normalizeSupport(input, files, usedIds, usedPaths);
-  addMissingFilesToSupport(files, chapters, support);
-
-  if (chapters.length === 0 && support.length === 0) {
-    throw new Error('Narrative walkthrough has no anchors that match the current diff.');
+  if (isLegacyV3Walkthrough(input)) {
+    throw new Error(
+      'Narrative walkthrough uses the legacy v3 anchors[] schema. Regenerate it with the v4 hunkIds[] schema for this diff.',
+    );
   }
 
-  const branch =
-    typeof input.repo?.branch === 'string' || input.repo?.branch === null
-      ? input.repo.branch
-      : null;
+  const index = indexFiles(files);
+  const coveredHunkIds = new Set();
+  const { chapters, itemIds, stopCount } = normalizeChapters(input, index, coveredHunkIds);
+  if (chapters.length === 0 || stopCount === 0) {
+    throw new Error('Narrative walkthrough has no chapters with resolvable stops.');
+  }
+
+  const support = normalizeAuthoredSupport(input, index, coveredHunkIds, itemIds);
+  addUnreferencedSupport(support, index, coveredHunkIds, itemIds);
+
+  const branch = typeof facts.branch === 'string' || facts.branch === null ? facts.branch : null;
+  const source =
+    facts.source && typeof facts.source === 'object' ? facts.source : { type: 'working-tree' };
 
   /** @type {Record<string, unknown>} */
   const result = {
-    agent: normalizeEnum(input.agent, AGENTS, 'claude'),
-    focus: cleanText(input.focus, 'Walk through the change.'),
-    generatedAt: oneLine(input.generatedAt),
+    agent: normalizeEnum(facts.agent, AGENTS, 'codex'),
     chapters,
+    focus: cleanText(input.focus, 'Walk through the change.'),
+    generatedAt: normalizeGeneratedAt(facts.generatedAt),
     kind: 'narrative',
     repo: {
       branch,
-      root: oneLine(input.repo?.root),
+      root: oneLine(facts.root),
     },
-    source:
-      input.source && typeof input.source === 'object' ? input.source : { type: 'working-tree' },
+    source,
     support,
     title: cleanText(input.title, 'Walkthrough'),
-    version: 3,
+    version: 4,
   };
 
-  const meta = cleanText(input.meta);
-  if (meta) {
-    result.meta = meta;
-  }
-  if (input.context && typeof input.context === 'object') {
-    result.context = input.context;
-  }
+  result.meta = `${stopCount} stops · ${chapters.length} chapters`;
 
   // A commit composer only makes sense for a live staging set — never a past
   // commit, branch, or pull request. For working trees, always expose the
@@ -729,7 +466,7 @@ const normalizeNarrativeWalkthrough = (input, files) => {
     const commit = {};
     const inputCommit = input.commit && typeof input.commit === 'object' ? input.commit : {};
     const rawBody = cleanRich(inputCommit.body);
-    let title = cleanText(inputCommit.title || inputCommit.subjectSeed);
+    let title = cleanText(inputCommit.title);
     if (!title && rawBody) {
       const firstLine = rawBody
         .split(/\r?\n/)
@@ -752,7 +489,7 @@ const normalizeNarrativeWalkthrough = (input, files) => {
   return /** @type {NarrativeWalkthrough} */ (result);
 };
 
-/** @param {DiffSection} section @param {number} remainingBudget */
+/** @param {DiffSection} section @param {number} remainingBudget @param {number} sectionPatchBudget */
 const buildPatchExcerpt = (section, remainingBudget, sectionPatchBudget) => {
   const summary = section.summary?.reason ? `Summary: ${section.summary.reason}\n` : '';
   const patch = section.patch || '';
@@ -763,24 +500,6 @@ const buildPatchExcerpt = (section, remainingBudget, sectionPatchBudget) => {
   }
 
   return `${summary}${truncate(patch, maxLength)}`;
-};
-
-/** @param {string} patch */
-const countPatchLines = (patch) => {
-  let added = 0;
-  let deleted = 0;
-  for (const line of patch.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---')) {
-      continue;
-    }
-    if (line.startsWith('+')) {
-      added += 1;
-    } else if (line.startsWith('-')) {
-      deleted += 1;
-    }
-  }
-
-  return { added, deleted };
 };
 
 /** @param {number} fileCount */
@@ -802,48 +521,45 @@ const buildPromptInput = (state) => {
 
   return {
     branch: state.branch,
-    commit: state.commitMetadata
-      ? {
-          stats: state.commitMetadata.stats,
-          subject: state.commitMetadata.subject,
-        }
-      : undefined,
-    files: state.files.map((file, index) => {
-      let added = 0;
-      let deleted = 0;
-      const sections = file.sections.map((section) => {
-        const stats = countPatchLines(section.patch || '');
-        added += stats.added;
-        deleted += stats.deleted;
+    files: state.files.map((file) => ({
+      oldPath: file.oldPath,
+      path: file.path,
+      sections: file.sections.map((section) => {
         const patchExcerpt = buildPatchExcerpt(section, remainingPatchBudget, patchBudget.section);
         remainingPatchBudget = Math.max(0, remainingPatchBudget - patchExcerpt.length);
+        const hunks = extractPatchHunks(section.patch).map((hunk, index) => ({
+          added: hunk.added,
+          deleted: hunk.deleted,
+          header: hunk.header,
+          id: `${section.id}:h${index + 1}`,
+          newLines:
+            hunk.additionStart === hunk.additionEnd
+              ? `${hunk.additionStart}`
+              : `${hunk.additionStart}-${hunk.additionEnd}`,
+          oldLines:
+            hunk.deletionStart === hunk.deletionEnd
+              ? `${hunk.deletionStart}`
+              : `${hunk.deletionStart}-${hunk.deletionEnd}`,
+        }));
 
         return {
           binary: section.binary,
+          hunks,
           id: section.id,
           kind: section.kind,
+          loadState: section.loadState,
           patchExcerpt,
           summary: section.summary?.reason,
         };
-      });
-
-      return {
-        added,
-        deleted,
-        index: index + 1,
-        oldPath: file.oldPath,
-        path: file.path,
-        sections,
-        status: file.status,
-      };
-    }),
+      }),
+      status: file.status,
+    })),
     generatedAt: state.generatedAt,
     root: state.root,
     source: state.source,
   };
 };
 
-/** @param {WalkthroughContext | null | undefined} context @param {string} agentLabel */
 const buildWalkthroughContextInput = (context, agentLabel) =>
   context
     ? `${agentLabel} conversation context:
@@ -855,50 +571,47 @@ If the context and digest conflict, trust the digest.
 `
     : '';
 
-/** @param {RepositoryState} state */
 const buildWalkthroughSizingGuidance = (state) => {
   const fileCount = state.files.length;
   const targetStops = fileCount <= 6 ? '3-6' : fileCount <= 16 ? '5-9' : '7-12';
   return `Coverage contract:
-- The digest has ${fileCount} files. Every file must appear exactly once in either a stop anchor or support.files.
-- Create anchor ids a1, a2, ... in digest.files order. Do not skip files. Do not invent files.
-- Use file granularity for broad file-level changes. Use hunk or line only for a truly pinpointed change.
-- Do not add comments unless there is an explicit review-comment need.
+- The digest has ${fileCount} files. Cover the changed hunks a reviewer should see, and put secondary/mechanical hunks in support[] rather than hiding them.
+- Define chapters[] in display order. Inside each chapter, define stops[] in display order.
+- Use stable item ids like s1, s2, ... for main stops and support-1, support-2, ... for supporting groups. Do not invent hunk ids.
+- Default to one hunkId per stop or support item.
 
 Grouping contract:
 - Target ${targetStops} main-path stops and at most ${MAX_WALKTHROUGH_STOPS}.
-- Use 2-${MAX_WALKTHROUGH_PHASES} chapters. Chapter titles render in a compact top bar: 1-2 short words and at most 16 characters, e.g. "UI", "CLI", "Tests", "Docs", "Runtime", "Cleanup".
-- Do not create one stop per file. Each stop should name one review idea and can include up to 8 anchors for files that belong to that idea.
-- Put generated files, lockfiles, snapshots, broad CSS churn, deleted legacy files, and repeated mechanical edits into support[] unless they are essential to the main review path.
-- Prefer fewer stronger stops over exhaustive prose.
-- Keep stop.summary to one concrete sentence. Keep stop.body short and specific. Do not use generic filler, broad assurance language, meta-explanatory labels, or markdown headings.
+- Use 2-${MAX_WALKTHROUGH_CHAPTERS} story chapters. A chapter is a conceptual group, not a file.
+- Chapter titles render in a compact top bar: keep each title to 1-2 short words and at most 16 characters, e.g. "UI", "CLI", "Tests", "Docs", "Runtime", "Cleanup".
+- A stop or support item may contain at most ${MAX_HUNKS_PER_WALKTHROUGH_GROUP} hunkIds. Use multiple hunkIds only when the prose needs those hunks read together to understand one invariant.
+- Split distant same-file hunks into separate consecutive stops when they deserve separate prose. Do not make a chapter-sized stop.
+- Put hunkIds in the exact display order you want Codiff to render. Out-of-line and cross-file order is allowed when it improves reviewer comprehension.
+- Use notes[] on a stop/support item for short per-hunk header notes: each note is { hunkId, body } and hunkId must be one of that item's hunkIds.
+- Do not provide added/deleted counts, status, oldPath, section ids, display labels, path, repo, source, generatedAt, agent, or meta; Codiff computes those.
+- Put secondary, mechanical, generated, docs-only, or repeated-pattern hunks in support[], grouped by reason.
 - For working-tree sources, include commit.title and commit.body by default unless there are no commit-worthy files. Put the subject line in commit.title, not as the first line of commit.body.
 `;
 };
 
-/** @param {RepositoryState} state @param {WalkthroughContext | null | undefined} [context] @param {string} [agentLabel] */
 const buildNarrativeWalkthroughPrompt = (
   state,
   context,
   agentLabel = 'Codex',
 ) => `You are authoring Codiff's narrative walkthrough JSON.
 
-Return JSON only and match the provided schema exactly. Do not inspect the repository or run shell commands; use only the optional conversation context and repository digest below.
+Return JSON only. Do not inspect the repository or run shell commands; use only the guide, optional conversation context, and repository digest below.
 
 ${buildWalkthroughSizingGuidance(state)}
 
+Current Codiff walkthrough guide:
+${readFileSync(join(root, 'bin/walkthrough-guide.md'), 'utf8').trim()}
+
 ${buildWalkthroughContextInput(context, agentLabel)}
 Repository change digest:
-${JSON.stringify(buildPromptInput(state))}
+${JSON.stringify(buildPromptInput(state), null, 2)}
 `;
 
-/**
- * @param {RepositoryState} state
- * @param {Agent} agent
- * @param {AgentOptions} agentOptions
- * @param {WalkthroughContext | null | undefined} [context]
- * @returns {Promise<NarrativeWalkthroughResult>}
- */
 const readNarrativeWalkthrough = async (state, agent, agentOptions, context) => {
   try {
     const response = await agent.run(
@@ -907,18 +620,16 @@ const readNarrativeWalkthrough = async (state, agent, agentOptions, context) => 
       narrativeWalkthroughResponseSchema,
       'walkthrough.json',
       `${agent.label} walkthrough timed out.`,
-      { ...agentOptions, reasoningEffort: 'low' },
+      agentOptions,
     );
     const parsed = parseJSONMessage(response);
-    const normalizedInput =
-      parsed && typeof parsed === 'object'
-        ? {
-            ...parsed,
-            ...(context ? { context } : {}),
-            source: state.source,
-          }
-        : parsed;
-    const walkthrough = normalizeNarrativeWalkthrough(normalizedInput, state.files);
+    const walkthrough = normalizeNarrativeWalkthrough(parsed, state.files, {
+      agent: agent.id,
+      branch: state.branch,
+      generatedAt: state.generatedAt,
+      root: state.root,
+      source: state.source,
+    });
     if (context && !walkthrough.context) {
       walkthrough.context = context;
     }

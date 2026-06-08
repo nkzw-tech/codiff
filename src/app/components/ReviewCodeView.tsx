@@ -24,10 +24,12 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type SyntheticEvent,
 } from 'react';
 import claudeIconUrl from '../../assets/claude.svg';
@@ -41,6 +43,7 @@ import type {
   ReviewAnnotationMetadata,
   ReviewComment,
   ReviewCommentAnnotationMetadata,
+  ReviewIdentity,
   ReviewScrollBehavior,
   ReviewScrollTarget,
   WalkthroughNote,
@@ -77,6 +80,7 @@ import {
   shouldDiscardReviewCommentOnEscape,
   updateStickyHeaderState,
 } from '../../lib/review-comments.ts';
+import { getReviewIdentity, isReviewIdentityViewed } from '../../lib/review-identity.ts';
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
 import type {
   ChangedFile,
@@ -147,9 +151,9 @@ function CodeViewHeader({
   meta: CodeViewItemMetadata;
   onLoadSection: (file: ChangedFile, section: DiffSection) => void;
   onOpenFile: (file: ChangedFile) => void;
-  onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean) => void;
+  onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean, reviewKey: string) => void;
   onToggleMarkdownPreview: (section: DiffSection) => void;
-  onToggleViewed: (file: ChangedFile, isViewed: boolean) => void;
+  onToggleViewed: (file: ChangedFile, isViewed: boolean, reviewIdentity: ReviewIdentity) => void;
 }) {
   const {
     canRenderMarkdown,
@@ -159,6 +163,7 @@ function CodeViewHeader({
     isSelected,
     isViewed,
     lineCount,
+    reviewIdentity,
     section,
     sectionCount,
     walkthroughNote,
@@ -176,11 +181,11 @@ function CodeViewHeader({
         aria-expanded={!isCollapsed}
         aria-label={isCollapsed ? 'Expand file' : 'Collapse file'}
         className="codiff-header-toggle"
-        onClick={() => onToggleCollapsed(file, isCollapsed)}
+        onClick={() => onToggleCollapsed(file, isCollapsed, reviewIdentity.key)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            onToggleCollapsed(file, isCollapsed);
+            onToggleCollapsed(file, isCollapsed, reviewIdentity.key);
           }
         }}
         role="button"
@@ -247,7 +252,7 @@ function CodeViewHeader({
       <button
         aria-pressed={isViewed}
         className={`codiff-viewed-button${isViewed ? ' active' : ''}`}
-        onClick={() => onToggleViewed(file, isViewed)}
+        onClick={() => onToggleViewed(file, isViewed, reviewIdentity)}
         type="button"
       >
         <span aria-hidden className="codiff-viewed-checkbox">
@@ -290,6 +295,9 @@ const canSubmitCommentToGitHub = (comment: ReviewComment) =>
   !comment.isReadOnly &&
   comment.body.trim().length > 0 &&
   comment.githubSubmit?.status !== 'submitting';
+
+const withCommentBody = (comment: ReviewComment, body: string): ReviewComment =>
+  comment.body === body ? comment : { ...comment, body };
 
 const getAddedLinesDigest = (lines: ReadonlySet<number>) =>
   lines.size > 0 ? [...lines].join(',') : '';
@@ -591,6 +599,259 @@ function ImageDiffPreview({
   );
 }
 
+function ReviewCommentEditor({
+  agentId,
+  agentLabel,
+  comment,
+  displayName,
+  focusCommentId,
+  focusTextareaRef,
+  identity,
+  isPullRequest,
+  keymap,
+  onAskCodex,
+  onCommentBlur,
+  onCommentFocus,
+  onDeleteComment,
+  onSubmitComment,
+  onUpdateComment,
+}: {
+  agentId: 'codex' | 'claude';
+  agentLabel: string;
+  comment: ReviewComment;
+  displayName: string;
+  focusCommentId: string | null;
+  focusTextareaRef: (node: HTMLTextAreaElement | null) => void;
+  identity: GitIdentity | null;
+  isPullRequest: boolean;
+  keymap: CodiffKeymap;
+  onAskCodex: (commentId: string) => void;
+  onCommentBlur: (comment: ReviewComment, body: string) => void;
+  onCommentFocus: (comment: ReviewComment) => void;
+  onDeleteComment: (commentId: string) => void;
+  onSubmitComment: (commentId: string) => void;
+  onUpdateComment: (commentId: string, body: string) => void;
+}) {
+  const [draftState, setDraftState] = useState(() => ({
+    commentBody: comment.body,
+    commentId: comment.id,
+    dirty: false,
+    draft: comment.body,
+  }));
+  const effectiveDraftState =
+    draftState.commentId === comment.id
+      ? draftState
+      : {
+          commentBody: comment.body,
+          commentId: comment.id,
+          dirty: false,
+          draft: comment.body,
+        };
+  const draft =
+    !effectiveDraftState.dirty && effectiveDraftState.commentBody !== comment.body
+      ? comment.body
+      : effectiveDraftState.draft;
+
+  const draftComment = withCommentBody(comment, draft);
+  const canAskCodex = canAskCodexForComment(draftComment);
+  const canSubmitComment = canSubmitCommentToGitHub(draftComment);
+  const flushDraft = useCallback(() => {
+    setDraftState((current) =>
+      current.commentId === comment.id
+        ? {
+            ...current,
+            commentBody: comment.body,
+            dirty: false,
+            draft,
+          }
+        : {
+            commentBody: comment.body,
+            commentId: comment.id,
+            dirty: false,
+            draft,
+          },
+    );
+    if (!comment.isReadOnly && draft !== comment.body) {
+      onUpdateComment(comment.id, draft);
+    }
+    return withCommentBody(comment, draft);
+  }, [comment, draft, onUpdateComment]);
+  const handleChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const draft = event.currentTarget.value;
+      setDraftState((current) => ({
+        commentBody: comment.body,
+        commentId: comment.id,
+        dirty: true,
+        draft,
+      }));
+    },
+    [comment.body, comment.id],
+  );
+
+  const handleAskCodex = useCallback(() => {
+    const flushed = flushDraft();
+    if (canAskCodexForComment(flushed)) {
+      onAskCodex(comment.id);
+    }
+  }, [comment.id, flushDraft, onAskCodex]);
+
+  const handleSubmitComment = useCallback(() => {
+    const flushed = flushDraft();
+    if (canSubmitCommentToGitHub(flushed)) {
+      onSubmitComment(comment.id);
+    }
+  }, [comment.id, flushDraft, onSubmitComment]);
+
+  const handleBlur = useCallback(() => {
+    onCommentBlur(flushDraft(), draft);
+  }, [draft, flushDraft, onCommentBlur]);
+
+  const handleFocus = useCallback(() => {
+    onCommentFocus(draftComment);
+  }, [draftComment, onCommentFocus]);
+
+  const handleKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+      if (matchesShortcut(event, keymap, 'submitComment')) {
+        if (isPullRequest && canSubmitComment) {
+          event.preventDefault();
+          event.stopPropagation();
+          handleSubmitComment();
+          return;
+        }
+
+        if (!isPullRequest && canAskCodex) {
+          event.preventDefault();
+          event.stopPropagation();
+          handleAskCodex();
+        }
+        return;
+      }
+
+      if (!matchesShortcut(event, keymap, 'discardComment')) {
+        return;
+      }
+
+      if (comment.isReadOnly) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (shouldDiscardReviewCommentOnEscape(draft)) {
+        onDeleteComment(comment.id);
+      }
+    },
+    [
+      canAskCodex,
+      canSubmitComment,
+      comment.id,
+      comment.isReadOnly,
+      draft,
+      handleAskCodex,
+      handleSubmitComment,
+      isPullRequest,
+      keymap,
+      onDeleteComment,
+    ],
+  );
+
+  return (
+    <Fragment>
+      <div className="review-comment">
+        <ReviewAvatar author={comment.author} identity={identity} />
+        <div className="review-comment-body">
+          <div
+            className={`review-comment-header${
+              isPullRequest && !comment.isReadOnly ? ' with-comment-action' : ''
+            }${comment.isReadOnly ? ' read-only' : ''}`}
+          >
+            <strong>{displayName}</strong>
+            <span>{getReviewCommentLineLabel(comment)}</span>
+            {!comment.isReadOnly ? (
+              <button
+                className="review-comment-action"
+                disabled={!canAskCodex}
+                onClick={handleAskCodex}
+                title={
+                  canAskCodex ? `Ask ${agentLabel}` : `Write a note before asking ${agentLabel}`
+                }
+                type="button"
+              >
+                Ask
+              </button>
+            ) : null}
+            {isPullRequest && !comment.isReadOnly ? (
+              <button
+                className="review-comment-action"
+                disabled={!canSubmitComment}
+                onClick={handleSubmitComment}
+                title={
+                  canSubmitComment ? 'Submit comment to GitHub' : 'Write a note before commenting'
+                }
+                type="button"
+              >
+                {comment.githubSubmit?.status === 'submitting' ? 'Sending' : 'Comment'}
+              </button>
+            ) : null}
+            {!comment.isReadOnly ? (
+              <button
+                aria-label="Delete comment"
+                className="review-comment-delete"
+                onClick={() => onDeleteComment(comment.id)}
+                title="Delete comment"
+                type="button"
+              >
+                <X aria-hidden className="review-comment-delete-icon" size={14} weight="bold" />
+              </button>
+            ) : null}
+          </div>
+          <textarea
+            aria-label={`Comment on ${comment.filePath} ${getReviewCommentLineLabel(comment)}`}
+            className={`review-comment-input${comment.isReadOnly ? ' read-only' : ''}`}
+            onBlur={handleBlur}
+            onChange={handleChange}
+            onFocus={handleFocus}
+            onKeyDown={handleKeyDown}
+            placeholder="Write a review comment…"
+            readOnly={comment.isReadOnly}
+            ref={comment.id === focusCommentId ? focusTextareaRef : undefined}
+            rows={3}
+            spellCheck
+            value={draft}
+          />
+          {comment.githubSubmit?.status === 'error' ? (
+            <div className="review-comment-error">{comment.githubSubmit.error}</div>
+          ) : null}
+        </div>
+      </div>
+      {comment.codexReply ? (
+        <div className="review-comment codex">
+          <AgentAvatar agentId={agentId} />
+          <div className="review-comment-body codex">
+            <div className="review-comment-header codex">
+              <strong>{agentLabel}</strong>
+            </div>
+            <div
+              className={`review-comment-codex-reply${
+                comment.codexReply.status === 'loading' ? ' is-loading' : ''
+              }${comment.codexReply.status === 'error' ? ' error' : ''}`}
+            >
+              {comment.codexReply.status === 'loading' ? (
+                <span className="review-comment-codex-loading">Waiting for {agentLabel}…</span>
+              ) : (
+                renderMarkdown(comment.codexReply.body ?? comment.codexReply.error ?? '')
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </Fragment>
+  );
+}
+
 function ReviewAnnotation({
   agentId,
   agentLabel,
@@ -625,6 +886,9 @@ function ReviewAnnotation({
   onUpdateComment: (commentId: string, body: string) => void;
 }) {
   const focusTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const setFocusTextareaRef = useCallback((node: HTMLTextAreaElement | null) => {
+    focusTextareaRef.current = node;
+  }, []);
   const annotationComments = annotation.metadata.commentIds
     .map((commentId) => comments.find((comment) => comment.id === commentId))
     .filter((comment): comment is ReviewComment => comment != null);
@@ -637,42 +901,6 @@ function ReviewAnnotation({
     }
   }, [focusCommentId, focusCommentRequest, hasFocusedComment]);
 
-  const handleCommentKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLTextAreaElement>, comment: ReviewComment) => {
-      if (matchesShortcut(event, keymap, 'submitComment')) {
-        if (isPullRequest && canSubmitCommentToGitHub(comment)) {
-          event.preventDefault();
-          event.stopPropagation();
-          onSubmitComment(comment.id);
-          return;
-        }
-
-        if (!isPullRequest && canAskCodexForComment(comment)) {
-          event.preventDefault();
-          event.stopPropagation();
-          onAskCodex(comment.id);
-        }
-        return;
-      }
-
-      if (!matchesShortcut(event, keymap, 'discardComment')) {
-        return;
-      }
-
-      if (comment.isReadOnly) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (shouldDiscardReviewCommentOnEscape(comment.body)) {
-        onDeleteComment(comment.id);
-      }
-    },
-    [isPullRequest, keymap, onAskCodex, onDeleteComment, onSubmitComment],
-  );
-
   if (annotationComments.length === 0) {
     return null;
   }
@@ -680,113 +908,28 @@ function ReviewAnnotation({
   return (
     <div className="review-comment-thread">
       {annotationComments.map((comment) => {
-        const canAskCodex = canAskCodexForComment(comment);
-        const canSubmitComment = canSubmitCommentToGitHub(comment);
         const displayName =
           comment.author?.login || identity?.name || identity?.email || 'Git user';
 
         return (
-          <Fragment key={comment.id}>
-            <div className="review-comment">
-              <ReviewAvatar author={comment.author} identity={identity} />
-              <div className="review-comment-body">
-                <div
-                  className={`review-comment-header${
-                    isPullRequest && !comment.isReadOnly ? ' with-comment-action' : ''
-                  }${comment.isReadOnly ? ' read-only' : ''}`}
-                >
-                  <strong>{displayName}</strong>
-                  <span>{getReviewCommentLineLabel(comment)}</span>
-                  {!comment.isReadOnly ? (
-                    <button
-                      className="review-comment-action"
-                      disabled={!canAskCodex}
-                      onClick={() => onAskCodex(comment.id)}
-                      title={
-                        canAskCodex
-                          ? `Ask ${agentLabel}`
-                          : `Write a note before asking ${agentLabel}`
-                      }
-                      type="button"
-                    >
-                      Ask
-                    </button>
-                  ) : null}
-                  {isPullRequest && !comment.isReadOnly ? (
-                    <button
-                      className="review-comment-action"
-                      disabled={!canSubmitComment}
-                      onClick={() => onSubmitComment(comment.id)}
-                      title={
-                        canSubmitComment
-                          ? 'Submit comment to GitHub'
-                          : 'Write a note before commenting'
-                      }
-                      type="button"
-                    >
-                      {comment.githubSubmit?.status === 'submitting' ? 'Sending' : 'Comment'}
-                    </button>
-                  ) : null}
-                  {!comment.isReadOnly ? (
-                    <button
-                      aria-label="Delete comment"
-                      className="review-comment-delete"
-                      onClick={() => onDeleteComment(comment.id)}
-                      title="Delete comment"
-                      type="button"
-                    >
-                      <X
-                        aria-hidden
-                        className="review-comment-delete-icon"
-                        size={14}
-                        weight="bold"
-                      />
-                    </button>
-                  ) : null}
-                </div>
-                <textarea
-                  aria-label={`Comment on ${comment.filePath} ${getReviewCommentLineLabel(comment)}`}
-                  className={`review-comment-input${comment.isReadOnly ? ' read-only' : ''}`}
-                  onBlur={(event) => onCommentBlur(comment, event.currentTarget.value)}
-                  onChange={(event) => onUpdateComment(comment.id, event.currentTarget.value)}
-                  onFocus={() => onCommentFocus(comment)}
-                  onKeyDown={(event) => handleCommentKeyDown(event, comment)}
-                  placeholder="Write a review comment…"
-                  readOnly={comment.isReadOnly}
-                  ref={comment.id === focusCommentId ? focusTextareaRef : undefined}
-                  rows={3}
-                  spellCheck
-                  value={comment.body}
-                />
-                {comment.githubSubmit?.status === 'error' ? (
-                  <div className="review-comment-error">{comment.githubSubmit.error}</div>
-                ) : null}
-              </div>
-            </div>
-            {comment.codexReply ? (
-              <div className="review-comment codex">
-                <AgentAvatar agentId={agentId} />
-                <div className="review-comment-body codex">
-                  <div className="review-comment-header codex">
-                    <strong>{agentLabel}</strong>
-                  </div>
-                  <div
-                    className={`review-comment-codex-reply${
-                      comment.codexReply.status === 'loading' ? ' is-loading' : ''
-                    }${comment.codexReply.status === 'error' ? ' error' : ''}`}
-                  >
-                    {comment.codexReply.status === 'loading' ? (
-                      <span className="review-comment-codex-loading">
-                        Waiting for {agentLabel}…
-                      </span>
-                    ) : (
-                      renderMarkdown(comment.codexReply.body ?? comment.codexReply.error ?? '')
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-          </Fragment>
+          <ReviewCommentEditor
+            agentId={agentId}
+            agentLabel={agentLabel}
+            comment={comment}
+            displayName={displayName}
+            focusCommentId={focusCommentId}
+            focusTextareaRef={setFocusTextareaRef}
+            identity={identity}
+            isPullRequest={isPullRequest}
+            key={comment.id}
+            keymap={keymap}
+            onAskCodex={onAskCodex}
+            onCommentBlur={onCommentBlur}
+            onCommentFocus={onCommentFocus}
+            onDeleteComment={onDeleteComment}
+            onSubmitComment={onSubmitComment}
+            onUpdateComment={onUpdateComment}
+          />
         );
       })}
     </div>
@@ -816,10 +959,6 @@ const getCommitDetailsVersionKey = (
   navigationKey: string,
 ) => [getCommitDetailsContentKey(metadata), layoutPass, navigationKey].join('\u0001');
 
-function isScrollTargetRendered(viewer: CodeViewInstance, itemId: string) {
-  return viewer.getRenderedItems().some((item) => item.id === itemId);
-}
-
 const getEffectiveScrollBehavior = (behavior: ReviewScrollBehavior) =>
   behavior === 'smooth' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     ? 'instant'
@@ -841,6 +980,142 @@ type NavAnchor = {
   scrollTarget: CodeViewScrollTarget;
   selection: SelectedLineRange | null;
   top: number;
+};
+
+type FileReviewDiffBlock = {
+  comments?: ReadonlyArray<ReviewComment>;
+  file: ChangedFile;
+  header?: ReactNode;
+  id: string;
+  itemIdPrefix?: string;
+  note?: string;
+  reviewIdentity?: ReviewIdentity;
+  selected?: boolean;
+};
+
+type HeaderReviewDiffBlock = {
+  file?: undefined;
+  header: ReactNode;
+  id: string;
+  selected?: boolean;
+};
+
+export type ReviewDiffBlock = FileReviewDiffBlock | HeaderReviewDiffBlock;
+
+const createFileReviewBlocks = (
+  files: ReadonlyArray<ChangedFile>,
+): ReadonlyArray<ReviewDiffBlock> =>
+  files.map((file) => ({
+    file,
+    id: `file:${file.path}`,
+  }));
+
+const getBlockItemId = (block: FileReviewDiffBlock, section: DiffSection) =>
+  block.itemIdPrefix ? `${block.itemIdPrefix}:${getItemId(section)}` : getItemId(section);
+
+const getBlockHeaderItemId = (block: ReviewDiffBlock) => `${block.id}:walkthrough-header`;
+
+const createInlineWalkthroughNote = (reason: string): WalkthroughNote => ({
+  action: 'review',
+  context: reason,
+  groupReason: 'Walkthrough',
+  groupTitle: 'Walkthrough',
+  impact: 'contained',
+  order: 0,
+  reason,
+});
+
+const getBlockWalkthroughNote = (
+  block: FileReviewDiffBlock,
+  fallbackByPath: ReadonlyMap<string, WalkthroughNote>,
+) => (block.note ? createInlineWalkthroughNote(block.note) : fallbackByPath.get(block.file.path));
+
+const lineIsVisibleInFileDiff = (
+  fileDiff: FileDiffMetadata,
+  side: ReviewComment['side'],
+  lineNumber: number,
+) =>
+  fileDiff.hunks.some((hunk) => {
+    const hunkStart = side === 'deletions' ? hunk.deletionStart : hunk.additionStart;
+    const hunkLineCount = side === 'deletions' ? hunk.deletionCount : hunk.additionCount;
+    return lineNumber >= hunkStart && lineNumber < hunkStart + hunkLineCount;
+  });
+
+const reviewCommentAnchorIsVisibleInFileDiff = (
+  comment: ReviewComment,
+  fileDiff: FileDiffMetadata,
+) => lineIsVisibleInFileDiff(fileDiff, comment.side, comment.lineNumber);
+
+const diffSearchMatchIsVisibleInFileDiff = (match: DiffSearchMatch, fileDiff: FileDiffMetadata) => {
+  if (match.lineNumber == null) {
+    return true;
+  }
+
+  return match.side
+    ? lineIsVisibleInFileDiff(fileDiff, match.side, match.lineNumber)
+    : lineIsVisibleInFileDiff(fileDiff, 'additions', match.lineNumber) ||
+        lineIsVisibleInFileDiff(fileDiff, 'deletions', match.lineNumber);
+};
+
+const dedupeReviewComments = (
+  comments: ReadonlyArray<ReviewComment>,
+): ReadonlyArray<ReviewComment> => {
+  const deduped: Array<ReviewComment> = [];
+  const seen = new Set<string>();
+  for (const comment of comments) {
+    if (seen.has(comment.id)) {
+      continue;
+    }
+    seen.add(comment.id);
+    deduped.push(comment);
+  }
+  return deduped;
+};
+
+const groupReviewCommentsBySection = (comments: ReadonlyArray<ReviewComment>) => {
+  const map = new Map<string, Array<ReviewComment>>();
+  for (const comment of comments) {
+    const list = map.get(comment.sectionId);
+    if (list) {
+      list.push(comment);
+    } else {
+      map.set(comment.sectionId, [comment]);
+    }
+  }
+  return map;
+};
+
+type RenderedSearchTarget = {
+  fileDiff: FileDiffMetadata;
+  itemId: string;
+  path: string;
+};
+
+const resolveRenderedSearchMatch = (
+  match: DiffSearchMatch | null,
+  itemMetadata: ReadonlyMap<string, CodeViewItemMetadata>,
+  searchTargetsByBaseItemId: ReadonlyMap<string, ReadonlyArray<RenderedSearchTarget>>,
+): DiffSearchMatch | null => {
+  if (!match) {
+    return null;
+  }
+
+  if (itemMetadata.has(match.itemId)) {
+    return match;
+  }
+
+  const candidates = searchTargetsByBaseItemId.get(match.itemId) ?? [];
+  const candidate =
+    candidates.find(
+      (candidate) =>
+        candidate.path === match.filePath &&
+        diffSearchMatchIsVisibleInFileDiff(match, candidate.fileDiff),
+    ) ??
+    candidates.find((candidate) => candidate.path === match.filePath) ??
+    candidates.find((candidate) => diffSearchMatchIsVisibleInFileDiff(match, candidate.fileDiff)) ??
+    candidates[0];
+
+  return candidate ? { ...match, itemId: candidate.itemId } : null;
 };
 
 // Estimate the rendered row index of a file line inside a diff item so comment
@@ -975,6 +1250,8 @@ export function ReviewCodeView({
   activeSearchMatch,
   agentId,
   agentLabel,
+  blocks,
+  bottomInset = codeViewLayout.paddingBottom,
   collapsed,
   comments,
   commitMetadata,
@@ -987,9 +1264,10 @@ export function ReviewCodeView({
   gitIdentity,
   hunkNavigation,
   isPullRequest,
-  itemVersionByPath,
+  itemVersionByKey,
   keymap,
   loadingSectionIds,
+  onActiveBlockChange,
   onAskCodex,
   onCreateComment,
   onDeleteComment,
@@ -1000,6 +1278,7 @@ export function ReviewCodeView({
   onToggleCollapsed,
   onToggleViewed,
   onUpdateComment,
+  reviewIdentityByPath,
   scrollTarget,
   searchQuery,
   selectedPath,
@@ -1012,6 +1291,8 @@ export function ReviewCodeView({
   activeSearchMatch: DiffSearchMatch | null;
   agentId: 'codex' | 'claude';
   agentLabel: string;
+  blocks?: ReadonlyArray<ReviewDiffBlock>;
+  bottomInset?: number;
   collapsed: ReadonlySet<string>;
   comments: ReadonlyArray<ReviewComment>;
   commitMetadata: CommitMetadata | null;
@@ -1024,9 +1305,10 @@ export function ReviewCodeView({
   gitIdentity: GitIdentity | null;
   hunkNavigation: HunkNavigationRequest | null;
   isPullRequest: boolean;
-  itemVersionByPath: Readonly<Record<string, number>>;
+  itemVersionByKey: Readonly<Record<string, number>>;
   keymap: CodiffKeymap;
   loadingSectionIds: ReadonlySet<string>;
+  onActiveBlockChange?: (blockId: string) => void;
   onAskCodex: (commentId: string) => void;
   onCreateComment: (comment: Omit<ReviewComment, 'body' | 'id'>) => void;
   onDeleteComment: (commentId: string) => void;
@@ -1034,9 +1316,10 @@ export function ReviewCodeView({
   onOpenFile: (file: ChangedFile) => void;
   onSelectPathFromScroll: (viewer: CodeViewInstance) => void;
   onSubmitComment: (commentId: string) => void;
-  onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean) => void;
-  onToggleViewed: (file: ChangedFile, isViewed: boolean) => void;
+  onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean, reviewKey: string) => void;
+  onToggleViewed: (file: ChangedFile, isViewed: boolean, reviewIdentity: ReviewIdentity) => void;
   onUpdateComment: (commentId: string, body: string) => void;
+  reviewIdentityByPath?: ReadonlyMap<string, ReviewIdentity>;
   scrollTarget: ReviewScrollTarget | null;
   searchQuery: string;
   selectedPath: string | null;
@@ -1083,15 +1366,24 @@ export function ReviewCodeView({
       ? commitDetailsCollapseState.collapsed
       : false;
   const stickyHeaderFrameRef = useRef<number | null>(null);
-  const commentsBySection = useMemo(() => {
-    const map = new Map<string, Array<ReviewComment>>();
+  const reviewBlocks = useMemo(() => blocks ?? createFileReviewBlocks(files), [blocks, files]);
+  const commentLookup = useMemo(() => {
+    const map = new Map<string, ReviewComment>();
     for (const comment of comments) {
-      const list = map.get(comment.sectionId) ?? [];
-      list.push(comment);
-      map.set(comment.sectionId, list);
+      map.set(comment.id, comment);
+    }
+    for (const block of reviewBlocks) {
+      if (!block.file) {
+        continue;
+      }
+      for (const comment of block.comments ?? []) {
+        map.set(comment.id, comment);
+      }
     }
     return map;
-  }, [comments]);
+  }, [comments, reviewBlocks]);
+  const renderComments = useMemo(() => [...commentLookup.values()], [commentLookup]);
+  const commentsBySection = useMemo(() => groupReviewCommentsBySection(comments), [comments]);
 
   const markMarkdownPreviewLayoutReady = useCallback((sectionId: string) => {
     setMarkdownPreviewLayoutPassBySection((current) => ({
@@ -1124,27 +1416,101 @@ export function ReviewCodeView({
     }
   }, [commitDetailsItemId, commitMetadata]);
 
-  const { commitDetailsFiles, firstItemByPath, itemMetadata, items } = useMemo(() => {
+  const {
+    commitDetailsFiles,
+    firstItemByBlockId,
+    firstItemByPath,
+    itemBlockId,
+    itemMetadata,
+    items,
+    searchTargetsByBaseItemId,
+  } = useMemo(() => {
     const nextItems: Array<CodeViewItem<ReviewAnnotationMetadata>> = [];
+    const nextFirstItemByBlockId = new Map<string, string>();
     const nextFirstItemByPath = new Map<string, string>();
+    const nextItemBlockId = new Map<string, string>();
     const nextItemMetadata = new Map<string, CodeViewItemMetadata>();
+    const nextSearchTargetsByBaseItemId = new Map<string, Array<RenderedSearchTarget>>();
     const fontLayoutKey = `line-height:${diffLineHeight}`;
 
-    for (const file of files) {
-      const isViewed = viewed[file.path] === file.fingerprint;
-      const isCollapsed = collapsed.has(file.path) && !forceExpandedPaths.has(file.path);
+    for (const block of reviewBlocks) {
+      if (block.header) {
+        const headerId = getBlockHeaderItemId(block);
+        nextFirstItemByBlockId.set(block.id, nextFirstItemByBlockId.get(block.id) ?? headerId);
+        nextItemBlockId.set(headerId, block.id);
+        nextItems.push({
+          annotations: [
+            {
+              lineNumber: 1,
+              metadata: {
+                header: block.header,
+                type: 'walkthrough-header',
+              },
+            } satisfies LineAnnotation<ReviewAnnotationMetadata>,
+          ],
+          collapsed: false,
+          file: {
+            cacheKey: `walkthrough-header:${block.id}`,
+            contents: ' ',
+            lang: 'text',
+            name: headerId,
+          },
+          id: headerId,
+          type: 'file',
+          version: getItemVersion(
+            `${block.id}:walkthrough-header:${block.selected === true ? 'selected' : 'idle'}`,
+          ),
+        });
+      }
+
+      if (!block.file) {
+        continue;
+      }
+
+      const file = block.file;
+      const reviewIdentity = block.reviewIdentity ?? getReviewIdentity(file, reviewIdentityByPath);
+      const reviewKey = reviewIdentity.key;
+      const isViewed = isReviewIdentityViewed(viewed, reviewIdentity);
+      const isCollapsed = collapsed.has(reviewKey) && !forceExpandedPaths.has(file.path);
       const visibleSections = getVisibleDiffSections(file, showWhitespace);
       const lineCount = getDiffLineCountFromVisibleSections(visibleSections);
       const sections = isCollapsed ? visibleSections.slice(0, 1) : visibleSections;
+      const walkthroughNote = getBlockWalkthroughNote(block, walkthroughNotes);
+      const blockCommentsBySection = groupReviewCommentsBySection(block.comments ?? []);
 
       for (const [index, { fileDiff, section }] of sections.entries()) {
-        const id = getItemId(section);
+        const baseItemId = getItemId(section);
+        const id = getBlockItemId(block, section);
+        nextItemBlockId.set(id, block.id);
+        const searchTargets = nextSearchTargetsByBaseItemId.get(baseItemId) ?? [];
+        searchTargets.push({ fileDiff, itemId: id, path: file.path });
+        nextSearchTargetsByBaseItemId.set(baseItemId, searchTargets);
         const markdownPreview = getMarkdownPreviewContents(file, section, fileDiff);
         const canRenderImage = canRenderImagePreview(file.path, section);
         const canRenderMarkdown = markdownPreview != null;
         const isMarkdownPreview = canRenderMarkdown && markdownPreviewSections.has(section.id);
+        const isSelected = block.selected ?? selectedPath === file.path;
+        const reviewVersionPrefix = `${itemVersionByKey[reviewKey] ?? 0}:${block.id}:${
+          reviewIdentity.fingerprint
+        }:${reviewKey}:${section.id}`;
+        const sectionStateVersionKey = `${isCollapsed ? 'collapsed' : 'open'}:${
+          isViewed ? 'viewed' : 'pending'
+        }:${index}:${isSelected ? 'selected' : 'idle'}:${fontLayoutKey}:${
+          walkthroughNote?.reason ?? ''
+        }`;
         const annotationMap = new Map<string, DiffLineAnnotation<ReviewAnnotationMetadata>>();
-        for (const comment of commentsBySection.get(section.id) ?? []) {
+        const globalSectionComments = commentsBySection.get(section.id) ?? [];
+        const visibleGlobalComments = globalSectionComments.filter(
+          (comment) =>
+            comment.filePath === file.path &&
+            reviewCommentAnchorIsVisibleInFileDiff(comment, fileDiff),
+        );
+        const blockSectionComments = blockCommentsBySection.get(section.id) ?? [];
+        const sectionComments = dedupeReviewComments([
+          ...visibleGlobalComments,
+          ...blockSectionComments,
+        ]);
+        for (const comment of sectionComments) {
           const key = getCommentKey(comment);
           const existing = annotationMap.get(key);
           if (existing && existing.metadata.type === 'review-comment') {
@@ -1168,17 +1534,21 @@ export function ReviewCodeView({
         }
 
         nextItemMetadata.set(id, {
+          blockId: block.id,
           canRenderMarkdown,
+          comments: sectionComments,
           file,
           isCollapsed,
           isMarkdownPreview,
-          isSelected: selectedPath === file.path,
+          isSelected,
           isViewed,
           lineCount,
+          reviewIdentity,
           section,
           sectionCount: file.sections.length,
-          walkthroughNote: walkthroughNotes.get(file.path),
+          walkthroughNote,
         });
+        nextFirstItemByBlockId.set(block.id, nextFirstItemByBlockId.get(block.id) ?? id);
         nextFirstItemByPath.set(file.path, nextFirstItemByPath.get(file.path) ?? id);
         if (canRenderImage) {
           nextItems.push({
@@ -1202,11 +1572,7 @@ export function ReviewCodeView({
             id,
             type: 'file',
             version: getItemVersion(
-              `${itemVersionByPath[file.path] ?? 0}:${file.fingerprint}:${section.id}:image:${
-                isCollapsed ? 'collapsed' : 'open'
-              }:${isViewed ? 'viewed' : 'pending'}:${index}:${
-                selectedPath === file.path ? 'selected' : 'idle'
-              }:${fontLayoutKey}:${walkthroughNotes.get(file.path)?.reason ?? ''}:${
+              `${reviewVersionPrefix}:image:${sectionStateVersionKey}:${
                 imagePreviewLayoutPassBySection[section.id] ?? 0
               }`,
             ),
@@ -1242,11 +1608,7 @@ export function ReviewCodeView({
             id,
             type: 'file',
             version: getItemVersion(
-              `${itemVersionByPath[file.path] ?? 0}:${file.fingerprint}:${section.id}:markdown:${
-                isCollapsed ? 'collapsed' : 'open'
-              }:${isViewed ? 'viewed' : 'pending'}:${index}:${
-                selectedPath === file.path ? 'selected' : 'idle'
-              }:${fontLayoutKey}:${walkthroughNotes.get(file.path)?.reason ?? ''}:${
+              `${reviewVersionPrefix}:markdown:${sectionStateVersionKey}:${
                 markdownPreviewLayoutKey
               }:${markdownPreviewLayoutPassBySection[section.id] ?? 0}`,
             ),
@@ -1260,13 +1622,9 @@ export function ReviewCodeView({
           id,
           type: 'diff',
           version: getItemVersion(
-            `${itemVersionByPath[file.path] ?? 0}:${file.fingerprint}:${section.id}:${
-              isCollapsed ? 'collapsed' : 'open'
-            }:${isViewed ? 'viewed' : 'pending'}:${index}:${
-              selectedPath === file.path ? 'selected' : 'idle'
-            }:${fontLayoutKey}:${walkthroughNotes.get(file.path)?.reason ?? ''}:${
+            `${reviewVersionPrefix}:${sectionStateVersionKey}:${
               showWhitespace ? 'ws' : 'ignore-ws'
-            }:${diffStyle}:${getReviewCommentsDigest(commentsBySection.get(section.id) ?? [])}`,
+            }:${diffStyle}:${getReviewCommentsDigest(sectionComments)}`,
           ),
         });
       }
@@ -1317,9 +1675,12 @@ export function ReviewCodeView({
 
     return {
       commitDetailsFiles: nextCommitDetailsFiles,
+      firstItemByBlockId: nextFirstItemByBlockId,
       firstItemByPath: nextFirstItemByPath,
+      itemBlockId: nextItemBlockId,
       itemMetadata: nextItemMetadata,
       items: nextItems,
+      searchTargetsByBaseItemId: nextSearchTargetsByBaseItemId,
     };
   }, [
     collapsed,
@@ -1330,15 +1691,16 @@ export function ReviewCodeView({
     commentsBySection,
     diffLineHeight,
     diffStyle,
-    files,
     forceExpandedPaths,
     imagePreviewLayoutPassBySection,
-    itemVersionByPath,
+    itemVersionByKey,
     markdownPreviewLayoutPassBySection,
     markdownPreviewSections,
+    reviewBlocks,
     selectedPath,
     showWhitespace,
     viewed,
+    reviewIdentityByPath,
     walkthroughNotes,
   ]);
 
@@ -1347,6 +1709,11 @@ export function ReviewCodeView({
     navigatedSelectionRef.current = null;
     setSelectedLines(null);
   }, []);
+
+  const resolvedActiveSearchMatch = useMemo(
+    () => resolveRenderedSearchMatch(activeSearchMatch, itemMetadata, searchTargetsByBaseItemId),
+    [activeSearchMatch, itemMetadata, searchTargetsByBaseItemId],
+  );
 
   const setCodeViewSelectedLines = useCallback((selection: CodeViewLineSelection | null) => {
     if (
@@ -1429,7 +1796,10 @@ export function ReviewCodeView({
         expansionLineCount: diffContextExpansionLineCount,
         hunkSeparators: 'line-info-basic',
         itemMetrics: codeViewItemMetrics,
-        layout: codeViewLayout,
+        layout: {
+          ...codeViewLayout,
+          paddingBottom: bottomInset,
+        },
         lineHoverHighlight: 'both',
         onGutterUtilityClick: (range, context) => {
           ignoreNextLineSelectionEndRef.current = context.item.type === 'diff';
@@ -1480,10 +1850,12 @@ export function ReviewCodeView({
         },
         onPostRender: (node, _instance, _phase, context) => {
           const metadata = itemMetadata.get(context.item.id);
+          const isWalkthroughHeaderItem = context.item.id.endsWith(':walkthrough-header');
           node.classList.toggle(
             'codiff-commit-details-item',
             context.item.id === commitDetailsItemId,
           );
+          node.classList.toggle('codiff-walkthrough-header-item', isWalkthroughHeaderItem);
           node.classList.toggle('codiff-selected-item', metadata?.isSelected === true);
           node.classList.toggle(
             'codiff-markdown-preview-item',
@@ -1515,6 +1887,7 @@ export function ReviewCodeView({
         unsafeCSS: codeViewUnsafeCSS,
       }) satisfies CodeViewOptions<ReviewAnnotationMetadata>,
     [
+      bottomInset,
       cancelPendingEmptyCommentDeletes,
       commitDetailsItemId,
       createCommentForRange,
@@ -1631,7 +2004,11 @@ export function ReviewCodeView({
     }
 
     const behavior = scrollTarget.behavior ?? 'instant';
-    const itemId = firstItemByPath.get(scrollTarget.path);
+    const itemId = scrollTarget.blockId
+      ? firstItemByBlockId.get(scrollTarget.blockId)
+      : scrollTarget.path
+        ? firstItemByPath.get(scrollTarget.path)
+        : null;
     if (!itemId) {
       return;
     }
@@ -1639,24 +2016,15 @@ export function ReviewCodeView({
     let frame: number | null = null;
     let attempts = 0;
     let canceled = false;
-    let requested = false;
 
     const tryScroll = () => {
       if (canceled || handledScrollRequestRef.current === scrollTarget.request) {
         return;
       }
 
-      const viewer = codeViewRef.current?.getInstance();
-      if (requested && viewer && isScrollTargetRendered(viewer, itemId)) {
+      if (requestScrollItemHeaderIntoView(itemId, behavior)) {
         handledScrollRequestRef.current = scrollTarget.request;
         return;
-      }
-
-      if (
-        (behavior === 'instant' || !requested) &&
-        requestScrollItemHeaderIntoView(itemId, behavior)
-      ) {
-        requested = true;
       }
 
       if (attempts < scrollTargetRetryFrameLimit) {
@@ -1673,7 +2041,7 @@ export function ReviewCodeView({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [firstItemByPath, requestScrollItemHeaderIntoView, scrollTarget]);
+  }, [firstItemByBlockId, firstItemByPath, requestScrollItemHeaderIntoView, scrollTarget]);
 
   useEffect(() => {
     selectedLinesRef.current = selectedLines;
@@ -1782,7 +2150,7 @@ export function ReviewCodeView({
         );
       }
 
-      for (const comment of commentsBySection.get(meta.section.id) ?? []) {
+      for (const comment of meta.comments) {
         addLineEntry(comment.lineNumber, comment.side, {
           end: comment.lineNumber,
           endSide: comment.side,
@@ -1852,7 +2220,6 @@ export function ReviewCodeView({
     handle.scrollTo(target.scrollTarget);
   }, [
     clearCommentLineHighlight,
-    commentsBySection,
     commitDetailsItemId,
     diffLineHeight,
     diffStyle,
@@ -1913,9 +2280,9 @@ export function ReviewCodeView({
 
     highlightFrameRef.current = window.requestAnimationFrame(() => {
       highlightFrameRef.current = null;
-      applySearchHighlights(viewer.getRenderedItems(), searchQuery, activeSearchMatch);
+      applySearchHighlights(viewer.getRenderedItems(), searchQuery, resolvedActiveSearchMatch);
     });
-  }, [activeSearchMatch, searchQuery]);
+  }, [resolvedActiveSearchMatch, searchQuery]);
 
   const scheduleStickyHeaderStateUpdate = useCallback((viewer?: CodeViewInstance) => {
     const nextViewer = viewer ?? codeViewRef.current?.getInstance();
@@ -1958,31 +2325,31 @@ export function ReviewCodeView({
   useEffect(() => {
     const handle = codeViewRef.current;
     const viewer = handle?.getInstance();
-    if (!handle || !viewer || !activeSearchMatch) {
+    if (!handle || !viewer || !resolvedActiveSearchMatch) {
       return;
     }
 
-    if (activeSearchMatch.lineNumber == null) {
+    if (resolvedActiveSearchMatch.lineNumber == null) {
       handle.scrollTo({
         align: 'center',
         behavior: 'smooth-auto',
-        id: activeSearchMatch.itemId,
+        id: resolvedActiveSearchMatch.itemId,
         type: 'item',
       });
     } else {
       handle.scrollTo({
         align: 'center',
         behavior: 'smooth-auto',
-        id: activeSearchMatch.itemId,
-        lineNumber: activeSearchMatch.lineNumber,
+        id: resolvedActiveSearchMatch.itemId,
+        lineNumber: resolvedActiveSearchMatch.lineNumber,
         offset: DEFAULT_PADDING,
-        side: activeSearchMatch.side,
+        side: resolvedActiveSearchMatch.side,
         type: 'line',
       });
     }
 
     scheduleSearchHighlights();
-  }, [activeSearchMatch, scheduleSearchHighlights]);
+  }, [resolvedActiveSearchMatch, scheduleSearchHighlights]);
 
   const renderCustomHeader = useCallback(
     (item: CodeViewItem<ReviewAnnotationMetadata>) => {
@@ -2071,12 +2438,16 @@ export function ReviewCodeView({
         );
       }
 
+      if (annotation.metadata.type === 'walkthrough-header') {
+        return annotation.metadata.header;
+      }
+
       return item.type === 'diff' ? (
         <ReviewAnnotation
           agentId={agentId}
           agentLabel={agentLabel}
           annotation={annotation as DiffLineAnnotation<ReviewCommentAnnotationMetadata>}
-          comments={comments}
+          comments={renderComments}
           focusCommentId={focusCommentId}
           focusCommentRequest={focusCommentRequest}
           identity={gitIdentity}
@@ -2094,7 +2465,6 @@ export function ReviewCodeView({
     [
       agentId,
       agentLabel,
-      comments,
       blurComment,
       commitDetailsFiles,
       deleteComment,
@@ -2111,6 +2481,7 @@ export function ReviewCodeView({
       onAskCodex,
       onSubmitComment,
       onUpdateComment,
+      renderComments,
       scrollToCommitDetailsDestination,
       source,
     ],
@@ -2119,10 +2490,34 @@ export function ReviewCodeView({
   const handleScroll = useCallback(
     (_scrollTop: number, viewer: CodeViewInstance) => {
       onSelectPathFromScroll(viewer);
+      if (onActiveBlockChange) {
+        const activationTop = viewer.getScrollTop() + DEFAULT_PADDING;
+        let activeBlockId: string | null = null;
+        for (const item of items) {
+          const top = viewer.getTopForItem(item.id);
+          if (top == null) {
+            continue;
+          }
+          if (top > activationTop) {
+            break;
+          }
+          activeBlockId = itemBlockId.get(item.id) ?? activeBlockId;
+        }
+        if (activeBlockId) {
+          onActiveBlockChange(activeBlockId);
+        }
+      }
       scheduleSearchHighlights();
       scheduleStickyHeaderStateUpdate(viewer);
     },
-    [onSelectPathFromScroll, scheduleSearchHighlights, scheduleStickyHeaderStateUpdate],
+    [
+      itemBlockId,
+      items,
+      onActiveBlockChange,
+      onSelectPathFromScroll,
+      scheduleSearchHighlights,
+      scheduleStickyHeaderStateUpdate,
+    ],
   );
 
   return (

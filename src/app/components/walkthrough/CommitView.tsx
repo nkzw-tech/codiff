@@ -12,7 +12,7 @@ import type {
   WalkthroughCommitResult,
 } from '../../../types.ts';
 import { ArrowsClockwise, Check, GitBranch } from './icons.tsx';
-import { PhaseIcon, WalkthroughLineCount } from './parts.tsx';
+import { ChapterIcon, WalkthroughLineCount } from './parts.tsx';
 
 export type CommitHandler = (request: WalkthroughCommitRequest) => Promise<WalkthroughCommitResult>;
 export type CommitMessageHandler = (
@@ -113,7 +113,7 @@ function StageGroupRow({
       <button className="wt-stage-group-head" onClick={() => onToggleGroup(paths)} type="button">
         <CommitCheck state={state} />
         <span className="wt-stage-group-icon">
-          <PhaseIcon icon={group.icon} size={14} />
+          <ChapterIcon icon={group.icon} size={14} />
         </span>
         <span className="wt-stage-group-title">{group.title}</span>
         <span className="wt-stage-group-count">

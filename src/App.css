@@ -865,6 +865,7 @@
 }
 
 .code-view {
+  --codiff-diff-radius: 28px;
   contain: strict;
   display: block;
   flex: 1;
@@ -1164,10 +1165,9 @@
 
 .code-view diffs-container {
   background: var(--code-bg);
-  border-radius: 28px;
-  box-shadow:
-    0 0 0 1px var(--file-border),
-    6px 18px 80px -54px rgb(0 0 0 / 0.78);
+  background-clip: padding-box;
+  border-radius: var(--codiff-diff-radius);
+  box-shadow: inset 0 0 0 1px var(--file-border);
   contain: layout style;
   corner-shape: squircle;
   display: block;
@@ -1539,19 +1539,18 @@
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   padding: 9px 10px;
-  transition: border-radius 120ms ease;
 }
 
 .codiff-file-header.selected {
   box-shadow:
     inset 0 -1px 0 var(--file-border),
     inset 0 0 0 1px rgb(61 135 245 / 0.52);
+  border-radius: var(--codiff-diff-radius) var(--codiff-diff-radius) 0 0;
   corner-shape: squircle;
-  border-radius: 28px 28px 0 0;
 }
 
 .codiff-file-header.collapsed {
-  border-radius: 28px;
+  border-radius: var(--codiff-diff-radius);
   box-shadow: none;
   corner-shape: squircle;
 }
