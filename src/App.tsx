@@ -17,16 +17,14 @@ import {
   RepositoryChangeBanner,
   RepositoryLoadErrorPanel,
   ReviewSourceLoading,
+  WalkthroughOutdatedBanner,
 } from './app/components/Panels.tsx';
 import { ReviewCodeView } from './app/components/ReviewCodeView.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
 import { CommitView } from './app/components/walkthrough/CommitView.tsx';
 import { NarrativeWalkthroughView } from './app/components/walkthrough/NarrativeWalkthroughView.tsx';
 import { useNarrativeNavigation } from './app/components/walkthrough/useNarrativeNavigation.ts';
-import {
-  type WalkthroughFileError,
-  WalkthroughFileErrorDialog,
-} from './app/components/WalkthroughFileError.tsx';
+import type { WalkthroughFileError } from './app/components/WalkthroughFileError.tsx';
 import { createDefaultConfig } from './config/defaults.ts';
 import { getShortcutLabel, matchesShortcut } from './config/keymap.ts';
 import type { CodiffConfig } from './config/types.ts';
@@ -388,6 +386,42 @@ export default function App() {
     }, 1200);
   }, []);
 
+  const setFileViewedState = useCallback(
+    (repositoryState: RepositoryState, file: ChangedFile, nextViewed: boolean) => {
+      setViewed((current) => {
+        if (!nextViewed) {
+          const next = { ...current };
+          delete next[file.path];
+          if (repositoryState.source.type === 'working-tree') {
+            writeViewed(repositoryState.root, next);
+          }
+          return next;
+        }
+
+        const next = {
+          ...current,
+          [file.path]: file.fingerprint,
+        };
+        if (repositoryState.source.type === 'working-tree') {
+          writeViewed(repositoryState.root, next);
+        }
+        return next;
+      });
+
+      setCollapsed((current) => {
+        const next = new Set(current);
+        if (nextViewed) {
+          next.add(file.path);
+        } else {
+          next.delete(file.path);
+        }
+        return next;
+      });
+      bumpItemVersion(file.path);
+    },
+    [bumpItemVersion],
+  );
+
   const saveCurrentSourceSession = useCallback(() => {
     const currentState = stateRef.current;
     if (!currentState) {
@@ -471,7 +505,11 @@ export default function App() {
       );
       setWalkthroughLoading(shouldLoadNarrative);
 
-      const narrativeResult = shouldLoadNarrative
+      // Always consult the main process for a pre-authored walkthrough file, even
+      // when the diff is empty, so it can diagnose *why* (e.g. the changes were
+      // committed) rather than us guessing in the renderer.
+      const shouldFetchNarrative = shouldLoadNarrative || walkthroughFilePath != null;
+      const narrativeResult = shouldFetchNarrative
         ? await window.codiff.getNarrativeWalkthrough(orderedState.source)
         : null;
       if (canceled) {
@@ -487,16 +525,19 @@ export default function App() {
         setWalkthroughError(null);
       }
 
-      // When a walkthrough file was explicitly passed but did not end up
-      // rendering, surface a modal explaining why rather than failing silently.
+      // When a walkthrough file was explicitly passed but did not anchor, drop
+      // the reviewer into the history view and float a dismissible banner
+      // explaining that the diff has moved on, rather than blocking with a modal.
       if (walkthroughFilePath != null && loadedNarrative == null) {
+        setSidebarMode('history');
         setWalkthroughFileError({
           path: walkthroughFilePath,
-          reason: !filesPresent
-            ? 'No changed files were found for this diff, so the walkthrough file has nothing to anchor to.'
-            : narrativeResult?.status === 'unavailable'
+          reason:
+            narrativeResult?.status === 'unavailable'
               ? narrativeResult.reason
-              : 'The walkthrough file could not be loaded.',
+              : !filesPresent
+                ? 'No changed files were found for this diff, so the walkthrough file has nothing to anchor to.'
+                : 'The walkthrough file could not be loaded.',
         });
       } else {
         setWalkthroughFileError(null);
@@ -1464,36 +1505,7 @@ export default function App() {
           }
 
           const isViewed = viewedRef.current[file.path] === file.fingerprint;
-          setViewed((current) => {
-            if (isViewed) {
-              const next = { ...current };
-              delete next[file.path];
-              if (currentState.source.type === 'working-tree') {
-                writeViewed(currentState.root, next);
-              }
-              return next;
-            }
-
-            const next = {
-              ...current,
-              [file.path]: file.fingerprint,
-            };
-            if (currentState.source.type === 'working-tree') {
-              writeViewed(currentState.root, next);
-            }
-            return next;
-          });
-
-          setCollapsed((current) => {
-            const next = new Set(current);
-            if (isViewed) {
-              next.delete(file.path);
-            } else {
-              next.add(file.path);
-            }
-            return next;
-          });
-          bumpItemVersion(file.path);
+          setFileViewedState(currentState, file, !isViewed);
         },
         id: 'toggle-viewed',
         title: 'Toggle Viewed',
@@ -1584,6 +1596,7 @@ export default function App() {
     openDiffSearch,
     openSelectedFile,
     reloadWindow,
+    setFileViewedState,
     toggleSidebar,
     toggleWordWrap,
   ]);
@@ -1656,40 +1669,9 @@ export default function App() {
         return;
       }
 
-      setViewed((current) => {
-        if (isViewed) {
-          const next = { ...current };
-          delete next[file.path];
-          if (state.source.type === 'working-tree') {
-            writeViewed(state.root, next);
-          }
-          return next;
-        }
-
-        const next = {
-          ...current,
-          [file.path]: file.fingerprint,
-        };
-        if (state.source.type === 'working-tree') {
-          writeViewed(state.root, next);
-        }
-        return next;
-      });
-
-      setCollapsed((current) => {
-        if (isViewed) {
-          const next = new Set(current);
-          next.delete(file.path);
-          return next;
-        }
-
-        const next = new Set(current);
-        next.add(file.path);
-        return next;
-      });
-      bumpItemVersion(file.path);
+      setFileViewedState(state, file, !isViewed);
     },
-    [bumpItemVersion, state],
+    [setFileViewedState, state],
   );
 
   const createComment = useCallback(
@@ -2159,6 +2141,10 @@ export default function App() {
         onReload={reloadWindow}
         visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
       />
+      <WalkthroughOutdatedBanner
+        onDismiss={() => setWalkthroughFileError(null)}
+        reason={walkthroughFileError?.reason ?? null}
+      />
       <DiffSearchPanel
         activeIndex={effectiveActiveDiffSearchMatchIndex}
         focusRequest={diffSearchFocusRequest}
@@ -2178,10 +2164,6 @@ export default function App() {
         visible={commandBarVisible}
       />
       <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
-      <WalkthroughFileErrorDialog
-        error={walkthroughFileError}
-        onDismiss={() => setWalkthroughFileError(null)}
-      />
       {!isSwitchingSource ? (
         <div className="review-action-bar">
           <CopyCommentsButton
@@ -2255,6 +2237,7 @@ export default function App() {
           searchQuery={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
           selectedPath={visibleSelectedPath}
           showWhitespace={showWhitespace}
+          viewed={viewed}
           walkthroughError={walkthroughError}
           walkthroughLoading={walkthroughLoading}
           walkthroughUnread={walkthroughUnread}

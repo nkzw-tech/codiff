@@ -1,6 +1,6 @@
 import type { FileTreeRowDecorationRenderer } from '@pierre/trees';
 import { FileTree, useFileTree } from '@pierre/trees/react';
-import { useCallback, useEffect, useMemo, useRef, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type MouseEvent, type RefObject } from 'react';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
 import type {
@@ -49,6 +49,7 @@ export function Sidebar({
   searchQuery,
   selectedPath,
   showWhitespace,
+  viewed,
   walkthroughError,
   walkthroughLoading,
   walkthroughUnread,
@@ -77,6 +78,7 @@ export function Sidebar({
   searchQuery: string;
   selectedPath: string | null;
   showWhitespace: boolean;
+  viewed: Record<string, string>;
   walkthroughError: WalkthroughError | null;
   walkthroughLoading: boolean;
   walkthroughUnread: boolean;
@@ -105,6 +107,7 @@ export function Sidebar({
     () => getReloadDeltaGitStatusCSS(reloadDeltaPaths),
     [reloadDeltaPaths],
   );
+  const viewedRowCSS = useMemo(() => getViewedRowCSS(files, viewed), [files, viewed]);
   const renderTreeRowDecoration = useCallback<FileTreeRowDecorationRenderer>(({ item }) => {
     const lineCount = lineCountsByPathRef.current.get(item.path);
     return lineCount?.countable
@@ -170,17 +173,8 @@ export function Sidebar({
     `,
   });
 
-  useEffect(() => {
-    // Tree unsafeCSS is constructor-time; keep reload delta styling dynamic without remounting.
-    if (syncReloadDeltaGitStatusCSS(treeHostRef.current, reloadDeltaGitStatusCSS)) {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      syncReloadDeltaGitStatusCSS(treeHostRef.current, reloadDeltaGitStatusCSS);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [reloadDeltaGitStatusCSS]);
+  useTreeShadowStyle(treeHostRef, reloadDeltaGitStatusStyleAttribute, reloadDeltaGitStatusCSS);
+  useTreeShadowStyle(treeHostRef, viewedRowStyleAttribute, viewedRowCSS);
 
   useEffect(() => {
     model.resetPaths(paths);
@@ -401,24 +395,70 @@ const getReloadDeltaGitStatusCSS = (paths: ReadonlySet<string>) =>
     )
     .join('\n');
 
-const reloadDeltaGitStatusStyleAttribute = 'data-codiff-reload-delta-git-status';
+const getViewedRowCSS = (files: ReadonlyArray<ChangedFile>, viewed: Record<string, string>) =>
+  getViewedRowCSSFromSelectors(
+    files
+      .filter((file) => viewed[file.path] === file.fingerprint)
+      .map((file) => `[data-item-path="${escapeCSSString(file.path)}"]`),
+  );
 
-const syncReloadDeltaGitStatusCSS = (treeHost: HTMLElement | null, css: string) => {
+const getViewedRowCSSFromSelectors = (selectors: ReadonlyArray<string>) => {
+  if (selectors.length === 0) {
+    return '';
+  }
+
+  const rowContent = selectors
+    .flatMap((selector) => [
+      `${selector} > [data-item-section='icon']`,
+      `${selector} > [data-item-section='icon'] > :where(:not([data-icon-name='file-tree-icon-chevron']))`,
+      `${selector} > [data-item-section='content']`,
+      `${selector} > [data-item-section='decoration']`,
+      `${selector} > [data-item-section='git']`,
+    ])
+    .join(',\n');
+
+  return `
+    ${rowContent} {
+      color: var(--muted);
+    }
+  `;
+};
+
+const reloadDeltaGitStatusStyleAttribute = 'data-codiff-reload-delta-git-status';
+const viewedRowStyleAttribute = 'data-codiff-viewed-rows';
+
+const useTreeShadowStyle = (
+  treeHostRef: RefObject<HTMLElement | null>,
+  styleAttribute: string,
+  css: string,
+) => {
+  useEffect(() => {
+    // Tree unsafeCSS is constructor-time; keep dynamic row styling in a shadow style tag.
+    if (syncTreeShadowStyle(treeHostRef.current, styleAttribute, css)) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      syncTreeShadowStyle(treeHostRef.current, styleAttribute, css);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [css, styleAttribute, treeHostRef]);
+};
+
+const syncTreeShadowStyle = (treeHost: HTMLElement | null, styleAttribute: string, css: string) => {
   const shadowRoot = treeHost?.querySelector('file-tree-container')?.shadowRoot;
   if (!shadowRoot) {
     return false;
   }
 
-  const existingStyle = shadowRoot.querySelector<HTMLStyleElement>(
-    `style[${reloadDeltaGitStatusStyleAttribute}]`,
-  );
+  const existingStyle = shadowRoot.querySelector<HTMLStyleElement>(`style[${styleAttribute}]`);
   if (css.length === 0) {
     existingStyle?.remove();
     return true;
   }
 
   const style = existingStyle ?? document.createElement('style');
-  style.setAttribute(reloadDeltaGitStatusStyleAttribute, '');
+  style.setAttribute(styleAttribute, '');
   style.textContent = css;
   if (!existingStyle) {
     shadowRoot.append(style);

@@ -64,6 +64,38 @@ export function RepositoryChangeBanner({
   );
 }
 
+export function WalkthroughOutdatedBanner({
+  onDismiss,
+  reason,
+}: {
+  onDismiss: () => void;
+  reason: string | null;
+}) {
+  const isVisible = reason != null;
+
+  return (
+    <div
+      aria-live="polite"
+      className={`walkthrough-outdated-banner${isVisible ? ' visible' : ''}`}
+      role="status"
+    >
+      <span className="walkthrough-outdated-banner-content">
+        <strong>Walkthrough out of date.</strong>
+        <span>{reason ?? ''} Showing history instead.</span>
+      </span>
+      <button
+        aria-label="Dismiss walkthrough banner"
+        className="repository-change-dismiss"
+        onClick={onDismiss}
+        title="Dismiss"
+        type="button"
+      >
+        <X aria-hidden className="diff-search-icon" size={15} weight="bold" />
+      </button>
+    </div>
+  );
+}
+
 export function FirstRunPanel({
   agentSkillInstalled,
   agentSkillInstalling,

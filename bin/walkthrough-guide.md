@@ -48,7 +48,8 @@ to the working tree (`git diff`) and say so. Anchor every `chapters[].stops[].an
 - Do not make one stop per file for broad changes. Group files that implement the same idea in
   one stop.
 - Keep `summary` to one concrete sentence. Keep `body` short and specific. Do not use markdown
-  headings.
+  headings, lists, or other block structure. Inline code is supported, though: wrap symbol names,
+  file paths, flags, and other literals in backticks, e.g. `--walkthrough-file` or `renderInlineMarkdown`.
 - Avoid generic filler, broad assurance language, and meta-explanatory labels.
 - Do not invent bugs, risks, tests, or validation. Describe what the diff and conversation
   actually support.

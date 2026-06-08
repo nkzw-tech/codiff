@@ -29,6 +29,7 @@ const {
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
+const { diagnoseWalkthroughMismatch } = require('./walkthrough-diagnosis.cjs');
 const { readCommitMessageReply } = require('./walkthrough-commit-message.cjs');
 const { getAgent, listAgents, normalizeAgentBackend } = require('./agent.cjs');
 const {
@@ -998,8 +999,16 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
         };
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
+        // The usual cause of an unanchored working-tree walkthrough is that the
+        // changes were committed (or reverted) after it was authored. Surface a
+        // specific explanation when we can determine one.
+        const diagnosis = await diagnoseWalkthroughMismatch({
+          hasFiles: state.files.length > 0,
+          input,
+          repositoryRoot: state.root,
+        }).catch(() => null);
         return {
-          reason: `Walkthrough file could not be applied to this diff: ${detail}`,
+          reason: diagnosis || `Walkthrough file could not be applied to this diff: ${detail}`,
           status: 'unavailable',
         };
       }
