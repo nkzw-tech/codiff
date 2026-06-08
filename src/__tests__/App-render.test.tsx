@@ -713,6 +713,56 @@ test('repository reload colors only git status glyphs for files changed after re
   }
 });
 
+test('tree sidebar subtly mutes files currently marked viewed', async () => {
+  const viewedFile = createChangedFile('src/viewed.ts', 'viewed-current');
+  const staleViewedFile = createChangedFile('src/stale.ts', 'stale-current');
+  const nextState = {
+    ...repositoryState,
+    files: [viewedFile, staleViewedFile],
+  } satisfies RepositoryState;
+
+  window.localStorage.setItem(
+    'codiff:viewed:/repo',
+    JSON.stringify({
+      [staleViewedFile.path]: 'stale-previous',
+      [viewedFile.path]: viewedFile.fingerprint,
+    }),
+  );
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => nextState),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      const shadowRoot = container.querySelector('file-tree-container')?.shadowRoot;
+      const styleText =
+        shadowRoot?.querySelector('style[data-codiff-viewed-rows]')?.textContent ?? '';
+      expect(styleText).toContain('[data-item-path="src/viewed.ts"]');
+      expect(styleText).not.toContain('[data-item-path="src/stale.ts"]');
+      expect(styleText).not.toContain('color-mix(in srgb, var(--viewed)');
+      expect(styleText).toContain(
+        "[data-item-path=\"src/viewed.ts\"] > [data-item-section='icon'] > :where(:not([data-icon-name='file-tree-icon-chevron']))",
+      );
+      expect(styleText).toContain("> [data-item-section='content']");
+      expect(styleText).toContain('color: var(--muted)');
+    });
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
 test('before unload saves the current source and selected file for any reload trigger', async () => {
   const changedFile = createChangedFile('src/app.ts');
   const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
