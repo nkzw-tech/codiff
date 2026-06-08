@@ -29,6 +29,11 @@ const codiff = {
     ipcRenderer.on('codiff:configChanged', listener);
     return () => ipcRenderer.removeListener('codiff:configChanged', listener);
   },
+  onChooseCodeFont: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('codiff:chooseCodeFont', listener);
+    return () => ipcRenderer.removeListener('codiff:chooseCodeFont', listener);
+  },
   onCopyPendingCommentsRequest: (callback) => {
     /** @param {Electron.IpcRendererEvent} _event @param {number} requestId */
     const listener = (_event, requestId) => {
@@ -61,6 +66,7 @@ const codiff = {
   },
   openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
+  setCodeFontFamily: (value) => ipcRenderer.invoke('codiff:setCodeFontFamily', value),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),
   setWalkthroughOrder: (value) => ipcRenderer.invoke('codiff:setWalkthroughOrder', value),

@@ -44,12 +44,14 @@ declare global {
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       installAgentSkill: () => Promise<AgentSkillStatus>;
       installTerminalHelper: () => Promise<TerminalHelperStatus>;
+      onChooseCodeFont: (callback: () => void) => () => void;
       onConfigChanged: (callback: (config: CodiffConfig) => void) => () => void;
       onCopyPendingCommentsRequest: (callback: () => string | Promise<string>) => () => void;
       onFindInDiffs: (callback: () => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
       openConfigFile: () => Promise<void>;
       openFile: (path: string) => Promise<void>;
+      setCodeFontFamily: (value: CodiffPreferences['codeFontFamily']) => Promise<void>;
       setDiffStyle: (value: CodiffPreferences['diffStyle']) => Promise<void>;
       setShowOutdated: (value: boolean) => Promise<void>;
       setWalkthroughOrder: (value: string) => Promise<void>;

@@ -67,7 +67,7 @@ export const markdownCodeBlockOptions = {
   tokenizeMaxLineLength: 20_000,
   unsafeCSS: `
     :host {
-      --diffs-font-family: var(--font-mono);
+      --diffs-font-family: var(--font-diff-mono, var(--font-mono));
       --diffs-font-size: 13px;
       --diffs-line-height: 20px;
       --diffs-light-bg: transparent;
@@ -145,7 +145,7 @@ export const maxWorkerThreads = 3;
 
 export const codeViewUnsafeCSS = `
   :host {
-    --diffs-font-family: var(--font-mono);
+    --diffs-font-family: var(--font-diff-mono, var(--font-mono));
     --diffs-header-font-family: var(--font-sans);
     --diffs-font-size: 13px;
     --diffs-line-height: 20px;

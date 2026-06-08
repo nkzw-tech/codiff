@@ -490,6 +490,7 @@ export type CodiffTheme = 'system' | 'light' | 'dark';
 export type CodiffPreferences = {
   agentBackend: 'codex' | 'claude';
   claudeModel: string;
+  codeFontFamily: string;
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
   editorCommand: string;

@@ -2,6 +2,7 @@
   "settings": {
     "agentBackend": "codex",
     "claudeModel": "claude-sonnet-4-6",
+    "codeFontFamily": "",
     "copyCommentsOnClose": false,
     "diffStyle": "split",
     "editorCommand": "",

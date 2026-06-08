@@ -25,6 +25,11 @@
           "default": "claude-sonnet-4-6",
           "description": "The Claude Code model to use for review assistance and walkthroughs when agentBackend is 'claude'."
         },
+        "codeFontFamily": {
+          "type": "string",
+          "default": "",
+          "description": "Installed local font family to use for rendering code diffs. Leave empty to use Codiff's bundled default font."
+        },
         "copyCommentsOnClose": {
           "type": "boolean",
           "default": false,

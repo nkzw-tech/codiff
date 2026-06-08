@@ -95,6 +95,7 @@ is running so changes apply to open windows.
   "settings": {
     "agentBackend": "codex",
     "claudeModel": "claude-sonnet-4-6",
+    "codeFontFamily": "",
     "copyCommentsOnClose": false,
     "diffStyle": "split",
     "editorCommand": "",
@@ -126,6 +127,9 @@ Choose `View > Split Diff` or `View > Unified Diff`, use Toggle Diff Layout in t
 or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.
 Choose `View > Word Wrap`, use Toggle Word Wrap in the command bar, or set `settings.wordWrap`
 to `true` to wrap long diff lines.
+Choose `View > Diff > Choose Code Font…`, use Choose Code Font in the command bar, or set
+`settings.codeFontFamily` to an installed local font family name to render code diffs with that
+font.
 Use `Mod` for <kbd>Cmd</kbd> on macOS and <kbd>Ctrl</kbd> on other platforms. Shortcut strings can
 combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Shift+p` or
 `Alt+Enter`.

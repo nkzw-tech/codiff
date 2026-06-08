@@ -493,6 +493,25 @@ const buildApplicationMenu = () =>
                 label: 'Word Wrap',
                 type: 'checkbox',
               },
+              { type: 'separator' },
+              {
+                click: (_menuItem, browserWindow) => {
+                  if (browserWindow instanceof BrowserWindow) {
+                    browserWindow.webContents.send('codiff:chooseCodeFont');
+                  }
+                },
+                label: 'Choose Code Font…',
+              },
+              {
+                click: () => {
+                  updateConfig({
+                    settings: { ...config.settings, codeFontFamily: '' },
+                  });
+                },
+                enabled: config.settings.codeFontFamily.length > 0,
+                label: 'Reset Code Font',
+              },
+              { type: 'separator' },
               {
                 checked: config.settings.showWhitespace,
                 click: (menuItem) => {
@@ -990,6 +1009,15 @@ ipcMain.handle('codiff:getGitIdentity', async (event) => {
 ipcMain.handle('codiff:getPreferences', () => configToPreferences(config));
 
 ipcMain.handle('codiff:getConfig', () => config);
+
+ipcMain.handle('codiff:setCodeFontFamily', (_event, value) => {
+  updateConfig({
+    settings: {
+      ...config.settings,
+      codeFontFamily: typeof value === 'string' ? value.trim() : '',
+    },
+  });
+});
 
 ipcMain.handle('codiff:setDiffStyle', (_event, value) => {
   updateConfig({

@@ -5,6 +5,7 @@ export type CodiffAgentBackend = 'codex' | 'claude';
 export type CodiffSettings = {
   agentBackend: CodiffAgentBackend;
   claudeModel: string;
+  codeFontFamily: string;
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
   editorCommand: string;

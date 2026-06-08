@@ -117,6 +117,10 @@ const normalizeDiffStyle = (diffStyle) =>
 const normalizeAgentBackend = (backend) =>
   backend === 'codex' || backend === 'claude' ? backend : 'codex';
 
+/** @param {unknown} fontFamily */
+const normalizeCodeFontFamily = (fontFamily) =>
+  typeof fontFamily === 'string' ? fontFamily.trim() : '';
+
 /** @param {unknown} path */
 const normalizeLastRepositoryPath = (path) =>
   typeof path === 'string' && path.length > 0 ? path : '';
@@ -224,6 +228,7 @@ const mergeConfig = (raw) => {
         typeof rawSettings.claudeModel === 'string'
           ? rawSettings.claudeModel
           : defaults.settings.claudeModel,
+      codeFontFamily: normalizeCodeFontFamily(rawSettings.codeFontFamily),
       copyCommentsOnClose:
         typeof rawSettings.copyCommentsOnClose === 'boolean'
           ? rawSettings.copyCommentsOnClose

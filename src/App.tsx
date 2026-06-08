@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import { CodeFontDialog } from './app/components/CodeFontDialog.tsx';
 import { CommandBar } from './app/components/CommandBar.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import {
@@ -114,6 +115,13 @@ import type {
 const emptyWalkthroughNotes = new Map<string, WalkthroughNote>();
 const emptyFiles: ReadonlyArray<ChangedFile> = [];
 type MainMode = 'review' | 'commit';
+
+const formatCodeFontFamilyValue = (fontFamily: string): string | null => {
+  const normalizedFontFamily = fontFamily.trim();
+  return normalizedFontFamily.length > 0
+    ? `${JSON.stringify(normalizedFontFamily)}, monospace`
+    : null;
+};
 
 const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
   isPatchOnlyDiffSection(section)
@@ -240,6 +248,7 @@ export default function App() {
   const walkthroughErrorRef = useRef<WalkthroughError | null>(null);
   const [commandBarVisible, setCommandBarVisible] = useState(false);
   const [commandBarCommands, setCommandBarCommands] = useState<ReadonlyArray<Command>>([]);
+  const [codeFontDialogVisible, setCodeFontDialogVisible] = useState(false);
   const [shortcutsHelpVisible, setShortcutsHelpVisible] = useState(false);
   const [hunkNavigation, setHunkNavigation] = useState<{
     direction: 1 | -1;
@@ -713,6 +722,17 @@ export default function App() {
     }
   }, [preferences.theme]);
 
+  useEffect(() => {
+    const root = document.documentElement;
+    const codeFontFamilyValue = formatCodeFontFamilyValue(preferences.codeFontFamily);
+
+    if (codeFontFamilyValue) {
+      root.style.setProperty('--font-diff-mono', codeFontFamilyValue);
+    } else {
+      root.style.removeProperty('--font-diff-mono');
+    }
+  }, [preferences.codeFontFamily]);
+
   useEffect(
     () => () => {
       if (programmaticScrollTimerRef.current != null) {
@@ -831,6 +851,7 @@ export default function App() {
       ? 0
       : Math.min(activeDiffSearchMatchIndex, diffSearchMatches.length - 1);
   const activeDiffSearchMatch = diffSearchMatches[effectiveActiveDiffSearchMatchIndex] ?? null;
+  const currentCodeFontLabel = preferences.codeFontFamily || 'Fira Code';
 
   const openDiffSearch = useCallback(() => {
     setDiffSearchVisible(true);
@@ -853,6 +874,11 @@ export default function App() {
 
   const toggleWordWrap = useCallback(() => {
     void window.codiff.setWordWrap(!preferencesRef.current.wordWrap).catch(() => {});
+  }, []);
+
+  const setCodeFontFamily = useCallback((fontFamily: string) => {
+    void window.codiff.setCodeFontFamily(fontFamily).catch(() => {});
+    setCodeFontDialogVisible(false);
   }, []);
 
   const expandSidebar = useCallback(() => {
@@ -991,6 +1017,7 @@ export default function App() {
   }, [codiffConfig.keymap]);
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
+  useEffect(() => window.codiff.onChooseCodeFont(() => setCodeFontDialogVisible(true)), []);
 
   const updateDiffSearchQuery = useCallback((query: string) => {
     setDiffSearchQuery(query);
@@ -1472,6 +1499,19 @@ export default function App() {
         id: 'toggle-word-wrap',
         keymapAction: 'toggleWordWrap',
         title: 'Toggle Word Wrap',
+      }),
+      registry.register({
+        description: () => preferencesRef.current.codeFontFamily || 'Default (Fira Code)',
+        execute: () => setCodeFontDialogVisible(true),
+        id: 'choose-code-font',
+        title: 'Choose Code Font',
+      }),
+      registry.register({
+        execute: () => {
+          void window.codiff.setCodeFontFamily('').catch(() => {});
+        },
+        id: 'reset-code-font',
+        title: 'Reset Code Font',
       }),
       registry.register({
         execute: reloadWindow,
@@ -2062,9 +2102,25 @@ export default function App() {
         onClose={() => setCommandBarVisible(false)}
         visible={commandBarVisible}
       />
+      {codeFontDialogVisible ? (
+        <CodeFontDialog
+          currentFontFamily={preferences.codeFontFamily}
+          onClose={() => setCodeFontDialogVisible(false)}
+          onSelect={setCodeFontFamily}
+        />
+      ) : null}
       <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
       {!isSwitchingSource ? (
         <div className="review-action-bar">
+          <button
+            className="code-font-indicator"
+            onClick={() => setCodeFontDialogVisible(true)}
+            title={`Choose code font (current: ${currentCodeFontLabel})`}
+            type="button"
+          >
+            <span>Code Font</span>
+            <strong>{currentCodeFontLabel}</strong>
+          </button>
           <CopyCommentsButton
             comments={reviewComments}
             files={orderedFiles}
