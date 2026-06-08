@@ -19,9 +19,9 @@ export const isReviewIdentityViewed = (
 export const updateReviewIdentityViewed = (
   viewed: Readonly<Record<string, string>>,
   identity: ReviewIdentity,
-  isViewed: boolean,
+  currentlyViewed: boolean,
 ): Record<string, string> => {
-  if (isViewed) {
+  if (currentlyViewed) {
     const next = { ...viewed };
     delete next[identity.key];
     return next;
@@ -36,10 +36,10 @@ export const updateReviewIdentityViewed = (
 export const updateReviewIdentityCollapsed = (
   collapsed: ReadonlySet<string>,
   identity: ReviewIdentity,
-  isCollapsed: boolean,
+  currentlyCollapsed: boolean,
 ): Set<string> => {
   const next = new Set(collapsed);
-  if (isCollapsed) {
+  if (currentlyCollapsed) {
     next.delete(identity.key);
   } else {
     next.add(identity.key);

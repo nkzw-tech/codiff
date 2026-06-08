@@ -37,9 +37,10 @@ export const useNarrativeNavigation = (
   });
   const [supportScrollRequest, setSupportScrollRequest] = useState(0);
   const [supportVisited, setSupportVisited] = useState(false);
-  const [visited, setVisited] = useState<ReadonlySet<string>>(
-    () => new Set(firstStopId(walkthrough) ? [firstStopId(walkthrough)!] : []),
-  );
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => {
+    const stopId = firstStopId(walkthrough);
+    return new Set(stopId ? [stopId] : []);
+  });
 
   const [commitSelected, setCommitSelected] = useState<ReadonlySet<string>>(
     () => new Set(commitPaths),

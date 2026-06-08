@@ -601,10 +601,8 @@ const multiHunkFile = (): ChangedFile => ({
   status: 'modified',
 });
 
-test('uncovered walkthrough files preserve uncovered hunks from partially covered sections', () => {
-  const file = multiHunkFile();
-  const section = file.sections[0];
-  const view = buildWalkthroughView({
+const walkthroughViewCovering = (coveredHunk: WalkthroughHunk) =>
+  buildWalkthroughView({
     ...walkthrough(),
     chapters: [
       {
@@ -613,19 +611,9 @@ test('uncovered walkthrough files preserve uncovered hunks from partially covere
         id: 'main',
         stops: [
           {
-            ...group({
-              hunks: [
-                {
-                  ...appHunk,
-                  anchor: { ...appHunk.anchor, sectionId: section.id },
-                  id: `${section.id}:h1`,
-                  path: file.path,
-                },
-              ],
-              id: 'covered-first-hunk',
-            }),
+            ...group({ hunks: [coveredHunk], id: `covered-${coveredHunk.id}` }),
             importance: 'normal',
-            prose: 'Covers the first hunk.',
+            prose: 'Covers the hunk.',
           },
         ],
         title: 'Main',
@@ -633,6 +621,16 @@ test('uncovered walkthrough files preserve uncovered hunks from partially covere
     ],
     support: [],
   })!;
+
+test('uncovered walkthrough files preserve uncovered hunks from partially covered sections', () => {
+  const file = multiHunkFile();
+  const section = file.sections[0];
+  const view = walkthroughViewCovering({
+    ...appHunk,
+    anchor: { ...appHunk.anchor, sectionId: section.id },
+    id: `${section.id}:h1`,
+    path: file.path,
+  });
 
   const uncoveredFiles = getUncoveredWalkthroughFiles([file], view, false);
 
@@ -647,6 +645,43 @@ test('uncovered walkthrough files preserve uncovered hunks from partially covere
   expect(getUncoveredWalkthroughFileLineItems([file], view, false)).toEqual([
     { added: 2, deleted: 2, path: file.path },
   ]);
+});
+
+test('uncovered walkthrough file fingerprints change with the uncovered hunk set', () => {
+  const file = multiHunkFile();
+  const section = file.sections[0];
+  const viewCoveringFirst = walkthroughViewCovering(
+    hunk({
+      added: 1,
+      deleted: 1,
+      display: 'database_search.py:2',
+      id: `${section.id}:h1`,
+      path: file.path,
+      sectionId: section.id,
+      status: 'modified',
+    }),
+  );
+  const viewCoveringSecond = walkthroughViewCovering(
+    hunk({
+      added: 1,
+      deleted: 1,
+      display: 'database_search.py:8',
+      id: `${section.id}:h2`,
+      path: file.path,
+      sectionId: section.id,
+      status: 'modified',
+    }),
+  );
+
+  const uncoveredAfterFirst = getUncoveredWalkthroughFiles([file], viewCoveringFirst, false);
+  const uncoveredAfterSecond = getUncoveredWalkthroughFiles([file], viewCoveringSecond, false);
+
+  expect(uncoveredAfterFirst).toHaveLength(1);
+  expect(uncoveredAfterSecond).toHaveLength(1);
+  expect(uncoveredAfterFirst[0].sections.map((section) => section.id)).toEqual(
+    uncoveredAfterSecond[0].sections.map((section) => section.id),
+  );
+  expect(uncoveredAfterFirst[0].fingerprint).not.toBe(uncoveredAfterSecond[0].fingerprint);
 });
 
 test('focusChangedFileForHunks renders only the matching hunk', () => {

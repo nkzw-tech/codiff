@@ -155,14 +155,19 @@ const walkthroughCoveredSectionIds = (view: WalkthroughView): ReadonlySet<string
 const getSectionHunkIds = (section: DiffSection): ReadonlyArray<string> =>
   extractPatchHunks(section.patch).map((_, index) => `${section.id}:h${index + 1}`);
 
+type UncoveredWalkthroughSection = {
+  identity: string;
+  section: DiffSection;
+};
+
 const getUncoveredWalkthroughSection = (
   section: DiffSection,
   coveredHunkIds: ReadonlySet<string>,
   coveredSectionIds: ReadonlySet<string>,
-): DiffSection | null => {
+): UncoveredWalkthroughSection | null => {
   const hunkIds = getSectionHunkIds(section);
   if (hunkIds.length === 0) {
-    return coveredSectionIds.has(section.id) ? null : section;
+    return coveredSectionIds.has(section.id) ? null : { identity: section.id, section };
   }
 
   const uncoveredHunkIds = hunkIds.filter((hunkId) => !coveredHunkIds.has(hunkId));
@@ -170,12 +175,13 @@ const getUncoveredWalkthroughSection = (
     return null;
   }
 
+  const identity = `${section.id}:${uncoveredHunkIds.join(',')}`;
   if (uncoveredHunkIds.length === hunkIds.length) {
-    return section;
+    return { identity, section };
   }
 
   const patch = filterPatchToHunkIds(section.patch, section.id, uncoveredHunkIds);
-  return patch ? { ...section, patch } : null;
+  return patch ? { identity, section: { ...section, patch } } : null;
 };
 
 export const getUncoveredWalkthroughFiles = (
@@ -186,18 +192,19 @@ export const getUncoveredWalkthroughFiles = (
   const coveredHunkIds = walkthroughCoveredHunkIds(view);
   const coveredSectionIds = walkthroughCoveredSectionIds(view);
   return files.flatMap((file) => {
-    const sections = getVisibleDiffSections(file, showWhitespace)
+    const uncoveredSections = getVisibleDiffSections(file, showWhitespace)
       .map(({ section }) => section)
       .map((section) => getUncoveredWalkthroughSection(section, coveredHunkIds, coveredSectionIds))
-      .filter((section): section is DiffSection => section != null);
+      .filter((entry): entry is UncoveredWalkthroughSection => entry != null);
+    const sections = uncoveredSections.map(({ section }) => section);
     if (sections.length === 0) {
       return [];
     }
     return [
       {
         ...file,
-        fingerprint: `${file.fingerprint}:walkthrough-uncovered:${sections
-          .map((section) => section.id)
+        fingerprint: `${file.fingerprint}:walkthrough-uncovered:${uncoveredSections
+          .map(({ identity }) => identity)
           .join(',')}`,
         sections,
       },
@@ -347,11 +354,8 @@ export const getWalkthroughRunNote = (
   return notes.length > 0 ? notes.join(' • ') : undefined;
 };
 
-const focusSignature = (
-  section: DiffSection,
-  hunkIds: ReadonlyArray<string>,
-  contentIdentity: string,
-) => `walkthrough:${section.id}:${hunkIds.join(',')}:${contentIdentity.length}`;
+const focusSignature = (section: DiffSection, hunkIds: ReadonlyArray<string>) =>
+  `walkthrough:${section.id}:${hunkIds.join(',')}`;
 
 /**
  * Return the changed-file view a walkthrough stop should render for one live diff
@@ -371,13 +375,7 @@ export const focusChangedFileForHunks = (
 
   const hunkIds = sectionHunks.map((hunk) => hunk.id);
   if (section.binary || (section.loadState != null && section.loadState !== 'ready')) {
-    const signature = focusSignature(
-      section,
-      hunkIds,
-      `${section.loadState ?? 'binary'}:${section.summary?.fingerprint ?? ''}:${
-        section.summary?.reason ?? ''
-      }:${section.patch.length}`,
-    );
+    const signature = focusSignature(section, hunkIds);
     return {
       ...file,
       fingerprint: `${file.fingerprint}:${signature}`,
@@ -404,7 +402,7 @@ export const focusChangedFileForHunks = (
     return null;
   }
 
-  const signature = focusSignature(section, hunkIds, focusedPatch);
+  const signature = focusSignature(section, hunkIds);
 
   return {
     ...file,
