@@ -431,6 +431,50 @@ test('packaged terminal helper forwards Codex walkthrough seed options', async (
   }
 });
 
+test('packaged terminal helper forwards pre-authored walkthrough files', async () => {
+  const logger = await createFakeOpenLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+  const walkthroughFile = join(logger.directory, 'walkthrough.json');
+
+  try {
+    await mkdir(repositoryPath);
+    await writeFile(walkthroughFile, '{}');
+
+    await execFileAsync(
+      resolve('bin/codiff-app'),
+      [
+        '-w',
+        '--agent',
+        'claude',
+        '--walkthrough-file',
+        walkthroughFile,
+        '--claude-session',
+        '019e5e57-e7d6-7392-9ad1-ad959319d2fb',
+        repositoryPath,
+      ],
+      {
+        env: logger.env,
+      },
+    );
+
+    expect(await logger.readArgs()).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      '--claude-session',
+      '019e5e57-e7d6-7392-9ad1-ad959319d2fb',
+      '--agent',
+      'claude',
+      '--walkthrough-file',
+      walkthroughFile,
+      '--walkthrough',
+      repositoryPath,
+    ]);
+  } finally {
+    await logger.cleanup();
+  }
+});
+
 test('Codex skill launcher uses the session cwd as the repository target', async () => {
   const logger = await createFakeCommandLogger('codiff-skill-launcher-', 'codiff');
   const home = join(logger.directory, 'home');

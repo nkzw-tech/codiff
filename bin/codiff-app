@@ -40,6 +40,7 @@ show_help() {
   printf '  %-22s%s%s%s\n' "--version, -v" "$gray" "Show version number and exit." "$reset"
   printf '  %-22s%s%s%s\n' "--walkthrough, -w" "$gray" "Start with an LLM-generated narrative walkthrough." "$reset"
   printf '  %-22s%s%s%s\n' "--walkthrough-context <file>" "$gray" "Seed a walkthrough with Codex conversation context JSON." "$reset"
+  printf '  %-22s%s%s%s\n' "--walkthrough-file <file>" "$gray" "Open a pre-authored narrative walkthrough JSON file." "$reset"
   printf '  %-22s%s%s%s\n' "--walkthrough-guide" "$gray" "Print the narrative walkthrough authoring guide and schema, then exit." "$reset"
   printf '\n'
   printf '%s\n' "${blue_bold}Examples:${reset}"
@@ -62,6 +63,7 @@ commit_ref=""
 pull_request_source=""
 source_ref=""
 walkthrough_context_path=""
+walkthrough_file_path=""
 expect_codex_session=0
 expect_claude_session=0
 expect_agent=0
@@ -69,6 +71,7 @@ expect_branch_ref=0
 expect_commit_ref=0
 expect_pull_request_number=0
 expect_walkthrough_context=0
+expect_walkthrough_file=0
 walkthrough=0
 
 is_commit_ref_arg() {
@@ -147,6 +150,12 @@ for arg in "$@"; do
     continue
   fi
 
+  if [ "$expect_walkthrough_file" -eq 1 ]; then
+    walkthrough_file_path="$arg"
+    expect_walkthrough_file=0
+    continue
+  fi
+
   if [ "$expect_pull_request_number" -eq 1 ]; then
     if printf '%s' "$arg" | grep -Eq '^[1-9][0-9]*$'; then
       pull_request_source="#$arg"
@@ -216,6 +225,12 @@ for arg in "$@"; do
     --walkthrough-context=*)
       walkthrough_context_path="${arg#--walkthrough-context=}"
       ;;
+    --walkthrough-file)
+      expect_walkthrough_file=1
+      ;;
+    --walkthrough-file=*)
+      walkthrough_file_path="${arg#--walkthrough-file=}"
+      ;;
     -*)
       ;;
     *)
@@ -266,9 +281,19 @@ if [ -n "$walkthrough_context_path" ]; then
   esac
 fi
 
+if [ -n "$walkthrough_file_path" ]; then
+  case "$walkthrough_file_path" in
+    /*) ;;
+    *) walkthrough_file_path="$PWD/$walkthrough_file_path" ;;
+  esac
+fi
+
 open_codiff() {
   # Prepend optional flags in reverse of their final order so the resulting
-  # argument list reads: --codex-session --claude-session --agent --walkthrough-context <trailing>.
+  # argument list reads: --codex-session --claude-session --agent --walkthrough-context --walkthrough-file <trailing>.
+  if [ -n "$walkthrough_file_path" ]; then
+    set -- --walkthrough-file "$walkthrough_file_path" "$@"
+  fi
   if [ -n "$walkthrough_context_path" ]; then
     set -- --walkthrough-context "$walkthrough_context_path" "$@"
   fi
