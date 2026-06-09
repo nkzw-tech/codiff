@@ -214,6 +214,9 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       'codex-session': {
         type: 'string',
       },
+      'pi-session': {
+        type: 'string',
+      },
       'walkthrough-context': {
         type: 'string',
       },
@@ -303,6 +306,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   const envPullRequestUrl = useEnvironment ? process.env.CODIFF_PULL_REQUEST_URL || '' : '';
   const envCodexSessionId = useEnvironment ? process.env.CODIFF_CODEX_SESSION_ID || '' : '';
   const envClaudeSessionId = useEnvironment ? process.env.CODIFF_CLAUDE_SESSION_ID || '' : '';
+  const envPiSessionId = useEnvironment ? process.env.CODIFF_PI_SESSION_ID || '' : '';
   const envAgentBackend = useEnvironment ? process.env.CODIFF_AGENT_BACKEND || '' : '';
   const envWalkthroughContextPath = useEnvironment
     ? process.env.CODIFF_WALKTHROUGH_CONTEXT || ''
@@ -316,10 +320,16 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     (typeof values['claude-session'] === 'string' ? values['claude-session'] : '') ||
     envClaudeSessionId ||
     undefined;
+  const piSessionId =
+    (typeof values['pi-session'] === 'string' ? values['pi-session'] : '') ||
+    envPiSessionId ||
+    undefined;
   const rawAgentBackend =
     (typeof values.agent === 'string' ? values.agent : '') || envAgentBackend || '';
   const agentBackend =
-    rawAgentBackend === 'codex' || rawAgentBackend === 'claude' ? rawAgentBackend : undefined;
+    rawAgentBackend === 'codex' || rawAgentBackend === 'claude' || rawAgentBackend === 'pi'
+      ? rawAgentBackend
+      : undefined;
   const walkthroughContextPath =
     (typeof values['walkthrough-context'] === 'string' ? values['walkthrough-context'] : '') ||
     envWalkthroughContextPath ||
@@ -341,6 +351,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       ...(agentBackend ? { agentBackend } : {}),
       ...(claudeSessionId ? { claudeSessionId } : {}),
       ...(codexSessionId ? { codexSessionId } : {}),
+      ...(piSessionId ? { piSessionId } : {}),
       repositoryPathProvided,
       source:
         sourceRange && sourcePullRequestNumber == null

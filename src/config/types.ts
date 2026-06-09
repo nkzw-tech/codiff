@@ -1,6 +1,6 @@
 export type CodiffDiffStyle = 'split' | 'unified';
 export type CodiffTheme = 'system' | 'light' | 'dark';
-export type CodiffAgentBackend = 'codex' | 'claude';
+export type CodiffAgentBackend = 'codex' | 'claude' | 'pi';
 
 export type CodiffSettings = {
   agentBackend: CodiffAgentBackend;
@@ -12,6 +12,7 @@ export type CodiffSettings = {
   editorCommand: string;
   lastRepositoryPath: string;
   openAIModel: string;
+  piModel: string;
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;

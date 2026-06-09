@@ -34,6 +34,7 @@ import {
 } from 'react';
 import claudeIconUrl from '../../assets/claude.svg';
 import codexIconUrl from '../../assets/codex.svg';
+import piIconUrl from '../../assets/pi.svg';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffDiffStyle, CodiffKeymap } from '../../config/types.ts';
 import type {
@@ -277,13 +278,13 @@ function ReviewAvatar({
   return <Gravatar fallback={label} size="medium" url={avatarUrl} />;
 }
 
-function AgentAvatar({ agentId }: { agentId: 'codex' | 'claude' }) {
+function AgentAvatar({ agentId }: { agentId: 'codex' | 'claude' | 'pi' }) {
   return (
     <img
       alt=""
       className="review-comment-avatar-codex"
       draggable={false}
-      src={agentId === 'claude' ? claudeIconUrl : codexIconUrl}
+      src={agentId === 'pi' ? piIconUrl : agentId === 'claude' ? claudeIconUrl : codexIconUrl}
     />
   );
 }
@@ -616,7 +617,7 @@ function ReviewCommentEditor({
   onSubmitComment,
   onUpdateComment,
 }: {
-  agentId: 'codex' | 'claude';
+  agentId: 'codex' | 'claude' | 'pi';
   agentLabel: string;
   comment: ReviewComment;
   displayName: string;
@@ -869,7 +870,7 @@ function ReviewAnnotation({
   onSubmitComment,
   onUpdateComment,
 }: {
-  agentId: 'codex' | 'claude';
+  agentId: 'codex' | 'claude' | 'pi';
   agentLabel: string;
   annotation: DiffLineAnnotation<ReviewCommentAnnotationMetadata>;
   comments: ReadonlyArray<ReviewComment>;
@@ -985,9 +986,7 @@ type NavAnchor = {
 type FileReviewDiffBlock = {
   comments?: ReadonlyArray<ReviewComment>;
   file: ChangedFile;
-  fileSelected?: boolean;
   header?: ReactNode;
-  headerSelected?: boolean;
   id: string;
   itemIdPrefix?: string;
   note?: string;
@@ -998,7 +997,6 @@ type FileReviewDiffBlock = {
 type HeaderReviewDiffBlock = {
   file?: undefined;
   header: ReactNode;
-  headerSelected?: boolean;
   id: string;
   selected?: boolean;
 };
@@ -1292,7 +1290,7 @@ export function ReviewCodeView({
   wordWrap,
 }: {
   activeSearchMatch: DiffSearchMatch | null;
-  agentId: 'codex' | 'claude';
+  agentId: 'codex' | 'claude' | 'pi';
   agentLabel: string;
   blocks?: ReadonlyArray<ReviewDiffBlock>;
   bottomInset?: number;
@@ -1461,9 +1459,7 @@ export function ReviewCodeView({
           id: headerId,
           type: 'file',
           version: getItemVersion(
-            `${block.id}:walkthrough-header:${
-              (block.headerSelected ?? block.selected) === true ? 'selected' : 'idle'
-            }`,
+            `${block.id}:walkthrough-header:${block.selected === true ? 'selected' : 'idle'}`,
           ),
         });
       }
@@ -1494,7 +1490,7 @@ export function ReviewCodeView({
         const canRenderImage = canRenderImagePreview(file.path, section);
         const canRenderMarkdown = markdownPreview != null;
         const isMarkdownPreview = canRenderMarkdown && markdownPreviewSections.has(section.id);
-        const isSelected = block.fileSelected ?? block.selected ?? selectedPath === file.path;
+        const isSelected = block.selected ?? selectedPath === file.path;
         const reviewVersionPrefix = `${itemVersionByKey[reviewKey] ?? 0}:${block.id}:${
           reviewIdentity.fingerprint
         }:${reviewKey}:${section.id}`;
@@ -1861,6 +1857,7 @@ export function ReviewCodeView({
             context.item.id === commitDetailsItemId,
           );
           node.classList.toggle('codiff-walkthrough-header-item', isWalkthroughHeaderItem);
+          node.classList.toggle('codiff-selected-item', metadata?.isSelected === true);
           node.classList.toggle(
             'codiff-markdown-preview-item',
             metadata?.isMarkdownPreview === true,

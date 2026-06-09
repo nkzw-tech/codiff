@@ -31,6 +31,7 @@ const { normalizeClaudeModel } = require('./claude.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
 const { diagnoseWalkthroughMismatch } = require('./walkthrough-diagnosis.cjs');
 const { readCommitMessageReply } = require('./walkthrough-commit-message.cjs');
+const { normalizePiModel, setOnPiModelsLoaded } = require('./pi.cjs');
 const { getAgent, listAgents, normalizeAgentBackend } = require('./agent.cjs');
 const {
   configToPreferences,
@@ -99,12 +100,27 @@ const pendingCommentsClipboardController = createPendingCommentsClipboardControl
 /** @type {CodiffConfig} */
 let config = createDefaultConfig();
 
-/** @type {Map<'codex' | 'claude', {agent: import('./agent.cjs').Agent; installer: ReturnType<typeof createSkillInstaller>}>} */
+/**
+ * @type {Map<
+ *   'codex' | 'claude' | 'pi',
+ *   { agent: import('./agent.cjs').Agent; installer: ReturnType<typeof createSkillInstaller> }
+ * >}
+ */
 const skillInstallers = new Map(
-  listAgents().map((agent) => [
-    agent.id,
-    { agent, installer: createSkillInstaller({ app, dialog, root, skill: agent.skill }) },
-  ]),
+  listAgents()
+    .filter((agent) => agent.skill !== undefined)
+    .map((agent) => [
+      agent.id,
+      {
+        agent,
+        installer: createSkillInstaller({
+          app,
+          dialog,
+          root,
+          skill: agent.skill,
+        }),
+      },
+    ]),
 );
 
 const getActiveAgent = () => getAgent(config.settings.agentBackend);
@@ -113,11 +129,13 @@ const getActiveAgent = () => getAgent(config.settings.agentBackend);
 const resolveWindowAgent = (webContentsId) => {
   const override = windowLaunchOptions.get(webContentsId)?.agentBackend;
   return getAgent(
-    override === 'codex' || override === 'claude' ? override : config.settings.agentBackend,
+    override === 'codex' || override === 'claude' || override === 'pi'
+      ? override
+      : config.settings.agentBackend,
   );
 };
 
-/** @param {'codex' | 'claude'} agentId */
+/** @param {'codex' | 'claude' | 'pi'} agentId */
 const skillInstallerFor = (agentId) => skillInstallers.get(agentId)?.installer;
 const { getTerminalHelperStatus, installTerminalHelper } = createTerminalHelper({
   app,
@@ -164,6 +182,7 @@ const updateConfig = (nextConfig) => {
       openAIModel: normalizeOpenAIModel(
         nextConfig.settings?.openAIModel ?? config.settings.openAIModel,
       ),
+      piModel: normalizePiModel(nextConfig.settings?.piModel ?? config.settings.piModel),
     },
   };
   nativeTheme.themeSource = config.settings.theme;
@@ -172,7 +191,7 @@ const updateConfig = (nextConfig) => {
   Menu.setApplicationMenu(buildApplicationMenu());
 };
 
-/** @param {'codex' | 'claude'} backend */
+/** @param {'codex' | 'claude' | 'pi'} backend */
 const selectAgentBackend = (backend) => {
   const agentBackend = normalizeAgentBackend(backend);
   if (config.settings.agentBackend === agentBackend) {
@@ -346,14 +365,36 @@ const openRepositoryFolder = async (browserWindow) => {
   }
 };
 
+/**
+ * @param {import('./agent.cjs').Agent} agent
+ * @returns {string}
+ */
+const getActiveModelShortName = (agent) => {
+  const key = /** @type {keyof typeof config.settings} */ (agent.modelSettingKey);
+  const raw = config.settings[key];
+  const modelId = typeof raw === 'string' ? raw : '';
+  if (!modelId) return '';
+  const match = agent.models.find((model) => model.id === modelId);
+  if (match) {
+    const shortId = match.id.includes('/') ? (match.id.split('/').pop() ?? '') : match.id;
+    return shortId || match.label;
+  }
+  const fallback = modelId.includes('/') ? (modelId.split('/').pop() ?? '') : modelId;
+  return fallback;
+};
+
 /** @returns {Array<import('electron').MenuItemConstructorOptions>} */
 const buildAgentSubmenu = () =>
-  listAgents().map((agent) => ({
-    checked: config.settings.agentBackend === agent.id,
-    click: () => selectAgentBackend(agent.id),
-    label: agent.label,
-    type: 'radio',
-  }));
+  listAgents().map((agent) => {
+    const isActive = config.settings.agentBackend === agent.id;
+    const modelName = isActive ? getActiveModelShortName(agent) : '';
+    return {
+      checked: isActive,
+      click: () => selectAgentBackend(agent.id),
+      label: modelName ? `${agent.label} (${modelName})` : agent.label,
+      type: 'radio',
+    };
+  });
 
 /** @returns {Array<import('electron').MenuItemConstructorOptions>} */
 const buildModelSubmenu = () => {
@@ -368,14 +409,16 @@ const buildModelSubmenu = () => {
 
 /** @returns {Array<import('electron').MenuItemConstructorOptions>} */
 const buildSkillMenuItems = () =>
-  listAgents().map((agent) => ({
-    click:
-      /** @type {NonNullable<import('electron').MenuItemConstructorOptions['click']>} */ (
-        (_menuItem, browserWindow) =>
-          void skillInstallers.get(agent.id)?.installer.install(browserWindow)
-      ),
-    label: `Install ${agent.skill.label}`,
-  }));
+  listAgents()
+    .filter((agent) => agent.skill)
+    .map((agent) => ({
+      click:
+        /** @type {NonNullable<import('electron').MenuItemConstructorOptions['click']>} */ (
+          (_menuItem, browserWindow) =>
+            void skillInstallers.get(agent.id)?.installer.install(browserWindow)
+        ),
+      label: `Install ${agent.skill?.label ?? agent.label}`,
+    }));
 
 /** @returns {import('electron').Menu} */
 const buildApplicationMenu = () =>
@@ -828,9 +871,21 @@ if (squirrelStartup || !lock) {
     config = readConfig();
     config.settings.openAIModel = normalizeOpenAIModel(config.settings.openAIModel);
     config.settings.claudeModel = normalizeClaudeModel(config.settings.claudeModel);
+    config.settings.piModel = normalizePiModel(config.settings.piModel);
     config.settings.agentBackend = normalizeAgentBackend(config.settings.agentBackend);
     nativeTheme.themeSource = config.settings.theme;
     Menu.setApplicationMenu(buildApplicationMenu());
+
+    // Re-normalize piModel now that models have loaded, then rebuild menu.
+    setOnPiModelsLoaded(() => {
+      const realPiModel = normalizePiModel(config.settings.piModel);
+      if (realPiModel !== config.settings.piModel) {
+        config.settings.piModel = realPiModel;
+        writeConfig(config);
+      }
+      Menu.setApplicationMenu(buildApplicationMenu());
+    });
+
     const launchOptions = getLaunchOptions();
     focusOrCreateWindow(
       getInitialRepositoryPath(getLaunchPath(), launchOptions, config.settings.lastRepositoryPath),
@@ -847,6 +902,7 @@ if (squirrelStartup || !lock) {
           codeFontFamily: normalizeCodeFontFamily(nextConfig.settings.codeFontFamily),
           codeFontSize: normalizeCodeFontSize(nextConfig.settings.codeFontSize),
           openAIModel: normalizeOpenAIModel(nextConfig.settings.openAIModel),
+          piModel: normalizePiModel(nextConfig.settings.piModel),
         },
       };
       nativeTheme.themeSource = config.settings.theme;

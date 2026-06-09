@@ -16,9 +16,9 @@
       "properties": {
         "agentBackend": {
           "type": "string",
-          "enum": ["codex", "claude"],
+          "enum": ["codex", "claude", "pi"],
           "default": "codex",
-          "description": "Which agent CLI powers review assistance and walkthroughs. 'codex' uses the OpenAI Codex CLI; 'claude' uses the Claude Code CLI."
+          "description": "Which agent CLI powers review assistance and walkthroughs. 'codex' uses the OpenAI Codex CLI; 'claude' uses the Claude Code CLI; 'pi' uses the Pi CLI (reserved for upcoming pi.dev integration)."
         },
         "claudeModel": {
           "type": "string",
@@ -62,6 +62,11 @@
           "type": "string",
           "default": "gpt-5.3-codex-spark",
           "description": "The OpenAI model to use for review assistance and walkthroughs."
+        },
+        "piModel": {
+          "type": "string",
+          "default": "pi-default",
+          "description": "The Pi model to use for review assistance and walkthroughs when agentBackend is 'pi'. Reserved for upcoming pi.dev integration."
         },
         "showOutdated": {
           "type": "boolean",

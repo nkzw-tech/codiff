@@ -4,7 +4,7 @@ import { expect, test } from 'vite-plus/test';
 const require = createRequire(import.meta.url);
 const { AGENT_BACKENDS, DEFAULT_AGENT_BACKEND, getAgent, listAgents, normalizeAgentBackend } =
   require('../agent.cjs') as {
-    AGENT_BACKENDS: ReadonlyArray<'codex' | 'claude'>;
+    AGENT_BACKENDS: ReadonlyArray<'codex' | 'claude' | 'pi'>;
     DEFAULT_AGENT_BACKEND: string;
     getAgent: (backendId: unknown) => {
       id: string;
@@ -14,7 +14,7 @@ const { AGENT_BACKENDS, DEFAULT_AGENT_BACKEND, getAgent, listAgents, normalizeAg
       notFoundCode: string;
       run: unknown;
       readSessionContext: unknown;
-      skill: { sourceSubdir: string; targetSubdir: string };
+      skill?: { sourceSubdir: string; targetSubdir: string };
     };
     listAgents: () => ReadonlyArray<{ id: string }>;
     normalizeAgentBackend: (value: unknown) => string;
@@ -23,13 +23,14 @@ const { AGENT_BACKENDS, DEFAULT_AGENT_BACKEND, getAgent, listAgents, normalizeAg
 test('normalizes unknown agent backends to the default', () => {
   expect(normalizeAgentBackend('claude')).toBe('claude');
   expect(normalizeAgentBackend('codex')).toBe('codex');
+  expect(normalizeAgentBackend('pi')).toBe('pi');
   expect(normalizeAgentBackend('gpt')).toBe(DEFAULT_AGENT_BACKEND);
   expect(normalizeAgentBackend(undefined)).toBe(DEFAULT_AGENT_BACKEND);
 });
 
-test('lists both agent backends', () => {
-  expect(AGENT_BACKENDS).toEqual(['codex', 'claude']);
-  expect(listAgents().map((agent) => agent.id)).toEqual(['codex', 'claude']);
+test('lists all agent backends', () => {
+  expect(AGENT_BACKENDS).toEqual(['codex', 'claude', 'pi']);
+  expect(listAgents().map((agent) => agent.id)).toEqual(['codex', 'claude', 'pi']);
 });
 
 test('resolves the Codex agent with its session and skill wiring', () => {
@@ -57,6 +58,18 @@ test('resolves the Claude Code agent with its session and skill wiring', () => {
     label: 'Claude Code Skill',
     targets: [{ sourceSubdir: 'claude/skills/codiff', targetSubdir: '.claude/skills/codiff' }],
   });
+});
+
+test('resolves the Pi agent with its session wiring but no skill', () => {
+  const agent = getAgent('pi');
+  expect(agent.id).toBe('pi');
+  expect(agent.label).toBe('Pi');
+  expect(agent.modelSettingKey).toBe('piModel');
+  expect(agent.sessionLaunchOptionKey).toBe('piSessionId');
+  expect(agent.notFoundCode).toBe('PI_NOT_FOUND');
+  expect(agent.skill).toBeUndefined();
+  expect(typeof agent.run).toBe('function');
+  expect(typeof agent.readSessionContext).toBe('function');
 });
 
 test('falls back to the default backend for unknown ids', () => {

@@ -112,8 +112,8 @@ const cleanReply = (value, fallback = '') =>
 /** @param {unknown} input @param {string} [agentLabel] */
 const normalizeReviewAssistantReply = (input, agentLabel = 'Codex') => ({
   reply: cleanReply(
-    input && typeof input === 'object' && 'reply' in input ? input.reply : undefined,
-    `${agentLabel} could not produce a useful reply.`,
+    input && typeof input === 'object' ? (input.reply ?? input.text ?? undefined) : undefined,
+    `${agentLabel} could not produce a useful reply. ${typeof input === 'object' ? JSON.stringify(input) : String(input)}`,
   ),
   version: 1,
 });

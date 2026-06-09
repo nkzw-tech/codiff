@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 
 export const flagDefinitions = [
   {
-    argument: '<codex|claude>',
+    argument: '<codex|claude|pi>',
     description: 'Override the agent backend for this session.',
     name: 'agent',
     type: 'string',
@@ -30,6 +30,12 @@ export const flagDefinitions = [
     type: 'string',
   },
   { description: 'Show this help message and exit.', name: 'help', short: 'h', type: 'boolean' },
+  {
+    argument: '<id>',
+    description: 'Attach Pi session metadata to a walkthrough.',
+    name: 'pi-session',
+    type: 'string',
+  },
   {
     description: 'Show version number and exit.',
     name: 'version',
@@ -289,7 +295,11 @@ export const parseArguments = (args) => {
     typeof values['codex-session'] === 'string' ? values['codex-session'] : null;
   const claudeSessionId =
     typeof values['claude-session'] === 'string' ? values['claude-session'] : null;
-  const agentBackend = values.agent === 'codex' || values.agent === 'claude' ? values.agent : null;
+  const piSessionId = typeof values['pi-session'] === 'string' ? values['pi-session'] : null;
+  const agentBackend =
+    values.agent === 'codex' || values.agent === 'claude' || values.agent === 'pi'
+      ? values.agent
+      : null;
   let pullRequestNumber = null;
   let pullRequestUrl = null;
   let requestedPath = null;
@@ -365,6 +375,7 @@ export const parseArguments = (args) => {
     ...(agentBackend ? { agentBackend } : {}),
     ...(claudeSessionId ? { claudeSessionId } : {}),
     ...(codexSessionId ? { codexSessionId } : {}),
+    ...(piSessionId ? { piSessionId } : {}),
     ...(branchRef ? { branchRef } : {}),
     ...(range ? { range } : {}),
     commitRef,

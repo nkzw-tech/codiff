@@ -164,16 +164,23 @@ export type WalkthroughContext = {
   source: {
     generatedAt: string;
     threadId?: string;
-    type: 'codex-session' | 'codex-session-excerpt' | 'claude-session' | 'claude-session-excerpt';
+    type:
+      | 'codex-session'
+      | 'codex-session-excerpt'
+      | 'claude-session'
+      | 'claude-session-excerpt'
+      | 'pi-session'
+      | 'pi-session-excerpt';
   };
   validation?: ReadonlyArray<string>;
   version: 1;
 };
 
 export type CodiffLaunchOptions = {
-  agentBackend?: 'codex' | 'claude';
+  agentBackend?: 'codex' | 'claude' | 'pi';
   claudeSessionId?: string;
   codexSessionId?: string;
+  piSessionId?: string;
   repositoryPathProvided: boolean;
   source?: ReviewSource;
   walkthrough: boolean;
@@ -349,7 +356,7 @@ export type NarrativeWalkthroughResult =
       walkthrough: NarrativeWalkthrough;
     }
   | {
-      code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND';
+      code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'PI_NOT_FOUND';
       reason: string;
       status: 'unavailable';
     };
@@ -429,7 +436,7 @@ export type ReviewAssistantResult =
       status: 'ready';
     }
   | {
-      code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND';
+      code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'PI_NOT_FOUND';
       reason: string;
       status: 'unavailable';
     };
@@ -474,7 +481,7 @@ export type DiffImageContentResult =
 export type CodiffTheme = 'system' | 'light' | 'dark';
 
 export type CodiffPreferences = {
-  agentBackend: 'codex' | 'claude';
+  agentBackend: 'codex' | 'claude' | 'pi';
   claudeModel: string;
   codeFontFamily: string;
   codeFontSize: number;
@@ -483,6 +490,7 @@ export type CodiffPreferences = {
   editorCommand: string;
   lastRepositoryPath: string;
   openAIModel: string;
+  piModel: string;
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;

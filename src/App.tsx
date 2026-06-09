@@ -37,6 +37,7 @@ import {
   defaultLaunchOptions,
   defaultTerminalHelperStatus,
   getAgentLabel,
+  getAgentModelShortName,
   HISTORY_PAGE_SIZE,
 } from './lib/app-constants.ts';
 import {
@@ -2030,6 +2031,15 @@ export default function App() {
 
   const activeAgentBackend = launchOptions.agentBackend ?? codiffConfig.settings.agentBackend;
   const agentLabel = getAgentLabel(activeAgentBackend);
+  const agentModelLabel = getAgentModelShortName(
+    activeAgentBackend,
+    activeAgentBackend === 'codex'
+      ? codiffConfig.settings.openAIModel
+      : activeAgentBackend === 'claude'
+        ? codiffConfig.settings.claudeModel
+        : codiffConfig.settings.piModel,
+  );
+  const agentLabelWithModel = agentModelLabel ? `${agentLabel} (${agentModelLabel})` : agentLabel;
   const agentSkillLabel = `${agentLabel} Skill`;
 
   if (loadError) {
@@ -2099,7 +2109,7 @@ export default function App() {
   const commonReviewProps = {
     activeSearchMatch: activeDiffSearchMatch,
     agentId: activeAgentBackend,
-    agentLabel,
+    agentLabel: agentLabelWithModel,
     collapsed,
     comments: visibleReviewComments,
     commitMetadata: state.source.type === 'commit' ? (state.commitMetadata ?? null) : null,
@@ -2325,7 +2335,7 @@ export default function App() {
           <div className="empty-state">
             <div className="empty-panel squircle">
               <AgentUnavailablePanel
-                agentLabel={agentLabel}
+                agentLabel={agentLabelWithModel}
                 onShowFiles={() => setSidebarMode('tree')}
                 reason={walkthroughError?.reason}
               />

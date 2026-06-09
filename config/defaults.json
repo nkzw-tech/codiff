@@ -9,6 +9,7 @@
     "editorCommand": "",
     "lastRepositoryPath": "",
     "openAIModel": "gpt-5.3-codex-spark",
+    "piModel": "pi-default",
     "showOutdated": false,
     "showWhitespace": false,
     "theme": "system",

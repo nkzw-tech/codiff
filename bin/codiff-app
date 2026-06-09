@@ -31,16 +31,17 @@ show_help() {
   printf '%s\n' "${blue_bold}Usage:${reset} ${gray}codiff [options] [<ref> | <pr> | <url>] [path]${reset}"
   printf '\n'
   printf '%s\n' "${blue_bold}Options:${reset}"
-  printf '  %-22s%s%s%s\n' "--agent <codex|claude>" "$gray" "Override the agent backend for this session." "$reset"
+  printf '  %-22s%s%s%s\n' "--agent <codex|claude|pi>" "$gray" "Override the agent backend for this session." "$reset"
   printf '  %-22s%s%s%s\n' "--branch <ref>" "$gray" "Review the current branch against a target branch." "$reset"
   printf '  %-22s%s%s%s\n' "--commit <ref>" "$gray" "Review a specific commit." "$reset"
   printf '  %-22s%s%s%s\n' "--codex-session <id>" "$gray" "Attach Codex session metadata to a walkthrough." "$reset"
   printf '  %-22s%s%s%s\n' "--claude-session <id>" "$gray" "Attach Claude Code session metadata to a walkthrough." "$reset"
   printf '  %-22s%s%s%s\n' "--help, -h" "$gray" "Show this help message and exit." "$reset"
+  printf '  %-22s%s%s%s\n' "--pi-session <id>" "$gray" "Attach Pi session metadata to a walkthrough." "$reset"
   printf '  %-22s%s%s%s\n' "--version, -v" "$gray" "Show version number and exit." "$reset"
   printf '  %-22s%s%s%s\n' "--walkthrough, -w" "$gray" "Start with an LLM-generated narrative walkthrough." "$reset"
   printf '  %-22s%s%s%s\n' "--walkthrough-context <file>" "$gray" "Seed a walkthrough with Codex conversation context JSON." "$reset"
-  printf '  %-22s%s%s%s\n' "--walkthrough-file <file>" "$gray" "Open a pre-authored narrative walkthrough JSON file." "$reset"
+
   printf '  %-22s%s%s%s\n' "--walkthrough-guide" "$gray" "Print the narrative walkthrough authoring guide and schema, then exit." "$reset"
   printf '\n'
   printf '%s\n' "${blue_bold}Examples:${reset}"
@@ -57,6 +58,7 @@ show_help() {
 repository_path=""
 codex_session_id=""
 claude_session_id=""
+pi_session_id=""
 agent_backend=""
 branch_ref=""
 commit_ref=""
@@ -66,6 +68,7 @@ walkthrough_context_path=""
 walkthrough_file_path=""
 expect_codex_session=0
 expect_claude_session=0
+expect_pi_session=0
 expect_agent=0
 expect_branch_ref=0
 expect_commit_ref=0
@@ -123,6 +126,12 @@ for arg in "$@"; do
   if [ "$expect_claude_session" -eq 1 ]; then
     claude_session_id="$arg"
     expect_claude_session=0
+    continue
+  fi
+
+  if [ "$expect_pi_session" -eq 1 ]; then
+    pi_session_id="$arg"
+    expect_pi_session=0
     continue
   fi
 
@@ -200,6 +209,12 @@ for arg in "$@"; do
       ;;
     --claude-session=*)
       claude_session_id="${arg#--claude-session=}"
+      ;;
+    --pi-session)
+      expect_pi_session=1
+      ;;
+    --pi-session=*)
+      pi_session_id="${arg#--pi-session=}"
       ;;
     --agent)
       expect_agent=1
@@ -305,6 +320,9 @@ open_codiff() {
   fi
   if [ -n "$codex_session_id" ]; then
     set -- --codex-session "$codex_session_id" "$@"
+  fi
+  if [ -n "$pi_session_id" ]; then
+    set -- --pi-session "$pi_session_id" "$@"
   fi
 
   open -n "$app_path" --args "$@"

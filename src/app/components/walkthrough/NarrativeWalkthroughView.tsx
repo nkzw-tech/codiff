@@ -118,9 +118,9 @@ function StopHeader({ current, stop }: { current: boolean; stop: WalkthroughStop
   );
 }
 
-function SupportHeader({ current }: { current: boolean }) {
+function SupportHeader() {
   return (
-    <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
+    <div className="wt-stop-block wt-stop-block-header current">
       <div className="wt-stage-title-row">
         <h2 className="wt-stage-title">Support</h2>
         <ImportancePill importance="normal" />
@@ -147,8 +147,8 @@ const createWalkthroughBlocks = (
       stopIndexByBlockId.set(blockId, stop.index);
       blocks.push({
         header: <StopHeader current={stop.index === currentIndex} stop={stop} />,
-        headerSelected: stop.index === currentIndex,
         id: blockId,
+        selected: stop.index === currentIndex,
       });
       continue;
     }
@@ -162,11 +162,11 @@ const createWalkthroughBlocks = (
         file,
         header:
           runIndex === 0 ? <StopHeader current={stop.index === currentIndex} stop={stop} /> : null,
-        headerSelected: stop.index === currentIndex,
         id: blockId,
         itemIdPrefix: blockId,
         note,
         reviewIdentity,
+        selected: stop.index === currentIndex,
       });
     });
   }
@@ -189,7 +189,6 @@ const getBlockReviewTarget = (
 
 const createSupportBlocks = (
   files: ReadonlyArray<ChangedFile>,
-  selected: boolean,
   walkthroughView: WalkthroughView,
   showWhitespace: boolean,
 ): ReadonlyArray<ReviewDiffBlock> => {
@@ -201,12 +200,12 @@ const createSupportBlocks = (
         const isFirstBlock = blocks.length === 0;
         blocks.push({
           file,
-          header: isFirstBlock ? <SupportHeader current={selected} /> : null,
-          headerSelected: selected,
+          header: isFirstBlock ? <SupportHeader /> : null,
           id: blockId,
           itemIdPrefix: blockId,
           note: note ?? item.note ?? group.reason,
           reviewIdentity,
+          selected: true,
         });
       });
     }
@@ -217,8 +216,7 @@ const createSupportBlocks = (
     const isFirstBlock = blocks.length === 0;
     blocks.push({
       file,
-      header: isFirstBlock ? <SupportHeader current={selected} /> : null,
-      headerSelected: selected,
+      header: isFirstBlock ? <SupportHeader /> : null,
       id: blockId,
       itemIdPrefix: blockId,
       note: 'Not included in the generated walkthrough.',
@@ -226,6 +224,7 @@ const createSupportBlocks = (
         fingerprint: file.fingerprint,
         key: blockId,
       },
+      selected: true,
     });
   }
 
@@ -462,65 +461,57 @@ export function NarrativeWalkthroughView({
     [files, navigation.index, walkthroughView],
   );
   const supportBlocks = useMemo(
-    () =>
-      walkthroughView
-        ? createSupportBlocks(files, navigation.mode === 'support', walkthroughView, showWhitespace)
-        : [],
-    [files, navigation.mode, showWhitespace, walkthroughView],
+    () => (walkthroughView ? createSupportBlocks(files, walkthroughView, showWhitespace) : []),
+    [files, showWhitespace, walkthroughView],
   );
   const supportAvailable = supportBlocks.length > 0;
-  const firstSupportBlockId = supportBlocks[0]?.id ?? null;
-  const supportBlockIds = useMemo(
-    () => new Set(supportBlocks.map((block) => block.id)),
-    [supportBlocks],
-  );
-  const reviewBlocks = useMemo(
-    () => [...walkthroughBlocks.blocks, ...supportBlocks],
-    [supportBlocks, walkthroughBlocks.blocks],
-  );
   const activeBlockId = walkthroughBlocks.firstBlockIdByStop[navigation.scrollTarget.index];
-  const reviewBlockScrollTarget: WalkthroughBlockScrollTarget | null =
-    navigation.mode === 'support' && firstSupportBlockId
+  const activeBlockScrollTarget: WalkthroughBlockScrollTarget | null =
+    navigation.mode === 'stop' && activeBlockId
       ? {
           behavior: 'smooth',
-          blockId: firstSupportBlockId,
+          blockId: activeBlockId,
+          request: navigation.scrollTarget.nonce,
+        }
+      : null;
+  const supportBlockScrollTarget: WalkthroughBlockScrollTarget | null =
+    navigation.mode === 'support' && supportBlocks[0]
+      ? {
+          behavior: 'smooth',
+          blockId: supportBlocks[0].id,
           request: navigation.supportScrollRequest,
         }
-      : navigation.mode === 'stop' && activeBlockId
-        ? {
-            behavior: 'smooth',
-            blockId: activeBlockId,
-            request: navigation.scrollTarget.nonce,
-          }
-        : null;
+      : null;
   const handleActiveBlockChange = useCallback(
     (blockId: string) => {
-      onActiveReviewTargetChange(getBlockReviewTarget(reviewBlocks, blockId));
-      if (supportBlockIds.has(blockId)) {
-        navigation.syncSupportFromScroll();
-        return;
-      }
+      onActiveReviewTargetChange(getBlockReviewTarget(walkthroughBlocks.blocks, blockId));
       const stopIndex = walkthroughBlocks.stopIndexByBlockId.get(blockId);
       if (stopIndex != null) {
         navigation.syncIndexFromScroll(stopIndex);
       }
     },
-    [navigation, onActiveReviewTargetChange, reviewBlocks, supportBlockIds, walkthroughBlocks],
+    [navigation, onActiveReviewTargetChange, walkthroughBlocks],
+  );
+  const handleSupportActiveBlockChange = useCallback(
+    (blockId: string) => {
+      onActiveReviewTargetChange(getBlockReviewTarget(supportBlocks, blockId));
+    },
+    [onActiveReviewTargetChange, supportBlocks],
   );
   useEffect(() => {
     if (navigation.mode === 'stop') {
-      onActiveReviewTargetChange(getBlockReviewTarget(reviewBlocks, activeBlockId));
+      onActiveReviewTargetChange(getBlockReviewTarget(walkthroughBlocks.blocks, activeBlockId));
     } else if (navigation.mode === 'support') {
-      onActiveReviewTargetChange(getBlockReviewTarget(reviewBlocks, firstSupportBlockId));
+      onActiveReviewTargetChange(getBlockReviewTarget(supportBlocks, supportBlocks[0]?.id));
     } else {
       onActiveReviewTargetChange(null);
     }
   }, [
     activeBlockId,
-    firstSupportBlockId,
     navigation.mode,
     onActiveReviewTargetChange,
-    reviewBlocks,
+    supportBlocks,
+    walkthroughBlocks.blocks,
   ]);
 
   // j/k and Ctrl+↑/↓ move between stops, matching the prototype and Codiff's
@@ -622,10 +613,10 @@ export function NarrativeWalkthroughView({
           onCommit={onCommit}
           onUpdateMessage={onUpdateCommitMessage}
         />
-      ) : walkthroughView.sequence.length > 0 ? (
-        renderDiffBlocks(reviewBlocks, reviewBlockScrollTarget, handleActiveBlockChange)
+      ) : navigation.mode === 'stop' && walkthroughView.sequence.length > 0 ? (
+        renderDiffBlocks(walkthroughBlocks.blocks, activeBlockScrollTarget, handleActiveBlockChange)
       ) : (
-        renderDiffBlocks(reviewBlocks, reviewBlockScrollTarget, handleActiveBlockChange)
+        renderDiffBlocks(supportBlocks, supportBlockScrollTarget, handleSupportActiveBlockChange)
       )}
 
       {navigation.mode === 'commit' ? null : completionAction ? (

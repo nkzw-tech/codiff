@@ -116,9 +116,9 @@ const normalizeTheme = (theme) =>
 const normalizeDiffStyle = (diffStyle) =>
   diffStyle === 'split' || diffStyle === 'unified' ? diffStyle : 'split';
 
-/** @param {unknown} backend @returns {'codex' | 'claude'} */
+/** @param {unknown} backend @returns {'codex' | 'claude' | 'pi'} */
 const normalizeAgentBackend = (backend) =>
-  backend === 'codex' || backend === 'claude' ? backend : 'codex';
+  backend === 'codex' || backend === 'claude' || backend === 'pi' ? backend : 'codex';
 
 /** @param {unknown} family @returns {string} */
 const normalizeCodeFontFamily = (family) => (typeof family === 'string' ? family.trim() : '');
@@ -251,6 +251,8 @@ const mergeConfig = (raw) => {
         typeof rawSettings.openAIModel === 'string'
           ? rawSettings.openAIModel
           : defaults.settings.openAIModel,
+      piModel:
+        typeof rawSettings.piModel === 'string' ? rawSettings.piModel : defaults.settings.piModel,
       showOutdated:
         typeof rawSettings.showOutdated === 'boolean'
           ? rawSettings.showOutdated

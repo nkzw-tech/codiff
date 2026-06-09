@@ -10,26 +10,10 @@ const { gitOrEmpty } = require('./git-state/common.cjs');
 /** @param {unknown} value @returns {ReadonlyArray<any>} */
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
-const WORKING_TREE_HUNK_ID = /^(.*):(staged|unstaged):h[1-9]\d*$/;
-
 /**
- * @param {unknown} value
- * @returns {string | null}
- */
-const pathFromWorkingTreeHunkId = (value) => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-
-  const match = WORKING_TREE_HUNK_ID.exec(value.trim());
-  return match?.[1] || null;
-};
-
-/**
- * The paths a walkthrough is anchored to, gathered from legacy stop anchors,
- * support files, v4 hunk ids, and normalized hunk objects. Repo-root relative,
- * matching how the walkthrough records them (and how `git log -- <path>` expects
- * them).
+ * The paths a walkthrough is anchored to, gathered from every stop anchor and
+ * support file in the raw walkthrough JSON. Repo-root relative, matching how the
+ * walkthrough records them (and how `git log -- <path>` expects them).
  * @param {WalkthroughInput} input
  * @returns {Array<string>}
  */
@@ -42,10 +26,6 @@ const collectWalkthroughPaths = (input) => {
       paths.add(value.trim());
     }
   };
-  /** @param {unknown} value */
-  const addHunkIdPath = (value) => {
-    add(pathFromWorkingTreeHunkId(value));
-  };
   /** @param {any} anchor */
   const visit = (anchor) => {
     if (anchor && typeof anchor === 'object') {
@@ -53,26 +33,15 @@ const collectWalkthroughPaths = (input) => {
       add(anchor.oldPath);
     }
   };
-  /** @param {any} group */
-  const visitHunkGroup = (group) => {
-    for (const hunkId of asArray(group?.hunkIds)) {
-      addHunkIdPath(hunkId);
-    }
-    for (const hunk of asArray(group?.hunks)) {
-      visit(hunk);
-    }
-  };
 
   for (const chapter of asArray(input?.chapters)) {
     for (const stop of asArray(chapter?.stops)) {
-      visitHunkGroup(stop);
       for (const anchor of asArray(stop?.anchors)) {
         visit(anchor);
       }
     }
   }
   for (const group of asArray(input?.support)) {
-    visitHunkGroup(group);
     for (const file of asArray(group?.files)) {
       visit(file);
     }

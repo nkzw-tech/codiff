@@ -45,6 +45,7 @@
     "electron-squirrel-startup": "^1.0.1"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.1",
     "@electron-forge/cli": "^7.11.2",
     "@electron-forge/maker-deb": "^7.11.2",
     "@electron-forge/maker-rpm": "^7.11.2",
@@ -79,11 +80,9 @@
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
-  "browserslist": [
-    ">0.2%",
-    "not dead",
-    "not op_mini all"
-  ],
+  "optionalDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.1"
+  },
   "engines": {
     "node": ">=23.0.0",
     "pnpm": ">=11.0.0"
