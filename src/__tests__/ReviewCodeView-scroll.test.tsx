@@ -730,3 +730,89 @@ test('Enter on a focused review control is not converted into a hunk comment', a
     container.remove();
   }
 });
+
+type ReviewLineClickHandler = (
+  line: { annotationSide: 'additions' | 'deletions'; event: unknown; lineNumber: number },
+  context: { item: unknown },
+) => void;
+
+type ReviewLineRangeHandler = (
+  range: { end: number; side: 'additions' | 'deletions'; start: number },
+  context: { item: unknown },
+) => void;
+
+const getReviewCodeViewHandlers = () => {
+  const options = codeViewMock.lastOptions;
+  const item = codeViewMock.lastItems.find((candidate) => candidate.type === 'diff');
+  if (!options || !item) {
+    throw new Error('Expected CodeView options and a diff item.');
+  }
+
+  return {
+    item,
+    onGutterUtilityClick: options.onGutterUtilityClick as unknown as ReviewLineRangeHandler,
+    onLineClick: options.onLineClick as unknown as ReviewLineClickHandler,
+    onLineSelectionEnd: options.onLineSelectionEnd as unknown as ReviewLineRangeHandler,
+  };
+};
+
+const nonInteractivePointerEvent = { composedPath: () => [] };
+
+test('line content clicks do not create review comments', async () => {
+  const onCreateComment = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/click.ts',
+    'diff --git a/src/click.ts b/src/click.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<ReviewCodeViewHarness files={[file]} onCreateComment={onCreateComment} />);
+    });
+
+    const { item, onGutterUtilityClick, onLineClick, onLineSelectionEnd } =
+      getReviewCodeViewHandlers();
+    const range = { end: 1, side: 'additions' as const, start: 1 };
+
+    await act(async () => {
+      onLineClick(
+        { annotationSide: 'additions', event: nonInteractivePointerEvent, lineNumber: 1 },
+        { item },
+      );
+    });
+
+    expect(onCreateComment).not.toHaveBeenCalled();
+
+    await act(async () => {
+      onLineSelectionEnd(range, { item });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onCreateComment).toHaveBeenCalledTimes(1);
+    expect(onCreateComment).toHaveBeenCalledWith({
+      filePath: 'src/click.ts',
+      lineNumber: 1,
+      sectionId: 'src/click.ts:unstaged',
+      side: 'additions',
+    });
+
+    await act(async () => {
+      onGutterUtilityClick(range, { item });
+      // The pointer-up after a gutter drag also ends a line selection; only
+      // the gutter callback may create the comment.
+      onLineSelectionEnd(range, { item });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(onCreateComment).toHaveBeenCalledTimes(2);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});

@@ -8,12 +8,16 @@ import type { ChangedFile, CommitMetadata, ReviewSource } from '../../types.ts';
 export type { ReviewDiffBlock } from '../../app/components/ReviewCodeView.tsx';
 
 const codeViewMockState = vi.hoisted(() => ({
+  lastItems: [] as ReadonlyArray<{ id: string; type: string }>,
+  lastOptions: null as Record<string, unknown> | null,
   postRenderNodes: [] as Array<HTMLElement>,
   scrollTo: vi.fn(),
 }));
 export const codeViewMock = codeViewMockState;
 
 export const resetCodeViewMock = () => {
+  codeViewMock.lastItems = [];
+  codeViewMock.lastOptions = null;
   codeViewMock.postRenderNodes = [];
   codeViewMock.scrollTo.mockClear();
 };
@@ -50,6 +54,8 @@ vi.mock('@pierre/diffs/react', async () => {
 
       React.useLayoutEffect(() => {
         itemsRef.current = props.items;
+        codeViewMock.lastItems = props.items;
+        codeViewMock.lastOptions = props.options ?? null;
         codeViewMock.postRenderNodes.length = props.items.length;
         props.items.forEach((item, index) => {
           const node = codeViewMock.postRenderNodes[index] ?? document.createElement('div');

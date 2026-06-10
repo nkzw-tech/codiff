@@ -1826,21 +1826,7 @@ export function ReviewCodeView({
             shouldLoadDiffSectionContents(meta.section)
           ) {
             onLoadSection(meta.file, meta.section);
-            return;
           }
-
-          const side = 'annotationSide' in line ? line.annotationSide : null;
-          if (!side) {
-            return;
-          }
-
-          cancelPendingEmptyCommentDeletes();
-          onCreateComment({
-            filePath: meta.file.path,
-            lineNumber: line.lineNumber,
-            sectionId: meta.section.id,
-            side,
-          });
         },
         onLineSelectionEnd: (range, context) => {
           if (ignoreNextLineSelectionEndRef.current) {
@@ -1894,13 +1880,11 @@ export function ReviewCodeView({
       }) satisfies CodeViewOptions<ReviewAnnotationMetadata>,
     [
       bottomInset,
-      cancelPendingEmptyCommentDeletes,
       commitDetailsItemId,
       createCommentForRange,
       diffStyle,
       itemMetadata,
       loadingSectionIds,
-      onCreateComment,
       onLoadSection,
       wordWrap,
     ],
