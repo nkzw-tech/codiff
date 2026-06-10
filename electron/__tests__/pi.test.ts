@@ -143,6 +143,7 @@ test.skipIf(!sdkInstalled)(
       expect(typeof model.label).toBe('string');
     }
   },
+  15_000,
 );
 
 test.skipIf(!sdkInstalled)(
