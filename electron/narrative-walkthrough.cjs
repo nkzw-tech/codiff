@@ -578,18 +578,47 @@ If the context and digest conflict, trust the digest.
 
 const buildWalkthroughSizingGuidance = (state) => {
   const fileCount = state.files.length;
-  const targetStops = fileCount <= 6 ? '3-6' : fileCount <= 16 ? '5-9' : '7-12';
+  const hunkCount = state.files.reduce(
+    (total, file) =>
+      total +
+      (file.sections || []).reduce(
+        (sectionTotal, section) => sectionTotal + getSectionWalkthroughHunks(file, section).length,
+        0,
+      ),
+    0,
+  );
+  const targetStops =
+    fileCount <= 2
+      ? hunkCount <= 4
+        ? '1-2'
+        : '2-3'
+      : fileCount <= 4 && hunkCount <= 4
+        ? '1-2'
+        : fileCount <= 4 && hunkCount <= 8
+          ? '1-3'
+          : fileCount <= 16
+            ? '5-9'
+            : '7-12';
+  const targetChapters =
+    fileCount <= 2
+      ? '1'
+      : fileCount <= 4 && hunkCount <= 8
+        ? '1-2'
+        : `2-${MAX_WALKTHROUGH_CHAPTERS}`;
+  const targetChapterInstruction =
+    targetChapters === '1' ? '1 story chapter' : `${targetChapters} story chapters`;
   return `Coverage contract:
-- The digest has ${fileCount} files. Cover the changed hunks a reviewer should see, and put secondary/mechanical hunks in support[] rather than hiding them.
+- The digest has ${fileCount} files and ${hunkCount} reviewable hunks. Cover the changed hunks a reviewer should see, and put secondary/mechanical hunks in support[] rather than hiding them.
 - Define chapters[] in display order. Inside each chapter, define stops[] in display order.
 - Use stable item ids like s1, s2, ... for main stops and support-1, support-2, ... for supporting groups. Do not invent hunk ids.
-- Default to one hunkId per stop or support item.
+- Default to one review idea per stop. Include multiple hunkIds when the hunks implement the same idea, especially in small diffs.
 
 Grouping contract:
 - Target ${targetStops} main-path stops and at most ${MAX_WALKTHROUGH_STOPS}.
-- Use 2-${MAX_WALKTHROUGH_CHAPTERS} story chapters. A chapter is a conceptual group, not a file.
+- Use ${targetChapterInstruction}. A chapter is a conceptual group, not a file. For one- or two-file diffs, prefer one chapter unless there are clearly separate review phases.
 - Chapter titles render in a compact top bar: keep each title to 1-2 short words and at most 16 characters, e.g. "UI", "CLI", "Tests", "Docs", "Runtime", "Cleanup".
-- A stop or support item may contain at most ${MAX_HUNKS_PER_WALKTHROUGH_GROUP} hunkIds. Use multiple hunkIds only when the prose needs those hunks read together to understand one invariant.
+- A stop or support item may contain at most ${MAX_HUNKS_PER_WALKTHROUGH_GROUP} hunkIds. Use multiple hunkIds when the prose needs those hunks read together to understand one invariant, behavior, or repeated pattern.
+- For 1-4 total hunks, usually write 1-2 stops. Similar same-file hunks should usually be one stop with multiple hunkIds, not separate chapters or stops.
 - Split distant same-file hunks into separate consecutive stops when they deserve separate prose. Do not make a chapter-sized stop.
 - Put hunkIds in the exact display order you want Codiff to render. Out-of-line and cross-file order is allowed when it improves reviewer comprehension.
 - Use notes[] on a stop/support item for short per-hunk header notes: each note is { hunkId, body } and hunkId must be one of that item's hunkIds.

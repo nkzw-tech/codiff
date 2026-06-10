@@ -54,6 +54,7 @@ export const useNarrativeNavigation = (
   const commitResetKeyRef = useRef(resetKey);
   const commitSubjectDirtyRef = useRef(false);
   const pendingStopScrollIndexRef = useRef<number | null>(null);
+  const pendingSupportScrollRef = useRef(false);
 
   const setCommitSubject = useCallback((value: string) => {
     commitSubjectDirtyRef.current = true;
@@ -75,6 +76,7 @@ export const useNarrativeNavigation = (
     setIndex(0);
     setScrollTarget({ index: 0, nonce: 0 });
     pendingStopScrollIndexRef.current = null;
+    pendingSupportScrollRef.current = false;
     setSupportScrollRequest(0);
     setSupportVisited(false);
     const stopId = firstStopId(walkthrough);
@@ -150,6 +152,7 @@ export const useNarrativeNavigation = (
       setIndex(clamped);
       markVisited(walkthroughView.sequence[clamped]?.id);
       pendingStopScrollIndexRef.current = clamped;
+      pendingSupportScrollRef.current = false;
       setScrollTarget((current) => ({ index: clamped, nonce: current.nonce + 1 }));
     },
     [walkthroughView, markVisited],
@@ -164,6 +167,9 @@ export const useNarrativeNavigation = (
         return;
       }
       const clamped = Math.max(0, Math.min(walkthroughView.sequence.length - 1, target));
+      if (pendingSupportScrollRef.current) {
+        return;
+      }
       const pendingStopScrollIndex = pendingStopScrollIndexRef.current;
       if (pendingStopScrollIndex != null && pendingStopScrollIndex !== clamped) {
         return;
@@ -171,6 +177,7 @@ export const useNarrativeNavigation = (
       if (pendingStopScrollIndex === clamped) {
         pendingStopScrollIndexRef.current = null;
       }
+      setMode('stop');
       setIndex((current) => (current === clamped ? current : clamped));
       markVisited(walkthroughView.sequence[clamped]?.id);
     },
@@ -179,10 +186,12 @@ export const useNarrativeNavigation = (
 
   const releaseStopScrollLock = useCallback(() => {
     pendingStopScrollIndexRef.current = null;
+    pendingSupportScrollRef.current = false;
   }, []);
 
   const leaveStopMode = useCallback(() => {
     pendingStopScrollIndexRef.current = null;
+    pendingSupportScrollRef.current = false;
   }, []);
 
   const openSupport = useCallback(() => {
@@ -191,9 +200,17 @@ export const useNarrativeNavigation = (
       setIndex(walkthroughView.sequence.length - 1);
     }
     setMode('support');
+    pendingSupportScrollRef.current = true;
     setSupportScrollRequest((current) => current + 1);
     setSupportVisited(true);
   }, [walkthroughView, leaveStopMode]);
+
+  const syncSupportFromScroll = useCallback(() => {
+    pendingSupportScrollRef.current = false;
+    pendingStopScrollIndexRef.current = null;
+    setMode('support');
+    setSupportVisited(true);
+  }, []);
 
   const enterCommit = useCallback(() => {
     leaveStopMode();
@@ -245,6 +262,7 @@ export const useNarrativeNavigation = (
     supportScrollRequest,
     supportVisited,
     syncIndexFromScroll,
+    syncSupportFromScroll,
     toggleCommitFile,
     toggleCommitGroup,
     visited,

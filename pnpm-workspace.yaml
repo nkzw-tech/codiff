@@ -1,9 +1,9 @@
 allowBuilds:
-  '@google/genai': set this to true or false
+  '@google/genai': false
   '@swc/core': true
   electron: true
   electron-winstaller: true
-  protobufjs: set this to true or false
+  protobufjs: false
 blockExoticSubdeps: false
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@^0.1.24

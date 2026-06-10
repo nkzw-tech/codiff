@@ -15,18 +15,19 @@ choose.
 
 ## Shape
 
-- **`chapters[]`** — 2-6 compact sections in display order. A chapter is a conceptual group,
-  not a file. Keep `title` to 1-2 short words and at most 16 characters, e.g. `"UI"`, `"CLI"`,
-  `"Tests"`, `"Docs"`, `"Runtime"`, `"Cleanup"`.
-- **`chapters[].stops[]`** — the main review path. Use 3-6 stops for small changes, 5-9 for
-  medium changes, and 7-12 for large changes. Never exceed 14. A stop should represent one
-  review idea and can include up to 14 ordered `hunkIds`.
+- **`chapters[]`** — 1-6 compact sections in display order. A chapter is a conceptual group,
+  not a file. For one- or two-file diffs, prefer one chapter unless there are clearly separate
+  review phases. Keep `title` to 1-2 short words and at most 16 characters, e.g. `"UI"`,
+  `"CLI"`, `"Tests"`, `"Docs"`, `"Runtime"`, `"Cleanup"`.
+- **`chapters[].stops[]`** — the main review path. Use 1-2 stops for tiny changes, 1-3 stops
+  for focused small changes, 5-9 for medium changes, and 7-12 for large changes. Never exceed 14. A stop should represent one review idea and can include up to 14 ordered `hunkIds`.
 - **`hunkIds[]`** — deterministic hunk ids copied from the repository digest, in the exact order
-  Codiff should render them. Default to one hunk id per stop or support item. Use multiple ids
-  only when those hunks must be read together; cross-file and out-of-line order is allowed when it
-  improves the review path. Some ids are synthetic hunks for binary, deferred, metadata-only, or
-  otherwise non-textual changes; treat them like normal hunk ids and explain why that review unit
-  matters.
+  Codiff should render them. Default to one review idea per stop, not one hunk per stop. Use
+  multiple ids when those hunks implement the same idea, invariant, behavior, or repeated pattern;
+  cross-file and out-of-line order is allowed when it improves the review path. For 1-4 total
+  hunks, usually write 1-2 stops. Some ids are synthetic hunks for binary, deferred,
+  metadata-only, or otherwise non-textual changes; treat them like normal hunk ids and explain why
+  that review unit matters.
 - **`notes[]`** — optional short header notes for individual focused hunks: `{ hunkId, body }`.
   Use these when a specific hunk needs a label under its file header.
 - **`support[]`** — changed hunks that should stay off the main path. Use it for generated files,
@@ -44,6 +45,8 @@ choose.
 - Every changed hunk should appear at most once in either a stop or support. Codiff adds omitted
   live-diff hunks to support, but a clean document reads better.
 - Order stops by review leverage, not by file path.
+- Similar same-file hunks should usually be one stop with multiple `hunkIds`, not separate
+  chapters or stops. Split them only when the reviewer needs different prose for different ideas.
 - Do not make one stop per file for broad changes. Group hunks that implement the same idea in
   one stop.
 - Keep `summary` to one concrete sentence. Keep `prose` short and specific. Do not use markdown

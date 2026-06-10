@@ -80,9 +80,6 @@
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
-  "optionalDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.78.1"
-  },
   "engines": {
     "node": ">=23.0.0",
     "pnpm": ">=11.0.0"

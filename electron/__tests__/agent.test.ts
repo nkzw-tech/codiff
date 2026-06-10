@@ -67,7 +67,15 @@ test('resolves the Pi agent with its session wiring but no skill', () => {
   expect(agent.modelSettingKey).toBe('piModel');
   expect(agent.sessionLaunchOptionKey).toBe('piSessionId');
   expect(agent.notFoundCode).toBe('PI_NOT_FOUND');
-  expect(agent.skill).toBeUndefined();
+  expect(agent.skill).toEqual({
+  "label": "Pi Skill",
+  "targets": [
+    {
+      "sourceSubdir": "pi/skills/codiff",
+      "targetSubdir": ".pi/agent/skills/codiff",
+    },
+  ],
+});
   expect(typeof agent.run).toBe('function');
   expect(typeof agent.readSessionContext).toBe('function');
 });

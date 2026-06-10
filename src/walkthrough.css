@@ -131,7 +131,8 @@
 }
 
 .wt-toc-main {
-  border-radius: 8px;
+  border-radius: 24px;
+  corner-shape: squircle;
   padding: 4px 8px;
 }
 .wt-toc-stop:hover .wt-toc-main {
@@ -168,7 +169,7 @@
   width: 100%;
 }
 .wt-toc-file-row {
-  align-items: center;
+  align-items: baseline;
   display: grid;
   gap: 6px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -176,7 +177,7 @@
 }
 .wt-toc-file {
   color: var(--muted);
-  font: 11px/1 var(--font-mono);
+  font: 12px/1.35 var(--font-sans);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -185,7 +186,7 @@
 .wt-toc-count {
   color: var(--muted);
   display: inline-flex;
-  font: 700 10px/1 var(--font-mono);
+  font: 600 11px/1.35 var(--font-mono);
   gap: 4px;
   justify-self: end;
 }
@@ -208,7 +209,8 @@
 }
 .wt-narration-prose code {
   background: var(--inline-code-bg);
-  border-radius: 6px;
+  border-radius: 24px;
+  corner-shape: squircle;
   font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 2px 5px;
@@ -293,7 +295,7 @@
   height: 32px;
   justify-content: center;
   position: relative;
-  top: 16px;
+  top: 11px;
   transition:
     background 120ms ease,
     color 120ms ease;
@@ -350,7 +352,7 @@
 .wt-arc-join {
   align-self: flex-start;
   border-top: 2px solid var(--file-border);
-  margin-top: 44px;
+  margin-top: 33px;
   width: 26px;
 }
 .wt-arc-join.dashed {
@@ -469,10 +471,12 @@
   overflow: auto;
 }
 .wt-stop-block-header {
+  box-shadow: inset 3px 0 0 rgb(61 135 245 / 0);
   flex: none;
   margin: 16px auto;
   max-width: 820px;
   padding: 0 24px;
+  transition: box-shadow 220ms ease;
   width: 100%;
 }
 .wt-stop-block-header.current {
@@ -497,7 +501,8 @@
   cursor: pointer;
   display: flex;
   flex: none;
-  padding: 6px 12px;
+  min-height: 38px;
+  padding: 0 8px;
   text-align: left;
   width: 100%;
 }
@@ -509,9 +514,9 @@
   corner-shape: squircle;
   display: flex;
   gap: 8px;
-  min-height: 36px;
+  height: 28px;
   min-width: 0;
-  padding: 4px 8px;
+  padding: 0 8px;
   transition:
     background 160ms ease,
     border-color 160ms ease;
@@ -545,8 +550,8 @@
 }
 .wt-upnext-file {
   color: var(--muted);
-  font: 12px/1 var(--font-mono);
   flex: none;
+  font: 600 13px/1.25 var(--font-sans);
 }
 .wt-upnext .icon,
 .wt-upnext-action > svg {
@@ -565,8 +570,9 @@
   align-self: center;
   background: var(--code-bg);
   border: 2px dashed color-mix(in srgb, var(--text) 26%, transparent);
-  border-radius: 13px;
+  border-radius: 24px;
   color: var(--muted);
+  corner-shape: squircle;
   cursor: pointer;
   display: inline-flex;
   font: 700 12px/1 var(--font-mono);
@@ -633,10 +639,10 @@
   color: #fff;
   display: inline-flex;
   flex: none;
-  height: 26px;
+  height: 20px;
   justify-content: center;
   margin-left: auto;
-  width: 26px;
+  width: 20px;
 }
 
 .wt-commit {
@@ -662,8 +668,9 @@
 .wt-commit-bar-branch {
   align-items: center;
   background: color-mix(in srgb, var(--sidebar-ref) 13%, transparent);
-  border-radius: 8px;
+  border-radius: 24px;
   color: var(--sidebar-ref);
+  corner-shape: squircle;
   display: inline-flex;
   flex: none;
   font: 600 11px/1 var(--font-mono);
@@ -712,8 +719,9 @@
 .wt-commit-subject-field {
   background: var(--code-bg);
   border: 1px solid var(--file-border);
-  border-radius: 14px;
+  border-radius: 32px;
   color: var(--text);
+  corner-shape: squircle;
   display: block;
   font: 600 18px/1.3 var(--font-mono);
   letter-spacing: -0.2px;
@@ -754,10 +762,11 @@
 }
 .wt-commit-msg {
   background: var(--code-bg);
-  border-radius: 16px;
+  border-radius: 32px;
   box-shadow:
     0 0 0 1px var(--file-border),
     4px 12px 50px -40px rgb(0 0 0 / 0.7);
+  corner-shape: squircle;
   overflow: clip;
 }
 .wt-commit-msg-head {
@@ -784,8 +793,9 @@
   align-items: center;
   background: color-mix(in srgb, var(--tree-selection-focus) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--tree-selection-focus) 32%, transparent);
-  border-radius: 11px;
+  border-radius: 24px;
   color: var(--tree-selection-focus);
+  corner-shape: squircle;
   cursor: pointer;
   display: inline-flex;
   font: 600 12px/1 var(--font-sans);
@@ -846,8 +856,9 @@
 .wt-commit-error {
   background: color-mix(in srgb, var(--diff-deletion) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--diff-deletion) 32%, transparent);
-  border-radius: 12px;
+  border-radius: 32px;
   color: var(--diff-deletion);
+  corner-shape: squircle;
   font: 13px/1.5 var(--font-sans);
   margin-bottom: 16px;
   padding: 12px 16px;
@@ -857,7 +868,8 @@
   align-items: center;
   background: color-mix(in srgb, var(--viewed) 8%, var(--code-bg));
   border: 1px solid color-mix(in srgb, var(--viewed) 26%, transparent);
-  border-radius: 13px;
+  border-radius: 32px;
+  corner-shape: squircle;
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
@@ -866,8 +878,9 @@
 .wt-commit-recap-icon {
   align-items: center;
   background: color-mix(in srgb, var(--viewed) 16%, transparent);
-  border-radius: 9px;
+  border-radius: 24px;
   color: var(--viewed);
+  corner-shape: squircle;
   display: inline-flex;
   flex: none;
   height: 30px;
@@ -916,7 +929,8 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: 24px;
+  corner-shape: squircle;
   cursor: pointer;
   display: flex;
   gap: 8px;
@@ -946,7 +960,8 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: 24px;
+  corner-shape: squircle;
   cursor: pointer;
   display: grid;
   gap: 8px;
@@ -999,8 +1014,9 @@
   align-items: center;
   background: var(--code-bg);
   border: 1.5px solid rgb(127 127 127 / 0.42);
-  border-radius: 6px;
+  border-radius: 24px;
   color: var(--code-bg);
+  corner-shape: squircle;
   display: inline-flex;
   flex: none;
   height: 18px;
@@ -1082,7 +1098,8 @@
   flex: none;
   gap: 12px;
   justify-content: flex-end;
-  padding: 9px 12px;
+  min-height: 38px;
+  padding: 3px 12px;
 }
 .wt-commit-foot-actions {
   display: flex;

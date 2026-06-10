@@ -101,3 +101,50 @@ test('clicked walkthrough stops hold selection until target reached or user scro
     await view.cleanup();
   }
 });
+
+test('support navigation holds support mode until the support block is reached', async () => {
+  const navigationRef: { current: NarrativeNavigation | null } = { current: null };
+  const getNavigation = () => {
+    if (!navigationRef.current) {
+      throw new Error('Navigation did not render.');
+    }
+    return navigationRef.current;
+  };
+
+  const view = await renderReact(
+    <NavigationHarness onNavigation={(next) => (navigationRef.current = next)} />,
+  );
+
+  try {
+    await act(async () => {
+      getNavigation().goStop(2);
+    });
+    expect(getNavigation().index).toBe(2);
+
+    await act(async () => {
+      getNavigation().openSupport();
+    });
+    expect(getNavigation().mode).toBe('support');
+    expect(getNavigation().supportVisited).toBe(true);
+
+    await act(async () => {
+      getNavigation().syncIndexFromScroll(1);
+    });
+    expect(getNavigation().mode).toBe('support');
+    expect(getNavigation().index).toBe(2);
+
+    await act(async () => {
+      getNavigation().syncSupportFromScroll();
+    });
+    expect(getNavigation().mode).toBe('support');
+
+    await act(async () => {
+      getNavigation().releaseStopScrollLock();
+      getNavigation().syncIndexFromScroll(1);
+    });
+    expect(getNavigation().mode).toBe('stop');
+    expect(getNavigation().index).toBe(1);
+  } finally {
+    await view.cleanup();
+  }
+});

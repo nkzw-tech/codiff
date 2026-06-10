@@ -167,12 +167,52 @@ test('prompts generated walkthroughs to use deterministic hunk groups', () => {
   expect(prompt).toContain('digest has 28 files');
   expect(prompt).toContain('Target 7-12 main-path stops');
   expect(prompt).toContain('Define chapters[] in display order');
-  expect(prompt).toContain('Default to one hunkId per stop or support item');
+  expect(prompt).toContain('Default to one review idea per stop');
   expect(prompt).toContain('A stop or support item may contain at most 14 hunkIds');
+  expect(prompt).toContain('Use multiple hunkIds when the prose needs those hunks read together');
   expect(prompt).toContain('Put hunkIds in the exact display order');
   expect(prompt).toContain('Use notes[] on a stop/support item');
   expect(prompt).not.toContain('comments[]');
   expect(prompt).toContain('include commit.title and commit.body by default');
+});
+
+test('prompts small walkthroughs to group similar hunks into compact chapters', () => {
+  const prompt = buildNarrativeWalkthroughPrompt({
+    branch: 'main',
+    files: [
+      {
+        path: 'src/App.tsx',
+        sections: [
+          {
+            id: 'src/App.tsx:staged',
+            kind: 'staged',
+            patch: '@@ -1 +1 @@\n-old title\n+new title\n@@ -10 +10 @@\n-old label\n+new label\n',
+          },
+        ],
+        status: 'modified',
+      },
+      {
+        path: 'src/App.test.tsx',
+        sections: [
+          {
+            id: 'src/App.test.tsx:staged',
+            kind: 'staged',
+            patch: '@@ -4 +4 @@\n-old assertion\n+new assertion\n',
+          },
+        ],
+        status: 'modified',
+      },
+    ],
+    generatedAt: 1,
+    root: '/repo',
+    source: { type: 'working-tree' },
+  });
+
+  expect(prompt).toContain('digest has 2 files and 3 reviewable hunks');
+  expect(prompt).toContain('Target 1-2 main-path stops');
+  expect(prompt).toContain('Use 1 story chapter');
+  expect(prompt).toContain('For one- or two-file diffs, prefer one chapter');
+  expect(prompt).toContain('Similar same-file hunks should usually be one stop');
 });
 
 test('repository digest exposes deterministic hunk ids and counts', () => {
