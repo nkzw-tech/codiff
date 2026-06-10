@@ -109,10 +109,15 @@ ${JSON.stringify(buildReviewAssistantInput(state, request), null, 2)}
 const cleanReply = (value, fallback = '') =>
   (typeof value === 'string' ? value : fallback).replace(/\n{3,}/g, '\n\n').trim();
 
+/** @param {any} obj @param {string} key */
+const maybeGetProps = (obj, key) => {
+  return obj && typeof obj === 'object' && key in obj ? obj[key] : undefined;
+};
+
 /** @param {unknown} input @param {string} [agentLabel] */
 const normalizeReviewAssistantReply = (input, agentLabel = 'Codex') => ({
   reply: cleanReply(
-    input && typeof input === 'object' ? (input.reply ?? input.text ?? undefined) : undefined,
+    input && (maybeGetProps(input, 'reply') ?? maybeGetProps(input, 'text') ?? undefined),
     `${agentLabel} could not produce a useful reply. ${typeof input === 'object' ? JSON.stringify(input) : String(input)}`,
   ),
   version: 1,
