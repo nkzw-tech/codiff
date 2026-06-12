@@ -947,6 +947,7 @@ export default function App() {
         currentState.files,
         reviewCommentsRef.current,
         preferencesRef.current.showWhitespace,
+        preferencesRef.current.reviewCommentsPrefix,
       );
     });
     return removeListener;
@@ -1611,6 +1612,7 @@ export default function App() {
             currentState.files,
             reviewCommentsRef.current,
             preferencesRef.current.showWhitespace,
+            preferencesRef.current.reviewCommentsPrefix,
           );
           if (markdown) {
             void navigator.clipboard.writeText(markdown);
@@ -1630,6 +1632,7 @@ export default function App() {
             currentState.files,
             reviewCommentsRef.current,
             preferencesRef.current.showWhitespace,
+            preferencesRef.current.reviewCommentsPrefix,
           );
           if (markdown) {
             void navigator.clipboard.writeText(markdown).then(() => {
@@ -2351,6 +2354,7 @@ export default function App() {
           <CopyCommentsButton
             comments={reviewComments}
             files={orderedFiles}
+            reviewCommentsPrefix={preferences.reviewCommentsPrefix}
             showWhitespace={showWhitespace}
           />
           {isPullRequest ? (

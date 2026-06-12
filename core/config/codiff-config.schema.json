@@ -68,6 +68,11 @@
           "default": "pi-default",
           "description": "The Pi model to use for review assistance and walkthroughs when agentBackend is 'pi'."
         },
+        "reviewCommentsPrefix": {
+          "type": "string",
+          "default": "# Address these Review Comments",
+          "description": "Markdown prefix prepended to copied review comments. Set to an empty string to omit the heading entirely."
+        },
         "showOutdated": {
           "type": "boolean",
           "default": false,

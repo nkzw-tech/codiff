@@ -10,6 +10,7 @@
     "lastRepositoryPath": "",
     "openAIModel": "gpt-5.3-codex-spark",
     "piModel": "pi-default",
+    "reviewCommentsPrefix": "# Address these Review Comments",
     "showOutdated": false,
     "showWhitespace": false,
     "theme": "system",

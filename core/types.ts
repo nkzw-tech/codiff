@@ -525,6 +525,7 @@ export type CodiffPreferences = {
   lastRepositoryPath: string;
   openAIModel: string;
   piModel: string;
+  reviewCommentsPrefix: string;
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;

@@ -568,6 +568,92 @@ test('review comment markdown includes file and patch context', () => {
   );
 });
 
+test('review comment markdown uses custom prefix', () => {
+  const file = {
+    fingerprint: 'comment-export',
+    path: 'src/comment.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/comment.ts:unstaged',
+        kind: 'unstaged',
+        newFile: {
+          contents: 'const label = "alpha";\nconst value = "needle";\n',
+          name: 'src/comment.ts',
+        },
+        oldFile: {
+          contents: 'const label = "alpha";\nconst value = "hay";\n',
+          name: 'src/comment.ts',
+        },
+        patch: '',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  const markdown = buildReviewCommentsMarkdown(
+    [file],
+    [
+      {
+        body: 'Check this.',
+        filePath: 'src/comment.ts',
+        id: 'comment-1',
+        lineNumber: 2,
+        sectionId: 'src/comment.ts:unstaged',
+        side: 'additions',
+      },
+    ],
+    false,
+    '## Review Notes',
+  );
+
+  expect(markdown).toMatch(/^## Review Notes\n\n/);
+  expect(markdown).not.toContain('Address these Review Comments');
+});
+
+test('review comment markdown omits prefix when set to empty string', () => {
+  const file = {
+    fingerprint: 'comment-export',
+    path: 'src/comment.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/comment.ts:unstaged',
+        kind: 'unstaged',
+        newFile: {
+          contents: 'const label = "alpha";\nconst value = "needle";\n',
+          name: 'src/comment.ts',
+        },
+        oldFile: {
+          contents: 'const label = "alpha";\nconst value = "hay";\n',
+          name: 'src/comment.ts',
+        },
+        patch: '',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  const markdown = buildReviewCommentsMarkdown(
+    [file],
+    [
+      {
+        body: 'Check this.',
+        filePath: 'src/comment.ts',
+        id: 'comment-1',
+        lineNumber: 2,
+        sectionId: 'src/comment.ts:unstaged',
+        side: 'additions',
+      },
+    ],
+    false,
+    '',
+  );
+
+  expect(markdown).toMatch(/^1\. \*\*/);
+  expect(markdown).not.toContain('Address these Review Comments');
+});
+
 test('review comment markdown includes multi-line ranges', () => {
   const file = {
     fingerprint: 'comment-range-export',

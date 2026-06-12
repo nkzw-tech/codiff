@@ -253,6 +253,10 @@ const mergeConfig = (raw) => {
           : defaults.settings.openAIModel,
       piModel:
         typeof rawSettings.piModel === 'string' ? rawSettings.piModel : defaults.settings.piModel,
+      reviewCommentsPrefix:
+        typeof rawSettings.reviewCommentsPrefix === 'string'
+          ? rawSettings.reviewCommentsPrefix
+          : defaults.settings.reviewCommentsPrefix,
       showOutdated:
         typeof rawSettings.showOutdated === 'boolean'
           ? rawSettings.showOutdated

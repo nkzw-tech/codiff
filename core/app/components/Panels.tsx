@@ -287,10 +287,12 @@ export function DiffSearchPanel({
 export function CopyCommentsButton({
   comments,
   files,
+  reviewCommentsPrefix,
   showWhitespace,
 }: {
   comments: ReadonlyArray<ReviewComment>;
   files: ReadonlyArray<ChangedFile>;
+  reviewCommentsPrefix: string;
   showWhitespace: boolean;
 }) {
   const [copied, markCopied] = useCopiedState(2000);
@@ -299,14 +301,19 @@ export function CopyCommentsButton({
   ).length;
 
   const copyComments = useCallback(async () => {
-    const markdown = buildReviewCommentsMarkdown(files, comments, showWhitespace);
+    const markdown = buildReviewCommentsMarkdown(
+      files,
+      comments,
+      showWhitespace,
+      reviewCommentsPrefix,
+    );
     if (!markdown) {
       return;
     }
 
     await navigator.clipboard.writeText(markdown);
     markCopied();
-  }, [comments, files, markCopied, showWhitespace]);
+  }, [comments, files, markCopied, reviewCommentsPrefix, showWhitespace]);
 
   if (pendingCommentCount === 0) {
     return null;

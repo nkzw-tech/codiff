@@ -132,6 +132,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     lastRepositoryPath: '/repo',
     openAIModel: defaultSettings.openAIModel,
     piModel: defaultSettings.piModel,
+    reviewCommentsPrefix: defaultSettings.reviewCommentsPrefix,
     showOutdated: false,
     showWhitespace: false,
     theme: 'system' as const,

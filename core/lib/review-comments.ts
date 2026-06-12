@@ -246,6 +246,7 @@ export const buildReviewCommentsMarkdown = (
   files: ReadonlyArray<ChangedFile>,
   comments: ReadonlyArray<ReviewComment>,
   showWhitespace: boolean,
+  prefix?: string,
 ) => {
   const pendingComments = comments.filter((comment) => !comment.isReadOnly && comment.body.trim());
   const filesByPath = new Map(files.map((file) => [file.path, file]));
@@ -279,7 +280,9 @@ export const buildReviewCommentsMarkdown = (
     })
     .join('\n\n');
 
-  return markdown ? `# Address these Review Comments\n\n${markdown}` : '';
+  const resolvedPrefix =
+    prefix == null ? '# Address these Review Comments\n\n' : prefix ? `${prefix}\n\n` : '';
+  return markdown ? `${resolvedPrefix}${markdown}` : '';
 };
 
 export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArray<ReviewComment> =>
