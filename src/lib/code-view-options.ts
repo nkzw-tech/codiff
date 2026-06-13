@@ -1,10 +1,12 @@
-import { registerCustomTheme, type FileOptions } from '@pierre/diffs';
+import { registerCustomTheme, setCustomExtension, type FileOptions } from '@pierre/diffs';
 import dunkelTheme from '../themes/dunkel.json' with { type: 'json' };
 import lichtTheme from '../themes/licht.json' with { type: 'json' };
 import type { DiffSection, GitFileStatus } from '../types.ts';
 
 registerCustomTheme('Licht', async () => lichtTheme as never);
 registerCustomTheme('Dunkel', async () => dunkelTheme as never);
+setCustomExtension('cts', 'typescript');
+setCustomExtension('mts', 'typescript');
 
 export const statusLabel: Record<GitFileStatus, string> = {
   added: 'Added',
