@@ -37,14 +37,14 @@ This skill is just the handoff: fetch the guide, author the document, open Codif
 4. **Open Codiff** with that file:
 
    ```bash
-   node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json
+   node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json /path/to/repository
    ```
 
    Forward an explicit target after the flag if the user gave one:
 
    ```bash
-   node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json HEAD
-   node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json /path/to/repository
+   node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json HEAD /path/to/repository
+   node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json pr 123 /path/to/repository
    ```
 
    The launcher passes the Pi session id to Codiff with `--agent pi` when it can resolve
