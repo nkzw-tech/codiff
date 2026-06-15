@@ -275,6 +275,8 @@ export const parseSectionDiffWithOptions = (
     } catch {
       fileDiff = createEmptyFileDiff(file, section);
     }
+  } else if (section.patch.trim().length === 0) {
+    fileDiff = createEmptyFileDiff(file, section);
   } else {
     const parsedFileDiff = parsePatchFiles(section.patch)[0]?.files[0];
     fileDiff = parsedFileDiff

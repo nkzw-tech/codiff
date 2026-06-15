@@ -266,6 +266,56 @@ test('empty code font family removes the root CSS variable', async () => {
   container.remove();
 });
 
+test('showWhitespace config changes reload the current repository state', async () => {
+  let configListener: ((config: ReturnType<typeof createDefaultConfig>) => void) | null = null;
+  const nextConfig = createDefaultConfig();
+  nextConfig.settings.showWhitespace = true;
+  const initialState = {
+    ...repositoryState,
+    files: [createChangedFile('src/initial.ts')],
+  };
+  const reloadedState = {
+    ...repositoryState,
+    files: [createChangedFile('src/reloaded.ts')],
+  };
+  const getRepositoryState = vi
+    .fn<Window['codiff']['getRepositoryState']>()
+    .mockResolvedValueOnce(initialState)
+    .mockResolvedValueOnce(reloadedState);
+  window.codiff = createCodiffMock({
+    getRepositoryState,
+    onConfigChanged: vi.fn((callback) => {
+      configListener = callback;
+      return () => {};
+    }),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(<App />);
+  });
+
+  await waitFor(() => {
+    expect(container.textContent).toContain('src/initial.ts');
+  });
+
+  await act(async () => {
+    configListener?.(nextConfig);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  await waitFor(() => {
+    expect(container.textContent).toContain('src/reloaded.ts');
+  });
+  expect(getRepositoryState).toHaveBeenLastCalledWith({ type: 'working-tree' });
+
+  await act(async () => root.unmount());
+  container.remove();
+});
+
 test('sidebar commit button toggles back to tree when commit view is open', async () => {
   window.codiff = createCodiffMock({
     getRepositoryState: vi.fn(async () => ({

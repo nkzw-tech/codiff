@@ -170,6 +170,14 @@ const ignoreWalkthroughPathScroll = () => {};
 
 const defaultPreferences = getPreferencesFromConfig(createDefaultConfig());
 
+const getCollapsedViewedPaths = (
+  files: ReadonlyArray<ChangedFile>,
+  viewedFiles: Readonly<Record<string, string>>,
+) =>
+  new Set(
+    files.filter((file) => viewedFiles[file.path] === file.fingerprint).map((file) => file.path),
+  );
+
 const getReloadSourceForLaunch = (
   reloadSelection: ReturnType<typeof consumeReloadSelection>,
   launchOptions: CodiffLaunchOptions,
@@ -255,6 +263,7 @@ export default function App() {
   const sidebarModeRef = useRef<SidebarMode>('tree');
   const mainModeRef = useRef<MainMode>('review');
   const sourceRequestRef = useRef(0);
+  const stateGenerationRef = useRef(0);
   const viewedRef = useRef<Record<string, string>>({});
   const narrativeWalkthroughRef = useRef<NarrativeWalkthrough | null>(null);
   const navigationResetKey = state ? `${state.root}:${getSourceKey(state.source)}` : '';
@@ -299,6 +308,7 @@ export default function App() {
       }
 
       const sourceKey = getSourceKey(currentState.source);
+      const stateGeneration = stateGenerationRef.current;
       const key = `${currentState.root}:${sourceKey}:${section.id}`;
       if (loadingSectionKeysRef.current.has(key)) {
         return;
@@ -312,11 +322,13 @@ export default function App() {
           force: true,
           kind: section.kind,
           path: file.path,
+          showWhitespace: preferencesRef.current.showWhitespace,
           source: currentState.source,
         })
         .then((loadedSection) => {
           setState((current) => {
             if (
+              stateGenerationRef.current !== stateGeneration ||
               !current ||
               current.root !== currentState.root ||
               getSourceKey(current.source) !== sourceKey
@@ -343,6 +355,7 @@ export default function App() {
         .catch(() => {
           setState((current) => {
             if (
+              stateGenerationRef.current !== stateGeneration ||
               !current ||
               current.root !== currentState.root ||
               getSourceKey(current.source) !== sourceKey
@@ -566,15 +579,10 @@ export default function App() {
       setHistoryHasMore(history.entries.length >= HISTORY_PAGE_SIZE);
       setHistoryLimit(HISTORY_PAGE_SIZE);
       setHistorySource(nextHistorySource ?? null);
+      stateGenerationRef.current += 1;
       setState(orderedState);
       setLoadError(null);
-      setCollapsed(
-        new Set(
-          orderedState.files
-            .filter((file) => nextViewed[file.path] === file.fingerprint)
-            .map((file) => file.path),
-        ),
-      );
+      setCollapsed(getCollapsedViewedPaths(orderedState.files, nextViewed));
       setItemVersionByKey({});
       setFocusCommentId(null);
       setFocusCommentRequest(0);
@@ -676,6 +684,7 @@ export default function App() {
     let canceled = false;
     let cursor = 0;
     const sourceKey = getSourceKey(state.source);
+    const stateGeneration = stateGenerationRef.current;
 
     const loadNext = async (): Promise<void> => {
       if (canceled) {
@@ -700,12 +709,14 @@ export default function App() {
           force: true,
           kind: request.section.kind,
           path: request.file.path,
+          showWhitespace: preferences.showWhitespace,
           source: state.source,
         });
 
         if (!canceled) {
           setState((current) => {
             if (
+              stateGenerationRef.current !== stateGeneration ||
               !current ||
               current.root !== state.root ||
               getSourceKey(current.source) !== sourceKey
@@ -733,6 +744,7 @@ export default function App() {
         if (!canceled) {
           setState((current) => {
             if (
+              stateGenerationRef.current !== stateGeneration ||
               !current ||
               current.root !== state.root ||
               getSourceKey(current.source) !== sourceKey
@@ -783,8 +795,61 @@ export default function App() {
     });
 
     const removeConfigListener = window.codiff.onConfigChanged((nextConfig) => {
+      const previousShowWhitespace = preferencesRef.current.showWhitespace;
+      const nextPreferences = getPreferencesFromConfig(nextConfig);
       setCodiffConfig(nextConfig);
-      setPreferences(getPreferencesFromConfig(nextConfig));
+      setPreferences(nextPreferences);
+
+      if (previousShowWhitespace === nextPreferences.showWhitespace) {
+        return;
+      }
+
+      const currentState = stateRef.current;
+      if (!currentState) {
+        return;
+      }
+
+      const request = sourceRequestRef.current + 1;
+      sourceRequestRef.current = request;
+      stateGenerationRef.current += 1;
+      loadingSectionKeysRef.current.clear();
+      setLoadingSectionIds(new Set());
+
+      window.codiff
+        .getRepositoryState(currentState.source)
+        .then((nextState) => {
+          if (sourceRequestRef.current !== request) {
+            return;
+          }
+
+          const orderedState = {
+            ...nextState,
+            files: sortFiles(nextState.files),
+          };
+          const nextSelectedPath =
+            selectedPathRef.current &&
+            orderedState.files.some((file) => file.path === selectedPathRef.current)
+              ? selectedPathRef.current
+              : (orderedState.files[0]?.path ?? null);
+          const nextViewed = usesViewedFileState(orderedState.source)
+            ? readViewed(orderedState.root)
+            : {};
+
+          setState(orderedState);
+          setSelectedPath(nextSelectedPath);
+          setReloadDeltaPaths(new Set());
+          setItemVersionByKey({});
+          setReviewComments(getReviewCommentsFromState(orderedState));
+          setViewed(nextViewed);
+          setCollapsed(getCollapsedViewedPaths(orderedState.files, nextViewed));
+          setLoadError(null);
+        })
+        .catch((error: unknown) => {
+          if (sourceRequestRef.current !== request) {
+            return;
+          }
+          setLoadError(getRepositoryLoadError(error));
+        });
     });
 
     return () => {
@@ -1276,13 +1341,9 @@ export default function App() {
               ? session.selectedPath
               : (orderedState.files[0]?.path ?? null);
           const nextCollapsed =
-            session?.collapsed ??
-            new Set(
-              orderedState.files
-                .filter((file) => nextViewed[file.path] === file.fingerprint)
-                .map((file) => file.path),
-            );
+            session?.collapsed ?? getCollapsedViewedPaths(orderedState.files, nextViewed);
 
+          stateGenerationRef.current += 1;
           setState(orderedState);
           setHistorySource(getHistorySource(orderedState.source) ?? historySource);
           setCollapsed(new Set(nextCollapsed));

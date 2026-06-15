@@ -33,7 +33,7 @@ const execFileAsync = promisify(execFile);
  *   unstaged: boolean;
  *   untracked: boolean;
  * }} StatusItem
- * @typedef {{force?: boolean; patch?: {binary: boolean; patch: string}; patchOnly?: boolean}} ReadFileOptions
+ * @typedef {{force?: boolean; patch?: {binary: boolean; patch: string}; patchOnly?: boolean; showWhitespace?: boolean}} ReadFileOptions
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
@@ -595,12 +595,17 @@ const createPatchForNewFile = (path, contents) => {
     .concat(noNewline, '\n');
 };
 
-/** @param {string} repoRoot @param {string} path @param {WorkingTreeSectionKind} kind */
-const getPatch = async (repoRoot, path, kind) => {
+/** @param {{showWhitespace?: boolean}} [options] @returns {Array<string>} */
+const getWhitespaceDiffArgs = (options = {}) =>
+  options.showWhitespace === false ? ['--ignore-all-space'] : [];
+
+/** @param {string} repoRoot @param {string} path @param {WorkingTreeSectionKind} kind @param {{showWhitespace?: boolean}} [options] */
+const getPatch = async (repoRoot, path, kind, options = {}) => {
+  const whitespaceArgs = getWhitespaceDiffArgs(options);
   const args =
     kind === 'staged'
-      ? ['diff', '--cached', '--patch', '--no-ext-diff', '--', path]
-      : ['diff', '--patch', '--no-ext-diff', '--', path];
+      ? ['diff', '--cached', '--patch', '--no-ext-diff', ...whitespaceArgs, '--', path]
+      : ['diff', '--patch', '--no-ext-diff', ...whitespaceArgs, '--', path];
   const patch = await git(repoRoot, args);
 
   return {
@@ -715,7 +720,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
   const id = `${item.path}:${kind}`;
 
   if (options.patchOnly && !item.untracked) {
-    const patch = options.patch ?? (await getPatch(repoRoot, item.path, kind));
+    const patch = options.patch ?? (await getPatch(repoRoot, item.path, kind, options));
 
     if (patch.binary) {
       return {
@@ -764,7 +769,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
     };
   }
 
-  const patch = await getPatch(repoRoot, item.path, kind);
+  const patch = await getPatch(repoRoot, item.path, kind, options);
 
   return {
     binary: patch.binary || contents.binary,
@@ -816,6 +821,7 @@ module.exports = {
   getGravatarHash,
   getImageMimeType,
   getPatch,
+  getWhitespaceDiffArgs,
   getWorkingTreeContents,
   git,
   gitBuffer,

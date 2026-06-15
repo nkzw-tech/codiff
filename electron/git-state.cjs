@@ -47,8 +47,8 @@ const {
  * @typedef {import('../src/types.ts').ReviewSource} ReviewSource
  */
 
-/** @param {string} launchPath @param {ReviewSource} [source] @returns {Promise<RepositoryState>} */
-const readRepositoryState = async (launchPath, source = { type: 'working-tree' }) => {
+/** @param {string} launchPath @param {ReviewSource} [source] @param {{showWhitespace?: boolean}} [options] @returns {Promise<RepositoryState>} */
+const readRepositoryState = async (launchPath, source = { type: 'working-tree' }, options = {}) => {
   const state =
     source.type === 'pull-request'
       ? await readPullRequestState(launchPath, source)
@@ -58,7 +58,10 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
           ? await readRangeState(launchPath, source.base, source.head, source.symmetric)
           : source.type === 'branch' || source.type === 'branch-diff'
             ? await readBranchState(launchPath, source)
-            : await readWorkingTreeState(launchPath, { eagerContents: false });
+            : await readWorkingTreeState(launchPath, {
+                eagerContents: false,
+                showWhitespace: options.showWhitespace,
+              });
   const branch = (await gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD'])).trim() || null;
   return { ...state, branch };
 };

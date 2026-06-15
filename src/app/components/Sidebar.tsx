@@ -1,6 +1,14 @@
 import type { FileTreeRowDecorationRenderer } from '@pierre/trees';
 import { FileTree, useFileTree } from '@pierre/trees/react';
-import { useCallback, useEffect, useMemo, useRef, type MouseEvent, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type MouseEvent,
+  type RefObject,
+} from 'react';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
 import type {
@@ -103,6 +111,18 @@ export function Sidebar({
     mode === 'tree' && currentSource.type === 'working-tree' && commitFiles.length > 0;
   const showFooter = showTotalLineCount || showCommitButton;
   const lineCountsByPathRef = useRef(lineCountsByPath);
+  const lineCountsSignature = useMemo(
+    () =>
+      [...lineCountsByPath]
+        .map(
+          ([path, lineCount]) =>
+            `${path}\0${lineCount.countable ? 1 : 0}\0${lineCount.additions}\0${
+              lineCount.deletions
+            }`,
+        )
+        .join('\u0001'),
+    [lineCountsByPath],
+  );
   const reloadDeltaGitStatusCSS = useMemo(
     () => getReloadDeltaGitStatusCSS(reloadDeltaPaths),
     [reloadDeltaPaths],
@@ -176,13 +196,13 @@ export function Sidebar({
   useTreeShadowStyle(treeHostRef, reloadDeltaGitStatusStyleAttribute, reloadDeltaGitStatusCSS);
   useTreeShadowStyle(treeHostRef, viewedRowStyleAttribute, viewedRowCSS);
 
-  useEffect(() => {
-    model.resetPaths(paths);
-  }, [model, paths]);
-
-  useEffect(() => {
+  useLayoutEffect(() => {
     lineCountsByPathRef.current = lineCountsByPath;
   }, [lineCountsByPath]);
+
+  useEffect(() => {
+    model.resetPaths(paths);
+  }, [lineCountsSignature, model, paths]);
 
   useEffect(() => {
     model.setGitStatus(status);

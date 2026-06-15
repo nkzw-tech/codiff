@@ -451,6 +451,7 @@ export type DiffSectionContentRequest = {
   force?: boolean;
   kind: DiffSection['kind'];
   path: string;
+  showWhitespace?: boolean;
   source?: ReviewSource;
 };
 

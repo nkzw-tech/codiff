@@ -125,6 +125,12 @@ const skillInstallers = new Map(
 
 const getActiveAgent = () => getAgent(config.settings.agentBackend);
 
+/** @param {string} repositoryPath @param {ReviewSource} [source] */
+const readRepositoryStateWithConfig = (repositoryPath, source) =>
+  readRepositoryState(repositoryPath, source, {
+    showWhitespace: config.settings.showWhitespace,
+  });
+
 /** @param {number} webContentsId */
 const resolveWindowAgent = (webContentsId) => {
   const override = windowLaunchOptions.get(webContentsId)?.agentBackend;
@@ -710,7 +716,10 @@ const createWindow = (
   }
   windowRepositories.set(webContentsId, repositoryPath);
   windowLaunchOptions.set(webContentsId, launchOptions);
-  const initialRepositoryState = readRepositoryState(repositoryPath, launchOptions.source);
+  const initialRepositoryState = readRepositoryStateWithConfig(
+    repositoryPath,
+    launchOptions.source,
+  );
   initialRepositoryState.catch(() => {});
   windowInitialRepositoryStates.set(webContentsId, initialRepositoryState);
   if (!launchOptions.source) {
@@ -814,7 +823,7 @@ const focusOrCreateWindow = (
       windowLaunchOptions.set(matchingWebContentsId, launchOptions);
       windowInitialRepositoryStates.set(
         matchingWebContentsId,
-        readRepositoryState(repositoryPath, launchOptions.source),
+        readRepositoryStateWithConfig(repositoryPath, launchOptions.source),
       );
       if (identity) {
         windowIdentities.set(matchingWebContentsId, identity);
@@ -951,7 +960,7 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   }
   const state = initialState
     ? await initialState
-    : await readRepositoryState(repositoryPath, source || launchOptions?.source);
+    : await readRepositoryStateWithConfig(repositoryPath, source || launchOptions?.source);
   if (launchOptions) {
     windowLaunchOptions.set(event.sender.id, {
       ...launchOptions,
@@ -1002,7 +1011,10 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   try {
     const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-    const state = await readRepositoryState(repositoryPath, source || launchOptions?.source);
+    const state = await readRepositoryStateWithConfig(
+      repositoryPath,
+      source || launchOptions?.source,
+    );
     const walkthroughFile = launchOptions?.walkthroughFile;
     if (walkthroughFile) {
       let input;
@@ -1060,7 +1072,10 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
 ipcMain.handle('codiff:askReviewAssistant', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   const launchOptions = windowLaunchOptions.get(event.sender.id);
-  const state = await readRepositoryState(repositoryPath, request?.source || launchOptions?.source);
+  const state = await readRepositoryStateWithConfig(
+    repositoryPath,
+    request?.source || launchOptions?.source,
+  );
   const agent = resolveWindowAgent(event.sender.id);
   return readReviewAssistantReply(state, request, agent, getAgentOptions(agent));
 });
@@ -1077,7 +1092,10 @@ ipcMain.handle('codiff:createWalkthroughCommit', async (event, request) => {
 ipcMain.handle('codiff:updateWalkthroughCommitMessage', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   const launchOptions = windowLaunchOptions.get(event.sender.id);
-  const state = await readRepositoryState(repositoryPath, request?.source || launchOptions?.source);
+  const state = await readRepositoryStateWithConfig(
+    repositoryPath,
+    request?.source || launchOptions?.source,
+  );
   const agent = resolveWindowAgent(event.sender.id);
   return readCommitMessageReply(state, request, agent, getAgentOptions(agent));
 });
@@ -1094,7 +1112,10 @@ ipcMain.handle('codiff:submitPullRequestReview', async (event, request) => {
 
 ipcMain.handle('codiff:getDiffSectionContent', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return readDiffSectionContent(repositoryPath, request);
+  return readDiffSectionContent(repositoryPath, {
+    ...request,
+    showWhitespace: request?.showWhitespace ?? config.settings.showWhitespace,
+  });
 });
 
 ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
@@ -1154,7 +1175,7 @@ ipcMain.handle('codiff:openConfigFile', () => openConfigFile());
 
 ipcMain.handle('codiff:openFile', async (event, filePath) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const state = await readRepositoryState(repositoryPath);
+  const state = await readRepositoryStateWithConfig(repositoryPath);
   const repositoryFilePath = validateRepositoryPath(filePath);
   const absolutePath = resolve(state.root, repositoryFilePath);
 
@@ -1167,7 +1188,7 @@ ipcMain.handle('codiff:openFile', async (event, filePath) => {
 
 ipcMain.handle('codiff:showInFolder', async (event, filePath) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const state = await readRepositoryState(repositoryPath);
+  const state = await readRepositoryStateWithConfig(repositoryPath);
   const repositoryFilePath = validateRepositoryPath(filePath);
   const absolutePath = resolve(state.root, repositoryFilePath);
 
@@ -1180,6 +1201,6 @@ ipcMain.handle('codiff:showInFolder', async (event, filePath) => {
 
 ipcMain.handle('codiff:getRelativePath', async (event, filePath) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const state = await readRepositoryState(repositoryPath);
+  const state = await readRepositoryStateWithConfig(repositoryPath);
   return relative(state.root, filePath);
 });

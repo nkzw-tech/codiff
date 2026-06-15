@@ -89,6 +89,9 @@ create the file with defaults and open it in your editor. The file supports JSON
 trailing commas, includes a JSON schema reference for editor completion, and is watched while Codiff
 is running so changes apply to open windows.
 
+Set `settings.showWhitespace` to `true` to show whitespace-only changes in diffs and file line
+counts; when it is `false`, Codiff hides those changes from the working-tree review state.
+
 ```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/nkzw-tech/codiff/main/src/config/codiff-config.schema.json",

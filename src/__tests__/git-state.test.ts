@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
+import { fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
 import type {
   DiffSection,
   DiffSectionContentRequest,
@@ -79,8 +80,15 @@ type GitStateModule = {
   readRepositoryChangeSignature: (
     launchPath: string,
   ) => Promise<{ root: string; signature: string }>;
-  readRepositoryState: (launchPath: string, source?: ReviewSource) => Promise<RepositoryState>;
-  readWorkingTreeState: (launchPath: string) => Promise<RepositoryState>;
+  readRepositoryState: (
+    launchPath: string,
+    source?: ReviewSource,
+    options?: { showWhitespace?: boolean },
+  ) => Promise<RepositoryState>;
+  readWorkingTreeState: (
+    launchPath: string,
+    options?: { eagerContents?: boolean; showWhitespace?: boolean },
+  ) => Promise<RepositoryState>;
   resolvePullRequestContentRefs: (
     repoRoot: string,
     pullRequest: { number: number; owner: string; repo: string; url: string },
@@ -627,6 +635,27 @@ test('readWorkingTreeState separates staged and unstaged modifications', async (
     expect(state.files[0].sections[0].newFile?.contents).toBe('two\n');
     expect(state.files[0].sections[1].oldFile?.contents).toBe('two\n');
     expect(state.files[0].sections[1].newFile?.contents).toBe('three\n');
+  });
+});
+
+test('readRepositoryState uses hidden-whitespace patches for patch-only working tree files', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'src/code.ts', 'const value = 1;\n');
+    await commitAll(repo, 'initial commit');
+    await writeRepoFile(repo, 'src/code.ts', 'const  value = 1;\n');
+
+    const state = await readRepositoryState(repo, undefined, { showWhitespace: false });
+    const file = state.files.find((candidate) => candidate.path === 'src/code.ts');
+
+    expect(file?.sections[0]?.oldFile).toBeUndefined();
+    expect(file?.sections[0]?.newFile).toBeUndefined();
+    expect(file?.sections[0]?.patch).toBe('');
+    expect(file ? fileHasVisibleDiff(file, false) : null).toBe(false);
+    expect(file ? getDiffLineCount(file, false) : null).toEqual({
+      additions: 0,
+      countable: false,
+      deletions: 0,
+    });
   });
 });
 

@@ -76,7 +76,7 @@
         "showWhitespace": {
           "type": "boolean",
           "default": false,
-          "description": "Show whitespace characters in diffs."
+          "description": "Show whitespace-only changes in diffs and file line counts."
         },
         "theme": {
           "type": "string",

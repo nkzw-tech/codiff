@@ -10,6 +10,7 @@ const {
   generatedDirectoryPathspecs,
   getFingerprint,
   getGravatarHash,
+  getWhitespaceDiffArgs,
   git,
   MAX_UNTRACKED_INITIAL_ITEMS,
   parseStatus,
@@ -133,13 +134,15 @@ const splitPatchByPath = (rawPatch) => {
 /**
  * @param {string} repoRoot
  * @param {WorkingTreeSectionKind} kind
+ * @param {{showWhitespace?: boolean}} [options]
  * @returns {Promise<Map<string, {binary: boolean; patch: string}>>}
  */
-const readPatchMap = async (repoRoot, kind) => {
+const readPatchMap = async (repoRoot, kind, options = {}) => {
+  const whitespaceArgs = getWhitespaceDiffArgs(options);
   const args =
     kind === 'staged'
-      ? ['diff', '--cached', '--patch', '--no-ext-diff']
-      : ['diff', '--patch', '--no-ext-diff'];
+      ? ['diff', '--cached', '--patch', '--no-ext-diff', ...whitespaceArgs]
+      : ['diff', '--patch', '--no-ext-diff', ...whitespaceArgs];
   return splitPatchByPath(await git(repoRoot, args));
 };
 
@@ -212,7 +215,7 @@ const listUntrackedItems = async (repoRoot) => {
 
 /**
  * @param {string} launchPath
- * @param {{eagerContents?: boolean}} [options]
+ * @param {{eagerContents?: boolean; showWhitespace?: boolean}} [options]
  * @returns {Promise<RepositoryState>}
  */
 const readWorkingTreeState = async (launchPath, options = {}) => {
@@ -224,7 +227,10 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
   const status = [...parseStatus(trackedStatus), ...untrackedItems].sort(fileSort);
   const shouldUsePatchOnly = options.eagerContents === false;
   const [stagedPatches, unstagedPatches] = shouldUsePatchOnly
-    ? await Promise.all([readPatchMap(repoRoot, 'staged'), readPatchMap(repoRoot, 'unstaged')])
+    ? await Promise.all([
+        readPatchMap(repoRoot, 'staged', options),
+        readPatchMap(repoRoot, 'unstaged', options),
+      ])
     : [new Map(), new Map()];
   /** @type {Array<ChangedFile>} */
   const files = [];
@@ -239,6 +245,7 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
         await createSection(repoRoot, item, 'staged', {
           patch: stagedPatches.get(item.path),
           patchOnly,
+          showWhitespace: options.showWhitespace,
         }),
       );
     }
@@ -248,6 +255,7 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
         await createSection(repoRoot, item, 'unstaged', {
           patch: unstagedPatches.get(item.path),
           patchOnly,
+          showWhitespace: options.showWhitespace,
         }),
       );
     }
@@ -317,6 +325,7 @@ const readDiffSectionContent = async (launchPath, request) => {
   const item = await getStatusItemForPath(repoRoot, path);
   return createSection(repoRoot, item, /** @type {WorkingTreeSectionKind} */ (request.kind), {
     force: request.force,
+    showWhitespace: request.showWhitespace,
   });
 };
 

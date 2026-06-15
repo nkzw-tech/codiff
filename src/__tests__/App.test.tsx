@@ -114,6 +114,30 @@ test('patch-only text sections are loadable for full context expansion', () => {
   ).toBe(false);
 });
 
+test('empty patch-only sections are not visible or countable', () => {
+  const file = {
+    fingerprint: 'empty-patch-only',
+    path: 'src/spacing.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/spacing.ts:unstaged',
+        kind: 'unstaged',
+        loadState: 'ready',
+        patch: '',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  expect(fileHasVisibleDiff(file, false)).toBe(false);
+  expect(getDiffLineCount(file, false)).toEqual({
+    additions: 0,
+    countable: false,
+    deletions: 0,
+  });
+});
+
 test('mode-only changes are visible without content hunks', () => {
   const file = {
     fingerprint: 'mode-only',
