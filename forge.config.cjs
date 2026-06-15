@@ -9,6 +9,10 @@ const entitlementsPath = join(__dirname, 'electron/entitlements.plist');
 const iconPath = existsSync(join(__dirname, 'electron/icons/icon.icns'))
   ? './electron/icons/icon'
   : undefined;
+const macAssetCatalogPath =
+  process.platform === 'darwin' && existsSync(join(__dirname, 'electron/icons/Assets.car'))
+    ? './electron/icons/Assets.car'
+    : undefined;
 const linuxIconPath = './electron/icons/icon.png';
 const windowsIconPath = './electron/icons/icon.ico';
 const skipSquirrel = process.env.CODIFF_SKIP_SQUIRREL === '1';
@@ -83,6 +87,14 @@ module.exports = {
       cacheRoot: electronCachePath,
     },
     executableName: 'codiff',
+    ...(macAssetCatalogPath
+      ? {
+          extendInfo: {
+            CFBundleIconName: 'Icon',
+          },
+          extraResource: macAssetCatalogPath,
+        }
+      : {}),
     ...(iconPath ? { icon: iconPath } : {}),
     ignore: [
       /^\/\.DS_Store$/,
