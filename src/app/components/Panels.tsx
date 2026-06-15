@@ -317,16 +317,17 @@ export function CopyCommentsButton({
       aria-label={`Copy ${pendingCommentCount} review ${
         pendingCommentCount === 1 ? 'comment' : 'comments'
       }`}
-      className={`copy-comments-button${copied ? ' copied' : ''}`}
+      className={`header-action-button copy-comments-button${copied ? ' copied' : ''}`}
       onClick={() => void copyComments()}
       title="Copy review comments"
       type="button"
     >
       {copied ? (
-        <Check aria-hidden className="copy-comments-icon check" size={22} weight="bold" />
+        <Check aria-hidden className="header-action-icon check" size={16} weight="bold" />
       ) : (
-        <LucideCopy aria-hidden className="copy-comments-icon" size={21} strokeWidth={2.25} />
+        <LucideCopy aria-hidden className="header-action-icon" size={15} strokeWidth={2.25} />
       )}
+      <span>{copied ? 'Copied' : 'Copy comments'}</span>
     </button>
   );
 }
@@ -344,30 +345,25 @@ export function PullRequestReviewButtons({
     <>
       <button
         aria-label="Approve pull request"
-        className="review-submit-button approve"
+        className="header-action-button review-submit-button approve"
         disabled={disabled}
         onClick={() => onSubmitReview('APPROVE')}
         title="Approve pull request"
         type="button"
       >
-        <Check aria-hidden className="review-submit-icon approve" size={22} weight="bold" />
+        <Check aria-hidden className="header-action-icon approve" size={16} weight="bold" />
+        <span>Approve</span>
       </button>
       <button
         aria-label="Request changes"
-        className="review-submit-button request-changes"
+        className="header-action-button review-submit-button request-changes"
         disabled={disabled}
         onClick={() => onSubmitReview('REQUEST_CHANGES')}
         title="Request changes"
         type="button"
       >
-        <X
-          aria-hidden
-          className={`review-submit-icon request-changes${
-            submittingEvent === 'REQUEST_CHANGES' ? ' submitting' : ''
-          }`}
-          size={22}
-          weight="bold"
-        />
+        <X aria-hidden className="header-action-icon request-changes" size={16} weight="bold" />
+        <span>Request changes</span>
       </button>
     </>
   );

@@ -2164,36 +2164,52 @@ export default function App() {
         sidebarCollapsed ? undefined : { gridTemplateColumns: `${sidebarWidth}px 0 minmax(0, 1fr)` }
       }
     >
-      <div aria-hidden className="window-drag-region" />
-      {sidebarCollapsed ? (
-        <div className="collapsed-sidebar-bar">
-          <button
-            className="sidebar-toggle-button"
-            onClick={expandSidebar}
-            title={`Expand sidebar (${getShortcutLabel(codiffConfig.keymap, 'toggleSidebar')})`}
-            type="button"
+      <header className="app-header">
+        <button
+          className="sidebar-toggle-button"
+          onClick={sidebarCollapsed ? expandSidebar : toggleSidebar}
+          title={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (${getShortcutLabel(
+            codiffConfig.keymap,
+            'toggleSidebar',
+          )})`}
+          type="button"
+        >
+          <svg
+            aria-hidden
+            fill="none"
+            height="16"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+            width="16"
           >
-            <svg
-              aria-hidden
-              fill="none"
-              height="16"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              width="16"
-            >
-              <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
-              <line x1="9" x2="9" y1="3" y2="21" />
-            </svg>
-          </button>
-          <div className="collapsed-sidebar-label" title={state.root}>
-            {sidebarLabel}
-            {sidebarSourceLabel}
-          </div>
+            <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
+            <line x1="9" x2="9" y1="3" y2="21" />
+          </svg>
+        </button>
+        <div className="app-header-label" title={state.root}>
+          {sidebarLabel}
+          {sidebarSourceLabel}
         </div>
-      ) : null}
+        {!isSwitchingSource ? (
+          <div className="app-header-actions">
+            <CopyCommentsButton
+              comments={reviewComments}
+              files={orderedFiles}
+              showWhitespace={showWhitespace}
+            />
+            {state.source.type === 'pull-request' ? (
+              <PullRequestReviewButtons
+                disabled={pullRequestReviewSubmitting != null}
+                onSubmitReview={submitPullRequestReview}
+                submittingEvent={pullRequestReviewSubmitting}
+              />
+            ) : null}
+          </div>
+        ) : null}
+      </header>
       <RepositoryChangeBanner
         onReload={reloadWindow}
         visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
@@ -2221,52 +2237,7 @@ export default function App() {
         visible={commandBarVisible}
       />
       <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
-      {!isSwitchingSource ? (
-        <div className="review-action-bar">
-          <CopyCommentsButton
-            comments={reviewComments}
-            files={orderedFiles}
-            showWhitespace={showWhitespace}
-          />
-          {isPullRequest ? (
-            <PullRequestReviewButtons
-              disabled={pullRequestReviewSubmitting != null}
-              onSubmitReview={submitPullRequestReview}
-              submittingEvent={pullRequestReviewSubmitting}
-            />
-          ) : null}
-        </div>
-      ) : null}
       <aside className="squircle sidebar">
-        <div className="sidebar-header">
-          <div className="sidebar-path-row">
-            <button
-              className="sidebar-toggle-button"
-              onClick={toggleSidebar}
-              title={`Collapse sidebar (${getShortcutLabel(codiffConfig.keymap, 'toggleSidebar')})`}
-              type="button"
-            >
-              <svg
-                aria-hidden
-                fill="none"
-                height="16"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                viewBox="0 0 24 24"
-                width="16"
-              >
-                <rect height="18" rx="2" ry="2" width="18" x="3" y="3" />
-                <line x1="9" x2="9" y1="3" y2="21" />
-              </svg>
-            </button>
-            <div className="sidebar-path" title={state.root}>
-              {sidebarLabel}
-              {sidebarSourceLabel}
-            </div>
-          </div>
-        </div>
         <Sidebar
           branchSource={historySource?.type === 'branch-diff' ? historySource : null}
           commitFiles={state.files}
