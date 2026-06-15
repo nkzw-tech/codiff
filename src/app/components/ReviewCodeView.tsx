@@ -1,6 +1,7 @@
 import { CaretDownIcon as CaretDown } from '@phosphor-icons/react/CaretDown';
 import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { ColumnsIcon as Columns } from '@phosphor-icons/react/Columns';
+import { GithubLogoIcon as GithubLogo } from '@phosphor-icons/react/GithubLogo';
 import { ImageBrokenIcon as ImageBroken } from '@phosphor-icons/react/ImageBroken';
 import { SquareSplitVerticalIcon as SquareSplitVertical } from '@phosphor-icons/react/SquareSplitVertical';
 import { XIcon as X } from '@phosphor-icons/react/X';
@@ -284,10 +285,14 @@ function AgentAvatar({ agentId }: { agentId: 'codex' | 'claude' | 'pi' }) {
       alt=""
       className="review-comment-avatar-codex"
       draggable={false}
-      src={agentId === 'pi' ? piIconUrl : agentId === 'claude' ? claudeIconUrl : codexIconUrl}
+      src={agentIconUrl(agentId)}
     />
   );
 }
+
+const agentIconUrl = (agentId: 'codex' | 'claude' | 'pi') => {
+  return agentId === 'pi' ? piIconUrl : agentId === 'claude' ? claudeIconUrl : codexIconUrl;
+};
 
 const canAskCodexForComment = (comment: ReviewComment) =>
   !comment.isReadOnly && comment.body.trim().length > 0 && comment.codexReply?.status !== 'loading';
@@ -781,6 +786,13 @@ function ReviewCommentEditor({
                 }
                 type="button"
               >
+                <img
+                  alt=""
+                  aria-hidden
+                  className="review-comment-action-icon"
+                  draggable={false}
+                  src={agentIconUrl(agentId)}
+                />
                 Ask
               </button>
             ) : null}
@@ -794,6 +806,12 @@ function ReviewCommentEditor({
                 }
                 type="button"
               >
+                <GithubLogo
+                  aria-hidden
+                  className="review-comment-action-icon"
+                  size={14}
+                  weight="bold"
+                />
                 {comment.githubSubmit?.status === 'submitting' ? 'Sending' : 'Comment'}
               </button>
             ) : null}

@@ -1992,6 +1992,7 @@
 }
 
 .review-comment-action {
+  align-items: center;
   background: transparent;
   border: 1px solid var(--file-border);
   border-radius: var(--review-comment-radius);
@@ -2002,7 +2003,9 @@
   color: var(--text);
   corner-shape: squircle;
   cursor: pointer;
+  display: inline-flex;
   font: 700 11px/1 var(--font-sans);
+  gap: 4px;
   height: 24px;
   padding: 0 8px;
   transform: scale(1);
@@ -2011,6 +2014,14 @@
     box-shadow 250ms ease,
     color 160ms ease,
     transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.review-comment-action-icon {
+  color: currentColor;
+  display: block;
+  flex: none;
+  height: 14px;
+  width: 14px;
 }
 
 .review-comment-action:disabled {
