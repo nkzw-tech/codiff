@@ -111,18 +111,6 @@ export function Sidebar({
     mode === 'tree' && currentSource.type === 'working-tree' && commitFiles.length > 0;
   const showFooter = showTotalLineCount || showCommitButton;
   const lineCountsByPathRef = useRef(lineCountsByPath);
-  const lineCountsSignature = useMemo(
-    () =>
-      [...lineCountsByPath]
-        .map(
-          ([path, lineCount]) =>
-            `${path}\0${lineCount.countable ? 1 : 0}\0${lineCount.additions}\0${
-              lineCount.deletions
-            }`,
-        )
-        .join('\u0001'),
-    [lineCountsByPath],
-  );
   const reloadDeltaGitStatusCSS = useMemo(
     () => getReloadDeltaGitStatusCSS(reloadDeltaPaths),
     [reloadDeltaPaths],
@@ -198,11 +186,14 @@ export function Sidebar({
 
   useLayoutEffect(() => {
     lineCountsByPathRef.current = lineCountsByPath;
-  }, [lineCountsByPath]);
+    if (model.getFileTreeContainer()) {
+      model.render({});
+    }
+  }, [lineCountsByPath, model]);
 
   useEffect(() => {
     model.resetPaths(paths);
-  }, [lineCountsSignature, model, paths]);
+  }, [model, paths]);
 
   useEffect(() => {
     model.setGitStatus(status);

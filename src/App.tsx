@@ -789,14 +789,17 @@ export default function App() {
 
     window.codiff.getConfig().then((nextConfig) => {
       if (!canceled) {
+        const nextPreferences = getPreferencesFromConfig(nextConfig);
+        preferencesRef.current = nextPreferences;
         setCodiffConfig(nextConfig);
-        setPreferences(getPreferencesFromConfig(nextConfig));
+        setPreferences(nextPreferences);
       }
     });
 
     const removeConfigListener = window.codiff.onConfigChanged((nextConfig) => {
       const previousShowWhitespace = preferencesRef.current.showWhitespace;
       const nextPreferences = getPreferencesFromConfig(nextConfig);
+      preferencesRef.current = nextPreferences;
       setCodiffConfig(nextConfig);
       setPreferences(nextPreferences);
 
