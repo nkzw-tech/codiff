@@ -49,7 +49,6 @@
                   "type": "string"
                 },
                 "hunkIds": {
-                  "description": "Deterministic hunk ids from the repository digest, in the display order Codiff should render them. Generated-like files are represented by one synthetic hunk id per changed section.",
                   "items": {
                     "type": "string"
                   },
@@ -137,7 +136,6 @@
             "type": "string"
           },
           "hunkIds": {
-            "description": "Deterministic hunk ids from the repository digest, in the display order Codiff should render them. Generated-like files are represented by one synthetic hunk id per changed section.",
             "items": {
               "type": "string"
             },

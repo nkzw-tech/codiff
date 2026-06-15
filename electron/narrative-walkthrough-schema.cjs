@@ -23,8 +23,6 @@ const hunkGroupProperties = {
   changeType: { enum: [...CHANGE_TYPES], type: 'string' },
   commitNote: { type: 'string' },
   hunkIds: {
-    description:
-      'Deterministic hunk ids from the repository digest, in the display order Codiff should render them. Generated-like files are represented by one synthetic hunk id per changed section.',
     items: { type: 'string' },
     maxItems: MAX_HUNKS_PER_WALKTHROUGH_GROUP,
     minItems: 1,
