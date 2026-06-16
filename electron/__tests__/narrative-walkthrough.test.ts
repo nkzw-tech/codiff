@@ -9,7 +9,12 @@ const {
   narrativeWalkthroughSchema,
   normalizeNarrativeWalkthrough,
 } = require('../narrative-walkthrough.cjs') as {
-  buildNarrativeWalkthroughPrompt: (state: any, context?: unknown, agentLabel?: string) => string;
+  buildNarrativeWalkthroughPrompt: (
+    state: any,
+    context?: unknown,
+    agentLabel?: string,
+    customPrompt?: string,
+  ) => string;
   narrativeWalkthroughResponseSchema: {
     properties: Record<string, any>;
     required: ReadonlyArray<string>;
@@ -220,6 +225,44 @@ test('prompts small walkthroughs to group similar hunks into compact chapters', 
   expect(prompt).toContain('Use 1 story chapter');
   expect(prompt).toContain('For one- or two-file diffs, prefer one chapter');
   expect(prompt).toContain('Similar same-file hunks should usually be one stop');
+});
+
+test('prompts generated walkthroughs with custom user guidance without replacing core constraints', () => {
+  const prompt = buildNarrativeWalkthroughPrompt(
+    {
+      branch: 'main',
+      files: files.slice(0, 1),
+      generatedAt: 1,
+      root: '/repo',
+      source: { type: 'working-tree' },
+    },
+    null,
+    'Claude Code',
+    'Answer in Japanese and use concise reviewer-facing explanations.',
+  );
+
+  expect(prompt).toContain('Custom walkthrough instructions:');
+  expect(prompt).toContain('Answer in Japanese and use concise reviewer-facing explanations.');
+  expect(prompt).toContain('Current Codiff walkthrough guide:');
+  expect(prompt).toContain('Return JSON only.');
+  expect(prompt).toContain('Repository change digest:');
+});
+
+test('omits blank custom walkthrough prompt guidance', () => {
+  const prompt = buildNarrativeWalkthroughPrompt(
+    {
+      branch: 'main',
+      files: files.slice(0, 1),
+      generatedAt: 1,
+      root: '/repo',
+      source: { type: 'working-tree' },
+    },
+    null,
+    'Codex',
+    '   ',
+  );
+
+  expect(prompt).not.toContain('Custom walkthrough instructions:');
 });
 
 test('repository digest exposes deterministic hunk ids and counts', () => {

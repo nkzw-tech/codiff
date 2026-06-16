@@ -59,6 +59,24 @@ test('electron config normalizes code font settings', () => {
   expect(mergeConfig({ settings: { codeFontSize: 99 } }).settings.codeFontSize).toBe(32);
 });
 
+test('electron config keeps custom walkthrough prompt text only when it is a string', () => {
+  expect(
+    mergeConfig({
+      settings: {
+        walkthroughPrompt: 'Respond in German with product-review terminology.',
+      },
+    }).settings.walkthroughPrompt,
+  ).toBe('Respond in German with product-review terminology.');
+
+  expect(
+    mergeConfig({
+      settings: {
+        walkthroughPrompt: ['Respond in German'],
+      },
+    }).settings.walkthroughPrompt,
+  ).toBe('');
+});
+
 test('electron defaults load from packaged app shape', () => {
   const packageRoot = mkdtempSync(join(tmpdir(), 'codiff-package-shape.'));
   mkdirSync(join(packageRoot, 'config'));

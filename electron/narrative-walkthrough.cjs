@@ -591,6 +591,19 @@ If the context and digest conflict, trust the digest.
 `
     : '';
 
+/** @param {unknown} customPrompt */
+const buildCustomPromptInput = (customPrompt) => {
+  const prompt = typeof customPrompt === 'string' ? customPrompt.trim() : '';
+
+  return prompt
+    ? `Custom walkthrough instructions:
+${prompt}
+
+Use these instructions to customize language, tone, and review detail. If they conflict with the JSON schema, current Codiff walkthrough guide, repository digest, hunk ids, or review-order constraints above, keep Codiff's constraints and the digest as the source of truth.
+`
+    : '';
+};
+
 const buildWalkthroughSizingGuidance = (state) => {
   const fileCount = state.files.length;
   const hunkCount = state.files.reduce(
@@ -648,6 +661,7 @@ const buildNarrativeWalkthroughPrompt = (
   state,
   context,
   agentLabel = 'Codex',
+  customPrompt,
 ) => `You are authoring Codiff's narrative walkthrough JSON.
 
 Return JSON only. Do not inspect the repository or run shell commands; use only the guide, optional conversation context, and repository digest below.
@@ -658,15 +672,16 @@ Current Codiff walkthrough guide:
 ${readFileSync(join(root, 'bin/walkthrough-guide.md'), 'utf8').trim()}
 
 ${buildWalkthroughContextInput(context, agentLabel)}
+${buildCustomPromptInput(customPrompt)}
 Repository change digest:
 ${JSON.stringify(buildPromptInput(state), null, 2)}
 `;
 
-const readNarrativeWalkthrough = async (state, agent, agentOptions, context) => {
+const readNarrativeWalkthrough = async (state, agent, agentOptions, context, customPrompt) => {
   try {
     const response = await agent.run(
       state.root,
-      buildNarrativeWalkthroughPrompt(state, context, agent.label),
+      buildNarrativeWalkthroughPrompt(state, context, agent.label, customPrompt),
       narrativeWalkthroughResponseSchema,
       'walkthrough.json',
       `${agent.label} walkthrough timed out.`,

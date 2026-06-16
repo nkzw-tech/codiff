@@ -84,6 +84,11 @@
           "default": "system",
           "description": "Application color theme. 'system' follows OS preference."
         },
+        "walkthroughPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "Additional instructions appended to generated walkthrough prompts. Use this to request a language, tone, or level of detail while Codiff keeps its walkthrough guide, hunk ids, review-order constraints, and schema."
+        },
         "wordWrap": {
           "type": "boolean",
           "default": false,

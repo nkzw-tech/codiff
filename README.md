@@ -104,6 +104,7 @@ is running so changes apply to open windows.
     "openAIModel": "gpt-5.3-codex-spark",
     "showWhitespace": false,
     "theme": "system",
+    "walkthroughPrompt": "",
     "wordWrap": false,
   },
   "keymap": {
@@ -164,6 +165,10 @@ CODIFF_CLAUDE_PATH=/absolute/path/to/claude codiff --agent claude -w
 
 Claude Code rides your existing `claude` login (subscription or `ANTHROPIC_API_KEY`); run `claude`
 once and complete `/login` if you have not already.
+
+Set `settings.walkthroughPrompt` to add custom instructions to generated walkthrough prompts. Use it
+to request a specific language, tone, or level of detail while Codiff keeps its walkthrough guide,
+hunk ids, review-order constraints, and JSON schema in place.
 
 To drive Codiff from your agent, install its skills from the application menu (`Install Codex Skill`
 or `Install Claude Code Skill`). Codiff updates keep the installed skill current. Invoke it from the

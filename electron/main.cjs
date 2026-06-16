@@ -1048,7 +1048,13 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
       launchOptions?.walkthroughContext,
       agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
     );
-    return readNarrativeWalkthrough(state, agent, getAgentOptions(agent), walkthroughContext);
+    return readNarrativeWalkthrough(
+      state,
+      agent,
+      getAgentOptions(agent),
+      walkthroughContext,
+      config.settings.walkthroughPrompt,
+    );
   } catch (error) {
     return {
       reason: error instanceof Error ? error.message : String(error),

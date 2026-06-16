@@ -16,6 +16,7 @@ export type CodiffSettings = {
   showOutdated: boolean;
   showWhitespace: boolean;
   theme: CodiffTheme;
+  walkthroughPrompt: string;
   wordWrap: boolean;
 };
 

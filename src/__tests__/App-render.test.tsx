@@ -132,6 +132,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     showOutdated: false,
     showWhitespace: false,
     theme: 'system' as const,
+    walkthroughPrompt: defaultSettings.walkthroughPrompt,
     wordWrap: false,
   })),
   getRepositoryHistory: vi.fn(async () => ({
