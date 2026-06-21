@@ -1,22 +1,73 @@
 // @ts-check
 
+const { trustSystemCertificates } = require('./system-certificates.cjs');
+
 const poll = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const CERTIFICATE_ERROR_CODES = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+
 /** @param {unknown} error */
-const describeFetchError = (error) => {
+const getErrorCause = (error) =>
+  error && typeof error === 'object' && 'cause' in error && error.cause ? error.cause : null;
+
+/** @param {unknown} error */
+const getErrorCode = (error) =>
+  error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : '';
+
+/** @param {unknown} error */
+const getCertificateErrorCode = (error) => {
+  for (
+    let current = error;
+    current && typeof current === 'object';
+    current = getErrorCause(current)
+  ) {
+    const code = getErrorCode(current);
+    if (CERTIFICATE_ERROR_CODES.has(code)) {
+      return code;
+    }
+  }
+  return '';
+};
+
+/**
+ * @param {ReturnType<typeof trustSystemCertificates>} certificateTrust
+ * @param {string} code
+ */
+const describeCertificateTrust = (certificateTrust, code) => {
+  if (!code || certificateTrust.status === 'applied') {
+    return '';
+  }
+
+  const reason = certificateTrust.reason ? ` (${certificateTrust.reason})` : '';
+  return `System certificate trust was not applied${reason}.`;
+};
+
+/**
+ * @param {unknown} error
+ * @param {ReturnType<typeof trustSystemCertificates>} certificateTrust
+ */
+const describeFetchError = (error, certificateTrust) => {
   const message = error instanceof Error ? error.message : String(error);
-  const cause =
-    error && typeof error === 'object' && 'cause' in error && error.cause ? error.cause : null;
+  const cause = getErrorCause(error);
   if (!cause || typeof cause !== 'object') {
     return message;
   }
 
-  const causeCode = 'code' in cause && typeof cause.code === 'string' ? cause.code : '';
+  const causeCode = getErrorCode(cause);
   const causeMessage = cause instanceof Error ? cause.message : String(cause);
   const causeDetail = [causeCode, causeMessage].filter(
     (detail, index, details) => detail && details.indexOf(detail) === index,
   );
-  return causeDetail.length > 0 ? `${message}: ${causeDetail.join(' - ')}` : message;
+  const detail = causeDetail.length > 0 ? `${message}: ${causeDetail.join(' - ')}` : message;
+  const trustDetail = describeCertificateTrust(certificateTrust, getCertificateErrorCode(error));
+  return [detail, trustDetail].filter(Boolean).join(' ');
 };
 
 /**
@@ -27,6 +78,7 @@ const describeFetchError = (error) => {
  *   openExternal: (url: string) => Promise<void>;
  *   serviceUrl: string;
  *   snapshot: unknown;
+ *   trustCertificates?: typeof trustSystemCertificates;
  *   uploader?: {email?: string; name?: string};
  * }} options
  */
@@ -37,8 +89,11 @@ const uploadSharedWalkthrough = async ({
   openExternal,
   serviceUrl,
   snapshot,
+  trustCertificates = trustSystemCertificates,
   uploader,
 }) => {
+  const certificateTrust = trustCertificates();
+
   const baseUrl = serviceUrl.replace(/\/+$/, '');
   await authenticate();
 
@@ -47,9 +102,12 @@ const uploadSharedWalkthrough = async ({
     try {
       return await fetchImpl(input, init);
     } catch (error) {
-      throw new Error(`Codiff share ${phase} failed: ${describeFetchError(error)}`, {
-        cause: error,
-      });
+      throw new Error(
+        `Codiff share ${phase} failed: ${describeFetchError(error, certificateTrust)}`,
+        {
+          cause: error,
+        },
+      );
     }
   };
 

@@ -10,6 +10,7 @@ const { uploadSharedWalkthrough } = require('../shared-walkthrough-upload.cjs') 
     openClaimPage?: boolean;
     serviceUrl: string;
     snapshot: unknown;
+    trustCertificates?: () => { reason?: string; status: string };
     uploader?: { email: string; name: string };
   }) => Promise<string>;
 };
@@ -149,5 +150,63 @@ test('includes the underlying cause when a share request cannot connect', async 
     }),
   ).rejects.toThrow(
     'Codiff share upload intent request failed: fetch failed: ENOTFOUND - getaddrinfo ENOTFOUND api.codiff.dev',
+  );
+});
+
+test('loads certificate trust before the first share request', async () => {
+  const events: Array<string> = [];
+  const trustCertificates = vi.fn(() => {
+    events.push('certificates');
+    return { status: 'applied' };
+  });
+  const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+    events.push(String(input));
+    return Response.json({
+      claimUrl: 'https://codiff.example/connect/CODE?secret=secret',
+      code: 'CODE',
+      pollUrl: 'https://codiff.example/api/upload-intents/CODE?secret=secret',
+      secret: 'secret',
+      status: 'claimed',
+    });
+  });
+
+  await expect(
+    uploadSharedWalkthrough({
+      authenticate: async () => {},
+      fetchImpl,
+      openClaimPage: false,
+      openExternal: async () => {},
+      serviceUrl: 'https://codiff.example',
+      snapshot: { kind: 'codiff-walkthrough-share', version: 1 },
+      trustCertificates,
+    }),
+  ).rejects.toThrow('Codiff share upload failed (200).');
+
+  expect(trustCertificates).toHaveBeenCalledOnce();
+  expect(events[0]).toBe('certificates');
+  expect(events[1]).toBe('https://codiff.example/api/upload-intents');
+});
+
+test('explains certificate trust status for certificate-chain failures', async () => {
+  const certificateError = new Error('self signed certificate in certificate chain');
+  Object.assign(certificateError, { code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+  const networkError = new Error('fetch failed', { cause: certificateError });
+
+  await expect(
+    uploadSharedWalkthrough({
+      authenticate: async () => {},
+      fetchImpl: vi.fn(async () => {
+        throw networkError;
+      }),
+      openExternal: async () => {},
+      serviceUrl: 'https://api.codiff.dev',
+      snapshot: { kind: 'codiff-walkthrough-share', version: 1 },
+      trustCertificates: () => ({
+        reason: 'this Node/Electron runtime does not expose system certificate APIs',
+        status: 'unavailable',
+      }),
+    }),
+  ).rejects.toThrow(
+    'Codiff share upload intent request failed: fetch failed: SELF_SIGNED_CERT_IN_CHAIN - self signed certificate in certificate chain System certificate trust was not applied (this Node/Electron runtime does not expose system certificate APIs).',
   );
 });
