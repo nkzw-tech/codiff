@@ -91,10 +91,7 @@ export const usageExamples = [
   { command: 'codiff', description: 'Review staged and unstaged changes.' },
   { command: 'codiff /path/to/repo', description: 'Review changes in a specific repository.' },
   { command: 'codiff main', description: 'Review the current branch against main.' },
-  {
-    command: 'codiff base',
-    description: "Review against the current branch's PR/MR base branch.",
-  },
+  { command: 'codiff base', description: "Review against the current branch's PR/MR base branch." },
   { command: 'codiff a1b2c3d', description: 'Review a specific commit.' },
   { command: "codiff '#75'", description: 'Review pull request #75.' },
   { command: 'codiff pr 75', description: 'Review pull request #75 (alternate syntax).' },
