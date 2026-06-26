@@ -4,7 +4,7 @@ import type { CodiffDiffStyle } from './config/types.ts';
 export type DiffSection = {
   binary: boolean;
   id: string;
-  kind: 'commit' | 'pull-request' | 'staged' | 'unstaged';
+  kind: 'arc' | 'commit' | 'pull-request' | 'staged' | 'unstaged';
   loadState?: 'binary' | 'deferred' | 'directory' | 'error' | 'ready' | 'too-large';
   newFile?: {
     cacheKey?: string;
@@ -38,6 +38,38 @@ export type ChangedFile = {
 };
 
 export type ReviewSource =
+  | {
+      type: 'arc-working-tree';
+    }
+  | {
+      /** Target branch the current Arc branch is compared against. */
+      base: string;
+      type: 'arc-branch';
+    }
+  | {
+      /** Arc base ref (left side). For symmetric ranges, Arc compares merge-base(base, head) to head. */
+      base: string;
+      /** Arc head ref (right side). */
+      head: string;
+      /** `true` for Arc `--base`, `false` for a direct two-ref diff. */
+      symmetric: boolean;
+      type: 'arc-range';
+    }
+  | {
+      ref: string;
+      type: 'arc-commit';
+    }
+  | {
+      author?: string;
+      fromBranch?: string;
+      headSha?: string;
+      number: number;
+      status?: string;
+      title?: string;
+      toBranch?: string;
+      type: 'arc-pull-request';
+      url?: string;
+    }
   | {
       type: 'working-tree';
     }
@@ -662,12 +694,12 @@ export type PullRequestReviewEvent = 'APPROVE' | 'REQUEST_CHANGES';
 
 export type SubmitPullRequestCommentRequest = {
   comment: PullRequestReviewComment;
-  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  source: Extract<ReviewSource, { type: 'arc-pull-request' | 'pull-request' }>;
 };
 
 export type SubmitPullRequestReviewRequest = {
   body?: string;
   comments: ReadonlyArray<PullRequestReviewComment>;
   event: PullRequestReviewEvent;
-  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  source: Extract<ReviewSource, { type: 'arc-pull-request' | 'pull-request' }>;
 };

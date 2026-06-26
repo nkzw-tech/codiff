@@ -113,14 +113,15 @@ export function FirstRunPanel({
 }) {
   return (
     <>
-      <strong>Open a Git repository</strong>
+      <strong>Open a repository</strong>
       <p>
         Install the terminal helper, then run{' '}
-        <code className="walkthrough-inline-code">codiff</code> from a Git repository in Terminal.
+        <code className="walkthrough-inline-code">codiff</code> from a Git or Arc repository in
+        Terminal.
       </p>
       <p>
         You can also choose <span className="empty-panel-menu-path">File → Open Folder…</span> to
-        open a Git repository.
+        open a repository.
       </p>
       <div className="empty-panel-actions">
         <button disabled={installing} onClick={onInstallTerminalHelper} type="button">
@@ -140,9 +141,9 @@ export function RepositoryLoadErrorPanel({ error }: { error: RepositoryLoadError
   if (error.kind === 'not-a-repository') {
     return (
       <>
-        <strong>No Git repository found</strong>
+        <strong>No repository found</strong>
         <p>
-          Codiff was opened outside a Git repository. Run{' '}
+          Codiff was opened outside a Git or Arc repository. Run{' '}
           <code className="walkthrough-inline-code">codiff</code> from inside a repo, or choose{' '}
           <span className="empty-panel-menu-path">File → Open Folder…</span> to open one.
         </p>

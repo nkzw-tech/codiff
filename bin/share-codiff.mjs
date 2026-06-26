@@ -88,24 +88,50 @@ if (!pullRequestUrl && parsed.pullRequestNumber != null) {
   );
 }
 
-const source = parsed.range
-  ? {
-      base: parsed.range.base,
-      head: parsed.range.head,
-      symmetric: parsed.range.symmetric,
-      type: 'range',
-    }
-  : pullRequestUrl
+const source = parsed.arc
+  ? parsed.arcRange
     ? {
-        ...(parsed.pullRequestProvider ? { provider: parsed.pullRequestProvider } : {}),
-        type: 'pull-request',
-        url: pullRequestUrl,
+        base: parsed.arcRange.base,
+        head: parsed.arcRange.head,
+        symmetric: parsed.arcRange.symmetric,
+        type: 'arc-range',
       }
-    : parsed.commitRef
-      ? { ref: parsed.commitRef, type: 'commit' }
-      : parsed.branchRef
-        ? { ref: parsed.branchRef, type: 'branch' }
-        : { type: 'working-tree' };
+    : parsed.arcCommitRef
+      ? {
+          ref: parsed.arcCommitRef,
+          type: 'arc-commit',
+        }
+      : parsed.arcPullRequestNumber != null
+        ? {
+            number: parsed.arcPullRequestNumber,
+            type: 'arc-pull-request',
+          }
+        : parsed.arcBase
+          ? {
+              base: parsed.arcBase,
+              type: 'arc-branch',
+            }
+          : {
+              type: 'arc-working-tree',
+            }
+  : parsed.range
+    ? {
+        base: parsed.range.base,
+        head: parsed.range.head,
+        symmetric: parsed.range.symmetric,
+        type: 'range',
+      }
+    : pullRequestUrl
+      ? {
+          ...(parsed.pullRequestProvider ? { provider: parsed.pullRequestProvider } : {}),
+          type: 'pull-request',
+          url: pullRequestUrl,
+        }
+      : parsed.commitRef
+        ? { ref: parsed.commitRef, type: 'commit' }
+        : parsed.branchRef
+          ? { ref: parsed.branchRef, type: 'branch' }
+          : { type: 'working-tree' };
 
 try {
   const sessionId =

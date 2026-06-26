@@ -291,7 +291,7 @@ export const buildReviewCommentsMarkdown = (
 };
 
 export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArray<ReviewComment> =>
-  state.source.type === 'pull-request'
+  state.source.type === 'pull-request' || state.source.type === 'arc-pull-request'
     ? (state.reviewComments ?? []).flatMap((comment) => {
         const file = state.files.find((candidate) => candidate.path === comment.filePath);
         const section = file?.sections[0];

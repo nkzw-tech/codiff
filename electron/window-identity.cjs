@@ -36,6 +36,22 @@ const resolveRepositoryRoot = (repositoryPath) => {
   }
 };
 
+/** @param {string} repositoryPath */
+const resolveArcRepositoryRoot = (repositoryPath) => {
+  const resolvedPath = resolve(repositoryPath);
+
+  try {
+    return getRealPath(
+      execFileSync('arc', ['root'], {
+        cwd: resolvedPath,
+        encoding: 'utf8',
+      }).trim(),
+    );
+  } catch {
+    return getRealPath(resolvedPath);
+  }
+};
+
 /** @param {string} repositoryRoot @param {string} ref */
 const resolveCommitRef = (repositoryRoot, ref) => {
   try {
@@ -124,6 +140,26 @@ const getPullRequestSourceKey = (source) => {
 
 /** @param {string} repositoryRoot @param {ReviewSource} [source] */
 const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
+  if (source.type === 'arc-working-tree') {
+    return 'arc-working-tree';
+  }
+
+  if (source.type === 'arc-branch') {
+    return `arc-branch:${source.base}`;
+  }
+
+  if (source.type === 'arc-commit') {
+    return `arc-commit:${source.ref}`;
+  }
+
+  if (source.type === 'arc-pull-request') {
+    return `arc-pull-request:${source.number}`;
+  }
+
+  if (source.type === 'arc-range') {
+    return `arc-range:${source.base}${source.symmetric ? '...' : '..'}${source.head}`;
+  }
+
   if (source.type === 'working-tree') {
     return 'working-tree';
   }
@@ -166,7 +202,14 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
       sourceKey: `plan:${planPath}`,
     };
   }
-  const repositoryRoot = resolveRepositoryRoot(repositoryPath);
+  const repositoryRoot =
+    launchOptions.source?.type === 'arc-working-tree' ||
+    launchOptions.source?.type === 'arc-branch' ||
+    launchOptions.source?.type === 'arc-commit' ||
+    launchOptions.source?.type === 'arc-pull-request' ||
+    launchOptions.source?.type === 'arc-range'
+      ? resolveArcRepositoryRoot(repositoryPath)
+      : resolveRepositoryRoot(repositoryPath);
   const implicitWalkthroughHead =
     launchOptions.walkthrough &&
     !launchOptions.walkthroughFile &&

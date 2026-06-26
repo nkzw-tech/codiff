@@ -248,6 +248,7 @@ const runCodex = async (
           `model_reasoning_effort="${reasoningEffort}"`,
           '--cd',
           repoRoot,
+          '--skip-git-repo-check',
           '--sandbox',
           'read-only',
           '--ephemeral',
@@ -261,6 +262,7 @@ const runCodex = async (
           '-',
         ];
         const child = spawn(codexCommand, codexArgs, {
+          cwd: repoRoot,
           env: process.env,
           stdio: ['pipe', 'pipe', 'pipe'],
         });

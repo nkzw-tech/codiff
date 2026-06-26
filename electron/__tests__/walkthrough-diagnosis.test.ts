@@ -7,14 +7,22 @@ import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
-const { collectWalkthroughPaths, diagnoseWalkthroughMismatch } =
+const { collectWalkthroughPaths, diagnoseWalkthroughMismatch, parseArcNewestCommit } =
   require('../walkthrough-diagnosis.cjs') as {
     collectWalkthroughPaths: (input: unknown) => Array<string>;
     diagnoseWalkthroughMismatch: (params: {
       hasFiles: boolean;
       input: unknown;
       repositoryRoot: string;
+      readNewestPathCommit?: (params: {
+        kind: 'arc-working-tree' | 'working-tree';
+        paths: Array<string>;
+        repositoryRoot: string;
+      }) => Promise<{ hash: string; isoDate: string; subject: string } | null>;
     }) => Promise<string | null>;
+    parseArcNewestCommit: (
+      raw: string,
+    ) => { hash: string; isoDate: string; subject: string } | null;
   };
 
 const execFileAsync = promisify(execFile);
@@ -26,6 +34,8 @@ const git = async (repo: string, args: ReadonlyArray<string>) => {
 const makeRepo = async () => {
   const repo = await mkdtemp(join(tmpdir(), 'codiff-diagnosis-'));
   await git(repo, ['init']);
+  await git(repo, ['config', 'commit.gpgSign', 'false']);
+  await git(repo, ['config', 'tag.gpgSign', 'false']);
   await git(repo, ['config', 'user.email', 'codiff@example.com']);
   await git(repo, ['config', 'user.name', 'Codiff Test']);
   return repo;
@@ -76,6 +86,33 @@ test('collects v4 hunk ids and normalized hunk paths from a walkthrough', () => 
   ]);
 });
 
+test('collects Arc v4 hunk ids from a walkthrough', () => {
+  const paths = collectWalkthroughPaths({
+    chapters: [{ stops: [{ hunkIds: ['src/a.ts:arc:h1', 'src/path:with:colon.ts:arc:h2'] }] }],
+    source: { type: 'arc-working-tree' },
+    version: 4,
+  });
+  expect([...paths].sort()).toEqual(['src/a.ts', 'src/path:with:colon.ts']);
+});
+
+test('parses newest Arc path commit from arc log JSON', () => {
+  expect(
+    parseArcNewestCommit(
+      JSON.stringify([
+        {
+          commit: '677c77892083d271094138885e41446323786113',
+          date: '2026-03-28T13:09:42+03:00',
+          message: 'VLG-4810: Speed up binary package install\n\nBody',
+        },
+      ]),
+    ),
+  ).toEqual({
+    hash: '677c77892083',
+    isoDate: '2026-03-28T13:09:42+03:00',
+    subject: 'VLG-4810: Speed up binary package install',
+  });
+});
+
 test('reports changes committed after the walkthrough was authored', async () => {
   const repo = await makeRepo();
   try {
@@ -115,6 +152,37 @@ test('reports v4 hunk-id changes committed after the walkthrough was authored', 
   } finally {
     await rm(repo, { force: true, recursive: true });
   }
+});
+
+test('reports Arc working-tree hunk-id changes committed after the walkthrough was authored', async () => {
+  const calls: Array<{
+    kind: 'arc-working-tree' | 'working-tree';
+    paths: Array<string>;
+    repositoryRoot: string;
+  }> = [];
+  const reason = await diagnoseWalkthroughMismatch({
+    hasFiles: false,
+    input: {
+      ...v4WalkthroughFor('feature.ts', { generatedAt: '2000-01-01T00:00:00.000Z' }),
+      chapters: [{ stops: [{ hunkIds: ['feature.ts:arc:h1'] }] }],
+      source: { type: 'arc-working-tree' },
+    },
+    readNewestPathCommit: async (params) => {
+      calls.push(params);
+      return {
+        hash: '677c77892083',
+        isoDate: '2026-03-28T13:09:42+03:00',
+        subject: 'Add the Arc v4 feature',
+      };
+    },
+    repositoryRoot: '/arcadia',
+  });
+
+  expect(calls).toEqual([
+    { kind: 'arc-working-tree', paths: ['feature.ts'], repositoryRoot: '/arcadia' },
+  ]);
+  expect(reason).toContain('committed since the walkthrough was authored');
+  expect(reason).toContain('Add the Arc v4 feature');
 });
 
 test('treats a commit that predates authoring as reverted, not committed', async () => {

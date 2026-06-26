@@ -2,6 +2,17 @@
 
 const { gitOrEmpty, parseStatus, validateRepositoryPath } = require('./git-state/common.cjs');
 const {
+  listArcRepositoryHistory,
+  normalizeArcanumReviewComment,
+  parseArcNameStatus,
+  readArcImageContent,
+  readArcIdentity,
+  readArcRepositoryChangeSignature,
+  readArcSectionContent,
+  readArcState,
+  submitArcPullRequestComment,
+} = require('./git-state/arc.cjs');
+const {
   listRepositoryHistory,
   readBranchImageContent,
   readBranchSectionContent,
@@ -46,7 +57,7 @@ const {
   readDiffSectionContent: readWorkingTreeDiffSectionContent,
   readDiffImageContent: readWorkingTreeDiffImageContent,
   readGitIdentity,
-  readRepositoryChangeSignature,
+  readRepositoryChangeSignature: readGitRepositoryChangeSignature,
   readWorkingTreeState,
 } = require('./git-state/working-tree.cjs');
 
@@ -59,25 +70,56 @@ const {
  * @typedef {import('../core/types.ts').ReviewSource} ReviewSource
  */
 
+/** @param {unknown} error */
+const isNotGitRepositoryError = (error) =>
+  /not a git repository/i.test(error instanceof Error ? error.message : String(error));
+
+/** @param {ReviewSource | undefined} source */
+const isArcSource = (source) =>
+  source?.type === 'arc-working-tree' ||
+  source?.type === 'arc-branch' ||
+  source?.type === 'arc-range' ||
+  source?.type === 'arc-commit' ||
+  source?.type === 'arc-pull-request';
+
+/** @param {ReviewSource} source */
+const isWorkingTreeSource = (source) =>
+  source.type === 'working-tree' || source.type === 'arc-working-tree';
+
 /** @param {string} launchPath @param {ReviewSource} [source] @param {{showWhitespace?: boolean}} [options] @returns {Promise<RepositoryState>} */
-const readRepositoryState = async (launchPath, source = { type: 'working-tree' }, options = {}) => {
-  const state =
-    source.type === 'pull-request'
-      ? await (isGitLabReviewSource(source) ? readMergeRequestState : readPullRequestState)(
-          launchPath,
-          source,
-        )
-      : source.type === 'commit'
-        ? await readCommitState(launchPath, source.ref)
-        : source.type === 'range'
-          ? await readRangeState(launchPath, source.base, source.head, source.symmetric)
-          : source.type === 'branch' || source.type === 'branch-diff'
-            ? await readBranchState(launchPath, source)
-            : await readWorkingTreeState(launchPath, {
-                eagerContents: false,
-                showWhitespace: options.showWhitespace,
-              });
-  const branch = (await gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD'])).trim() || null;
+const readRepositoryState = async (launchPath, source, options = {}) => {
+  let state;
+  if (isArcSource(source)) {
+    state = await readArcState(launchPath, source, { showWhitespace: options.showWhitespace });
+  } else if (source?.type === 'pull-request') {
+    state = await (isGitLabReviewSource(source) ? readMergeRequestState : readPullRequestState)(
+      launchPath,
+      source,
+    );
+  } else if (source?.type === 'commit') {
+    state = await readCommitState(launchPath, source.ref);
+  } else if (source?.type === 'range') {
+    state = await readRangeState(launchPath, source.base, source.head, source.symmetric);
+  } else if (source?.type === 'branch' || source?.type === 'branch-diff') {
+    state = await readBranchState(launchPath, source);
+  } else {
+    state = await readWorkingTreeState(launchPath, {
+      eagerContents: false,
+      showWhitespace: options.showWhitespace,
+    }).catch(async (error) => {
+      if (isNotGitRepositoryError(error)) {
+        try {
+          return await readArcState(launchPath, { type: 'arc-working-tree' }, options);
+        } catch {
+          throw error;
+        }
+      }
+      throw error;
+    });
+  }
+
+  const branch =
+    (await gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD'])).trim() || state.branch;
   return { ...state, branch };
 };
 
@@ -92,8 +134,15 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
  */
 const readWalkthroughRepositoryState = async (launchPath, source, options = {}) => {
   const state = await readRepositoryState(launchPath, source, options);
-  if (source || state.source.type !== 'working-tree' || state.files.length > 0) {
+  if (source || !isWorkingTreeSource(state.source) || state.files.length > 0) {
     return state;
+  }
+
+  if (state.source.type === 'arc-working-tree') {
+    const history = await listArcRepositoryHistory(state.root, 1, state.source);
+    return history.entries.length > 0
+      ? readRepositoryState(launchPath, { ref: 'HEAD', type: 'arc-commit' }, options)
+      : state;
   }
 
   const head = (await gitOrEmpty(state.root, ['rev-parse', '--verify', 'HEAD'])).trim();
@@ -110,60 +159,121 @@ const getBranchHistoryRef = (source) =>
 
 /** @param {string} launchPath @param {number} [limit] @param {ReviewSource} [source] @returns {Promise<RepositoryHistory>} */
 const readRepositoryHistory = (launchPath, limit, source) =>
-  source?.type === 'pull-request'
-    ? (isGitLabReviewSource(source) ? listMergeRequestHistory : listPullRequestHistory)(
-        launchPath,
-        source,
-        limit,
-      )
-    : listRepositoryHistory(
-        launchPath,
-        limit,
-        source?.type === 'branch' || source?.type === 'branch-diff'
-          ? getBranchHistoryRef(source)
-          : undefined,
-      );
+  isArcSource(source)
+    ? listArcRepositoryHistory(launchPath, limit, source)
+    : source?.type === 'pull-request'
+      ? (isGitLabReviewSource(source) ? listMergeRequestHistory : listPullRequestHistory)(
+          launchPath,
+          source,
+          limit,
+        )
+      : listRepositoryHistory(
+          launchPath,
+          limit,
+          source?.type === 'branch' || source?.type === 'branch-diff'
+            ? getBranchHistoryRef(source)
+            : undefined,
+        );
 
 /** @param {string} launchPath @param {DiffSectionContentRequest} request */
-const readDiffSectionContent = async (launchPath, request) =>
-  request.source?.type === 'range'
-    ? readRangeSectionContent(
-        launchPath,
-        request.source.base,
-        request.source.head,
-        request.source.symmetric,
-        request.path,
-        { force: request.force },
-      )
-    : request.source?.type === 'branch' || request.source?.type === 'branch-diff'
-      ? readBranchSectionContent(launchPath, request.source, request.path, {
-          force: request.force,
-        })
-      : request.kind === 'commit' || request.source?.type === 'commit'
-        ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
-            force: request.force,
-          })
-        : readWorkingTreeDiffSectionContent(launchPath, request);
+const readDiffSectionContent = async (launchPath, request) => {
+  if (isArcSource(request.source)) {
+    return readArcSectionContent(launchPath, request);
+  }
+
+  if (request.source?.type === 'range') {
+    return readRangeSectionContent(
+      launchPath,
+      request.source.base,
+      request.source.head,
+      request.source.symmetric,
+      request.path,
+      { force: request.force },
+    );
+  }
+
+  if (request.source?.type === 'branch' || request.source?.type === 'branch-diff') {
+    return readBranchSectionContent(launchPath, request.source, request.path, {
+      force: request.force,
+    });
+  }
+
+  if (request.kind === 'commit' || request.source?.type === 'commit') {
+    return readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
+      force: request.force,
+    });
+  }
+
+  return readWorkingTreeDiffSectionContent(launchPath, request);
+};
 
 /** @param {string} launchPath @param {DiffImageContentRequest} request @returns {Promise<DiffImageContentResult>} */
-const readDiffImageContent = (launchPath, request) =>
-  request.source?.type === 'pull-request'
-    ? (isGitLabReviewSource(request.source)
+const readDiffImageContent = (launchPath, request) => {
+  if (isArcSource(request.source)) {
+    return readArcImageContent(launchPath, request);
+  }
+
+  if (request.source?.type === 'pull-request') {
+    return (
+      isGitLabReviewSource(request.source)
         ? readMergeRequestImageContent
-        : readPullRequestImageContent)(launchPath, request.source, request.path)
-    : request.source?.type === 'range'
-      ? readRangeImageContent(
-          launchPath,
-          request.source.base,
-          request.source.head,
-          request.source.symmetric,
-          request.path,
-        )
-      : request.source?.type === 'branch' || request.source?.type === 'branch-diff'
-        ? readBranchImageContent(launchPath, request.source, request.path)
-        : request.kind === 'commit' || request.source?.type === 'commit'
-          ? readCommitImageContent(launchPath, request.source?.ref || 'HEAD', request.path)
-          : readWorkingTreeDiffImageContent(launchPath, request);
+        : readPullRequestImageContent
+    )(launchPath, request.source, request.path);
+  }
+
+  if (request.source?.type === 'range') {
+    return readRangeImageContent(
+      launchPath,
+      request.source.base,
+      request.source.head,
+      request.source.symmetric,
+      request.path,
+    );
+  }
+
+  if (request.source?.type === 'branch' || request.source?.type === 'branch-diff') {
+    return readBranchImageContent(launchPath, request.source, request.path);
+  }
+
+  if (request.kind === 'commit' || request.source?.type === 'commit') {
+    return readCommitImageContent(launchPath, request.source?.ref || 'HEAD', request.path);
+  }
+
+  return readWorkingTreeDiffImageContent(launchPath, request);
+};
+
+/** @param {string} launchPath @param {Iterable<string>} [additionalPaths] */
+const readRepositoryChangeSignature = async (launchPath, additionalPaths = []) => {
+  try {
+    return await readGitRepositoryChangeSignature(launchPath, additionalPaths);
+  } catch (error) {
+    if (!isNotGitRepositoryError(error)) {
+      throw error;
+    }
+    return readArcRepositoryChangeSignature(launchPath, additionalPaths);
+  }
+};
+
+/** @param {string} launchPath */
+const readLocalIdentity = async (launchPath) => {
+  try {
+    return await readArcIdentity(launchPath);
+  } catch {
+    // Fall through to Git/global identity when Arc is unavailable.
+  }
+
+  try {
+    const identity = await readGitIdentity(launchPath);
+    if (identity.name || identity.email) {
+      return identity;
+    }
+  } catch (error) {
+    if (!isNotGitRepositoryError(error)) {
+      throw error;
+    }
+  }
+  return readArcIdentity(launchPath);
+};
 
 module.exports = {
   collectResolvedReviewCommentIds,
@@ -175,8 +285,10 @@ module.exports = {
   listRepositoryHistory: readRepositoryHistory,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
+  normalizeArcanumReviewComment,
   normalizeGitLabReviewComment,
   normalizePullRequestComment,
+  parseArcNameStatus,
   parseStatus,
   parseGitHubPullRequestUrl,
   parseGitLabMergeRequestUrl,
@@ -184,7 +296,7 @@ module.exports = {
   readBranchState,
   readDiffSectionContent,
   readDiffImageContent,
-  readGitIdentity,
+  readGitIdentity: readLocalIdentity,
   readRepositoryChangeSignature,
   readCommitState,
   readPullRequestState,
@@ -193,14 +305,22 @@ module.exports = {
   readWorkingTreeState,
   resolvePullRequestContentRefs,
   submitPullRequestComment: (launchPath, request) =>
-    (isGitLabReviewSource(request.source) ? submitMergeRequestComment : submitPullRequestComment)(
-      launchPath,
-      request,
-    ),
-  submitPullRequestReview: (launchPath, request) =>
-    (isGitLabReviewSource(request.source) ? submitMergeRequestReview : submitPullRequestReview)(
-      launchPath,
-      request,
-    ),
+    request.source.type === 'arc-pull-request'
+      ? submitArcPullRequestComment(launchPath, request)
+      : (isGitLabReviewSource(request.source)
+          ? submitMergeRequestComment
+          : submitPullRequestComment)(launchPath, request),
+  submitPullRequestReview: (launchPath, request) => {
+    // TODO(arcadia): Replace this guard with a real Arcanum review-verdict call when
+    // Arcanum exposes Approve/Request changes through the available API/tooling.
+    if (request.source.type === 'arc-pull-request') {
+      throw new Error(
+        'Arcadia review verdicts are not supported yet. Add inline comments instead.',
+      );
+    }
+    return (
+      isGitLabReviewSource(request.source) ? submitMergeRequestReview : submitPullRequestReview
+    )(launchPath, request);
+  },
   validateRepositoryPath,
 };

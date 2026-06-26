@@ -572,6 +572,11 @@ test('working-tree walkthroughs are committable even without commit seed text', 
     commit: undefined,
     source: { type: 'working-tree' },
   };
+  const arc: NarrativeWalkthrough = {
+    ...walkthrough(),
+    commit: undefined,
+    source: { type: 'arc-working-tree' },
+  };
   const committedReview: NarrativeWalkthrough = {
     ...walkthrough(),
     commit: {},
@@ -579,6 +584,7 @@ test('working-tree walkthroughs are committable even without commit seed text', 
   };
 
   expect(isWalkthroughCommittable(wt)).toBe(true);
+  expect(isWalkthroughCommittable(arc)).toBe(true);
   expect(isWalkthroughCommittable(committedReview)).toBe(false);
 });
 

@@ -107,6 +107,7 @@ import {
   getSourceKey,
   getSourceLabel,
   shouldStartInHistoryWhenEmpty,
+  isWorkingTreeSource,
   supportsDiffSearchContentPreload,
   supportsLazyDiffContent,
   usesViewedFileState,
@@ -406,7 +407,7 @@ export default function App() {
     (file: ChangedFile, _section: DiffSection) => {
       const refresh = async () => {
         const currentState = stateRef.current;
-        if (!currentState || currentState.source.type !== 'working-tree') {
+        if (!currentState || !isWorkingTreeSource(currentState.source)) {
           return true;
         }
         const sourceRequest = sourceRequestRef.current;
@@ -479,7 +480,7 @@ export default function App() {
         if (!nextViewed) {
           const next = { ...current };
           delete next[file.path];
-          if (repositoryState.source.type === 'working-tree') {
+          if (isWorkingTreeSource(repositoryState.source)) {
             writeViewed(repositoryState.root, next);
           }
           return next;
@@ -489,7 +490,7 @@ export default function App() {
           ...current,
           [file.path]: file.fingerprint,
         };
-        if (repositoryState.source.type === 'working-tree') {
+        if (isWorkingTreeSource(repositoryState.source)) {
           writeViewed(repositoryState.root, next);
         }
         return next;
@@ -1590,7 +1591,7 @@ export default function App() {
     const currentState = stateRef.current;
     if (
       !currentState ||
-      currentState.source.type !== 'working-tree' ||
+      !isWorkingTreeSource(currentState.source) ||
       currentState.files.length === 0
     ) {
       return;
@@ -1620,7 +1621,7 @@ export default function App() {
 
       setViewed((current) => {
         const next = updateReviewIdentityViewed(current, reviewIdentity, isViewed);
-        if (currentState.source.type === 'working-tree') {
+        if (isWorkingTreeSource(currentState.source)) {
           writeViewed(currentState.root, next);
         }
         return next;
@@ -2068,7 +2069,8 @@ export default function App() {
       const currentState = stateRef.current;
       const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
       if (
-        currentState?.source.type !== 'pull-request' ||
+        (currentState?.source.type !== 'pull-request' &&
+          currentState?.source.type !== 'arc-pull-request') ||
         !comment ||
         comment.body.trim().length === 0 ||
         comment.remoteSubmit?.status === 'submitting'
@@ -2124,7 +2126,18 @@ export default function App() {
   const submitPullRequestReview = useCallback(
     (event: PullRequestReviewEvent) => {
       const currentState = stateRef.current;
-      if (currentState?.source.type !== 'pull-request' || pullRequestReviewSubmitting) {
+      if (pullRequestReviewSubmitting) {
+        return;
+      }
+
+      // TODO(arcadia): Wire this to a real Arcanum review-verdict API once one is available.
+      // Posting a regular comment is not equivalent to Approve/Request changes.
+      if (currentState?.source.type === 'arc-pull-request') {
+        window.alert('Arcadia review verdicts are not supported yet. Add inline comments instead.');
+        return;
+      }
+
+      if (currentState?.source.type !== 'pull-request') {
         return;
       }
 
@@ -2211,7 +2224,9 @@ export default function App() {
         root: currentState.root,
         source: currentState.source,
         title:
-          currentState.source.type === 'commit' ? currentState.commitMetadata?.subject : undefined,
+          currentState.source.type === 'commit' || currentState.source.type === 'arc-commit'
+            ? currentState.commitMetadata?.subject
+            : undefined,
       },
       reviewComments: currentState.reviewComments,
       version: 1,
@@ -2298,7 +2313,9 @@ export default function App() {
       ? selectedOrSearchPath
       : (visibleFiles[0]?.path ?? null);
   const hasDiffSearchQuery = diffSearchQuery.trim().length > 0;
-  const isPullRequest = state.source.type === 'pull-request';
+  const canSubmitRemoteComments =
+    state.source.type === 'pull-request' || state.source.type === 'arc-pull-request';
+  const canSubmitPullRequestReview = state.source.type === 'pull-request';
   const isSwitchingSource = pendingSource != null;
   const showAgentUnavailablePanel =
     sidebarMode === 'walkthrough' &&
@@ -2310,8 +2327,9 @@ export default function App() {
       walkthroughError?.code === 'PI_NOT_FOUND');
 
   const sidebarLabel = `${compactPath(state.root)}${state.branch ? ` (${state.branch})` : ''}`;
-  const sidebarSourceLabel =
-    state.source.type !== 'working-tree' ? ` · ${getSourceLabel(state.source)}` : '';
+  const sidebarSourceLabel = !isWorkingTreeSource(state.source)
+    ? ` · ${getSourceLabel(state.source)}`
+    : '';
   const emptySourceDetail = getEmptySourceDetail(state.source, state.root);
 
   const showNarrativeWalkthrough = narrativeWalkthrough != null && sidebarMode === 'walkthrough';
@@ -2319,7 +2337,7 @@ export default function App() {
     ? buildCommitModel(narrativeNavigation.walkthroughView, state.files)
     : buildGenericCommitModel(state.files);
   const showPlainCommitView =
-    mainMode === 'commit' && state.source.type === 'working-tree' && state.files.length > 0;
+    mainMode === 'commit' && isWorkingTreeSource(state.source) && state.files.length > 0;
   const diffLineHeight = getCodeFontLineHeight(
     normalizeCodeFontSizePreference(preferences.codeFontSize),
   );
@@ -2331,14 +2349,17 @@ export default function App() {
     agentLabel,
     collapsed,
     comments: visibleReviewComments,
-    commitMetadata: state.source.type === 'commit' ? (state.commitMetadata ?? null) : null,
+    commitMetadata:
+      state.source.type === 'commit' || state.source.type === 'arc-commit'
+        ? (state.commitMetadata ?? null)
+        : null,
     diffLineHeight,
     diffStyle,
     focusCommentId,
     focusCommentRequest,
     gitIdentity,
     hunkNavigation,
-    isPullRequest,
+    isPullRequest: canSubmitRemoteComments,
     itemVersionByKey,
     keymap: codiffConfig.keymap,
     loadingSectionIds,
@@ -2425,7 +2446,7 @@ export default function App() {
       ) : null}
       <RepositoryChangeBanner
         onReload={reloadWindow}
-        visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
+        visible={localChangesDetected && isWorkingTreeSource(pendingSource ?? state.source)}
       />
       <WalkthroughOutdatedBanner
         onDismiss={() => setWalkthroughFileError(null)}
@@ -2458,7 +2479,7 @@ export default function App() {
             reviewCommentsPrefix={preferences.reviewCommentsPrefix}
             showWhitespace={showWhitespace}
           />
-          {isPullRequest ? (
+          {canSubmitPullRequestReview ? (
             <PullRequestReviewButtons
               disabled={pullRequestReviewSubmitting != null}
               onSubmitReview={submitPullRequestReview}
@@ -2498,7 +2519,11 @@ export default function App() {
           </div>
         </div>
         <Sidebar
-          branchSource={historySource?.type === 'branch-diff' ? historySource : null}
+          branchSource={
+            historySource?.type === 'arc-branch' || historySource?.type === 'branch-diff'
+              ? historySource
+              : null
+          }
           commitFiles={state.files}
           commitViewOpen={showPlainCommitView}
           currentSource={pendingSource ?? state.source}
@@ -2520,7 +2545,11 @@ export default function App() {
           onSelectSource={selectSource}
           onShareWalkthrough={enabledShareWalkthrough}
           onToggleCommitView={showPlainCommitView ? closeCommitView : openCommitView}
-          pullRequestSource={historySource?.type === 'pull-request' ? historySource : null}
+          pullRequestSource={
+            historySource?.type === 'arc-pull-request' || historySource?.type === 'pull-request'
+              ? historySource
+              : null
+          }
           reloadDeltaPaths={reloadDeltaPaths}
           searchQuery={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
           selectedPath={visibleSelectedPath}

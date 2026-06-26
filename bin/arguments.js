@@ -2,9 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import arcDetection from '../electron/arc-detection.cjs';
 import reviewSource from '../electron/review-source.cjs';
 
-const { parseReviewUrl, resolveReviewUrl } = reviewSource;
+const { shouldUseArcRepository } = arcDetection;
+const { parseArcReviewUrl, parseReviewUrl, resolveReviewUrl } = reviewSource;
 
 export const flagDefinitions = [
   {
@@ -17,6 +19,17 @@ export const flagDefinitions = [
     argument: '<ref>',
     description: 'Review the current branch against a target branch.',
     name: 'branch',
+    type: 'string',
+  },
+  {
+    description: 'Review an Arc repository instead of a Git repository.',
+    name: 'arc',
+    type: 'boolean',
+  },
+  {
+    argument: '<ref>',
+    description: 'Review the current Arc branch against a target branch.',
+    name: 'arc-base',
     type: 'string',
   },
   {
@@ -91,6 +104,8 @@ export const usageExamples = [
   { command: 'codiff', description: 'Review staged and unstaged changes.' },
   { command: 'codiff /path/to/repo', description: 'Review changes in a specific repository.' },
   { command: 'codiff main', description: 'Review the current branch against main.' },
+  { command: 'codiff --arc', description: 'Review local Arc changes.' },
+  { command: 'codiff --arc --arc-base trunk', description: 'Review Arc branch changes.' },
   { command: 'codiff a1b2c3d', description: 'Review a specific commit.' },
   { command: "codiff '#75'", description: 'Review pull request #75.' },
   { command: 'codiff pr 75', description: 'Review pull request #75 (alternate syntax).' },
@@ -231,6 +246,12 @@ export const parseArguments = (args) => {
 
   let commitRef = typeof values.commit === 'string' ? values.commit : null;
   let branchRef = typeof values.branch === 'string' ? values.branch : null;
+  let arcBase = typeof values['arc-base'] === 'string' ? values['arc-base'] : null;
+  let arc = values.arc === true || arcBase != null;
+  let arcCommitRef = null;
+  let arcPullRequestNumber = null;
+  let arcPullRequestUrl = null;
+  let arcRange = null;
   const codexSessionId =
     typeof values['codex-session'] === 'string' ? values['codex-session'] : null;
   const claudeSessionId =
@@ -262,6 +283,15 @@ export const parseArguments = (args) => {
     if (planFilePath) {
       requestedPath ??= arg;
       continue;
+    }
+    if (arcPullRequestNumber == null) {
+      const arcReview = parseArcReviewUrl(arg);
+      if (arcReview) {
+        arc = true;
+        arcPullRequestNumber = arcReview.number;
+        arcPullRequestUrl = arcReview.url;
+        continue;
+      }
     }
     if (!pullRequestUrl && isPullRequestUrlArgument(arg)) {
       pullRequestUrl = arg;
@@ -303,6 +333,9 @@ export const parseArguments = (args) => {
   }
 
   const repositoryPath = resolve(requestedPath ?? process.cwd());
+  const canUseArcRepository = !planFilePath && !pullRequestUrl;
+  const canInferSource = canUseArcRepository && pullRequestNumber == null;
+  const useArcRepository = canUseArcRepository && (arc || shouldUseArcRepository(repositoryPath));
   let range = null;
   if (rangeCandidate) {
     // Only honor the range when both ends resolve in this repository; otherwise
@@ -312,6 +345,10 @@ export const parseArguments = (args) => {
       isCommitRef(repositoryPath, rangeCandidate.head)
         ? rangeCandidate
         : null;
+    if (!range && useArcRepository) {
+      arc = true;
+      arcRange = rangeCandidate;
+    }
   }
   if (!range && !commitRef && !branchRef && sourceCandidate) {
     const source = resolveSourceCandidate(repositoryPath, sourceCandidate);
@@ -319,9 +356,44 @@ export const parseArguments = (args) => {
       branchRef = source.branchRef;
     } else if (source?.commitRef) {
       commitRef = source.commitRef;
+    } else if (
+      canInferSource &&
+      useArcRepository &&
+      !existsSync(resolve(sourceCandidate)) &&
+      !isExplicitPathArgument(sourceCandidate)
+    ) {
+      arc = true;
+      if (isCommitRefArgument(sourceCandidate)) {
+        arcCommitRef = sourceCandidate;
+      } else {
+        arcBase ??= sourceCandidate;
+      }
     } else if (requestedPath == null) {
       requestedPath = sourceCandidate;
     }
+  }
+  if (useArcRepository && commitRef && !branchRef && !range && !arcRange) {
+    arc = true;
+    arcCommitRef = commitRef;
+    commitRef = null;
+  }
+  if (useArcRepository && pullRequestNumber != null && !pullRequestUrl) {
+    arc = true;
+    arcPullRequestNumber = pullRequestNumber;
+    pullRequestNumber = null;
+    pullRequestProvider = null;
+  }
+  if (
+    canInferSource &&
+    !arc &&
+    !arcBase &&
+    !range &&
+    !commitRef &&
+    !branchRef &&
+    !sourceCandidate &&
+    shouldUseArcRepository(repositoryPath)
+  ) {
+    arc = true;
   }
 
   return {
@@ -332,6 +404,12 @@ export const parseArguments = (args) => {
     ...(piSessionId ? { piSessionId } : {}),
     ...(planFilePath ? { planFilePath: resolve(planFilePath) } : {}),
     ...(branchRef ? { branchRef } : {}),
+    ...(arc ? { arc: true } : {}),
+    ...(arcBase ? { arcBase } : {}),
+    ...(arcCommitRef ? { arcCommitRef } : {}),
+    ...(arcPullRequestNumber != null ? { arcPullRequestNumber } : {}),
+    ...(arcPullRequestUrl ? { arcPullRequestUrl } : {}),
+    ...(arcRange ? { arcRange } : {}),
     ...(range ? { range } : {}),
     commitRef,
     help: values.help === true,

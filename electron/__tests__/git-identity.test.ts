@@ -27,6 +27,8 @@ test('prefers configured git identity and falls back to the current commit autho
       'user.name=Commit Author',
       '-c',
       'user.email=commit@example.com',
+      '-c',
+      'commit.gpgsign=false',
       'commit',
       '-m',
       'Initial commit',

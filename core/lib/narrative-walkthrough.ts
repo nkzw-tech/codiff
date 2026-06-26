@@ -16,6 +16,7 @@ import type {
   WalkthroughStop,
 } from '../types.ts';
 import { getDiffLineCount, getVisibleDiffSections } from './diff.ts';
+import { isWorkingTreeSource } from './source.ts';
 
 export type NarrativeLineCount = {
   added: number;
@@ -253,7 +254,7 @@ export const getUncoveredWalkthroughFileLineItems = (
   });
 
 export const isWalkthroughCommittable = (walkthrough: NarrativeWalkthrough): boolean =>
-  walkthrough.source.type === 'working-tree';
+  isWorkingTreeSource(walkthrough.source);
 
 const groupSupportByReason = (
   support: ReadonlyArray<WalkthroughSupportGroup>,

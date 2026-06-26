@@ -66,6 +66,50 @@ test('getReviewCommentsFromState carries the outdated flag through to review com
   expect(comments.find((comment) => comment.id === 'github:2')?.isOutdated).toBeUndefined();
 });
 
+test('getReviewCommentsFromState maps Arc pull request comments onto Arc diff sections', () => {
+  const comments = getReviewCommentsFromState({
+    ...createPullRequestState(),
+    files: [
+      {
+        fingerprint: 'fingerprint',
+        path: 'src/a.ts',
+        sections: [
+          {
+            binary: false,
+            id: 'src/a.ts:arc',
+            kind: 'arc',
+            patch: '',
+          },
+        ],
+        status: 'modified',
+      },
+    ],
+    reviewComments: [
+      {
+        author: { login: 'arc-reviewer' },
+        body: 'Arc comment.',
+        filePath: 'src/a.ts',
+        id: 'arcanum:1',
+        lineNumber: 5,
+        side: 'additions',
+      },
+    ],
+    source: {
+      number: 123,
+      type: 'arc-pull-request',
+    },
+  });
+
+  expect(comments).toMatchObject([
+    {
+      author: { login: 'arc-reviewer' },
+      body: 'Arc comment.',
+      id: 'arcanum:1',
+      sectionId: 'src/a.ts:arc',
+    },
+  ]);
+});
+
 test('getVisibleReviewComments hides outdated comments unless they are shown', () => {
   const comments = [
     createReviewComment({ id: 'github:1', isOutdated: true }),

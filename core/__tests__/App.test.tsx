@@ -516,7 +516,7 @@ test('repository load errors hide raw git output for non-repositories', () => {
   expect(error).toEqual({
     kind: 'not-a-repository',
     message:
-      'Codiff was opened outside a Git repository. Run `codiff` from inside a repo, or choose File → Open Folder… to open one.',
+      'Codiff was opened outside a Git or Arc repository. Run `codiff` from inside a repo, or choose File → Open Folder… to open one.',
   });
 });
 

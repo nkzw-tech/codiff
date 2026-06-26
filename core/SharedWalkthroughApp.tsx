@@ -41,7 +41,7 @@ import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
 } from './lib/review-identity.ts';
-import { getSourceLabel, getSourceKey } from './lib/source.ts';
+import { getSourceLabel, getSourceKey, isWorkingTreeSource } from './lib/source.ts';
 import type {
   ChangedFile,
   PullRequestExistingReviewComment,
@@ -369,7 +369,9 @@ export function SharedWalkthroughApp({ snapshot }: { snapshot: SharedWalkthrough
     gitIdentity: null,
     hunkNavigation: null,
     initialMarkdownPreviewSectionIds,
-    isPullRequest: snapshot.repository.source.type === 'pull-request',
+    isPullRequest:
+      snapshot.repository.source.type === 'pull-request' ||
+      snapshot.repository.source.type === 'arc-pull-request',
     isReadOnly: true,
     itemVersionByKey,
     keymap: createDefaultConfig().keymap,
@@ -412,10 +414,9 @@ export function SharedWalkthroughApp({ snapshot }: { snapshot: SharedWalkthrough
     </div>
   );
 
-  const sourceLabel =
-    snapshot.repository.source.type === 'working-tree'
-      ? ''
-      : ` · ${getSourceLabel(snapshot.repository.source)}`;
+  const sourceLabel = isWorkingTreeSource(snapshot.repository.source)
+    ? ''
+    : ` · ${getSourceLabel(snapshot.repository.source)}`;
   const rootLabel = `${compactPath(snapshot.repository.root)}${snapshot.branch ? ` (${snapshot.branch})` : ''}`;
 
   return (

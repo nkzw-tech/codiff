@@ -4,13 +4,14 @@ const { execFileSync } = require('node:child_process');
 const { existsSync } = require('node:fs');
 const { resolve } = require('node:path');
 const { parseArgs } = require('node:util');
+const { shouldUseArcRepository } = require('../arc-detection.cjs');
 const { readWalkthroughContext } = require('../walkthrough-context.cjs');
-const { parseReviewUrl, resolveReviewUrl } = require('../review-source.cjs');
+const { parseArcReviewUrl, parseReviewUrl, resolveReviewUrl } = require('../review-source.cjs');
 
 /**
  * @typedef {import('../../core/types.ts').CodiffLaunchOptions} CodiffLaunchOptions
  * @typedef {{direction: string; name: string; owner: string; repo: string}} GitHubRemote
- * @typedef {{launchOptions: CodiffLaunchOptions; pullRequestNumber: number | null; repositoryPath: string | null}} ParsedCommandLineArguments
+ * @typedef {{launchOptions: CodiffLaunchOptions; pullRequestNumber: number | null; pullRequestProvider?: 'github' | 'gitlab'; repositoryPath: string | null}} ParsedCommandLineArguments
  */
 
 const commitHashPattern = /^[0-9a-f]{4,64}$/i;
@@ -123,7 +124,7 @@ const parseGitHubRemoteUrl = (value) => {
   }
 };
 
-/** @param {string} repositoryPath @param {number} number */
+/** @param {string} repositoryPath @param {number} number @param {'github' | 'gitlab'} [provider] */
 const resolvePullRequestUrl = (repositoryPath, number, provider) =>
   resolveReviewUrl(repositoryPath, number, provider);
 
@@ -146,6 +147,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
         type: 'boolean',
       },
       agent: {
+        type: 'string',
+      },
+      arc: {
+        type: 'boolean',
+      },
+      'arc-base': {
         type: 'string',
       },
       'claude-session': {
@@ -178,6 +185,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
 
   let commitRef = typeof values.commit === 'string' ? values.commit : null;
   let branchRef = typeof values.branch === 'string' ? values.branch : null;
+  let arcBase = typeof values['arc-base'] === 'string' ? values['arc-base'] : null;
+  let arc = values.arc === true || arcBase != null;
+  let arcCommitRef = null;
+  let arcPullRequestNumber = null;
+  let arcPullRequestUrl = null;
+  let arcRange = null;
   let pullRequestNumber = null;
   let pullRequestProvider = null;
   let pullRequestUrl = null;
@@ -193,6 +206,15 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     if (requestedPlanFilePath) {
       repositoryPath ??= arg;
       continue;
+    }
+    if (arcPullRequestNumber == null) {
+      const arcReview = parseArcReviewUrl(arg);
+      if (arcReview) {
+        arc = true;
+        arcPullRequestNumber = arcReview.number;
+        arcPullRequestUrl = arcReview.url;
+        continue;
+      }
     }
     if (!pullRequestUrl && isPullRequestUrlArgument(arg)) {
       pullRequestUrl = arg;
@@ -234,29 +256,79 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   }
 
   let range = null;
+  const commandRepositoryPath = resolve(repositoryPath || process.cwd());
+  const canUseArcRepository = !requestedPlanFilePath && !pullRequestUrl;
+  const canInferSource = canUseArcRepository && pullRequestNumber == null;
+  const useArcRepository =
+    canUseArcRepository && (arc || shouldUseArcRepository(commandRepositoryPath));
   if (rangeCandidate) {
-    const rangeRepo = resolve(repositoryPath || process.cwd());
     range =
-      isCommitRef(rangeRepo, rangeCandidate.base) && isCommitRef(rangeRepo, rangeCandidate.head)
+      isCommitRef(commandRepositoryPath, rangeCandidate.base) &&
+      isCommitRef(commandRepositoryPath, rangeCandidate.head)
         ? rangeCandidate
         : null;
+    if (!range && useArcRepository) {
+      arc = true;
+      arcRange = rangeCandidate;
+    }
   }
 
   if (!range && !commitRef && !branchRef && sourceCandidate) {
-    const source = resolveSourceCandidate(
-      resolve(repositoryPath || process.cwd()),
-      sourceCandidate,
-    );
+    const source = resolveSourceCandidate(commandRepositoryPath, sourceCandidate);
     if (source?.branchRef) {
       branchRef = source.branchRef;
     } else if (source?.commitRef) {
       commitRef = source.commitRef;
+    } else if (
+      useArcRepository &&
+      !existsSync(resolve(sourceCandidate)) &&
+      !isExplicitPathArgument(sourceCandidate)
+    ) {
+      arc = true;
+      if (isCommitRefArgument(sourceCandidate)) {
+        arcCommitRef = sourceCandidate;
+      } else {
+        arcBase ??= sourceCandidate;
+      }
     } else if (repositoryPath == null) {
       repositoryPath = sourceCandidate;
     }
   }
+  if (useArcRepository && commitRef && !branchRef && !range && !arcRange) {
+    arc = true;
+    arcCommitRef = commitRef;
+    commitRef = null;
+  }
+  if (useArcRepository && pullRequestNumber != null && !pullRequestUrl) {
+    arc = true;
+    arcPullRequestNumber = pullRequestNumber;
+    pullRequestNumber = null;
+    pullRequestProvider = null;
+  }
+  if (
+    canInferSource &&
+    !arc &&
+    !arcBase &&
+    !range &&
+    !commitRef &&
+    !branchRef &&
+    !sourceCandidate &&
+    shouldUseArcRepository(commandRepositoryPath)
+  ) {
+    arc = true;
+  }
 
   const envCommitRef = useEnvironment ? process.env.CODIFF_COMMIT_REF || '' : '';
+  const envArc = useEnvironment ? process.env.CODIFF_ARC === '1' : false;
+  const envArcBase = useEnvironment ? process.env.CODIFF_ARC_BASE || '' : '';
+  const envArcCommitRef = useEnvironment ? process.env.CODIFF_ARC_COMMIT_REF || '' : '';
+  const envArcPullRequestNumber = useEnvironment
+    ? parsePullRequestNumberValue(process.env.CODIFF_ARC_PULL_REQUEST_NUMBER || '')
+    : null;
+  const envArcPullRequestUrl = useEnvironment ? process.env.CODIFF_ARC_PULL_REQUEST_URL || '' : '';
+  const envArcRange = useEnvironment
+    ? parseRangeArgument(process.env.CODIFF_ARC_RANGE || '')
+    : null;
   const envBranchRef = useEnvironment ? process.env.CODIFF_BRANCH_REF || '' : '';
   const envRange = useEnvironment ? parseRangeArgument(process.env.CODIFF_RANGE || '') : null;
   const envPullRequestNumber = useEnvironment
@@ -319,9 +391,20 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       ? envReviewProvider
       : pullRequestProvider;
   const sourceRef = envCommitRef || commitRef;
+  const sourceArcBase = envArcBase || arcBase;
+  const sourceArcCommitRef = envArcCommitRef || arcCommitRef;
+  const sourceArcPullRequestNumber = envArcPullRequestNumber ?? arcPullRequestNumber;
+  const sourceArcPullRequestUrl = envArcPullRequestUrl || arcPullRequestUrl;
+  const sourceArcRange = envArcRange || arcRange;
+  const sourceArc =
+    envArc ||
+    arc ||
+    Boolean(sourceArcBase || sourceArcCommitRef || sourceArcRange) ||
+    sourceArcPullRequestNumber != null;
   const sourceBranchRef = envBranchRef || branchRef;
   const sourceRange = envRange || range;
   const sourcePullRequestUrl = envPullRequestUrl || pullRequestUrl;
+  const parsedPullRequest = sourcePullRequestUrl ? parseReviewUrl(sourcePullRequestUrl) : null;
   const repositoryPathProvided = Boolean(
     repositoryPath || (useEnvironment && process.env.CODIFF_REPOSITORY_PATH),
   );
@@ -335,8 +418,34 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       ...(planFilePath ? { planFile: resolve(planFilePath) } : {}),
       ...(planResultFilePath ? { planResultFile: resolve(planResultFilePath) } : {}),
       repositoryPathProvided,
-      source:
-        sourceRange && sourcePullRequestNumber == null
+      source: sourceArc
+        ? sourceArcRange
+          ? {
+              base: sourceArcRange.base,
+              head: sourceArcRange.head,
+              symmetric: sourceArcRange.symmetric,
+              type: 'arc-range',
+            }
+          : sourceArcCommitRef
+            ? {
+                ref: sourceArcCommitRef,
+                type: 'arc-commit',
+              }
+            : sourceArcPullRequestNumber != null
+              ? {
+                  number: sourceArcPullRequestNumber,
+                  type: 'arc-pull-request',
+                  ...(sourceArcPullRequestUrl ? { url: sourceArcPullRequestUrl } : {}),
+                }
+              : sourceArcBase
+                ? {
+                    base: sourceArcBase,
+                    type: 'arc-branch',
+                  }
+                : {
+                    type: 'arc-working-tree',
+                  }
+        : sourceRange && sourcePullRequestNumber == null
           ? {
               base: sourceRange.base,
               head: sourceRange.head,
@@ -345,9 +454,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
             }
           : sourcePullRequestUrl
             ? {
-                ...(parseReviewUrl(sourcePullRequestUrl)?.provider
-                  ? { provider: parseReviewUrl(sourcePullRequestUrl).provider }
-                  : {}),
+                ...(parsedPullRequest?.provider ? { provider: parsedPullRequest.provider } : {}),
                 type: 'pull-request',
                 url: sourcePullRequestUrl,
               }

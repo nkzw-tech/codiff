@@ -17,6 +17,11 @@ const { getInitialRepositoryPath, parseCommandLineArguments, parseGitHubRemoteUr
         planResultFile?: string;
         repositoryPathProvided: boolean;
         source?:
+          | { type: 'arc-working-tree' }
+          | { base: string; type: 'arc-branch' }
+          | { ref: string; type: 'arc-commit' }
+          | { number: number; type: 'arc-pull-request' }
+          | { base: string; head: string; symmetric: boolean; type: 'arc-range' }
           | { ref: string; type: 'branch' }
           | { ref: string; type: 'commit' }
           | { base: string; head: string; symmetric: boolean; type: 'range' }
@@ -34,6 +39,11 @@ const { getInitialRepositoryPath, parseCommandLineArguments, parseGitHubRemoteUr
         planResultFile?: string;
         repositoryPathProvided: boolean;
         source?:
+          | { type: 'arc-working-tree' }
+          | { base: string; type: 'arc-branch' }
+          | { ref: string; type: 'arc-commit' }
+          | { number: number; type: 'arc-pull-request' }
+          | { base: string; head: string; symmetric: boolean; type: 'arc-range' }
           | { ref: string; type: 'branch' }
           | { ref: string; type: 'commit' }
           | { base: string; head: string; symmetric: boolean; type: 'range' }
@@ -50,7 +60,11 @@ const { getInitialRepositoryPath, parseCommandLineArguments, parseGitHubRemoteUr
 const execFileAsync = promisify(execFile);
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
-  await execFileAsync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  await execFileAsync(
+    'git',
+    ['-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', '-C', repo, ...args],
+    { encoding: 'utf8' },
+  );
 };
 
 const defaultLaunchOptions = {
@@ -122,6 +136,115 @@ test('parses commit and walkthrough command-line options', () => {
     pullRequestNumber: null,
     repositoryPath: '/repo',
   });
+});
+
+test('parses Arc command-line options', () => {
+  expect(parseCommandLineArguments(['codiff', '--arc', '/arcadia'])).toEqual({
+    launchOptions: {
+      repositoryPathProvided: true,
+      source: {
+        type: 'arc-working-tree',
+      },
+      walkthrough: false,
+    },
+    pullRequestNumber: null,
+    repositoryPath: '/arcadia',
+  });
+
+  expect(parseCommandLineArguments(['codiff', '--arc-base', 'trunk', '/arcadia'])).toEqual({
+    launchOptions: {
+      repositoryPathProvided: true,
+      source: {
+        base: 'trunk',
+        type: 'arc-branch',
+      },
+      walkthrough: false,
+    },
+    pullRequestNumber: null,
+    repositoryPath: '/arcadia',
+  });
+});
+
+test.sequential('auto-detects Arc command-line sources', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-arc-command-line-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+  const previousCwd = process.cwd();
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await writeFile(
+      join(fakeBin, 'arc'),
+      '#!/bin/sh\nif [ "$1" = "root" ]; then pwd; exit 0; fi\nexit 1\n',
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    await git(workspace, ['init']);
+    process.chdir(workspace);
+
+    expect(parseCommandLineArguments(['codiff'])).toMatchObject({
+      launchOptions: {
+        repositoryPathProvided: false,
+        source: {
+          type: 'arc-working-tree',
+        },
+      },
+      repositoryPath: null,
+    });
+    expect(parseCommandLineArguments(['codiff', 'trunk'])).toMatchObject({
+      launchOptions: {
+        source: {
+          base: 'trunk',
+          type: 'arc-branch',
+        },
+      },
+    });
+    expect(parseCommandLineArguments(['codiff', 'base...head'])).toMatchObject({
+      launchOptions: {
+        source: {
+          base: 'base',
+          head: 'head',
+          symmetric: true,
+          type: 'arc-range',
+        },
+      },
+    });
+    expect(parseCommandLineArguments(['codiff', '--commit', 'HEAD'])).toMatchObject({
+      launchOptions: {
+        source: {
+          ref: 'HEAD',
+          type: 'arc-commit',
+        },
+      },
+    });
+    expect(parseCommandLineArguments(['codiff', 'pr', '123'])).toMatchObject({
+      launchOptions: {
+        source: {
+          number: 123,
+          type: 'arc-pull-request',
+        },
+      },
+      pullRequestNumber: null,
+    });
+    expect(
+      parseCommandLineArguments(['codiff', 'https://a.yandex-team.ru/review/456/files']),
+    ).toMatchObject({
+      launchOptions: {
+        source: {
+          number: 456,
+          type: 'arc-pull-request',
+          url: 'https://a.yandex-team.ru/review/456',
+        },
+      },
+      pullRequestNumber: null,
+    });
+  } finally {
+    process.chdir(previousCwd);
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
 });
 
 test('parses plan handoff command-line options', () => {

@@ -5,6 +5,24 @@ const { execFileSync } = require('node:child_process');
 /** @typedef {'github' | 'gitlab'} ReviewProvider */
 
 /** @param {string} value */
+const parseArcReviewUrl = (value) => {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+
+  const match = url.pathname.match(/(?:^|\/)review\/([1-9]\d*)(?:\/.*)?$/);
+  return url.hostname.toLowerCase() === 'a.yandex-team.ru' && match
+    ? {
+        number: Number(match[1]),
+        url: `${url.protocol}//${url.host}/review/${match[1]}`,
+      }
+    : null;
+};
+
+/** @param {string} value */
 const parseReviewUrl = (value) => {
   let url;
   try {
@@ -134,6 +152,7 @@ const resolveReviewUrl = (repositoryPath, number, provider) => {
 };
 
 module.exports = {
+  parseArcReviewUrl,
   parseRemoteUrl,
   parseReviewUrl,
   readReviewRemotes,

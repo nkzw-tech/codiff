@@ -632,6 +632,143 @@ test('branch history keeps branch diff available after selecting uncommitted cha
   }
 });
 
+test('Arc branch history keeps Arc sources after selecting local changes and commits', async () => {
+  const branchSource = {
+    base: 'trunk',
+    type: 'arc-branch',
+  } satisfies ReviewSource;
+  const branchState = {
+    ...repositoryState,
+    branch: 'users/reviewer/feature',
+    source: branchSource,
+  } satisfies RepositoryState;
+  const workingTreeState = {
+    ...repositoryState,
+    branch: 'users/reviewer/feature',
+    source: { type: 'arc-working-tree' },
+  } satisfies RepositoryState;
+  const commitState = {
+    ...repositoryState,
+    branch: 'users/reviewer/feature',
+    source: { ref: '99e7b27', type: 'arc-commit' },
+  } satisfies RepositoryState;
+  const getRepositoryState = vi.fn(async (requestedSource?: ReviewSource) =>
+    requestedSource?.type === 'arc-working-tree'
+      ? workingTreeState
+      : requestedSource?.type === 'arc-commit'
+        ? commitState
+        : branchState,
+  );
+
+  window.codiff = createCodiffMock({
+    getRepositoryHistory: vi.fn(async () => ({
+      entries: [
+        {
+          author: 'Reviewer',
+          committedAt: Date.now(),
+          parents: [],
+          ref: '99e7b27',
+          subject: 'Add Arc branch diff review mode',
+        },
+      ],
+      root: '/repo',
+    })),
+    getRepositoryState,
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  const findButton = (label: string) =>
+    Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes(label),
+    );
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.loading')).toBeNull();
+      expect(findButton('Arc branch diff')).toBeTruthy();
+    });
+
+    await act(async () => {
+      findButton('Arc local changes')?.click();
+    });
+
+    await waitFor(() => {
+      expect(getRepositoryState).toHaveBeenCalledWith({ type: 'arc-working-tree' });
+      expect(findButton('Arc branch diff')).toBeTruthy();
+    });
+
+    await act(async () => {
+      findButton('Add Arc branch diff review mode')?.click();
+    });
+
+    await waitFor(() => {
+      expect(getRepositoryState).toHaveBeenCalledWith({ ref: '99e7b27', type: 'arc-commit' });
+    });
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('empty Arc working tree starts in history with Arc history source', async () => {
+  const arcWorkingTreeSource = { type: 'arc-working-tree' } satisfies ReviewSource;
+  const arcWorkingTreeState = {
+    ...repositoryState,
+    branch: 'users/reviewer/feature',
+    files: [],
+    source: arcWorkingTreeSource,
+  } satisfies RepositoryState;
+  const getRepositoryHistory = vi.fn(async () => ({
+    entries: [
+      {
+        author: 'Reviewer',
+        committedAt: Date.now(),
+        parents: [],
+        ref: '99e7b27',
+        subject: 'Arc history commit',
+      },
+    ],
+    root: '/repo',
+  }));
+
+  window.codiff = createCodiffMock({
+    getRepositoryHistory,
+    getRepositoryState: vi.fn(async () => arcWorkingTreeState),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.loading')).toBeNull();
+      expect(container.textContent).toContain('Arc history commit');
+    });
+    expect(getRepositoryHistory).toHaveBeenCalledWith(expect.any(Number), arcWorkingTreeSource);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
 test('repository reload restores branch diff scope after selecting uncommitted changes', async () => {
   const branchSource = {
     baseRef: 'base123',
@@ -1041,6 +1178,78 @@ test('commit details render inline in the diff view', async () => {
     expect(copyButton.getAttribute('aria-label')).toBe('Commit hash copied');
     expect(copyButton.textContent).toContain(commitMetadata.shortRef);
     expect(copyButton.textContent).not.toContain('Copied');
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('Arc commit details render inline in the diff view', async () => {
+  const changedFile = createChangedFile('src/app.ts');
+  const commitMetadata = {
+    author: {
+      date: '2026-01-01T12:00:00Z',
+      email: '',
+      name: 'Arc Author',
+    },
+    body: 'Arc commit body.',
+    committer: {
+      date: '2026-01-01T12:00:00Z',
+      email: '',
+      name: 'Arc Author',
+    },
+    files: [
+      {
+        additions: 1,
+        binary: false,
+        deletions: 1,
+        path: 'src/app.ts',
+        status: 'modified' as const,
+      },
+    ],
+    parents: ['parent-sha'],
+    ref: 'arc1234',
+    refs: [],
+    shortRef: 'arc1234',
+    signature: { status: 'N' },
+    stats: {
+      additions: 1,
+      binaryFiles: 0,
+      deletions: 1,
+      files: 1,
+      renamedFiles: 0,
+    },
+    subject: 'Arc commit subject',
+    trailers: [],
+  } satisfies CommitMetadata;
+
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      commitMetadata,
+      files: [changedFile],
+      source: { ref: 'arc1234', type: 'arc-commit' } satisfies ReviewSource,
+    })),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.loading')).toBeNull();
+      expect(container.querySelector('.commit-details-panel')?.textContent).toContain(
+        'Arc commit body.',
+      );
+    });
   } finally {
     if (root) {
       await act(async () => root?.unmount());

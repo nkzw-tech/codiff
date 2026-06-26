@@ -17,6 +17,7 @@ export const statusLabel: Record<GitFileStatus, string> = {
 };
 
 export const sectionLabel: Record<DiffSection['kind'], string> = {
+  arc: 'Arc',
   commit: 'Commit',
   'pull-request': 'PR',
   staged: 'Staged',

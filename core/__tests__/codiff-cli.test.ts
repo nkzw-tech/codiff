@@ -100,6 +100,100 @@ test('parseArguments treats HEAD positional revisions as commit refs', () => {
   });
 });
 
+test('parseArguments reads Arc options', () => {
+  expect(parseArguments(['--arc'])).toEqual({
+    arc: true,
+    commitRef: null,
+    help: false,
+    pullRequestNumber: null,
+    pullRequestUrl: null,
+    requestedPath: resolve(process.cwd()),
+    version: false,
+    walkthrough: false,
+  });
+
+  expect(parseArguments(['--arc-base', 'trunk', '/arcadia'])).toEqual({
+    arc: true,
+    arcBase: 'trunk',
+    commitRef: null,
+    help: false,
+    pullRequestNumber: null,
+    pullRequestUrl: null,
+    requestedPath: '/arcadia',
+    version: false,
+    walkthrough: false,
+  });
+});
+
+test.sequential('parseArguments auto-detects Arc repositories', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-cli-arc-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await writeFile(
+      join(fakeBin, 'arc'),
+      '#!/bin/sh\nif [ "$1" = "root" ]; then pwd; exit 0; fi\nexit 1\n',
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    const realWorkspace = await realpath(workspace);
+    await git(realWorkspace, ['init']);
+
+    await withCwd(realWorkspace, () => {
+      expect(parseArguments([])).toMatchObject({
+        arc: true,
+        commitRef: null,
+        requestedPath: realWorkspace,
+      });
+      expect(parseArguments(['trunk'])).toMatchObject({
+        arc: true,
+        arcBase: 'trunk',
+        commitRef: null,
+        requestedPath: realWorkspace,
+      });
+      expect(parseArguments(['base..head'])).toMatchObject({
+        arc: true,
+        arcRange: {
+          base: 'base',
+          head: 'head',
+          symmetric: false,
+        },
+        commitRef: null,
+        requestedPath: realWorkspace,
+      });
+      expect(parseArguments(['HEAD'])).toMatchObject({
+        arc: true,
+        arcCommitRef: 'HEAD',
+        commitRef: null,
+        requestedPath: realWorkspace,
+      });
+      expect(parseArguments(['pr', '123'])).toMatchObject({
+        arc: true,
+        arcPullRequestNumber: 123,
+        commitRef: null,
+        pullRequestNumber: null,
+        requestedPath: realWorkspace,
+      });
+      expect(parseArguments(['https://a.yandex-team.ru/review/456/files'])).toMatchObject({
+        arc: true,
+        arcPullRequestNumber: 456,
+        arcPullRequestUrl: 'https://a.yandex-team.ru/review/456',
+        commitRef: null,
+        pullRequestNumber: null,
+        pullRequestUrl: null,
+        requestedPath: realWorkspace,
+      });
+    });
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
 test('parseArguments treats plain branch refs as branch refs', async () => {
   await withCwd(refRepositoryPath, () => {
     expect(parseArguments(['feature'])).toEqual({

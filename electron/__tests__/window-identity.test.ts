@@ -17,6 +17,11 @@ const { findMatchingWindowIdentity, getWindowIdentity, parseGitHubPullRequestUrl
       repositoryPath: string,
       launchOptions?: {
         source?:
+          | { type: 'arc-working-tree' }
+          | { base: string; type: 'arc-branch' }
+          | { ref: string; type: 'arc-commit' }
+          | { number: number; type: 'arc-pull-request' }
+          | { base: string; head: string; symmetric: boolean; type: 'arc-range' }
           | { type: 'working-tree' }
           | { ref: string; type: 'branch' }
           | { baseRef: string; headRef: string; ref: string; type: 'branch-diff' }
@@ -44,7 +49,11 @@ const { findMatchingWindowIdentity, getWindowIdentity, parseGitHubPullRequestUrl
 const execFileAsync = promisify(execFile);
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
-  const result = await execFileAsync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  const result = await execFileAsync(
+    'git',
+    ['-c', 'commit.gpgsign=false', '-c', 'tag.gpgsign=false', '-C', repo, ...args],
+    { encoding: 'utf8' },
+  );
   return result.stdout.trim();
 };
 
@@ -83,6 +92,52 @@ test.sequential('plan window identities do not invoke Git outside repositories',
       sourceKey: `plan:${realPlanFile}`,
     });
     expect(await readFile(gitMarker, 'utf8').catch(() => null)).toBeNull();
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test.sequential('Arc window identities use Arc roots and source keys', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-arc-window-identity-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await writeFile(
+      join(fakeBin, 'arc'),
+      '#!/bin/sh\nif [ "$1" = "root" ]; then pwd; exit 0; fi\nexit 1\n',
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    const realWorkspace = await realpath(workspace);
+
+    expect(getWindowIdentity(realWorkspace, { source: { type: 'arc-working-tree' } })).toEqual({
+      key: `${realWorkspace}\0arc-working-tree`,
+      repositoryRoot: realWorkspace,
+      sourceKey: 'arc-working-tree',
+    });
+    expect(
+      getWindowIdentity(realWorkspace, {
+        source: { base: 'HEAD~1', head: 'HEAD', symmetric: false, type: 'arc-range' },
+      }),
+    ).toEqual({
+      key: `${realWorkspace}\0arc-range:HEAD~1..HEAD`,
+      repositoryRoot: realWorkspace,
+      sourceKey: 'arc-range:HEAD~1..HEAD',
+    });
+    expect(
+      getWindowIdentity(realWorkspace, {
+        source: { number: 123, type: 'arc-pull-request' },
+      }),
+    ).toEqual({
+      key: `${realWorkspace}\0arc-pull-request:123`,
+      repositoryRoot: realWorkspace,
+      sourceKey: 'arc-pull-request:123',
+    });
   } finally {
     process.env.PATH = previousPath;
     await rm(directory, { force: true, recursive: true });

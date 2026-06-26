@@ -119,6 +119,12 @@ const run = async () => {
 
   const {
     agentBackend,
+    arc,
+    arcBase,
+    arcCommitRef,
+    arcPullRequestNumber,
+    arcPullRequestUrl,
+    arcRange,
     branchRef,
     claudeSessionId,
     codexSessionId,
@@ -182,24 +188,51 @@ const run = async () => {
       return;
     }
 
-    const source = range
-      ? {
-          base: range.base,
-          head: range.head,
-          symmetric: range.symmetric,
-          type: 'range',
-        }
-      : pullRequestUrl
+    const source = arc
+      ? arcRange
         ? {
-            ...(pullRequestProvider ? { provider: pullRequestProvider } : {}),
-            type: 'pull-request',
-            url: pullRequestUrl,
+            base: arcRange.base,
+            head: arcRange.head,
+            symmetric: arcRange.symmetric,
+            type: 'arc-range',
           }
-        : commitRef
-          ? { ref: commitRef, type: 'commit' }
-          : branchRef
-            ? { ref: branchRef, type: 'branch' }
-            : undefined;
+        : arcCommitRef
+          ? {
+              ref: arcCommitRef,
+              type: 'arc-commit',
+            }
+          : arcPullRequestNumber != null
+            ? {
+                number: arcPullRequestNumber,
+                type: 'arc-pull-request',
+                ...(arcPullRequestUrl ? { url: arcPullRequestUrl } : {}),
+              }
+            : arcBase
+              ? {
+                  base: arcBase,
+                  type: 'arc-branch',
+                }
+              : {
+                  type: 'arc-working-tree',
+                }
+      : range
+        ? {
+            base: range.base,
+            head: range.head,
+            symmetric: range.symmetric,
+            type: 'range',
+          }
+        : pullRequestUrl
+          ? {
+              ...(pullRequestProvider ? { provider: pullRequestProvider } : {}),
+              type: 'pull-request',
+              url: pullRequestUrl,
+            }
+          : commitRef
+            ? { ref: commitRef, type: 'commit' }
+            : branchRef
+              ? { ref: branchRef, type: 'branch' }
+              : undefined;
 
     try {
       const commonOptions = {
@@ -249,6 +282,15 @@ const run = async () => {
   const childEnv = {
     ...process.env,
     CODIFF_AGENT_BACKEND: agentBackend ?? '',
+    CODIFF_ARC: arc ? '1' : '',
+    CODIFF_ARC_BASE: arcBase ?? '',
+    CODIFF_ARC_COMMIT_REF: arcCommitRef ?? '',
+    CODIFF_ARC_PULL_REQUEST_NUMBER:
+      arcPullRequestNumber == null ? '' : String(arcPullRequestNumber),
+    CODIFF_ARC_PULL_REQUEST_URL: arcPullRequestUrl ?? '',
+    CODIFF_ARC_RANGE: arcRange
+      ? `${arcRange.base}${arcRange.symmetric ? '...' : '..'}${arcRange.head}`
+      : '',
     CODIFF_BRANCH_REF: branchRef ?? '',
     CODIFF_CLAUDE_SESSION_ID: claudeSessionId ?? '',
     CODIFF_COMMIT_REF: commitRef ?? '',

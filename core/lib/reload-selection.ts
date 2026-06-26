@@ -39,6 +39,39 @@ const isReviewSource = (value: unknown): value is ReviewSource => {
     return true;
   }
 
+  if (value.type === 'arc-working-tree') {
+    return true;
+  }
+
+  if (value.type === 'arc-branch') {
+    return typeof value.base === 'string';
+  }
+
+  if (value.type === 'arc-commit') {
+    return typeof value.ref === 'string';
+  }
+
+  if (value.type === 'arc-pull-request') {
+    return (
+      typeof value.number === 'number' &&
+      isOptionalString(value.author) &&
+      isOptionalString(value.fromBranch) &&
+      isOptionalString(value.headSha) &&
+      isOptionalString(value.status) &&
+      isOptionalString(value.title) &&
+      isOptionalString(value.toBranch) &&
+      isOptionalString(value.url)
+    );
+  }
+
+  if (value.type === 'arc-range') {
+    return (
+      typeof value.base === 'string' &&
+      typeof value.head === 'string' &&
+      typeof value.symmetric === 'boolean'
+    );
+  }
+
   if (value.type === 'commit') {
     return typeof value.ref === 'string';
   }

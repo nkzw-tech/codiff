@@ -114,7 +114,10 @@ export type ReviewComment = {
 
 export type SidebarMode = 'tree' | 'walkthrough' | 'history';
 
-export type PullRequestSource = Extract<ReviewSource, { type: 'pull-request' }>;
+export type PullRequestSource = Extract<
+  ReviewSource,
+  { type: 'arc-pull-request' | 'pull-request' }
+>;
 
 export type WalkthroughNote = {
   action: 'review' | 'scan' | 'skim';

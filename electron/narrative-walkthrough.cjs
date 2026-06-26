@@ -113,6 +113,13 @@ const normalizeGeneratedAt = (value) => {
   return '';
 };
 
+/** @param {unknown} source */
+const isWorkingTreeSource = (source) => {
+  const type =
+    source && typeof source === 'object' ? /** @type {{type?: unknown}} */ (source).type : null;
+  return type === 'working-tree' || type === 'arc-working-tree';
+};
+
 /** @param {any} input */
 const isLegacyV3Walkthrough = (input) =>
   input?.version === 3 ||
@@ -463,7 +470,7 @@ const normalizeNarrativeWalkthrough = (input, files, facts = {}) => {
   // commit, branch, or pull request. For working trees, always expose the
   // composer even when the agent did not draft a message, so the reviewer can
   // complete the whole workflow in Codiff.
-  if (/** @type {{type?: string}} */ (result.source).type === 'working-tree') {
+  if (isWorkingTreeSource(result.source)) {
     /** @type {Record<string, unknown>} */
     const commit = {};
     const inputCommit = input.commit && typeof input.commit === 'object' ? input.commit : {};
@@ -684,7 +691,7 @@ Grouping contract:
 - Use notes[] on a stop/support item for short per-hunk header notes: each note is { hunkId, body } and hunkId must be one of that item's hunkIds.
 - Do not provide added/deleted counts, status, oldPath, section ids, display labels, path, repo, source, generatedAt, agent, or meta; Codiff computes those.
 - Put secondary, mechanical, docs-only, or repeated-pattern hunks in support[], grouped by reason.
-- For working-tree sources, include commit.title and commit.body by default unless there are no commit-worthy files. Put the subject line in commit.title, not as the first line of commit.body.
+- For Git or Arc working-tree sources, include commit.title and commit.body by default unless there are no commit-worthy files. Put the subject line in commit.title, not as the first line of commit.body.
 `;
 };
 

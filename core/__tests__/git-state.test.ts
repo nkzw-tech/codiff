@@ -1,5 +1,14 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -8,6 +17,8 @@ import { expect, test } from 'vite-plus/test';
 import { fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
 import type {
   DiffSection,
+  DiffImageContentRequest,
+  DiffImageContentResult,
   DiffSectionContentRequest,
   RepositoryState,
   ReviewSource,
@@ -63,9 +74,15 @@ type GitStateModule = {
     limit?: number,
     source?: ReviewSource,
   ) => Promise<{ entries: ReadonlyArray<unknown>; root: string }>;
+  normalizeArcanumReviewComment: (
+    comment: Record<string, unknown>,
+    prNumber: number,
+    prUrl?: string,
+  ) => unknown;
   normalizeGitHubPullRequestCommit: (commit: Record<string, unknown>) => unknown;
   normalizeGitHubReviewComment: (comment: Record<string, unknown>) => unknown;
   normalizePullRequestComment: (comment: Record<string, unknown>) => Record<string, unknown>;
+  parseArcNameStatus: (raw: string) => Array<{ oldPath?: string; path: string; status: string }>;
   parseGitHubPullRequestUrl: (value: string) => {
     number: number;
     owner: string;
@@ -73,13 +90,18 @@ type GitStateModule = {
     url: string;
   };
   parseStatus: (raw: string) => Array<StatusEntry>;
+  readDiffImageContent: (
+    launchPath: string,
+    request: DiffImageContentRequest,
+  ) => Promise<DiffImageContentResult>;
   readDiffSectionContent: (
     launchPath: string,
     request: DiffSectionContentRequest,
   ) => Promise<DiffSection>;
+  readGitIdentity: (launchPath: string) => Promise<{ email: string; name: string }>;
   readRepositoryChangeSignature: (
     launchPath: string,
-  ) => Promise<{ root: string; signature: string }>;
+  ) => Promise<{ head?: string; root: string; signature: string }>;
   readRepositoryState: (
     launchPath: string,
     source?: ReviewSource,
@@ -103,6 +125,20 @@ type GitStateModule = {
     comments: ReadonlyArray<Record<string, unknown>>,
     resolvedCommentIds: ReadonlySet<number>,
   ) => Array<Record<string, unknown>>;
+  submitPullRequestComment: (
+    launchPath: string,
+    request: {
+      comment: {
+        body: string;
+        filePath: string;
+        lineNumber: number;
+        side: 'additions' | 'deletions';
+        startLineNumber?: number;
+        startSide?: 'additions' | 'deletions';
+      };
+      source: Extract<ReviewSource, { type: 'arc-pull-request' | 'pull-request' }>;
+    },
+  ) => Promise<unknown>;
 };
 
 const execFileAsync = promisify(execFile);
@@ -113,18 +149,23 @@ const {
   createPullRequestSection,
   getPullRequestHeadImageSource,
   listRepositoryHistory,
+  normalizeArcanumReviewComment,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
+  parseArcNameStatus,
   parseGitHubPullRequestUrl,
   parseStatus,
+  readDiffImageContent,
   readDiffSectionContent,
+  readGitIdentity,
   readRepositoryChangeSignature,
   readRepositoryState,
   readWalkthroughRepositoryState,
   readWorkingTreeState,
   resolvePullRequestContentRefs,
   selectUnresolvedReviewComments,
+  submitPullRequestComment,
 } = require('../../electron/git-state.cjs') as GitStateModule;
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
@@ -177,6 +218,550 @@ test('parseStatus reads staged rename paths in porcelain v1 -z order', () => {
       untracked: false,
     },
   ]);
+});
+
+test('parseArcNameStatus reads git-style name status rows', () => {
+  expect(parseArcNameStatus('M\tmodified.ts\nA\tadded.ts\nD\tdeleted.ts\n')).toEqual([
+    {
+      path: 'added.ts',
+      status: 'added',
+    },
+    {
+      path: 'deleted.ts',
+      status: 'deleted',
+    },
+    {
+      path: 'modified.ts',
+      status: 'modified',
+    },
+  ]);
+  expect(parseArcNameStatus('R100\told.ts\tnew.ts\n')).toEqual([
+    {
+      oldPath: 'old.ts',
+      path: 'new.ts',
+      status: 'renamed',
+    },
+  ]);
+});
+
+test('normalizeArcanumReviewComment reads inline anchors and ranges', () => {
+  expect(
+    normalizeArcanumReviewComment(
+      {
+        anchor: {
+          review_request: {
+            diff: {
+              file: {
+                entry_id: {
+                  content_id_after: {
+                    path: 'src/file.ts',
+                  },
+                },
+                position: {
+                  line: 10,
+                  side: 'new',
+                  size: 3,
+                },
+              },
+            },
+          },
+        },
+        content: 'Arc comment',
+        created_at: '2026-06-25T08:12:50.000000Z',
+        id: 456,
+        user: {
+          name: 'reviewer',
+        },
+      },
+      123,
+      'https://a.yandex-team.ru/review/123',
+    ),
+  ).toMatchObject({
+    author: { login: 'reviewer' },
+    body: 'Arc comment',
+    filePath: 'src/file.ts',
+    id: 'arcanum:456',
+    lineNumber: 12,
+    side: 'additions',
+    startLineNumber: 10,
+    submittedAt: '2026-06-25T08:12:50.000000Z',
+  });
+});
+
+test.sequential('readRepositoryState auto-detects Arc repositories', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-git-state-arc-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await mkdir(join(workspace, 'src'));
+    await writeFile(join(workspace, 'src/new.ts'), 'new file\n');
+    await writeFile(
+      join(workspace, 'image.png'),
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l6D6NwAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
+    await writeFile(
+      join(fakeBin, 'arc'),
+      `#!/bin/sh
+if [ "$1" = "root" ]; then pwd; exit 0; fi
+if [ "$1" = "info" ]; then printf '{"user_login":"arc-login","author":"last-author"}'; exit 0; fi
+if [ "$1" = "branch" ]; then printf "  trunk\\n* feature\\n"; exit 0; fi
+if [ "$1" = "log" ]; then printf '[{"commit":"abc123","parents":["def456"],"author":"arc-user","date":"2026-06-25T13:42:44+03:00","message":"Arc subject\\\\n\\\\nArc body"}]'; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "status" ]; then printf '{"id":123,"url":"https://a.yandex-team.ru/review/123","author":"arc-author","summary":"Arc PR title","status":"open","from_branch":"users/me/feature","from_id":"abc123","to_branch":"trunk"}'; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "changes" ]; then printf "\\033[1marc diff base head src/pr.ts\\033[0m\\ndiff --git a/src/pr.ts b/src/pr.ts\\n--- a/src/pr.ts\\n+++ b/src/pr.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n"; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "history" ]; then printf '{"iterations":[{"timestamp":"2026-06-25T08:03:29.000000Z","commit":"pr123","message":"PR subject"}]}'; exit 0; fi
+if [ "$1" = "status" ]; then printf "?? image.png\\n?? src/new.ts\\n"; exit 0; fi
+if [ "$1" = "diff" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "--name-status" ]; then printf "M\\tsrc/a.ts\\n"; exit 0; fi
+  done
+  printf "diff --git a/src/a.ts b/src/a.ts\\n--- a/src/a.ts\\n+++ b/src/a.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n"
+  exit 0
+fi
+exit 1
+`,
+    );
+    await writeFile(
+      join(fakeBin, 'ya'),
+      `#!/bin/sh
+printf '%s\\n' "$@" > "${join(directory, 'ya-args.txt')}"
+if [ "$6" = "arcanum_pr_data" ]; then
+  node <<'NODE'
+const text = JSON.stringify({
+  data: [
+    {
+      anchor: {
+        review_request: {
+          diff: {
+            file: {
+              entry_id: {
+                content_id_after: {
+                  path: 'src/pr.ts',
+                },
+              },
+              position: {
+                line: 2,
+                side: 'new',
+                size: 2,
+              },
+            },
+          },
+          id: 123,
+        },
+      },
+      content: 'Existing Arc comment',
+      created_at: '2026-06-25T08:12:50.000000Z',
+      id: 456,
+      user: {
+        name: 'arc-reviewer',
+      },
+    },
+  ],
+});
+process.stdout.write(
+  JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    result: { content: [{ type: 'text', text }], isError: false },
+  }),
+);
+NODE
+  exit 0
+fi
+if [ "$6" = "arcanum_post_comment" ]; then
+  node <<'NODE'
+const text = JSON.stringify({
+  data: {
+    anchor: {
+      review_request: {
+        diff: {
+          file: {
+            entry_id: {
+              content_id_after: {
+                path: 'src/pr.ts',
+              },
+            },
+            position: {
+              line: 4,
+              side: 'old',
+              size: 1,
+            },
+          },
+        },
+        id: 123,
+      },
+    },
+    content: 'Submitted Arc comment',
+    created_at: '2026-06-25T09:12:50.000000Z',
+    id: 789,
+    user: {
+      name: 'me',
+    },
+  },
+});
+process.stdout.write(
+  JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    result: { content: [{ type: 'text', text }], isError: false },
+  }),
+);
+NODE
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    await chmod(join(fakeBin, 'ya'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    const realWorkspace = await realpath(workspace);
+    const { stdout: arcanumFixture } = await execFileAsync(
+      'ya',
+      [
+        'tool',
+        'mcp',
+        'connect',
+        'devtools',
+        '--tool',
+        'arcanum_pr_data',
+        '--raw',
+        '--arg',
+        'pr_id:123',
+      ],
+      { cwd: realWorkspace, encoding: 'utf8' },
+    );
+    expect(JSON.parse(JSON.parse(arcanumFixture).result.content[0].text).data[0].content).toBe(
+      'Existing Arc comment',
+    );
+
+    const state = await readRepositoryState(realWorkspace);
+    expect(state.branch).toBe('feature');
+    expect(state.root).toBe(realWorkspace);
+    expect(state.source).toEqual({ type: 'arc-working-tree' });
+    expect(state.files).toHaveLength(3);
+    const modifiedFile = state.files.find((file) => file.path === 'src/a.ts');
+    expect(modifiedFile?.sections[0]?.patch).toContain('diff --git a/src/a.ts b/src/a.ts');
+    const untrackedFile = state.files.find((file) => file.path === 'src/new.ts');
+    expect(untrackedFile?.status).toBe('untracked');
+    expect(untrackedFile?.sections[0]?.patch).toContain('new file mode 100644');
+    const beforeSignature = await readRepositoryChangeSignature(realWorkspace);
+    await writeFile(join(workspace, 'src/new.ts'), 'new file changed\n');
+    const afterSignature = await readRepositoryChangeSignature(realWorkspace);
+    expect(beforeSignature.root).toBe(realWorkspace);
+    expect(beforeSignature.head).toBe('abc123');
+    expect(afterSignature.signature).not.toBe(beforeSignature.signature);
+    const image = await readDiffImageContent(realWorkspace, {
+      kind: 'arc',
+      path: 'image.png',
+      source: { type: 'arc-working-tree' },
+    });
+    expect(image.status).toBe('ready');
+    expect(image.status === 'ready' ? image.newImage?.mimeType : null).toBe('image/png');
+
+    const history = await listRepositoryHistory(realWorkspace, 2, {
+      base: 'trunk',
+      type: 'arc-branch',
+    });
+    expect(history.root).toBe(realWorkspace);
+    expect(history.entries).toEqual([
+      {
+        author: 'arc-user',
+        committedAt: Date.parse('2026-06-25T13:42:44+03:00'),
+        parents: ['def456'],
+        ref: 'abc123',
+        subject: 'Arc subject',
+      },
+    ]);
+
+    const commitState = await readRepositoryState(realWorkspace, {
+      ref: 'abc123',
+      type: 'arc-commit',
+    });
+    expect(commitState.commitMetadata).toMatchObject({
+      author: {
+        email: '',
+        name: 'arc-user',
+      },
+      body: 'Arc body',
+      files: [
+        {
+          additions: 1,
+          binary: false,
+          deletions: 1,
+          path: 'src/a.ts',
+          status: 'modified',
+        },
+      ],
+      parents: ['def456'],
+      ref: 'abc123',
+      shortRef: 'abc123',
+      stats: {
+        additions: 1,
+        binaryFiles: 0,
+        deletions: 1,
+        files: 1,
+        renamedFiles: 0,
+      },
+      subject: 'Arc subject',
+    });
+
+    const pullRequestState = await readRepositoryState(realWorkspace, {
+      number: 123,
+      type: 'arc-pull-request',
+    });
+    expect(pullRequestState.source).toMatchObject({
+      author: 'arc-author',
+      fromBranch: 'users/me/feature',
+      headSha: 'abc123',
+      number: 123,
+      status: 'open',
+      title: 'Arc PR title',
+      toBranch: 'trunk',
+      type: 'arc-pull-request',
+      url: 'https://a.yandex-team.ru/review/123',
+    });
+    expect(pullRequestState.files).toHaveLength(1);
+    expect(pullRequestState.files[0]?.path).toBe('src/pr.ts');
+    expect(pullRequestState.files[0]?.sections[0]?.patch).not.toContain('\u001b');
+    expect(pullRequestState.reviewComments).toMatchObject([
+      {
+        author: { login: 'arc-reviewer' },
+        body: 'Existing Arc comment',
+        filePath: 'src/pr.ts',
+        id: 'arcanum:456',
+        lineNumber: 3,
+        side: 'additions',
+        startLineNumber: 2,
+      },
+    ]);
+    await expect(readGitIdentity(realWorkspace)).resolves.toMatchObject({
+      email: '',
+      name: 'arc-login',
+    });
+
+    const submittedComment = await submitPullRequestComment(realWorkspace, {
+      comment: {
+        body: 'Submitted Arc comment',
+        filePath: 'src/pr.ts',
+        lineNumber: 4,
+        side: 'deletions',
+      },
+      source: {
+        number: 123,
+        type: 'arc-pull-request',
+        url: 'https://a.yandex-team.ru/review/123',
+      },
+    });
+    expect(submittedComment).toMatchObject({
+      author: { login: 'me' },
+      body: 'Submitted Arc comment',
+      filePath: 'src/pr.ts',
+      id: 'arcanum:789',
+      lineNumber: 4,
+      side: 'deletions',
+    });
+    const yaArgs = await readFile(join(directory, 'ya-args.txt'), 'utf8');
+    expect(yaArgs).toContain('arcanum_post_comment');
+    expect(yaArgs).toContain('comment_data:{"content":"Submitted Arc comment"');
+    expect(yaArgs).toContain('diff_side:old');
+    expect(yaArgs).toContain('file_line_number:4');
+    expect(yaArgs).toContain('file_path:src/pr.ts');
+    expect(yaArgs).toContain('pr_id:123');
+
+    const pullRequestHistory = await listRepositoryHistory(realWorkspace, 2, {
+      number: 123,
+      type: 'arc-pull-request',
+    });
+    expect(pullRequestHistory.entries[0]).toMatchObject({
+      ref: 'pr123',
+      subject: 'PR subject',
+    });
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test.sequential('readRepositoryState surfaces Arc pull request comment load errors', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-git-state-arc-pr-error-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await writeFile(
+      join(fakeBin, 'arc'),
+      `#!/bin/sh
+if [ "$1" = "root" ]; then pwd; exit 0; fi
+if [ "$1" = "branch" ]; then printf "* feature\\n"; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "status" ]; then printf '{"id":123,"url":"https://a.yandex-team.ru/review/123","summary":"Arc PR title"}'; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "changes" ]; then printf "diff --git a/src/pr.ts b/src/pr.ts\\n--- a/src/pr.ts\\n+++ b/src/pr.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n"; exit 0; fi
+exit 1
+`,
+    );
+    await writeFile(
+      join(fakeBin, 'ya'),
+      `#!/bin/sh
+printf 'arcanum unavailable' >&2
+exit 42
+`,
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    await chmod(join(fakeBin, 'ya'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    await expect(
+      readRepositoryState(await realpath(workspace), {
+        number: 123,
+        type: 'arc-pull-request',
+      }),
+    ).rejects.toThrow(/Could not load Arcanum comments for PR #123/);
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test.sequential('readWalkthroughRepositoryState falls back to HEAD for a clean Arc working tree', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-git-state-arc-clean-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await writeFile(
+      join(fakeBin, 'arc'),
+      `#!/bin/sh
+if [ "$1" = "root" ]; then pwd; exit 0; fi
+if [ "$1" = "branch" ]; then printf "* feature\\n"; exit 0; fi
+if [ "$1" = "status" ]; then exit 0; fi
+if [ "$1" = "log" ]; then printf '[{"commit":"abc123","parents":["def456"],"author":"arc-user","date":"2026-06-25T13:42:44+03:00","message":"Arc subject"}]'; exit 0; fi
+if [ "$1" = "diff" ]; then
+  has_head=false
+  has_name_status=false
+  for arg in "$@"; do
+    if [ "$arg" = "HEAD" ]; then has_head=true; fi
+    if [ "$arg" = "--name-status" ]; then has_name_status=true; fi
+  done
+  if [ "$has_head" = "true" ] && [ "$has_name_status" = "true" ]; then printf "M\\tsrc/head.ts\\n"; exit 0; fi
+  if [ "$has_head" = "true" ]; then printf "diff --git a/src/head.ts b/src/head.ts\\n--- a/src/head.ts\\n+++ b/src/head.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n"; exit 0; fi
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    const state = await readWalkthroughRepositoryState(await realpath(workspace));
+
+    expect(state.source).toEqual({ ref: 'abc123', type: 'arc-commit' });
+    expect(state.files.map((file) => file.path)).toEqual(['src/head.ts']);
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test.sequential('readDiffImageContent loads Arc commit image revisions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-git-state-arc-image-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await writeFile(
+      join(fakeBin, 'arc'),
+      `#!/bin/sh
+if [ "$1" = "root" ]; then pwd; exit 0; fi
+if [ "$1" = "diff" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "--name-status" ]; then printf "M\\timage.png\\n"; exit 0; fi
+  done
+  printf "diff --git a/image.png b/image.png\\n--- a/image.png\\n+++ b/image.png\\n@@ -1 +1 @@\\n-old\\n+new\\n"
+  exit 0
+fi
+if [ "$1" = "show" ] && [ "$2" = "abc123^:image.png" ]; then printf "old-image"; exit 0; fi
+if [ "$1" = "show" ] && [ "$2" = "abc123:image.png" ]; then printf "new-image"; exit 0; fi
+exit 1
+`,
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    const image = await readDiffImageContent(await realpath(workspace), {
+      kind: 'arc',
+      path: 'image.png',
+      source: { ref: 'abc123', type: 'arc-commit' },
+    });
+
+    expect(image.status).toBe('ready');
+    expect(image.status === 'ready' ? image.oldImage?.dataUrl : null).toContain(
+      Buffer.from('old-image').toString('base64'),
+    );
+    expect(image.status === 'ready' ? image.newImage?.dataUrl : null).toContain(
+      Buffer.from('new-image').toString('base64'),
+    );
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test.sequential('readDiffImageContent loads Arc pull request image revisions', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-git-state-arc-pr-image-'));
+  const fakeBin = join(directory, 'bin');
+  const workspace = join(directory, 'workspace');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await mkdir(workspace);
+    await writeFile(
+      join(fakeBin, 'arc'),
+      `#!/bin/sh
+if [ "$1" = "root" ]; then pwd; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "status" ]; then printf '{"id":123,"url":"https://a.yandex-team.ru/review/123","from_id":"head123","to_branch":"trunk"}'; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "changes" ]; then printf "diff --git a/image.png b/image.png\\n--- a/image.png\\n+++ b/image.png\\n@@ -1 +1 @@\\n-old\\n+new\\n"; exit 0; fi
+if [ "$1" = "merge-base" ] && [ "$2" = "trunk" ] && [ "$3" = "head123" ]; then printf "base123\\n"; exit 0; fi
+if [ "$1" = "show" ] && [ "$2" = "base123:image.png" ]; then printf "old-pr-image"; exit 0; fi
+if [ "$1" = "show" ] && [ "$2" = "head123:image.png" ]; then printf "new-pr-image"; exit 0; fi
+exit 1
+`,
+    );
+    await chmod(join(fakeBin, 'arc'), 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    const image = await readDiffImageContent(await realpath(workspace), {
+      kind: 'arc',
+      path: 'image.png',
+      source: { number: 123, type: 'arc-pull-request' },
+    });
+
+    expect(image.status).toBe('ready');
+    expect(image.status === 'ready' ? image.oldImage?.dataUrl : null).toContain(
+      Buffer.from('old-pr-image').toString('base64'),
+    );
+    expect(image.status === 'ready' ? image.newImage?.dataUrl : null).toContain(
+      Buffer.from('new-pr-image').toString('base64'),
+    );
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
 });
 
 test('parseGitHubPullRequestUrl reads canonical pull request URLs', () => {

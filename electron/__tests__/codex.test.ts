@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -128,12 +128,16 @@ test('runs Codex walkthroughs as fresh ephemeral repository-scoped calls', async
   const directory = await mkdtemp(join(tmpdir(), 'codiff-codex-'));
   const fakeCodexPath = join(directory, 'codex');
   const argsPath = join(directory, 'args.txt');
+  const cwdPath = join(directory, 'cwd.txt');
   const previousCodexPath = process.env.CODIFF_CODEX_PATH;
 
   try {
+    const repoPath = join(directory, 'repo');
+    await mkdir(repoPath);
     await writeFile(
       fakeCodexPath,
       `#!/bin/sh
+pwd > "${cwdPath}"
 for arg in "$@"; do
   printf '%s\\n' "$arg" >> "${argsPath}"
 done
@@ -151,16 +155,18 @@ exit 1
     await chmod(fakeCodexPath, 0o755);
     process.env.CODIFF_CODEX_PATH = fakeCodexPath;
 
-    await expect(runCodex('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.')).resolves.toBe(
+    await expect(runCodex(repoPath, 'prompt', {}, 'walkthrough.json', 'Timed out.')).resolves.toBe(
       '{"version":1}',
     );
 
     const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
     expect(args).toContain('--ephemeral');
     expect(args).toContain('--cd');
-    expect(args).toContain('/repo');
+    expect(args).toContain(repoPath);
+    expect(args).toContain('--skip-git-repo-check');
     expect(args).toContain('model_reasoning_effort="high"');
     expect(args).not.toContain('resume');
+    await expect(readFile(cwdPath, 'utf8')).resolves.toBe(`${await realpath(repoPath)}\n`);
   } finally {
     if (previousCodexPath == null) {
       delete process.env.CODIFF_CODEX_PATH;
@@ -178,6 +184,8 @@ test('forwards per-call Codex reasoning effort overrides', async () => {
   const previousCodexPath = process.env.CODIFF_CODEX_PATH;
 
   try {
+    const repoPath = join(directory, 'repo');
+    await mkdir(repoPath);
     await writeFile(
       fakeCodexPath,
       `#!/bin/sh
@@ -199,7 +207,7 @@ exit 1
     process.env.CODIFF_CODEX_PATH = fakeCodexPath;
 
     await expect(
-      runCodex('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.', {
+      runCodex(repoPath, 'prompt', {}, 'walkthrough.json', 'Timed out.', {
         reasoningEffort: 'low',
       }),
     ).resolves.toBe('{"version":1}');
@@ -222,6 +230,8 @@ test('supports per-call Codex timeouts', async () => {
   const previousCodexPath = process.env.CODIFF_CODEX_PATH;
 
   try {
+    const repoPath = join(directory, 'repo');
+    await mkdir(repoPath);
     await writeFile(
       fakeCodexPath,
       `#!/usr/bin/env node
@@ -233,7 +243,7 @@ setInterval(() => {}, 1_000);
     process.env.CODIFF_CODEX_PATH = fakeCodexPath;
 
     await expect(
-      runCodex('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.', { timeoutMs: 10 }),
+      runCodex(repoPath, 'prompt', {}, 'walkthrough.json', 'Timed out.', { timeoutMs: 10 }),
     ).rejects.toThrow('Timed out.');
   } finally {
     if (previousCodexPath == null) {
@@ -251,6 +261,8 @@ test('surfaces structured Codex CLI errors without the full prompt stream', asyn
   const previousCodexPath = process.env.CODIFF_CODEX_PATH;
 
   try {
+    const repoPath = join(directory, 'repo');
+    await mkdir(repoPath);
     await writeFile(
       fakeCodexPath,
       `#!/bin/sh
@@ -264,7 +276,7 @@ exit 1
 
     let message = '';
     try {
-      await runCodex('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.');
+      await runCodex(repoPath, 'prompt', {}, 'walkthrough.json', 'Timed out.');
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }

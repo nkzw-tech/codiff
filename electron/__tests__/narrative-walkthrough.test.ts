@@ -187,6 +187,7 @@ test('prompts generated walkthroughs to use deterministic hunk groups', () => {
   expect(prompt).toContain('Put hunkIds in the exact display order');
   expect(prompt).toContain('Use notes[] on a stop/support item');
   expect(prompt).not.toContain('comments[]');
+  expect(prompt).toContain('For Git or Arc working-tree sources');
   expect(prompt).toContain('include commit.title and commit.body by default');
 });
 
@@ -792,6 +793,23 @@ test('keeps the commit composer for a working-tree staging set', () => {
   expect(result.commit).toEqual({
     body: 'Hunk order is now collapse-independent.\n\nNavigation expands a collapsed target before scrolling.',
     title: 'Fix hunk nav',
+  });
+});
+
+test('keeps the commit composer for an Arc working-tree staging set', () => {
+  const input = baseInput() as any;
+  input.commit = {
+    body: 'Route Arc working-tree commits through arc.',
+    title: 'Support Arc commits',
+  };
+
+  const result = normalizeNarrativeWalkthrough(input, files, {
+    source: { type: 'arc-working-tree' },
+  });
+
+  expect(result.commit).toEqual({
+    body: 'Route Arc working-tree commits through arc.',
+    title: 'Support Arc commits',
   });
 });
 

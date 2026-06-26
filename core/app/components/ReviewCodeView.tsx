@@ -89,6 +89,7 @@ import {
 } from '../../lib/review-comments.ts';
 import { getReviewIdentity, isReviewIdentityViewed } from '../../lib/review-identity.ts';
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
+import { isWorkingTreeSource } from '../../lib/source.ts';
 import type {
   ChangedFile,
   CommitMetadata,
@@ -1453,7 +1454,7 @@ export function ReviewCodeView({
       : (blocks?.map((block) => block.file).filter((file): file is ChangedFile => file != null) ??
         []);
   const initialEditableMarkdownSections =
-    !isReadOnly && source.type === 'working-tree'
+    !isReadOnly && isWorkingTreeSource(source)
       ? initialMarkdownFiles.flatMap((file) => {
           const section = file.sections.at(-1);
           return file.status !== 'deleted' && isMarkdownFilePath(file.path) && section
@@ -1477,7 +1478,7 @@ export function ReviewCodeView({
   >({});
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
   const selectedLinesRef = useRef<CodeViewLineSelection | null>(null);
-  const commitRef = source.type === 'commit' ? source.ref : null;
+  const commitRef = source.type === 'commit' || source.type === 'arc-commit' ? source.ref : null;
   const commitDetailsItemId = commitRef ? `commit-details:${commitRef}` : null;
   const [commitDetailsLayoutPass, setCommitDetailsLayoutPass] = useState(0);
   const [commitDetailsCollapseState, setCommitDetailsCollapseState] = useState<{
@@ -1628,7 +1629,7 @@ export function ReviewCodeView({
         const canEditMarkdown =
           canRenderMarkdown &&
           !isReadOnly &&
-          source.type === 'working-tree' &&
+          isWorkingTreeSource(source) &&
           file.status !== 'deleted' &&
           file.sections.at(-1)?.id === section.id;
         const isMarkdownPreview = canRenderMarkdown && markdownPreviewSections.has(section.id);
@@ -1847,7 +1848,7 @@ export function ReviewCodeView({
     reviewBlocks,
     selectedPath,
     showWhitespace,
-    source.type,
+    source,
     viewed,
     reviewIdentityByPath,
     walkthroughNotes,
@@ -2124,7 +2125,7 @@ export function ReviewCodeView({
       clearCommentLineHighlight();
       if (
         markdownPreviewSections.has(section.id) &&
-        source.type === 'working-tree' &&
+        isWorkingTreeSource(source) &&
         file.status !== 'deleted'
       ) {
         if (refreshingMarkdownSectionsRef.current.has(section.id)) {
@@ -2153,7 +2154,7 @@ export function ReviewCodeView({
         return next;
       });
     },
-    [clearCommentLineHighlight, markdownPreviewSections, onRefreshMarkdown, source.type],
+    [clearCommentLineHighlight, markdownPreviewSections, onRefreshMarkdown, source],
   );
 
   const workerPoolOptions = useMemo(

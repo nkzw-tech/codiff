@@ -26,7 +26,7 @@ import {
 } from '../../lib/diff.ts';
 import { fileTreeSort, statusForTree } from '../../lib/files.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
-import { getShortRef, getSourceKey } from '../../lib/source.ts';
+import { getShortRef, getSourceKey, isWorkingTreeSource } from '../../lib/source.ts';
 import type { ChangedFile, HistoryEntry, NarrativeWalkthrough, ReviewSource } from '../../types.ts';
 import { Gravatar } from './Gravatar.tsx';
 import { NarrativeSidebar } from './walkthrough/NarrativeSidebar.tsx';
@@ -64,7 +64,7 @@ export function Sidebar({
   walkthroughLoading,
   walkthroughUnread,
 }: {
-  branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
+  branchSource: Extract<ReviewSource, { type: 'arc-branch' | 'branch-diff' }> | null;
   commitFiles: ReadonlyArray<ChangedFile>;
   commitViewOpen: boolean;
   currentSource: ReviewSource;
@@ -112,7 +112,7 @@ export function Sidebar({
   );
   const showTotalLineCount = mode !== 'history' && totalLineCount.countable;
   const showCommitButton =
-    mode === 'tree' && currentSource.type === 'working-tree' && commitFiles.length > 0;
+    mode === 'tree' && isWorkingTreeSource(currentSource) && commitFiles.length > 0;
   const showFooter = showTotalLineCount || showCommitButton;
   const lineCountsByPathRef = useRef(lineCountsByPath);
   const reloadDeltaGitStatusCSS = useMemo(
@@ -532,7 +532,7 @@ function HistorySidebar({
   pullRequestSource,
   searchQuery,
 }: {
-  branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
+  branchSource: Extract<ReviewSource, { type: 'arc-branch' | 'branch-diff' }> | null;
   currentSource: ReviewSource;
   entries: ReadonlyArray<HistoryEntry>;
   hasMore: boolean;
@@ -546,15 +546,22 @@ function HistorySidebar({
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => {
+    const contextSource = pullRequestSource ?? branchSource ?? currentSource;
+    const localSource = (
+      contextSource.type.startsWith('arc-')
+        ? { type: 'arc-working-tree' }
+        : { type: 'working-tree' }
+    ) satisfies ReviewSource;
+    const commitType = contextSource.type.startsWith('arc-') ? 'arc-commit' : 'commit';
     const commitRows = entries.map((entry) => ({
       author: entry.author,
       committedAt: entry.committedAt,
       gravatarUrl: entry.gravatarUrl,
-      key: `commit:${entry.ref}`,
+      key: `${commitType}:${entry.ref}`,
       kind: 'entry' as const,
       ref: entry.ref,
       scope: entry.scope,
-      source: { ref: entry.ref, type: 'commit' } satisfies ReviewSource,
+      source: { ref: entry.ref, type: commitType } satisfies ReviewSource,
       subject: entry.subject,
     }));
     const matchesQuery = (row: (typeof commitRows)[number]) =>
@@ -579,9 +586,18 @@ function HistorySidebar({
               gravatarUrl: undefined,
               key: getSourceKey(pullRequestSource),
               kind: 'entry' as const,
-              ref: pullRequestSource.number ? `PR #${pullRequestSource.number}` : 'PR',
+              ref:
+                pullRequestSource.type === 'arc-pull-request'
+                  ? `Arc PR #${pullRequestSource.number}`
+                  : pullRequestSource.number
+                    ? `PR #${pullRequestSource.number}`
+                    : 'PR',
               source: pullRequestSource satisfies ReviewSource,
-              subject: pullRequestSource.title || 'Pull Request',
+              subject:
+                pullRequestSource.title ||
+                (pullRequestSource.type === 'arc-pull-request'
+                  ? 'Arc Pull Request'
+                  : 'Pull Request'),
             }
           : null,
         {
@@ -610,11 +626,13 @@ function HistorySidebar({
               author: null,
               committedAt: null,
               gravatarUrl: undefined,
-              key: 'working-tree',
+              key: getSourceKey(localSource),
               kind: 'entry' as const,
               ref: '',
-              source: { type: 'working-tree' } satisfies ReviewSource,
-              subject: 'Uncommitted changes',
+              source: localSource,
+              subject: contextSource.type.startsWith('arc-')
+                ? 'Arc local changes'
+                : 'Uncommitted changes',
             }
           : null,
         !normalizedQuery
@@ -626,7 +644,10 @@ function HistorySidebar({
               kind: 'entry' as const,
               ref: 'branch',
               source: branchSource satisfies ReviewSource,
-              subject: `Branch diff vs ${branchSource.ref}`,
+              subject:
+                branchSource.type === 'arc-branch'
+                  ? `Arc branch diff vs ${branchSource.base}`
+                  : `Branch diff vs ${branchSource.ref}`,
             }
           : null,
         localRows.length > 0
@@ -647,16 +668,18 @@ function HistorySidebar({
             author: null,
             committedAt: null,
             gravatarUrl: undefined,
-            key: 'working-tree',
+            key: getSourceKey(localSource),
             kind: 'entry' as const,
             ref: '',
-            source: { type: 'working-tree' } satisfies ReviewSource,
-            subject: 'Uncommitted changes',
+            source: localSource,
+            subject: contextSource.type.startsWith('arc-')
+              ? 'Arc local changes'
+              : 'Uncommitted changes',
           }
         : null,
       ...localRows,
     ].filter((row): row is NonNullable<typeof row> => row != null);
-  }, [branchSource, entries, normalizedQuery, pullRequestSource]);
+  }, [branchSource, currentSource, entries, normalizedQuery, pullRequestSource]);
   const maybeLoadMore = useCallback(() => {
     const element = listRef.current;
     if (!element || loading || !hasMore || normalizedQuery) {
@@ -690,9 +713,12 @@ function HistorySidebar({
             type="button"
           >
             <span className="history-entry-ref">
-              {row.source.type === 'commit'
+              {row.source.type === 'commit' || row.source.type === 'arc-commit'
                 ? getShortRef(row.source.ref)
-                : row.source.type === 'pull-request' || row.source.type === 'branch-diff'
+                : row.source.type === 'pull-request' ||
+                    row.source.type === 'arc-pull-request' ||
+                    row.source.type === 'branch-diff' ||
+                    row.source.type === 'arc-branch'
                   ? row.ref
                   : 'local'}
             </span>

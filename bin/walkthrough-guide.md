@@ -71,6 +71,8 @@ The `<scope>` segment depends on which diff you anchored against:
 
 - `staged` — the staged diff (`git diff --staged`).
 - `unstaged` — the working-tree diff (`git diff`).
+- `arc` — an Arc diff, including Arc working-tree, Arc commit, Arc range, Arc branch, and
+  Arcanum pull-request sources.
 - `pull-request:<number>` — a pull request.
 - `<commit SHA>` — every commit-like target: a single commit, a branch comparison, or a
   ref range. This is always the **full 40-character SHA of the diff's new (head) side**,

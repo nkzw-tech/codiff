@@ -990,10 +990,18 @@ const createWindow = (
   if (initialRepositoryState) {
     windowInitialRepositoryStates.set(webContentsId, initialRepositoryState);
   }
-  if (!launchOptions.planFile && !launchOptions.source) {
+  if (
+    !launchOptions.planFile &&
+    (!launchOptions.source ||
+      launchOptions.source.type === 'working-tree' ||
+      launchOptions.source.type === 'arc-working-tree')
+  ) {
     void initialRepositoryState
       .then((state) => {
-        if (state.source.type === 'working-tree' && !window.isDestroyed()) {
+        if (
+          (state.source.type === 'working-tree' || state.source.type === 'arc-working-tree') &&
+          !window.isDestroyed()
+        ) {
           startRepositoryWatcher(window, repositoryPath);
         }
       })
