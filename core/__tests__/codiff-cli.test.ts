@@ -10,6 +10,7 @@ import {
   truncate,
   writeFile,
 } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -19,6 +20,23 @@ import type { PlanReview } from '../types.ts';
 import { createFakeCommandLogger, createFakeOpenLogger } from './helpers/cli.ts';
 
 const execFileAsync = promisify(execFile);
+
+const require = createRequire(import.meta.url);
+const { resolveBaseBranchRef } = require('../../electron/review-source.cjs') as {
+  resolveBaseBranchRef: (repositoryPath: string) => {
+    base: string;
+    provider: string;
+    ref: string;
+    remote: string;
+  };
+};
+
+const writeFakeExecutable = async (directory: string, name: string, body: string) => {
+  const path = join(directory, name);
+  await writeFile(path, body);
+  await chmod(path, 0o755);
+  return path;
+};
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
   await execFileAsync(
@@ -329,6 +347,121 @@ test('parseArguments treats GitLab MR marker values as review sources', () => {
   });
 });
 
+test('parseArguments treats the base keyword as a PR/MR base review', () => {
+  expect(parseArguments(['base'])).toEqual({
+    commitRef: null,
+    help: false,
+    pullRequestNumber: null,
+    pullRequestUrl: null,
+    requestedPath: resolve(process.cwd()),
+    reviewBase: true,
+    version: false,
+    walkthrough: false,
+  });
+
+  expect(parseArguments(['BASE'])).toMatchObject({ reviewBase: true });
+});
+
+test('parseArguments still lets --branch base review a literal base branch', async () => {
+  await withCwd(refRepositoryPath, () => {
+    expect(parseArguments(['--branch', 'base'])).toMatchObject({
+      branchRef: 'base',
+      commitRef: null,
+    });
+    expect(parseArguments(['--branch', 'base'])).not.toHaveProperty('reviewBase');
+  });
+});
+
+test('resolveBaseBranchRef reads the GitHub PR base branch through gh', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'codiff-base-github-')));
+  const repositoryPath = join(directory, 'repo');
+  const fakeBin = join(directory, 'bin');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(repositoryPath);
+    await mkdir(fakeBin);
+    await git(repositoryPath, ['init']);
+    await git(repositoryPath, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+    await writeFakeExecutable(fakeBin, 'gh', '#!/bin/sh\nprintf "feature-base\\n"\n');
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    expect(resolveBaseBranchRef(repositoryPath)).toEqual({
+      base: 'feature-base',
+      provider: 'github',
+      ref: 'origin/feature-base',
+      remote: 'origin',
+    });
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('resolveBaseBranchRef reads the GitLab MR target branch through glab', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'codiff-base-gitlab-')));
+  const repositoryPath = join(directory, 'repo');
+  const fakeBin = join(directory, 'bin');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(repositoryPath);
+    await mkdir(fakeBin);
+    await git(repositoryPath, ['init']);
+    await git(repositoryPath, [
+      'remote',
+      'add',
+      'origin',
+      'git@gitlab.example.com:group/project.git',
+    ]);
+    await writeFakeExecutable(fakeBin, 'glab', '#!/bin/sh\nprintf "release\\n"\n');
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    expect(resolveBaseBranchRef(repositoryPath)).toEqual({
+      base: 'release',
+      provider: 'gitlab',
+      ref: 'origin/release',
+      remote: 'origin',
+    });
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('resolveBaseBranchRef falls back to the remote default branch without a request', async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'codiff-base-fallback-')));
+  const repositoryPath = join(directory, 'repo');
+  const fakeBin = join(directory, 'bin');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(repositoryPath);
+    await mkdir(fakeBin);
+    await git(repositoryPath, ['init']);
+    await git(repositoryPath, ['config', 'user.email', 'codiff@example.com']);
+    await git(repositoryPath, ['config', 'user.name', 'Codiff Test']);
+    await git(repositoryPath, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'init']);
+    const { stdout } = await execFileAsync('git', ['-C', repositoryPath, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+    });
+    await git(repositoryPath, ['update-ref', 'refs/remotes/origin/main', stdout.trim()]);
+    await writeFakeExecutable(fakeBin, 'gh', '#!/bin/sh\nexit 1\n');
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    expect(resolveBaseBranchRef(repositoryPath)).toEqual({
+      base: 'main',
+      provider: 'github',
+      ref: 'origin/main',
+      remote: 'origin',
+    });
+  } finally {
+    process.env.PATH = previousPath;
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
 test('parseArguments accepts nested GitLab merge request URLs', () => {
   expect(
     parseArguments(['https://gitlab.example.com/group/subgroup/project/-/merge_requests/23']),
@@ -412,6 +545,46 @@ test('packaged terminal helper forwards GitLab MR markers to Electron', async ()
       'mr',
       '23',
       process.cwd(),
+    ]);
+  } finally {
+    await logger.cleanup();
+  }
+});
+
+test('packaged terminal helper resolves the PR base branch for `base`', async () => {
+  const logger = await createFakeOpenLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+
+  try {
+    await mkdir(repositoryPath);
+    const realRepositoryPath = await realpath(repositoryPath);
+    await git(realRepositoryPath, ['init']);
+    // A local path that still contains "github.com" selects the GitHub provider
+    // while keeping the background fetch offline and instant during the test.
+    await git(realRepositoryPath, [
+      'remote',
+      'add',
+      'origin',
+      join(logger.directory, 'github.com', 'remote.git'),
+    ]);
+    await writeFakeExecutable(
+      join(logger.directory, 'bin'),
+      'gh',
+      '#!/bin/sh\nprintf "feature-base\\n"\n',
+    );
+
+    await execFileAsync(resolve('bin/codiff-app'), ['base'], {
+      cwd: realRepositoryPath,
+      env: logger.env,
+    });
+
+    expect(await logger.readArgs()).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      '--branch',
+      'origin/feature-base',
+      realRepositoryPath,
     ]);
   } finally {
     await logger.cleanup();

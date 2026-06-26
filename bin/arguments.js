@@ -91,6 +91,10 @@ export const usageExamples = [
   { command: 'codiff', description: 'Review staged and unstaged changes.' },
   { command: 'codiff /path/to/repo', description: 'Review changes in a specific repository.' },
   { command: 'codiff main', description: 'Review the current branch against main.' },
+  {
+    command: 'codiff base',
+    description: "Review against the current branch's PR/MR base branch.",
+  },
   { command: 'codiff a1b2c3d', description: 'Review a specific commit.' },
   { command: "codiff '#75'", description: 'Review pull request #75.' },
   { command: 'codiff pr 75', description: 'Review pull request #75 (alternate syntax).' },
@@ -216,6 +220,8 @@ const getReviewProviderMarker = (arg) =>
       ? 'gitlab'
       : null;
 
+const isBaseReviewMarker = (arg) => /^base$/i.test(arg);
+
 const isPullRequestUrlArgument = (arg) => parseReviewUrl(arg) != null;
 
 export const resolvePullRequestUrl = (repositoryPath, number, provider) =>
@@ -250,6 +256,7 @@ export const parseArguments = (args) => {
   let pullRequestProvider = null;
   let pullRequestUrl = null;
   let requestedPath = null;
+  let reviewBase = false;
   let sourceCandidate = null;
   let rangeCandidate = null;
   const walkthroughContextPath =
@@ -265,6 +272,20 @@ export const parseArguments = (args) => {
     }
     if (!pullRequestUrl && isPullRequestUrlArgument(arg)) {
       pullRequestUrl = arg;
+      continue;
+    }
+
+    if (
+      !reviewBase &&
+      !pullRequestUrl &&
+      pullRequestNumber == null &&
+      !commitRef &&
+      !branchRef &&
+      !sourceCandidate &&
+      !rangeCandidate &&
+      isBaseReviewMarker(arg)
+    ) {
+      reviewBase = true;
       continue;
     }
 
@@ -338,6 +359,7 @@ export const parseArguments = (args) => {
     pullRequestNumber,
     ...(pullRequestProvider ? { pullRequestProvider } : {}),
     pullRequestUrl,
+    ...(reviewBase ? { reviewBase: true } : {}),
     requestedPath: resolve(requestedPath ?? process.cwd()),
     ...(values.share === true ? { share: true } : {}),
     version: values.version === true,

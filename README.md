@@ -47,6 +47,18 @@ Review the current branch against a target branch:
 codiff main
 ```
 
+Review the current branch against the branch its pull request or merge request
+targets, which is handy for stacked changes where the base is not `main`:
+
+```bash
+codiff base
+```
+
+Codiff asks GitHub through `gh` or GitLab through `glab` (chosen from the
+repository's remote) for the current branch's PR/MR base branch, refreshes that
+branch from the remote, and diffs against it. When there is no open request, or
+the relevant CLI is unavailable, it falls back to the remote's default branch.
+
 Review a GitHub pull request or GitLab merge request using the current repository remote:
 
 ```bash

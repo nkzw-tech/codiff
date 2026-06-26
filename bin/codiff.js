@@ -19,6 +19,7 @@ const {
   shareWalkthroughFile,
 } = require('../electron/headless-walkthrough-share.cjs');
 const { sharePlanFile } = require('../electron/headless-plan-share.cjs');
+const { refreshBaseBranchRef, resolveBaseBranchRef } = require('../electron/review-source.cjs');
 
 // The renderer is the built dist/ by default. When Codiff's own Vite dev server
 // is running, use it instead so source edits hot-reload without a rebuild. The
@@ -119,7 +120,6 @@ const run = async () => {
 
   const {
     agentBackend,
-    branchRef,
     claudeSessionId,
     codexSessionId,
     commitRef,
@@ -130,12 +130,22 @@ const run = async () => {
     pullRequestProvider,
     range,
     requestedPath,
+    reviewBase,
     share,
     walkthrough,
     walkthroughContextPath,
     walkthroughFilePath,
   } = parsedArguments;
-  let { pullRequestUrl } = parsedArguments;
+  let { branchRef, pullRequestUrl } = parsedArguments;
+
+  // `codiff base` reviews the current branch against the branch its PR/MR
+  // targets. Resolve that base into a concrete remote branch ref and refresh
+  // it so the diff is current, then reuse the regular branch review path.
+  if (reviewBase && !branchRef && !commitRef && !range) {
+    const { base, ref, remote } = resolveBaseBranchRef(requestedPath);
+    branchRef = ref;
+    refreshBaseBranchRef(requestedPath, remote, base);
+  }
 
   if (planFilePath && (!existsSync(planFilePath) || !/\.md$/i.test(planFilePath))) {
     process.stderr.write(`codiff: plan file not found or not Markdown: ${planFilePath}\n`);
