@@ -25,7 +25,6 @@ const require = createRequire(import.meta.url);
 const { resolveBaseBranchRef } = require('../../electron/review-source.cjs') as {
   resolveBaseBranchRef: (repositoryPath: string) => {
     base: string;
-    provider: string;
     ref: string;
     remote: string;
   };
@@ -388,7 +387,6 @@ test('resolveBaseBranchRef reads the GitHub PR base branch through gh', async ()
 
     expect(resolveBaseBranchRef(repositoryPath)).toEqual({
       base: 'feature-base',
-      provider: 'github',
       ref: 'origin/feature-base',
       remote: 'origin',
     });
@@ -419,7 +417,6 @@ test('resolveBaseBranchRef reads the GitLab MR target branch through glab', asyn
 
     expect(resolveBaseBranchRef(repositoryPath)).toEqual({
       base: 'release',
-      provider: 'gitlab',
       ref: 'origin/release',
       remote: 'origin',
     });
@@ -452,7 +449,6 @@ test('resolveBaseBranchRef falls back to the remote default branch without a req
 
     expect(resolveBaseBranchRef(repositoryPath)).toEqual({
       base: 'main',
-      provider: 'github',
       ref: 'origin/main',
       remote: 'origin',
     });
@@ -551,41 +547,18 @@ test('packaged terminal helper forwards GitLab MR markers to Electron', async ()
   }
 });
 
-test('packaged terminal helper resolves the PR base branch for `base`', async () => {
-  const logger = await createFakeOpenLogger();
-  const repositoryPath = join(logger.directory, 'repo');
+test('packaged terminal helper runs `base` through the bundled Node entry point', async () => {
+  const logger = await createFakeCommandLogger('codiff-packaged-base-', 'runtime');
 
   try {
-    await mkdir(repositoryPath);
-    const realRepositoryPath = await realpath(repositoryPath);
-    await git(realRepositoryPath, ['init']);
-    // A local path that still contains "github.com" selects the GitHub provider
-    // while keeping the background fetch offline and instant during the test.
-    await git(realRepositoryPath, [
-      'remote',
-      'add',
-      'origin',
-      join(logger.directory, 'github.com', 'remote.git'),
-    ]);
-    await writeFakeExecutable(
-      join(logger.directory, 'bin'),
-      'gh',
-      '#!/bin/sh\nprintf "feature-base\\n"\n',
-    );
-
     await execFileAsync(resolve('bin/codiff-app'), ['base'], {
-      cwd: realRepositoryPath,
-      env: logger.env,
+      env: {
+        ...logger.env,
+        CODIFF_NODE_COMMAND: logger.commandPath,
+      },
     });
 
-    expect(await logger.readArgs()).toEqual([
-      '-n',
-      resolve('bin/../../../..'),
-      '--args',
-      '--branch',
-      'origin/feature-base',
-      realRepositoryPath,
-    ]);
+    expect(await logger.readArgs()).toEqual([resolve('bin/codiff.js'), 'base']);
   } finally {
     await logger.cleanup();
   }

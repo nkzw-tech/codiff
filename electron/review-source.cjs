@@ -1,6 +1,6 @@
 // @ts-check
 
-const { execFileSync, spawn } = require('node:child_process');
+const { execFileSync } = require('node:child_process');
 
 /** @typedef {'github' | 'gitlab'} ReviewProvider */
 
@@ -104,14 +104,6 @@ const remotePriority = (remote) =>
       ? 2
       : 3;
 
-/**
- * Run a command and return its trimmed stdout, or an empty string when it is
- * not installed, errors, or exceeds the timeout. Never throws so base-branch
- * resolution can always fall back gracefully.
- * @param {string} command
- * @param {ReadonlyArray<string>} args
- * @param {string} cwd
- */
 const tryCommandOutput = (command, args, cwd) => {
   try {
     return execFileSync(command, args, {
@@ -125,12 +117,13 @@ const tryCommandOutput = (command, args, cwd) => {
   }
 };
 
-/**
- * Best-effort default branch for a remote: the remote's `HEAD` symbolic ref,
- * then `main`/`master` if either is tracked, then `main`.
- * @param {string} repositoryPath
- * @param {string} remoteName
- */
+/** @param {string} repositoryPath */
+const getPrimaryReviewRemote = (repositoryPath) =>
+  readReviewRemotes(repositoryPath).sort(
+    (left, right) => remotePriority(left) - remotePriority(right),
+  )[0];
+
+/** @param {string} repositoryPath @param {string} remoteName */
 const resolveDefaultRemoteBranch = (repositoryPath, remoteName) => {
   const head = tryCommandOutput(
     'git',
@@ -142,44 +135,18 @@ const resolveDefaultRemoteBranch = (repositoryPath, remoteName) => {
     return head.slice(prefix.length);
   }
 
-  for (const candidate of ['main', 'master']) {
-    if (
-      tryCommandOutput(
-        'git',
-        ['show-ref', '--verify', `refs/remotes/${remoteName}/${candidate}`],
-        repositoryPath,
-      )
-    ) {
-      return candidate;
-    }
-  }
-
   return 'main';
 };
 
 /**
- * Resolve the branch the current branch's open pull/merge request targets so a
- * review can diff against the real base of a stack instead of always against
- * `main`. Asks GitHub through `gh` or GitLab through `glab` (chosen from the
- * repository's primary review remote) and falls back to the remote's default
- * branch when there is no request or the CLI is unavailable.
  * @param {string} repositoryPath
- * @returns {{ base: string; provider: ReviewProvider; ref: string; remote: string }}
+ * @returns {{ base: string; ref: string; remote: string }}
  */
 const resolveBaseBranchRef = (repositoryPath) => {
-  let remotes = [];
-  try {
-    remotes = readReviewRemotes(repositoryPath);
-  } catch {
-    remotes = [];
-  }
-
-  const remote = remotes.sort((left, right) => remotePriority(left) - remotePriority(right))[0];
-  const remoteName = remote?.name ?? 'origin';
-  const provider = remote?.provider ?? /** @type {ReviewProvider} */ ('github');
-
+  const remote = getPrimaryReviewRemote(repositoryPath);
+  const remoteName = remote.name;
   const base =
-    (provider === 'gitlab'
+    remote.provider === 'gitlab'
       ? tryCommandOutput(
           'glab',
           ['mr', 'view', '--output', 'json', '--jq', '.target_branch'],
@@ -189,46 +156,10 @@ const resolveBaseBranchRef = (repositoryPath) => {
           'gh',
           ['pr', 'view', '--json', 'baseRefName', '--jq', '.baseRefName'],
           repositoryPath,
-        )) || resolveDefaultRemoteBranch(repositoryPath, remoteName);
+        );
 
-  return { base, provider, ref: `${remoteName}/${base}`, remote: remoteName };
-};
-
-/**
- * Refresh a single base branch from its remote. Blocks only when the ref is
- * not present locally yet so the diff has something to compare against;
- * otherwise it refreshes in the background and returns immediately, mirroring
- * the parallel fetch in the `cdf` shell helper this command is based on.
- * @param {string} repositoryPath
- * @param {string} remoteName
- * @param {string} base
- */
-const refreshBaseBranchRef = (repositoryPath, remoteName, base) => {
-  const hasRef = Boolean(
-    tryCommandOutput(
-      'git',
-      ['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteName}/${base}^{commit}`],
-      repositoryPath,
-    ),
-  );
-  const fetchArgs = ['-C', repositoryPath, 'fetch', remoteName, base, '--quiet'];
-
-  if (hasRef) {
-    try {
-      const child = spawn('git', fetchArgs, { detached: true, stdio: 'ignore' });
-      child.on('error', () => {});
-      child.unref();
-    } catch {
-      // A failed background refresh still leaves the existing ref to diff against.
-    }
-    return;
-  }
-
-  try {
-    execFileSync('git', fetchArgs, { stdio: 'ignore', timeout: 30_000 });
-  } catch {
-    // Offline or unknown branch: fall through and let the diff report what it can.
-  }
+  const branch = base || resolveDefaultRemoteBranch(repositoryPath, remoteName);
+  return { base: branch, ref: `${remoteName}/${branch}`, remote: remoteName };
 };
 
 /**
@@ -264,7 +195,6 @@ module.exports = {
   parseRemoteUrl,
   parseReviewUrl,
   readReviewRemotes,
-  refreshBaseBranchRef,
   resolveBaseBranchRef,
   resolveReviewUrl,
 };

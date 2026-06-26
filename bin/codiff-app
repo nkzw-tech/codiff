@@ -64,21 +64,25 @@ show_help() {
   printf '  %-32s%s%s%s\n' "codiff --share HEAD" "$gray" "Share a walkthrough for a commit." "$reset"
 }
 
-for arg in "$@"; do
-  if [ "$arg" = "--share" ]; then
-    runtime="${CODIFF_NODE_COMMAND:-}"
-    if [ -z "$runtime" ]; then
-      electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
-      if [ -n "$electron_exec" ]; then
-        runtime="$app_path/Contents/MacOS/$electron_exec"
-      fi
+run_with_bundled_node() {
+  runtime="${CODIFF_NODE_COMMAND:-}"
+  if [ -z "$runtime" ]; then
+    electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
+    if [ -n "$electron_exec" ]; then
+      runtime="$app_path/Contents/MacOS/$electron_exec"
     fi
-    if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
-      printf '%s\n' "codiff: could not find the bundled runtime for --share." >&2
-      exit 1
-    fi
-    ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script_dir/codiff.js" "$@"
   fi
+  if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
+    printf '%s\n' "codiff: could not find the bundled runtime." >&2
+    exit 1
+  fi
+  ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script_dir/codiff.js" "$@"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --share|[Bb][Aa][Ss][Ee]) run_with_bundled_node "$@" ;;
+  esac
 done
 
 repository_path=""
@@ -91,7 +95,6 @@ branch_ref=""
 commit_ref=""
 pull_request_source=""
 pull_request_provider=""
-review_base=0
 source_ref=""
 walkthrough_context_path=""
 walkthrough_file_path=""
@@ -148,59 +151,6 @@ is_git_branch_ref() {
 
 is_git_commit_ref() {
   git -C "$1" rev-parse --verify "$2^{commit}" >/dev/null 2>&1
-}
-
-# Prefer origin, otherwise the first configured remote, falling back to origin.
-resolve_remote_name() {
-  if git -C "$1" remote get-url origin >/dev/null 2>&1; then
-    printf 'origin'
-    return 0
-  fi
-  first_remote="$(git -C "$1" remote 2>/dev/null | head -n 1)"
-  printf '%s' "${first_remote:-origin}"
-}
-
-# Best-effort default branch for a remote: HEAD symbolic ref, then main/master.
-remote_default_branch() {
-  head_ref="$(git -C "$1" symbolic-ref --quiet --short "refs/remotes/$2/HEAD" 2>/dev/null || true)"
-  case "$head_ref" in
-    "$2"/*)
-      printf '%s' "${head_ref#"$2"/}"
-      return 0
-      ;;
-  esac
-  for candidate in main master; do
-    if git -C "$1" show-ref --verify "refs/remotes/$2/$candidate" >/dev/null 2>&1; then
-      printf '%s' "$candidate"
-      return 0
-    fi
-  done
-  printf 'main'
-}
-
-# Resolve the current branch's PR/MR base branch (GitHub via gh, GitLab via
-# glab, chosen from the primary remote), refresh it, and echo "<remote>/<base>".
-resolve_base_branch_ref() {
-  base_repo="$1"
-  base_remote="$(resolve_remote_name "$base_repo")"
-  base_remote_url="$(git -C "$base_repo" remote get-url "$base_remote" 2>/dev/null || true)"
-  base_branch=""
-  case "$base_remote_url" in
-    *github.com*)
-      base_branch="$( (cd "$base_repo" && gh pr view --json baseRefName --jq .baseRefName) 2>/dev/null || true)"
-      ;;
-    ?*)
-      base_branch="$( (cd "$base_repo" && glab mr view --output json --jq .target_branch) 2>/dev/null || true)"
-      ;;
-    *)
-      base_branch="$( (cd "$base_repo" && gh pr view --json baseRefName --jq .baseRefName) 2>/dev/null || true)"
-      ;;
-  esac
-  if [ -z "$base_branch" ]; then
-    base_branch="$(remote_default_branch "$base_repo" "$base_remote")"
-  fi
-  git -C "$base_repo" fetch "$base_remote" "$base_branch" --quiet >/dev/null 2>&1 || true
-  printf '%s/%s' "$base_remote" "$base_branch"
 }
 
 for arg in "$@"; do
@@ -389,8 +339,6 @@ for arg in "$@"; do
         pull_request_source="$arg"
       elif [ -z "$pull_request_source" ] && printf '%s' "$arg" | grep -Eq '^https?://[^/]+/(.+/)?[^/]+/(-/merge_requests|pull)/[0-9]+/?$'; then
         pull_request_source="$arg"
-      elif [ -z "$pull_request_source" ] && [ -z "$commit_ref" ] && [ -z "$branch_ref" ] && [ -z "$source_ref" ] && [ "$review_base" -eq 0 ] && printf '%s' "$arg" | grep -Eiq '^base$'; then
-        review_base=1
       elif [ -z "$commit_ref" ] && [ -z "$branch_ref" ] && [ -z "$source_ref" ] && ! is_explicit_path_arg "$arg"; then
         source_ref="$arg"
       elif [ -z "$repository_path" ]; then
@@ -421,15 +369,6 @@ if [ -n "$source_ref" ] && [ -z "$commit_ref" ] && [ -z "$branch_ref" ]; then
   elif [ -z "$repository_path" ]; then
     repository_path="$source_ref"
   fi
-fi
-
-if [ "$review_base" -eq 1 ] && [ -z "$branch_ref" ] && [ -z "$commit_ref" ]; then
-  base_repository_context="${repository_path:-$PWD}"
-  case "$base_repository_context" in
-    /*) ;;
-    *) base_repository_context="$PWD/$base_repository_context" ;;
-  esac
-  branch_ref="$(resolve_base_branch_ref "$base_repository_context")"
 fi
 
 repository_path="${repository_path:-$PWD}"

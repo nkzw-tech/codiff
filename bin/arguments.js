@@ -275,16 +275,14 @@ export const parseArguments = (args) => {
       continue;
     }
 
-    if (
-      !reviewBase &&
+    const canReadBaseMarker =
       !pullRequestUrl &&
       pullRequestNumber == null &&
       !commitRef &&
       !branchRef &&
       !sourceCandidate &&
-      !rangeCandidate &&
-      isBaseReviewMarker(arg)
-    ) {
+      !rangeCandidate;
+    if (canReadBaseMarker && isBaseReviewMarker(arg)) {
       reviewBase = true;
       continue;
     }

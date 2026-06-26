@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -19,7 +19,7 @@ const {
   shareWalkthroughFile,
 } = require('../electron/headless-walkthrough-share.cjs');
 const { sharePlanFile } = require('../electron/headless-plan-share.cjs');
-const { refreshBaseBranchRef, resolveBaseBranchRef } = require('../electron/review-source.cjs');
+const { resolveBaseBranchRef } = require('../electron/review-source.cjs');
 
 // The renderer is the built dist/ by default. When Codiff's own Vite dev server
 // is running, use it instead so source edits hot-reload without a rebuild. The
@@ -138,13 +138,17 @@ const run = async () => {
   } = parsedArguments;
   let { branchRef, pullRequestUrl } = parsedArguments;
 
-  // `codiff base` reviews the current branch against the branch its PR/MR
-  // targets. Resolve that base into a concrete remote branch ref and refresh
-  // it so the diff is current, then reuse the regular branch review path.
   if (reviewBase && !branchRef && !commitRef && !range) {
     const { base, ref, remote } = resolveBaseBranchRef(requestedPath);
     branchRef = ref;
-    refreshBaseBranchRef(requestedPath, remote, base);
+    try {
+      execFileSync('git', ['-C', requestedPath, 'fetch', remote, base, '--quiet'], {
+        stdio: 'ignore',
+        timeout: 30_000,
+      });
+    } catch {
+      // Keep going with the local remote ref when offline.
+    }
   }
 
   if (planFilePath && (!existsSync(planFilePath) || !/\.md$/i.test(planFilePath))) {
