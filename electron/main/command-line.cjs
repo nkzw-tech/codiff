@@ -52,6 +52,10 @@ const gitSucceeds = (repositoryPath, args) => {
   }
 };
 
+/** @param {string} repositoryPath */
+const isGitRepository = (repositoryPath) =>
+  gitSucceeds(repositoryPath, ['rev-parse', '--show-toplevel']);
+
 /** @param {string} repositoryPath @param {string} ref */
 const isBranchRef = (repositoryPath, ref) =>
   gitSucceeds(repositoryPath, ['show-ref', '--verify', '--quiet', `refs/heads/${ref}`]) ||
@@ -251,6 +255,10 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       branchRef = source.branchRef;
     } else if (source?.commitRef) {
       commitRef = source.commitRef;
+    } else if (repositoryPath == null && existsSync(resolve(sourceCandidate))) {
+      repositoryPath = sourceCandidate;
+    } else if (isGitRepository(resolve(repositoryPath || process.cwd()))) {
+      branchRef = sourceCandidate;
     } else if (repositoryPath == null) {
       repositoryPath = sourceCandidate;
     }

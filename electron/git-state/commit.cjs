@@ -118,6 +118,79 @@ const resolveRangeRefs = async (repoRoot, base, head, symmetric) => {
   return { newRef, oldRef };
 };
 
+/** @param {string} left @param {string} right */
+const getEditDistance = (left, right) => {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+
+  for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+    const current = [leftIndex + 1];
+    for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+      current[rightIndex + 1] =
+        left[leftIndex] === right[rightIndex]
+          ? previous[rightIndex]
+          : Math.min(previous[rightIndex], previous[rightIndex + 1], current[rightIndex]) + 1;
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+
+  return previous[right.length];
+};
+
+/** @param {string} requested @param {string} candidate */
+const getBranchSuggestionScore = (requested, candidate) => {
+  const requestedLower = requested.toLowerCase();
+  const aliases = [candidate.toLowerCase()];
+  const slashIndex = candidate.indexOf('/');
+  if (slashIndex !== -1) {
+    aliases.push(candidate.slice(slashIndex + 1).toLowerCase());
+  }
+
+  return Math.min(
+    ...aliases.map((alias) => {
+      if (
+        (requestedLower === 'main' && alias === 'master') ||
+        (requestedLower === 'master' && alias === 'main')
+      ) {
+        return 1;
+      }
+
+      return alias.startsWith(requestedLower) && requestedLower.length >= 3
+        ? 1
+        : getEditDistance(requestedLower, alias);
+    }),
+  );
+};
+
+/** @param {string} ref */
+const getBranchSuggestionThreshold = (ref) =>
+  ref.length <= 4 ? 1 : ref.length <= 8 ? 2 : Math.floor(ref.length / 3);
+
+/** @param {string} repoRoot @param {string} ref @returns {Promise<string | null>} */
+const getBranchSuggestion = async (repoRoot, ref) => {
+  const raw = await git(repoRoot, [
+    'for-each-ref',
+    '--format=%(refname:short)',
+    'refs/heads',
+    'refs/remotes',
+  ]);
+  const candidates = [
+    ...new Set(
+      raw
+        .split('\n')
+        .map((branch) => branch.trim())
+        .filter((branch) => branch && !branch.endsWith('/HEAD') && branch !== ref),
+    ),
+  ];
+  const [best] = candidates
+    .map((branch) => ({
+      branch,
+      score: getBranchSuggestionScore(ref, branch),
+    }))
+    .sort((left, right) => left.score - right.score || left.branch.localeCompare(right.branch));
+
+  return best && best.score <= getBranchSuggestionThreshold(ref) ? best.branch : null;
+};
+
 /** @param {string | BranchSource | BranchDiffSource} input @returns {BranchSource | BranchDiffSource} */
 const normalizeBranchSourceInput = (input) =>
   typeof input === 'string' ? { ref: input, type: 'branch' } : input;
@@ -137,7 +210,19 @@ const resolveBranchComparison = async (repoRoot, source) => {
     };
   }
 
-  const { newRef, oldRef } = await resolveRangeRefs(repoRoot, source.ref, 'HEAD', true);
+  const newRef = await resolveRangeEndpoint(repoRoot, 'HEAD');
+  let branchRef;
+  try {
+    branchRef = await resolveRangeEndpoint(repoRoot, source.ref);
+  } catch {
+    const suggestion = await getBranchSuggestion(repoRoot, source.ref);
+    throw new Error(
+      `Branch "${source.ref}" does not exist in this repository.${
+        suggestion ? ` Did you mean "${suggestion}"?` : ''
+      }`,
+    );
+  }
+  const oldRef = (await git(repoRoot, ['merge-base', branchRef, newRef])).trim();
   return {
     newRef,
     oldRef,

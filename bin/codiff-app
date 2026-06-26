@@ -148,6 +148,10 @@ is_git_commit_ref() {
   git -C "$1" rev-parse --verify "$2^{commit}" >/dev/null 2>&1
 }
 
+is_git_repository() {
+  git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1
+}
+
 for arg in "$@"; do
   if [ "$expect_codex_session" -eq 1 ]; then
     codex_session_id="$arg"
@@ -361,6 +365,10 @@ if [ -n "$source_ref" ] && [ -z "$commit_ref" ] && [ -z "$branch_ref" ]; then
     branch_ref="$source_ref"
   elif is_git_commit_ref "$repository_context" "$source_ref" || is_commit_ref_arg "$source_ref"; then
     commit_ref="$source_ref"
+  elif [ -z "$repository_path" ] && [ -e "$source_ref" ]; then
+    repository_path="$source_ref"
+  elif is_git_repository "$repository_context"; then
+    branch_ref="$source_ref"
   elif [ -z "$repository_path" ]; then
     repository_path="$source_ref"
   fi

@@ -216,6 +216,50 @@ test('parses plain refs as branch sources', async () => {
   }
 });
 
+test('parses missing plain refs in Git repositories as branch sources', async () => {
+  const repositoryPath = await mkdtemp(join(tmpdir(), 'codiff-missing-branch-ref-'));
+  const previousCwd = process.cwd();
+
+  try {
+    await git(repositoryPath, ['init']);
+    await git(repositoryPath, ['config', 'user.email', 'codiff@example.com']);
+    await git(repositoryPath, ['config', 'user.name', 'Codiff Test']);
+    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'initial commit']);
+    process.chdir(repositoryPath);
+
+    expect(parseCommandLineArguments(['codiff', 'definitely-missing-branch'])).toEqual({
+      launchOptions: {
+        repositoryPathProvided: false,
+        source: {
+          ref: 'definitely-missing-branch',
+          type: 'branch',
+        },
+        walkthrough: false,
+      },
+      pullRequestNumber: null,
+      repositoryPath: null,
+    });
+
+    expect(
+      parseCommandLineArguments(['codiff', 'definitely-missing-branch', repositoryPath]),
+    ).toEqual({
+      launchOptions: {
+        repositoryPathProvided: true,
+        source: {
+          ref: 'definitely-missing-branch',
+          type: 'branch',
+        },
+        walkthrough: false,
+      },
+      pullRequestNumber: null,
+      repositoryPath,
+    });
+  } finally {
+    process.chdir(previousCwd);
+    await rm(repositoryPath, { force: true, recursive: true });
+  }
+});
+
 test('parses hex-like refs as commits before branches', async () => {
   const repositoryPath = await mkdtemp(join(tmpdir(), 'codiff-hex-ref-'));
   const previousCwd = process.cwd();

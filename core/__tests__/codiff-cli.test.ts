@@ -115,6 +115,22 @@ test('parseArguments treats plain branch refs as branch refs', async () => {
   });
 });
 
+test('parseArguments treats missing plain refs in Git repositories as branch refs', async () => {
+  await withCwd(refRepositoryPath, () => {
+    expect(parseArguments(['definitely-missing-branch'])).toMatchObject({
+      branchRef: 'definitely-missing-branch',
+      commitRef: null,
+      requestedPath: refRepositoryPath,
+    });
+
+    expect(parseArguments(['definitely-missing-branch', refRepositoryPath])).toMatchObject({
+      branchRef: 'definitely-missing-branch',
+      commitRef: null,
+      requestedPath: refRepositoryPath,
+    });
+  });
+});
+
 test('parseArguments treats hex-like refs as commits before branches', async () => {
   await withCwd(refRepositoryPath, () => {
     expect(parseArguments([refRepositoryShortHash])).toMatchObject({
@@ -454,6 +470,28 @@ test('packaged terminal helper forwards branch names to Electron as branches', a
       '--args',
       '--branch',
       'feature',
+      refRepositoryPath,
+    ]);
+  } finally {
+    await logger.cleanup();
+  }
+});
+
+test('packaged terminal helper forwards missing branch names to Electron as branches', async () => {
+  const logger = await createFakeOpenLogger();
+
+  try {
+    await execFileAsync(resolve('bin/codiff-app'), ['definitely-missing-branch'], {
+      cwd: refRepositoryPath,
+      env: logger.env,
+    });
+
+    expect(await logger.readArgs()).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      '--branch',
+      'definitely-missing-branch',
       refRepositoryPath,
     ]);
   } finally {

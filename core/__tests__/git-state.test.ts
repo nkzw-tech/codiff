@@ -906,6 +906,57 @@ test('readRepositoryState opens branch refs as current branch diffs against the 
   });
 });
 
+test('readRepositoryState reports missing branch refs clearly', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+
+    await expect(
+      readRepositoryState(repo, { ref: 'definitely-missing-branch', type: 'branch' }),
+    ).rejects.toThrow('Branch "definitely-missing-branch" does not exist in this repository.');
+  });
+});
+
+test('readRepositoryState suggests nearby branch refs', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+    await git(repo, ['branch', 'feature/login']);
+
+    await expect(
+      readRepositoryState(repo, { ref: 'feature/logn', type: 'branch' }),
+    ).rejects.toThrow(
+      'Branch "feature/logn" does not exist in this repository. Did you mean "feature/login"?',
+    );
+  });
+});
+
+test('readRepositoryState suggests master when main is missing', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+    await git(repo, ['checkout', '-B', 'master']);
+    await git(repo, ['branch', '-D', 'main']).catch(() => undefined);
+
+    await expect(readRepositoryState(repo, { ref: 'main', type: 'branch' })).rejects.toThrow(
+      'Branch "main" does not exist in this repository. Did you mean "master"?',
+    );
+  });
+});
+
+test('readRepositoryState suggests main when master is missing', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+    await git(repo, ['checkout', '-B', 'main']);
+    await git(repo, ['branch', '-D', 'master']).catch(() => undefined);
+
+    await expect(readRepositoryState(repo, { ref: 'master', type: 'branch' })).rejects.toThrow(
+      'Branch "master" does not exist in this repository. Did you mean "main"?',
+    );
+  });
+});
+
 test('readWorkingTreeState reports staged pure renames with old and new paths', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'old.txt', 'same contents\n');
