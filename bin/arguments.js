@@ -275,18 +275,6 @@ export const parseArguments = (args) => {
       continue;
     }
 
-    const canReadBaseMarker =
-      !pullRequestUrl &&
-      pullRequestNumber == null &&
-      !commitRef &&
-      !branchRef &&
-      !sourceCandidate &&
-      !rangeCandidate;
-    if (canReadBaseMarker && isBaseReviewMarker(arg)) {
-      reviewBase = true;
-      continue;
-    }
-
     if (!pullRequestUrl && pullRequestNumber == null) {
       const number = parsePullRequestNumberArgument(arg);
       if (number != null) {
@@ -333,13 +321,17 @@ export const parseArguments = (args) => {
         : null;
   }
   if (!range && !commitRef && !branchRef && sourceCandidate) {
-    const source = resolveSourceCandidate(repositoryPath, sourceCandidate);
-    if (source?.branchRef) {
-      branchRef = source.branchRef;
-    } else if (source?.commitRef) {
-      commitRef = source.commitRef;
-    } else if (requestedPath == null) {
-      requestedPath = sourceCandidate;
+    if (isBaseReviewMarker(sourceCandidate)) {
+      reviewBase = true;
+    } else {
+      const source = resolveSourceCandidate(repositoryPath, sourceCandidate);
+      if (source?.branchRef) {
+        branchRef = source.branchRef;
+      } else if (source?.commitRef) {
+        commitRef = source.commitRef;
+      } else if (requestedPath == null) {
+        requestedPath = sourceCandidate;
+      }
     }
   }
 
