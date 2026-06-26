@@ -64,24 +64,22 @@ show_help() {
   printf '  %-32s%s%s%s\n' "codiff --share HEAD" "$gray" "Share a walkthrough for a commit." "$reset"
 }
 
-run_with_bundled_node() {
-  runtime="${CODIFF_NODE_COMMAND:-}"
-  if [ -z "$runtime" ]; then
-    electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
-    if [ -n "$electron_exec" ]; then
-      runtime="$app_path/Contents/MacOS/$electron_exec"
-    fi
-  fi
-  if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
-    printf '%s\n' "codiff: could not find the bundled runtime." >&2
-    exit 1
-  fi
-  ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script_dir/codiff.js" "$@"
-}
-
 for arg in "$@"; do
   case "$arg" in
-    --share|[Bb][Aa][Ss][Ee]) run_with_bundled_node "$@" ;;
+    --share|[Bb][Aa][Ss][Ee])
+      runtime="${CODIFF_NODE_COMMAND:-}"
+      if [ -z "$runtime" ]; then
+        electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
+        if [ -n "$electron_exec" ]; then
+          runtime="$app_path/Contents/MacOS/$electron_exec"
+        fi
+      fi
+      if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
+        printf '%s\n' "codiff: could not find the bundled runtime." >&2
+        exit 1
+      fi
+      ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script_dir/codiff.js" "$@"
+      ;;
   esac
 done
 
