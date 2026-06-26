@@ -37,6 +37,32 @@ const writeFakeExecutable = async (directory: string, name: string, body: string
   return path;
 };
 
+const createTemporaryDirectory = async (prefix: string) => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), prefix)));
+  return {
+    directory,
+    [Symbol.asyncDispose]: () => rm(directory, { force: true, recursive: true }),
+  };
+};
+
+const overridePath = (value: string) => {
+  const previousPath = process.env.PATH;
+  process.env.PATH = value;
+  return {
+    [Symbol.dispose]: () => {
+      process.env.PATH = previousPath;
+    },
+  };
+};
+
+const createDisposableFakeCommandLogger = async (
+  prefix: string,
+  commandName: string,
+): Promise<Awaited<ReturnType<typeof createFakeCommandLogger>> & AsyncDisposable> => {
+  const logger = await createFakeCommandLogger(prefix, commandName);
+  return { ...logger, [Symbol.asyncDispose]: logger.cleanup };
+};
+
 const git = async (repo: string, args: ReadonlyArray<string>) => {
   await execFileAsync(
     'git',
@@ -372,90 +398,75 @@ test('parseArguments still lets --branch base review a literal base branch', asy
 });
 
 test('resolveBaseBranchRef reads the GitHub PR base branch through gh', async () => {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), 'codiff-base-github-')));
-  const repositoryPath = join(directory, 'repo');
-  const fakeBin = join(directory, 'bin');
-  const previousPath = process.env.PATH;
+  await using temporaryDirectory = await createTemporaryDirectory('codiff-base-github-');
+  const repositoryPath = join(temporaryDirectory.directory, 'repo');
+  const fakeBin = join(temporaryDirectory.directory, 'bin');
 
-  try {
-    await mkdir(repositoryPath);
-    await mkdir(fakeBin);
-    await git(repositoryPath, ['init']);
-    await git(repositoryPath, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
-    await writeFakeExecutable(fakeBin, 'gh', '#!/bin/sh\nprintf "feature-base\\n"\n');
-    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+  await mkdir(repositoryPath);
+  await mkdir(fakeBin);
+  await git(repositoryPath, ['init']);
+  await git(repositoryPath, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+  await writeFakeExecutable(fakeBin, 'gh', '#!/bin/sh\nprintf "feature-base\\n"\n');
+  using pathOverride = overridePath(`${fakeBin}:${process.env.PATH ?? ''}`);
+  void pathOverride;
 
-    expect(resolveBaseBranchRef(repositoryPath)).toEqual({
-      base: 'feature-base',
-      ref: 'origin/feature-base',
-      remote: 'origin',
-    });
-  } finally {
-    process.env.PATH = previousPath;
-    await rm(directory, { force: true, recursive: true });
-  }
+  expect(resolveBaseBranchRef(repositoryPath)).toEqual({
+    base: 'feature-base',
+    ref: 'origin/feature-base',
+    remote: 'origin',
+  });
 });
 
 test('resolveBaseBranchRef reads the GitLab MR target branch through glab', async () => {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), 'codiff-base-gitlab-')));
-  const repositoryPath = join(directory, 'repo');
-  const fakeBin = join(directory, 'bin');
-  const previousPath = process.env.PATH;
+  await using temporaryDirectory = await createTemporaryDirectory('codiff-base-gitlab-');
+  const repositoryPath = join(temporaryDirectory.directory, 'repo');
+  const fakeBin = join(temporaryDirectory.directory, 'bin');
 
-  try {
-    await mkdir(repositoryPath);
-    await mkdir(fakeBin);
-    await git(repositoryPath, ['init']);
-    await git(repositoryPath, [
-      'remote',
-      'add',
-      'origin',
-      'git@gitlab.example.com:group/project.git',
-    ]);
-    await writeFakeExecutable(fakeBin, 'glab', '#!/bin/sh\nprintf "release\\n"\n');
-    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+  await mkdir(repositoryPath);
+  await mkdir(fakeBin);
+  await git(repositoryPath, ['init']);
+  await git(repositoryPath, [
+    'remote',
+    'add',
+    'origin',
+    'git@gitlab.example.com:group/project.git',
+  ]);
+  await writeFakeExecutable(fakeBin, 'glab', '#!/bin/sh\nprintf "release\\n"\n');
+  using pathOverride = overridePath(`${fakeBin}:${process.env.PATH ?? ''}`);
+  void pathOverride;
 
-    expect(resolveBaseBranchRef(repositoryPath)).toEqual({
-      base: 'release',
-      ref: 'origin/release',
-      remote: 'origin',
-    });
-  } finally {
-    process.env.PATH = previousPath;
-    await rm(directory, { force: true, recursive: true });
-  }
+  expect(resolveBaseBranchRef(repositoryPath)).toEqual({
+    base: 'release',
+    ref: 'origin/release',
+    remote: 'origin',
+  });
 });
 
 test('resolveBaseBranchRef falls back to the remote default branch without a request', async () => {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), 'codiff-base-fallback-')));
-  const repositoryPath = join(directory, 'repo');
-  const fakeBin = join(directory, 'bin');
-  const previousPath = process.env.PATH;
+  await using temporaryDirectory = await createTemporaryDirectory('codiff-base-fallback-');
+  const repositoryPath = join(temporaryDirectory.directory, 'repo');
+  const fakeBin = join(temporaryDirectory.directory, 'bin');
 
-  try {
-    await mkdir(repositoryPath);
-    await mkdir(fakeBin);
-    await git(repositoryPath, ['init']);
-    await git(repositoryPath, ['config', 'user.email', 'codiff@example.com']);
-    await git(repositoryPath, ['config', 'user.name', 'Codiff Test']);
-    await git(repositoryPath, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
-    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'init']);
-    const { stdout } = await execFileAsync('git', ['-C', repositoryPath, 'rev-parse', 'HEAD'], {
-      encoding: 'utf8',
-    });
-    await git(repositoryPath, ['update-ref', 'refs/remotes/origin/main', stdout.trim()]);
-    await writeFakeExecutable(fakeBin, 'gh', '#!/bin/sh\nexit 1\n');
-    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+  await mkdir(repositoryPath);
+  await mkdir(fakeBin);
+  await git(repositoryPath, ['init']);
+  await git(repositoryPath, ['config', 'user.email', 'codiff@example.com']);
+  await git(repositoryPath, ['config', 'user.name', 'Codiff Test']);
+  await git(repositoryPath, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+  await git(repositoryPath, ['commit', '--allow-empty', '-m', 'init']);
+  const { stdout } = await execFileAsync('git', ['-C', repositoryPath, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+  });
+  await git(repositoryPath, ['update-ref', 'refs/remotes/origin/main', stdout.trim()]);
+  await writeFakeExecutable(fakeBin, 'gh', '#!/bin/sh\nexit 1\n');
+  using pathOverride = overridePath(`${fakeBin}:${process.env.PATH ?? ''}`);
+  void pathOverride;
 
-    expect(resolveBaseBranchRef(repositoryPath)).toEqual({
-      base: 'main',
-      ref: 'origin/main',
-      remote: 'origin',
-    });
-  } finally {
-    process.env.PATH = previousPath;
-    await rm(directory, { force: true, recursive: true });
-  }
+  expect(resolveBaseBranchRef(repositoryPath)).toEqual({
+    base: 'main',
+    ref: 'origin/main',
+    remote: 'origin',
+  });
 });
 
 test('parseArguments accepts nested GitLab merge request URLs', () => {
@@ -548,20 +559,16 @@ test('packaged terminal helper forwards GitLab MR markers to Electron', async ()
 });
 
 test('packaged terminal helper runs `base` through the bundled Node entry point', async () => {
-  const logger = await createFakeCommandLogger('codiff-packaged-base-', 'runtime');
+  await using logger = await createDisposableFakeCommandLogger('codiff-packaged-base-', 'runtime');
 
-  try {
-    await execFileAsync(resolve('bin/codiff-app'), ['base'], {
-      env: {
-        ...logger.env,
-        CODIFF_NODE_COMMAND: logger.commandPath,
-      },
-    });
+  await execFileAsync(resolve('bin/codiff-app'), ['base'], {
+    env: {
+      ...logger.env,
+      CODIFF_NODE_COMMAND: logger.commandPath,
+    },
+  });
 
-    expect(await logger.readArgs()).toEqual([resolve('bin/codiff.js'), 'base']);
-  } finally {
-    await logger.cleanup();
-  }
+  expect(await logger.readArgs()).toEqual([resolve('bin/codiff.js'), 'base']);
 });
 
 test('packaged terminal helper forwards HEAD^1 to Electron as a commit', async () => {
