@@ -33,6 +33,11 @@ const getCodiffCommand = () => {
     return { args: [], command: process.env.CODIFF_COMMAND };
   }
 
+  const packagedWindowsExe = resolve(codiffRoot, '../..', 'codiff.exe');
+  if (process.platform === 'win32' && existsSync(packagedWindowsExe)) {
+    return { args: [], command: packagedWindowsExe };
+  }
+
   const appCli = join(codiffRoot, 'bin/codiff-app');
   if (
     process.platform === 'darwin' &&

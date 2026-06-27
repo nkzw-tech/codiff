@@ -85,7 +85,10 @@ approval document.
 
 2. **Pick the change.** Default to the staged diff (`git diff --staged`). If the user named a
    target such as a commit, `HEAD`, a PR/MR, a range, or a path, use that. If nothing is
-   staged, fall back to the working tree (`git diff`) and say so.
+   staged, fall back to the working tree (`git diff`) and say so. For a PR that has already
+   merged or whose branch may be cleaned up, prefer an immutable commit range such as
+   `<head-sha>^..<head-sha>` over the PR number so Codiff resolves hunk ids against the intended
+   diff.
 
 3. **Author the JSON** per the guide and write it to a unique temporary file outside the
    repository, such as `$TMPDIR/codiff-walkthrough-<id>.json`.
