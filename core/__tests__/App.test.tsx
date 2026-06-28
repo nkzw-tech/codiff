@@ -1,3 +1,4 @@
+import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test } from 'vite-plus/test';
 import { getDiffSearchResult } from '../lib/diff-search.ts';
 import {
@@ -10,6 +11,7 @@ import {
   shouldLoadDiffSectionContents,
 } from '../lib/diff.ts';
 import { isDiffSearchShortcut } from '../lib/keyboard.ts';
+import { renderInlineMarkdown, sanitizeMarkdownImages } from '../lib/markdown.tsx';
 import {
   buildReviewCommentsMarkdown,
   shouldDiscardReviewCommentOnEscape,
@@ -399,6 +401,48 @@ test('markdown previews use new file contents for modified files', () => {
   const preview = getMarkdownPreviewContents(file, section, fileDiff);
 
   expect(preview?.contents).toBe(file.sections[0].newFile?.contents);
+});
+
+test('inline markdown shows markdown and GitHub HTML images', () => {
+  const html = renderToStaticMarkup(
+    <>
+      {renderInlineMarkdown(
+        [
+          '![diagram](https://example.com/diagram.gif)',
+          '',
+          '<img width="334" height="399" alt="image" src="https://github.com/user-attachments/assets/c29fc8d3-f2b1-41e3-8759-83a840c6aef2" />',
+          '',
+          '<img alt="local" src="file:///etc/passwd" />',
+        ].join('\n'),
+      )}
+    </>,
+  );
+
+  expect(html.match(/<img/g)).toHaveLength(2);
+  expect(html).toContain('src="https://example.com/diagram.gif"');
+  expect(html).toContain(
+    'src="https://github.com/user-attachments/assets/c29fc8d3-f2b1-41e3-8759-83a840c6aef2"',
+  );
+  expect(html).toContain('width="334"');
+  expect(html).toContain('height="399"');
+  expect(html).not.toContain('src="file:///etc/passwd"');
+});
+
+test('markdown image sanitization keeps only web image sources', () => {
+  const markdown = sanitizeMarkdownImages(
+    [
+      '![diagram](https://example.com/diagram.gif)',
+      '<img width="334" height="399" alt="image" src="https://github.com/user-attachments/assets/c29fc8d3-f2b1-41e3-8759-83a840c6aef2" />',
+      '![local](file:///etc/passwd)',
+      '<img alt="secret" src="file:///etc/passwd" />',
+    ].join('\n'),
+  );
+
+  expect(markdown).toContain('![diagram](https://example.com/diagram.gif)');
+  expect(markdown).toContain('src="https://github.com/user-attachments/assets/');
+  expect(markdown).toContain('local');
+  expect(markdown).toContain('secret');
+  expect(markdown).not.toContain('file:///etc/passwd');
 });
 
 test('diff search shortcut does not claim fullscreen shortcut', () => {

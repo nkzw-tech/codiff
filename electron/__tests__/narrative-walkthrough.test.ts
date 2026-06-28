@@ -297,6 +297,48 @@ test('omits blank custom walkthrough prompt guidance', () => {
   expect(prompt).not.toContain('Custom walkthrough instructions:');
 });
 
+test('prompts generated walkthroughs with PR descriptions as orientation only', () => {
+  const prompt = buildNarrativeWalkthroughPrompt({
+    branch: 'main',
+    files: files.slice(0, 1),
+    generatedAt: 1,
+    root: '/repo',
+    source: {
+      description: '## Intent\n\nKeep reviewers oriented.',
+      number: 42,
+      provider: 'github',
+      type: 'pull-request',
+      url: 'https://github.com/nkzw-tech/codiff/pull/42',
+    },
+  });
+
+  expect(prompt).toContain('"description": "## Intent\\n\\nKeep reviewers oriented."');
+  expect(prompt).toContain('author-written PR/MR intent and orientation');
+  expect(prompt).toContain('not proof of behavior');
+  expect(prompt).toContain(
+    'The changed files, patches, and hunk data remain the source of truth for what changed.',
+  );
+});
+
+test('truncates long PR descriptions in generated walkthrough prompts', () => {
+  const prompt = buildNarrativeWalkthroughPrompt({
+    branch: 'main',
+    files: files.slice(0, 1),
+    generatedAt: 1,
+    root: '/repo',
+    source: {
+      description: `${'A'.repeat(4100)}UNTRUNCATED_TAIL`,
+      number: 42,
+      provider: 'github',
+      type: 'pull-request',
+      url: 'https://github.com/nkzw-tech/codiff/pull/42',
+    },
+  });
+
+  expect(prompt).toContain('...[truncated]');
+  expect(prompt).not.toContain('UNTRUNCATED_TAIL');
+});
+
 test('repository digest exposes deterministic hunk ids and counts', () => {
   const prompt = buildNarrativeWalkthroughPrompt({
     branch: 'main',

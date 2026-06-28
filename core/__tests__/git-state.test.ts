@@ -48,6 +48,15 @@ type GitStateModule = {
     oldFile?: PullRequestFileContent,
     newFile?: PullRequestFileContent,
   ) => DiffSection;
+  createPullRequestSource: (
+    pullRequest: { number: number; owner: string; repo: string; url: string },
+    metadata: {
+      body?: string | null;
+      head?: { sha?: string };
+      title?: string;
+      user?: { avatar_url?: string; html_url?: string; login?: string };
+    },
+  ) => Extract<ReviewSource, { type: 'pull-request' }>;
   getPullRequestHeadImageSource: (
     pullRequest: { number: number; owner: string; repo: string; url: string },
     metadata: {
@@ -111,6 +120,7 @@ const {
   collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSection,
+  createPullRequestSource,
   getPullRequestHeadImageSource,
   listRepositoryHistory,
   normalizeGitHubPullRequestCommit,
@@ -216,6 +226,37 @@ const pullRequestFixture = {
   repo: 'codiff',
   url: 'https://github.com/nkzw-tech/codiff/pull/7',
 };
+
+test('createPullRequestSource normalizes non-empty GitHub PR descriptions', () => {
+  expect(
+    createPullRequestSource(pullRequestFixture, {
+      body: '\n## Intent\n\nShip the focused fix.\n',
+      head: { sha: 'head-sha' },
+      title: 'Focused fix',
+      user: {
+        avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
+        html_url: 'https://github.com/octocat',
+        login: 'octocat',
+      },
+    }),
+  ).toMatchObject({
+    author: {
+      avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
+      login: 'octocat',
+      url: 'https://github.com/octocat',
+    },
+    description: '## Intent\n\nShip the focused fix.',
+    provider: 'github',
+    title: 'Focused fix',
+    type: 'pull-request',
+  });
+});
+
+test('createPullRequestSource omits blank GitHub PR descriptions', () => {
+  expect(createPullRequestSource(pullRequestFixture, { body: ' \n\t ' })).not.toHaveProperty(
+    'description',
+  );
+});
 
 test('createPullRequestSection renders full contents so pull request diffs can expand context', () => {
   const section = createPullRequestSection(

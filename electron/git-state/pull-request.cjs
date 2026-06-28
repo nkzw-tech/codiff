@@ -28,7 +28,7 @@ const {
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{direction: 'fetch' | 'push'; name: string; owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
- * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string}} GitHubPullRequestMetadata
+ * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
  * @typedef {{author?: {avatar_url?: string}; commit?: {author?: {date?: string; email?: string; name?: string}; message?: string}; parents?: ReadonlyArray<{sha?: string}>; sha?: string}} GitHubCommit
  * @typedef {{[key: string]: any}} GitHubReviewComment
  * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
@@ -591,6 +591,16 @@ const normalizePullRequestFileStatus = (status) =>
 
 /** @param {PullRequestReference} pullRequest @param {GitHubPullRequestMetadata} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
 const createPullRequestSource = (pullRequest, metadata) => ({
+  ...(metadata.user?.login
+    ? {
+        author: {
+          avatarUrl: metadata.user.avatar_url,
+          login: metadata.user.login,
+          url: metadata.user.html_url,
+        },
+      }
+    : {}),
+  ...(metadata.body?.trim() ? { description: metadata.body.trim() } : {}),
   headSha: metadata.head?.sha,
   host: 'github.com',
   number: pullRequest.number,

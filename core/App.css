@@ -1520,6 +1520,48 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding: 5px 7px;
 }
 
+.codiff-header-toggle.codiff-header-toggle-static {
+  cursor: default;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.codiff-file-path.source-description-title {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.source-description-author {
+  align-items: center;
+  color: var(--text);
+  display: inline-flex;
+  font: 600 13px/1 var(--font-sans);
+  gap: 7px;
+  max-width: 280px;
+  min-width: 0;
+}
+
+.source-description-author .gravatar {
+  border-radius: 50%;
+  corner-shape: round;
+  font-size: 9px;
+  height: 22px;
+  width: 22px;
+}
+
+.source-description-author span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-description-markdown.codiff-markdown-preview:not(.editable) :is(h1, h2, h3, h4, h5, h6) {
+  border-bottom: none;
+  font-size: 15px;
+  margin: 14px 0 6px;
+  padding-bottom: 0;
+}
+
 .commit-details-trailers {
   display: grid;
   gap: 6px 10px;
@@ -1649,6 +1691,12 @@ html[data-codiff-platform='darwin'] .sidebar {
 .codiff-markdown-preview-editor .mdx-editor-content {
   border: 0;
   border-radius: 0;
+}
+
+.source-description-markdown-editor {
+  --mdx-editor-font-size: 13px;
+  --mdx-editor-line-height: 1.5;
+  --mdx-editor-padding: 0 24px 22px;
 }
 
 .codiff-markdown-preview-editor .mdx-editor-content a,

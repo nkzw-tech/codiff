@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { expect, test } from 'vite-plus/test';
+import { afterEach, beforeEach, expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
 const { createEditorOpener } = require('../main/editor.cjs') as {
@@ -22,6 +22,20 @@ const { createEditorOpener } = require('../main/editor.cjs') as {
     parseEditorCommand: (command: string) => Array<string>;
   };
 };
+
+const originalCodiffEditor = process.env.CODIFF_EDITOR;
+
+beforeEach(() => {
+  delete process.env.CODIFF_EDITOR;
+});
+
+afterEach(() => {
+  if (originalCodiffEditor === undefined) {
+    delete process.env.CODIFF_EDITOR;
+  } else {
+    process.env.CODIFF_EDITOR = originalCodiffEditor;
+  }
+});
 
 const createOpener = (
   options: { getEditorCommand?: () => string; platform?: NodeJS.Platform } = {},
@@ -96,23 +110,14 @@ test('appends the file path when the configured editor command only uses the rep
 });
 
 test('lets CODIFF_EDITOR override the configured editor command', () => {
-  const previous = process.env.CODIFF_EDITOR;
   process.env.CODIFF_EDITOR = 'zed --wait';
 
-  try {
-    const opener = createOpener({
-      getEditorCommand: () => 'cursor --goto "{file}"',
-    });
+  const opener = createOpener({
+    getEditorCommand: () => 'cursor --goto "{file}"',
+  });
 
-    expect(opener.getEditorCommands('/Users/test/project/file.ts')[0]).toEqual({
-      args: ['--wait', '/Users/test/project/file.ts'],
-      command: 'zed',
-    });
-  } finally {
-    if (previous === undefined) {
-      delete process.env.CODIFF_EDITOR;
-    } else {
-      process.env.CODIFF_EDITOR = previous;
-    }
-  }
+  expect(opener.getEditorCommands('/Users/test/project/file.ts')[0]).toEqual({
+    args: ['--wait', '/Users/test/project/file.ts'],
+    command: 'zed',
+  });
 });

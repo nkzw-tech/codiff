@@ -37,6 +37,12 @@ export type ChangedFile = {
   status: GitFileStatus;
 };
 
+export type ReviewAuthor = {
+  avatarUrl?: string;
+  login: string;
+  url?: string;
+};
+
 export type ReviewSource =
   | {
       type: 'working-tree';
@@ -68,6 +74,8 @@ export type ReviewSource =
       type: 'range';
     }
   | {
+      author?: ReviewAuthor;
+      description?: string;
       headSha?: string;
       host?: string;
       number?: number;
@@ -647,11 +655,7 @@ export type PullRequestReviewComment = {
 };
 
 export type PullRequestExistingReviewComment = PullRequestReviewComment & {
-  author: {
-    avatarUrl?: string;
-    login: string;
-    url?: string;
-  };
+  author: ReviewAuthor;
   id: string;
   isOutdated?: boolean;
   submittedAt?: string;

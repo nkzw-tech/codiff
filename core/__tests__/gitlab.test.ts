@@ -13,6 +13,7 @@ const {
   createGitLabPosition,
   createGlabApiArgs,
   createMergeRequestFetchRefspecs,
+  createMergeRequestSource,
   getGitLabReviewQuickAction,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
@@ -33,6 +34,10 @@ const {
     mergeRequest: Record<string, unknown>,
     metadata: Record<string, unknown>,
   ) => ReadonlyArray<string>;
+  createMergeRequestSource: (
+    mergeRequest: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+  ) => Record<string, unknown>;
   getGitLabReviewQuickAction: (event: 'APPROVE' | 'REQUEST_CHANGES') => string;
   normalizeGitLabReviewComment: (
     note: Record<string, unknown>,
@@ -106,6 +111,54 @@ describe('GitLab merge requests', () => {
       '+refs/merge-requests/23/head:refs/codiff/merge-requests/23/head',
       '+refs/heads/main:refs/codiff/merge-requests/23/base',
     ]);
+  });
+
+  test('normalizes non-empty GitLab MR descriptions', () => {
+    expect(
+      createMergeRequestSource(
+        {
+          host: 'gitlab.example.com',
+          number: 23,
+          projectPath: 'group/project',
+          url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+        },
+        {
+          author: {
+            avatar_url: 'https://gitlab.example.com/avatar.png',
+            username: 'mona',
+            web_url: 'https://gitlab.example.com/mona',
+          },
+          description: '\n### Intent\n\nKeep the branch reviewable.\n',
+          sha: 'head-sha',
+          title: 'Reviewable branch',
+          web_url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+        },
+      ),
+    ).toMatchObject({
+      author: {
+        avatarUrl: 'https://gitlab.example.com/avatar.png',
+        login: 'mona',
+        url: 'https://gitlab.example.com/mona',
+      },
+      description: '### Intent\n\nKeep the branch reviewable.',
+      provider: 'gitlab',
+      title: 'Reviewable branch',
+      type: 'pull-request',
+    });
+  });
+
+  test('omits blank GitLab MR descriptions', () => {
+    expect(
+      createMergeRequestSource(
+        {
+          host: 'gitlab.example.com',
+          number: 23,
+          projectPath: 'group/project',
+          url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+        },
+        { description: ' \n ' },
+      ),
+    ).not.toHaveProperty('description');
   });
 
   test('maps review outcomes to GitLab review quick actions', () => {

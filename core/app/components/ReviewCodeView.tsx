@@ -78,6 +78,7 @@ import {
 } from '../../lib/diff.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
+import { sanitizeMarkdownImages } from '../../lib/markdown.tsx';
 import {
   getCommentKey,
   getReviewCommentLineLabel,
@@ -97,6 +98,7 @@ import type {
   DiffSection,
   GitIdentity,
   PullRequestExistingReviewComment,
+  ReviewAuthor,
   ReviewSource,
 } from '../../types.ts';
 import {
@@ -440,6 +442,104 @@ function ReadOnlyMarkdown({
         variant={variant}
       />
     </Suspense>
+  );
+}
+
+const getPullRequestDescriptionLabel = (source: Extract<ReviewSource, { type: 'pull-request' }>) =>
+  source.provider === 'github'
+    ? 'PR description'
+    : source.provider === 'gitlab'
+      ? 'MR description'
+      : 'Description';
+
+// The PR/MR description is a file-style card matching commit details: the title lives in the
+// card header (where the file path goes) and the description is the collapsible body.
+function SourceDescriptionHeader({
+  author,
+  canCollapse,
+  isCollapsed,
+  label,
+  onToggleCollapsed,
+  title,
+}: {
+  author?: ReviewAuthor;
+  canCollapse: boolean;
+  isCollapsed: boolean;
+  label: string;
+  onToggleCollapsed: () => void;
+  title: string;
+}) {
+  const heading = (
+    <span className="codiff-file-heading">
+      <span className="codiff-file-path-row">
+        <span className={`codiff-file-path${title ? ' source-description-title' : ''}`}>
+          {title || label}
+        </span>
+      </span>
+    </span>
+  );
+
+  return (
+    <div
+      className={`codiff-file-header codiff-source-description-header${isCollapsed ? ' collapsed' : ''}`}
+    >
+      {canCollapse ? (
+        <button
+          aria-expanded={!isCollapsed}
+          aria-label={isCollapsed ? 'Expand description' : 'Collapse description'}
+          className="codiff-header-toggle"
+          onClick={onToggleCollapsed}
+          title={isCollapsed ? 'Expand' : 'Collapse'}
+          type="button"
+        >
+          <span className="codiff-chevron-box">
+            <CaretDown
+              aria-hidden
+              className={isCollapsed ? 'codiff-chevron collapsed' : 'codiff-chevron'}
+              size={16}
+              weight="bold"
+            />
+          </span>
+          {heading}
+        </button>
+      ) : (
+        <div className="codiff-header-toggle codiff-header-toggle-static">{heading}</div>
+      )}
+      {author ? (
+        <span className="source-description-author" title={author.login}>
+          <Gravatar fallback={author.login} size="medium" url={author.avatarUrl} />
+          <span>@{author.login}</span>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function SourceDescriptionBody({
+  description,
+  layoutKey,
+  onLayoutReady,
+}: {
+  description: string;
+  layoutKey: string;
+  onLayoutReady: (layoutKey: string) => void;
+}) {
+  useLayoutEffect(() => {
+    onLayoutReady(layoutKey);
+  }, [layoutKey, onLayoutReady]);
+  const sanitizedDescription = useMemo(() => sanitizeMarkdownImages(description), [description]);
+
+  return (
+    <div className="codiff-markdown-preview source-description-markdown">
+      <ReadOnlyMarkdown
+        ariaLabel="Preview source description"
+        className="codiff-markdown-preview-editor source-description-markdown-editor"
+        density="compact"
+        onHeightChange={() => onLayoutReady(layoutKey)}
+        value={sanitizedDescription}
+        variant="embedded"
+      />
+    </div>
   );
 }
 
@@ -1536,7 +1636,19 @@ export function ReviewCodeView({
   const selectedLinesRef = useRef<CodeViewLineSelection | null>(null);
   const commitRef = source.type === 'commit' ? source.ref : null;
   const commitDetailsItemId = commitRef ? `commit-details:${commitRef}` : null;
+  const sourceDescription =
+    source.type === 'pull-request' ? (source.description?.trim() ?? '') : '';
+  const sourceDescriptionHasBody = sourceDescription.length > 0;
+  const sourceAuthor = source.type === 'pull-request' ? source.author : undefined;
+  const sourceTitle = source.type === 'pull-request' ? (source.title?.trim() ?? '') : '';
+  const sourceDescriptionItemId =
+    source.type === 'pull-request' && (sourceDescription || sourceTitle)
+      ? `source-description:${source.provider ?? ''}:${source.url}`
+      : null;
+  const sourceDescriptionLabel =
+    source.type === 'pull-request' ? getPullRequestDescriptionLabel(source) : '';
   const [commitDetailsLayoutPass, setCommitDetailsLayoutPass] = useState(0);
+  const [sourceDescriptionLayoutPass, setSourceDescriptionLayoutPass] = useState(0);
   const [commitDetailsCollapseState, setCommitDetailsCollapseState] = useState<{
     collapsed: boolean;
     itemId: string | null;
@@ -1548,6 +1660,16 @@ export function ReviewCodeView({
     commitDetailsCollapseState.itemId === commitDetailsItemId
       ? commitDetailsCollapseState.collapsed
       : false;
+  const [collapsedSourceDescriptionItemId, setCollapsedSourceDescriptionItemId] = useState<
+    string | null
+  >(null);
+  const sourceDescriptionCollapsed =
+    !sourceDescriptionHasBody || collapsedSourceDescriptionItemId === sourceDescriptionItemId;
+  const toggleSourceDescriptionCollapsed = useCallback(() => {
+    setCollapsedSourceDescriptionItemId((current) =>
+      current === sourceDescriptionItemId ? null : sourceDescriptionItemId,
+    );
+  }, [sourceDescriptionItemId]);
   const stickyHeaderFrameRef = useRef<number | null>(null);
 
   const reviewBlocks = useMemo(() => blocks ?? createFileReviewBlocks(files), [blocks, files]);
@@ -1601,6 +1723,10 @@ export function ReviewCodeView({
     setCommitDetailsLayoutPass((current) => current + 1);
   }, []);
 
+  const markSourceDescriptionLayoutReady = useCallback((_layoutKey: string) => {
+    setSourceDescriptionLayoutPass((current) => current + 1);
+  }, []);
+
   useEffect(() => {
     if (!commitDetailsItemId || !commitMetadata) {
       measuredCommitDetailsLayoutKeyRef.current = null;
@@ -1623,6 +1749,41 @@ export function ReviewCodeView({
     const nextItemMetadata = new Map<string, CodeViewItemMetadata>();
     const nextSearchTargetsByBaseItemId = new Map<string, Array<RenderedSearchTarget>>();
     const fontLayoutKey = `line-height:${diffLineHeight}`;
+
+    if (sourceDescriptionItemId) {
+      const sourceDescriptionLayoutKey = `${sourceDescriptionItemId}:${sourceTitle}:${sourceDescription}:${sourceAuthor?.login ?? ''}:${sourceAuthor?.avatarUrl ?? ''}:${sourceDescriptionCollapsed ? 'collapsed' : 'open'}`;
+      nextItems.push({
+        annotations: [
+          {
+            lineNumber: 1,
+            metadata: {
+              header: (
+                <SourceDescriptionBody
+                  description={sourceDescription}
+                  layoutKey={sourceDescriptionLayoutKey}
+                  onLayoutReady={markSourceDescriptionLayoutReady}
+                />
+              ),
+              type: 'walkthrough-header',
+            },
+          } satisfies LineAnnotation<ReviewAnnotationMetadata>,
+        ].filter(() => sourceDescriptionHasBody && !sourceDescriptionCollapsed),
+        // The header (rendered via renderCustomHeader) carries the title; the body is the
+        // collapsible content. A title-only card has nothing to fold, so it stays collapsed.
+        collapsed: sourceDescriptionCollapsed,
+        file: {
+          cacheKey: sourceDescriptionLayoutKey,
+          contents: ' ',
+          lang: 'text',
+          name: 'source-description.md',
+        },
+        id: sourceDescriptionItemId,
+        type: 'file',
+        version: getItemVersion(
+          `${sourceDescriptionLayoutKey}:${fontLayoutKey}:${sourceDescriptionLayoutPass}`,
+        ),
+      });
+    }
 
     for (const block of reviewBlocks) {
       if (block.header) {
@@ -1895,12 +2056,20 @@ export function ReviewCodeView({
     imagePreviewLayoutPassBySection,
     isReadOnly,
     itemVersionByKey,
+    markSourceDescriptionLayoutReady,
     markdownPreviewLayoutPassBySection,
     markdownPreviewSections,
     onLoadImageContent,
     reviewBlocks,
     selectedPath,
     showWhitespace,
+    sourceDescription,
+    sourceAuthor,
+    sourceDescriptionCollapsed,
+    sourceDescriptionHasBody,
+    sourceDescriptionItemId,
+    sourceDescriptionLayoutPass,
+    sourceTitle,
     source.type,
     viewed,
     reviewIdentityByPath,
@@ -2075,6 +2244,10 @@ export function ReviewCodeView({
             'codiff-commit-details-item',
             context.item.id === commitDetailsItemId,
           );
+          node.classList.toggle(
+            'codiff-source-description-item',
+            context.item.id === sourceDescriptionItemId,
+          );
           node.classList.toggle('codiff-walkthrough-header-item', isWalkthroughHeaderItem);
           node.classList.toggle('codiff-selected-item', metadata?.isSelected === true);
           node.classList.toggle(
@@ -2117,6 +2290,7 @@ export function ReviewCodeView({
       loadingSectionIds,
       onCreateComment,
       onLoadSection,
+      sourceDescriptionItemId,
       wordWrap,
     ],
   );
@@ -2338,7 +2512,7 @@ export function ReviewCodeView({
     };
 
     for (const item of items) {
-      if (item.id === commitDetailsItemId) {
+      if (item.id === commitDetailsItemId || item.id === sourceDescriptionItemId) {
         continue;
       }
 
@@ -2479,6 +2653,7 @@ export function ReviewCodeView({
     hunkNavigation,
     itemMetadata,
     items,
+    sourceDescriptionItemId,
   ]);
 
   // Enter on a navigated hunk starts a review comment on its selection and moves
@@ -2624,6 +2799,19 @@ export function ReviewCodeView({
         ) : null;
       }
 
+      if (item.id === sourceDescriptionItemId) {
+        return (
+          <SourceDescriptionHeader
+            author={sourceAuthor}
+            canCollapse={sourceDescription.length > 0}
+            isCollapsed={sourceDescriptionCollapsed}
+            label={sourceDescriptionLabel}
+            onToggleCollapsed={toggleSourceDescriptionCollapsed}
+            title={sourceTitle}
+          />
+        );
+      }
+
       const meta = itemMetadata.get(item.id);
       return meta ? (
         <CodeViewHeader
@@ -2651,6 +2839,13 @@ export function ReviewCodeView({
       onOpenFile,
       onToggleCollapsed,
       onToggleViewed,
+      sourceAuthor,
+      sourceDescription,
+      sourceDescriptionCollapsed,
+      sourceDescriptionItemId,
+      sourceDescriptionLabel,
+      sourceTitle,
+      toggleSourceDescriptionCollapsed,
       toggleMarkdownPreview,
     ],
   );

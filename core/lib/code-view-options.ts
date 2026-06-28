@@ -106,9 +106,12 @@ export const codeViewUnsafeCSS = `
     display: none;
   }
 
-  /* Commit details render through CodeView's file layout; hide the file UI around the panel. */
-  :host(.codiff-commit-details-item) {
+  /* Commit details and PR/MR descriptions render through CodeView's file layout with no real code. */
+  :host(:is(.codiff-commit-details-item, .codiff-source-description-item)) {
     --diffs-scrollbar-gutter-override: 0px;
+  }
+
+  :host(.codiff-commit-details-item) {
     background: transparent;
     border: 0;
     box-shadow: none;
@@ -120,30 +123,26 @@ export const codeViewUnsafeCSS = `
     box-shadow: none;
   }
 
-  :host(.codiff-commit-details-item) [data-file] [data-code] {
+  :host(:is(.codiff-commit-details-item, .codiff-source-description-item)) [data-file] [data-code] {
     overflow: visible;
     padding-bottom: 0;
     padding-top: 0;
     scrollbar-width: none;
   }
 
-  :host(.codiff-commit-details-item) [data-file] [data-code]::-webkit-scrollbar {
+  :host(:is(.codiff-commit-details-item, .codiff-source-description-item)) [data-file] [data-code]::-webkit-scrollbar {
     display: none;
   }
 
-  :host(.codiff-commit-details-item) [data-file] [data-line],
-  :host(.codiff-commit-details-item) [data-file] [data-column-number],
-  :host(.codiff-commit-details-item) [data-file] [data-gutter-buffer],
-  :host(.codiff-commit-details-item) [data-file] [data-gutter-gap] {
+  :host(:is(.codiff-commit-details-item, .codiff-source-description-item)) [data-file] :is([data-line], [data-column-number], [data-gutter-buffer], [data-gutter-gap]) {
     display: none;
   }
 
-  :host(.codiff-commit-details-item) [data-file] [data-code],
-  :host(.codiff-commit-details-item) [data-file] [data-content] {
+  :host(:is(.codiff-commit-details-item, .codiff-source-description-item)) [data-file] :is([data-code], [data-content]) {
     display: block;
   }
 
-  :host(.codiff-commit-details-item) [data-file] [data-line-annotation] {
+  :host(:is(.codiff-commit-details-item, .codiff-source-description-item)) [data-file] [data-line-annotation] {
     background: transparent;
     grid-column: 1 / -1;
   }

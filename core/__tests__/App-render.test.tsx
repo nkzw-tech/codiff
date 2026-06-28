@@ -23,7 +23,7 @@ import type {
   ReviewSource,
 } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
-import { waitFor } from './helpers/react.tsx';
+import { renderReact, waitFor } from './helpers/react.tsx';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   ResizeObserver?: typeof ResizeObserver;
@@ -1056,6 +1056,307 @@ test('commit details render inline in the diff view', async () => {
       await act(async () => root?.unmount());
     }
     container.remove();
+  }
+});
+
+test('pull request descriptions render as provider-aware Markdown source context', async () => {
+  const changedFile = createChangedFile('src/app.ts');
+  const cases: ReadonlyArray<{
+    label: string;
+    source: Extract<ReviewSource, { type: 'pull-request' }>;
+  }> = [
+    {
+      label: 'PR description',
+      source: {
+        author: {
+          avatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
+          login: 'octocat',
+          url: 'https://github.com/octocat',
+        },
+        description: '## Intent\n\nShip **review** context.',
+        number: 12,
+        provider: 'github',
+        type: 'pull-request',
+        url: 'https://github.com/nkzw-tech/codiff/pull/12',
+      },
+    },
+    {
+      label: 'MR description',
+      source: {
+        description: '## Intent\n\nShip **review** context.',
+        number: 13,
+        provider: 'gitlab',
+        type: 'pull-request',
+        url: 'https://gitlab.example.com/group/project/-/merge_requests/13',
+      },
+    },
+    {
+      label: 'Description',
+      source: {
+        description: '## Intent\n\nShip **review** context.',
+        number: 14,
+        type: 'pull-request',
+        url: 'https://example.com/reviews/14',
+      },
+    },
+  ];
+
+  for (const { label, source } of cases) {
+    window.codiff = createCodiffMock({
+      getRepositoryState: vi.fn(async () => ({
+        ...repositoryState,
+        files: [changedFile],
+        source,
+      })),
+    });
+
+    const app = await renderReact(<App />);
+
+    try {
+      await waitFor(() => {
+        expect(app.container.querySelector('.codiff-source-description-header')).not.toBeNull();
+      });
+      const header = app.container.querySelector<HTMLElement>('.codiff-source-description-header');
+      const body = app.container.querySelector<HTMLElement>('.source-description-markdown');
+      expect(body?.textContent).toContain('Intent');
+      expect(body?.textContent).toContain('Ship review context.');
+      expect(header?.querySelector('.codiff-file-path')?.textContent).toBe(label);
+      expect(header?.querySelector('.source-description-title')).toBeNull();
+      if (source.author) {
+        expect(header?.querySelector('.source-description-author')?.textContent).toContain(
+          `@${source.author.login}`,
+        );
+      } else {
+        expect(header?.querySelector('.source-description-author')).toBeNull();
+      }
+      const toggle = header?.querySelector<HTMLButtonElement>('button.codiff-header-toggle');
+      expect(toggle).not.toBeNull();
+      expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+      expect(toggle?.type).toBe('button');
+    } finally {
+      await app.cleanup();
+    }
+  }
+});
+
+test('pull request description collapse button toggles the markdown body', async () => {
+  const source = {
+    description: '## Intent\n\nShip **review** context.',
+    number: 12,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/nkzw-tech/codiff/pull/12',
+  } satisfies ReviewSource;
+
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [createChangedFile('src/app.ts')],
+      source,
+    })),
+  });
+
+  const app = await renderReact(<App />);
+
+  try {
+    await waitFor(() => {
+      expect(app.container.querySelector('.source-description-markdown')).not.toBeNull();
+    });
+
+    let toggle = app.container.querySelector<HTMLButtonElement>('button.codiff-header-toggle');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(app.container.querySelector('.source-description-markdown')?.textContent).toContain(
+      'Ship review context.',
+    );
+
+    await act(async () => {
+      toggle?.click();
+    });
+
+    await waitFor(() => {
+      toggle = app.container.querySelector<HTMLButtonElement>('button.codiff-header-toggle');
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+      expect(app.container.querySelector('.source-description-markdown')).toBeNull();
+    });
+
+    await act(async () => {
+      toggle?.click();
+    });
+
+    await waitFor(() => {
+      expect(
+        app.container
+          .querySelector<HTMLButtonElement>('button.codiff-header-toggle')
+          ?.getAttribute('aria-expanded'),
+      ).toBe('true');
+      expect(app.container.querySelector('.source-description-markdown')?.textContent).toContain(
+        'Ship review context.',
+      );
+    });
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test('missing pull request descriptions do not render placeholder source context', async () => {
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [createChangedFile('src/app.ts')],
+      source: {
+        description: '   ',
+        number: 12,
+        provider: 'github',
+        type: 'pull-request',
+        url: 'https://github.com/nkzw-tech/codiff/pull/12',
+      } satisfies ReviewSource,
+    })),
+  });
+
+  const app = await renderReact(<App />);
+
+  try {
+    await waitFor(() => {
+      expect(app.container.querySelector('.codiff-file-header')).not.toBeNull();
+    });
+    expect(app.container.querySelector('.codiff-source-description-header')).toBeNull();
+    expect(app.container.textContent).not.toContain('PR description');
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test('title-only pull request source context renders as a collapsed static header', async () => {
+  const cases: ReadonlyArray<Extract<ReviewSource, { type: 'pull-request' }>> = [
+    {
+      description: '   ',
+      number: 12,
+      provider: 'github',
+      title: 'Title without a body',
+      type: 'pull-request',
+      url: 'https://github.com/nkzw-tech/codiff/pull/12',
+    },
+    {
+      number: 13,
+      provider: 'gitlab',
+      title: 'Merge request title only',
+      type: 'pull-request',
+      url: 'https://gitlab.example.com/group/project/-/merge_requests/13',
+    },
+  ];
+
+  for (const source of cases) {
+    window.codiff = createCodiffMock({
+      getRepositoryState: vi.fn(async () => ({
+        ...repositoryState,
+        files: [createChangedFile('src/app.ts')],
+        source,
+      })),
+    });
+
+    const app = await renderReact(<App />);
+
+    try {
+      await waitFor(() => {
+        expect(app.container.querySelector('.codiff-source-description-header')).not.toBeNull();
+      });
+      const header = app.container.querySelector<HTMLElement>('.codiff-source-description-header');
+      expect(header?.classList.contains('collapsed')).toBe(true);
+      expect(header?.querySelector('.source-description-title')?.textContent).toBe(source.title);
+      expect(header?.querySelector('.codiff-header-toggle-static')).not.toBeNull();
+      expect(header?.querySelector('button.codiff-header-toggle')).toBeNull();
+      expect(header?.querySelector('.codiff-chevron-box')).toBeNull();
+      expect(app.container.querySelector('.source-description-markdown')).toBeNull();
+    } finally {
+      await app.cleanup();
+    }
+  }
+});
+
+test('pull request descriptions stay visible in walkthrough mode', async () => {
+  const changedFile = createChangedFile('src/app.ts');
+  const source = {
+    description: '## Summary\n\nKeep the PR context visible.',
+    number: 12,
+    provider: 'github',
+    title: 'Keep context visible in walkthrough',
+    type: 'pull-request',
+    url: 'https://github.com/nkzw-tech/codiff/pull/12',
+  } satisfies ReviewSource;
+  const narrativeWalkthrough = {
+    agent: 'codex',
+    chapters: [
+      {
+        blurb: 'Review the implementation.',
+        icon: 'gear',
+        id: 'impl',
+        stops: [
+          {
+            added: 1,
+            deleted: 1,
+            hunkIds: ['src/app.ts:unstaged:h1'],
+            hunks: [
+              {
+                added: 1,
+                anchor: { display: 'src/app.ts', sectionId: 'src/app.ts:unstaged', side: 'both' },
+                deleted: 1,
+                id: 'src/app.ts:unstaged:h1',
+                path: 'src/app.ts',
+                status: 'modified',
+              },
+            ],
+            id: 's1',
+            importance: 'critical',
+            prose: 'Review this file.',
+            title: 'Implementation path',
+          },
+        ],
+        title: 'Implementation',
+      },
+    ],
+    focus: 'Focus.',
+    generatedAt: '2026-06-07T00:00:00.000Z',
+    kind: 'narrative',
+    repo: { branch: 'main', root: '/repo' },
+    source,
+    support: [],
+    title: 'Narrative',
+    version: 4,
+  } satisfies NarrativeWalkthrough;
+
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      source,
+      walkthrough: true,
+      walkthroughFile: '/tmp/walkthrough.json',
+    })),
+    getNarrativeWalkthrough: vi.fn(async () => ({
+      status: 'ready' as const,
+      walkthrough: narrativeWalkthrough,
+    })),
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [changedFile],
+      source,
+    })),
+  });
+
+  const app = await renderReact(<App />);
+
+  try {
+    await waitFor(() => {
+      expect(app.container.querySelector('.codiff-source-description-header')).not.toBeNull();
+      expect(app.container.querySelector('.wt-stop-block')).not.toBeNull();
+    });
+
+    const header = app.container.querySelector<HTMLElement>('.codiff-source-description-header');
+    expect(header?.textContent).toContain('Keep context visible in walkthrough');
+    expect(app.container.querySelector('.source-description-markdown')?.textContent).toContain(
+      'Keep the PR context visible.',
+    );
+  } finally {
+    await app.cleanup();
   }
 });
 

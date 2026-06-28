@@ -10,9 +10,9 @@ import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
 } from '../lib/review-identity.ts';
-import type { ChangedFile } from '../types.ts';
+import type { ChangedFile, ReviewSource } from '../types.ts';
 import { createChangedFile, createChangedFileWithPatch } from './helpers/fixtures.ts';
-import { setInputValue, waitFor } from './helpers/react.tsx';
+import { renderReact, setInputValue, waitFor } from './helpers/react.tsx';
 import {
   codeViewMock,
   commitMetadata,
@@ -79,6 +79,7 @@ vi.mock('@nkzw/mdx-editor', async () => {
           className={props.contentClassName ?? props.className}
           onBlur={props.onBlur}
           onChange={(event) => props.onChange?.(event.currentTarget.value)}
+          onDoubleClick={() => onHeightChange?.(200)}
           onFocus={props.onFocus}
           onKeyDown={(event) =>
             props.onKeyDown?.(event as unknown as React.KeyboardEvent<HTMLDivElement>)
@@ -98,6 +99,10 @@ beforeEach(() => {
   markdownEditorMock.flush.mockClear();
   markdownEditorMock.flush.mockResolvedValue(true);
 });
+
+const getCodeViewItemVersion = (id: string) =>
+  (codeViewMock.lastItems.find((item) => item.id === id) as { version?: number } | undefined)
+    ?.version;
 
 const createLoadedMarkdownFile = (contents: string, fingerprint: string) => {
   const file = createChangedFileWithPatch(
@@ -838,6 +843,104 @@ test('hunk navigation skips stale requests when the review view remounts', async
       await act(async () => root?.unmount());
     }
     container.remove();
+  }
+});
+
+test('hunk navigation skips pull request description source context', async () => {
+  const source = {
+    description: '## Intent\n\nOrient the reviewer before the diff.',
+    number: 12,
+    provider: 'github',
+    title: 'Review source context',
+    type: 'pull-request',
+    url: 'https://github.com/nkzw-tech/codiff/pull/12',
+  } satisfies ReviewSource;
+  const file = createChangedFile('src/first.ts');
+  const app = await renderReact(
+    <ReviewCodeViewHarness
+      diffStyle="unified"
+      files={[file]}
+      hunkNavigation={{ direction: 1, request: 1 }}
+      source={source}
+    />,
+  );
+
+  try {
+    codeViewMock.scrollTo.mockClear();
+
+    await app.rerender(
+      <ReviewCodeViewHarness
+        diffStyle="unified"
+        files={[file]}
+        hunkNavigation={{ direction: 1, request: 2 }}
+        source={source}
+      />,
+    );
+
+    const target = codeViewMock.scrollTo.mock.lastCall?.[0];
+    expect(target?.id).toBe('diff:src/first.ts:unstaged');
+    expect(target).toEqual(
+      expect.objectContaining({
+        lineNumber: 1,
+        side: 'additions',
+        type: 'line',
+      }),
+    );
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test('read-only markdown previews trigger CodeView layout remeasurement after height change', async () => {
+  const markdownFile = createLoadedMarkdownFile(
+    '![diagram](https://example.com/diagram.png)\n',
+    'markdown-image-layout',
+  );
+  const markdownSectionId = 'plan.md:unstaged';
+  const source = {
+    description: '![flow](https://example.com/flow.png)',
+    number: 12,
+    provider: 'github',
+    title: 'Images in source context',
+    type: 'pull-request',
+    url: 'https://github.com/nkzw-tech/codiff/pull/12',
+  } satisfies ReviewSource;
+  const app = await renderReact(
+    <ReviewCodeViewHarness
+      files={[markdownFile]}
+      initialMarkdownPreviewSectionIds={new Set([markdownSectionId])}
+      isReadOnly
+      source={source}
+    />,
+  );
+
+  try {
+    const markdownItemId = `diff:${markdownSectionId}`;
+    const sourceItemId = 'source-description:github:https://github.com/nkzw-tech/codiff/pull/12';
+    const initialMarkdownVersion = getCodeViewItemVersion(markdownItemId);
+    const initialSourceVersion = getCodeViewItemVersion(sourceItemId);
+
+    const markdownPreview = app.container.querySelector<HTMLElement>(
+      '[aria-label="Preview plan.md"]',
+    );
+    const sourceDescription = app.container.querySelector<HTMLElement>(
+      '[aria-label="Preview source description"]',
+    );
+
+    expect(markdownPreview).not.toBeNull();
+    expect(sourceDescription).not.toBeNull();
+
+    await act(async () => {
+      markdownPreview?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      sourceDescription?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+
+    await waitFor(() => {
+      expect(getCodeViewItemVersion(markdownItemId)).not.toBe(initialMarkdownVersion);
+      expect(getCodeViewItemVersion(sourceItemId)).not.toBe(initialSourceVersion);
+    });
+  } finally {
+    await app.cleanup();
   }
 });
 
