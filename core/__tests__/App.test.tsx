@@ -468,6 +468,31 @@ test('rendered markdown marks blocks intersecting added source lines', () => {
   expect(html).toContain('<div class="codiff-markdown-code-added codiff-markdown-added"><pre>');
 });
 
+test('rendered markdown shows markdown and GitHub HTML images', () => {
+  const html = renderToStaticMarkup(
+    <>
+      {renderMarkdown(
+        [
+          '![diagram](https://example.com/diagram.gif)',
+          '',
+          '<img width="334" height="399" alt="image" src="https://github.com/user-attachments/assets/c29fc8d3-f2b1-41e3-8759-83a840c6aef2" />',
+          '',
+          '<img alt="local" src="file:///etc/passwd" />',
+        ].join('\n'),
+      )}
+    </>,
+  );
+
+  expect(html.match(/<img/g)).toHaveLength(2);
+  expect(html).toContain('src="https://example.com/diagram.gif"');
+  expect(html).toContain(
+    'src="https://github.com/user-attachments/assets/c29fc8d3-f2b1-41e3-8759-83a840c6aef2"',
+  );
+  expect(html).toContain('width="334"');
+  expect(html).toContain('height="399"');
+  expect(html).not.toContain('src="file:///etc/passwd"');
+});
+
 test('diff search shortcut does not claim fullscreen shortcut', () => {
   const baseEvent = {
     altKey: false,

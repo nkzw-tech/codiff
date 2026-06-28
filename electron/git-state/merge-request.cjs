@@ -246,6 +246,30 @@ const readMergeRequestComments = async (repoRoot, mergeRequest) => {
     .filter(Boolean);
 };
 
+/** @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest @param {any} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
+const createMergeRequestSource = (mergeRequest, metadata) => ({
+  ...(metadata.author?.username || metadata.author?.name
+    ? {
+        author: {
+          avatarUrl: metadata.author.avatar_url,
+          login: metadata.author.username || metadata.author.name,
+          url: metadata.author.web_url,
+        },
+      }
+    : {}),
+  ...(typeof metadata.description === 'string' && metadata.description.trim()
+    ? { description: metadata.description.trim() }
+    : {}),
+  headSha: metadata.sha,
+  host: mergeRequest.host,
+  number: mergeRequest.number,
+  projectPath: mergeRequest.projectPath,
+  provider: 'gitlab',
+  title: metadata.title,
+  type: 'pull-request',
+  url: metadata.web_url || mergeRequest.url,
+});
+
 /** @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest @param {any} metadata */
 const createMergeRequestFetchRefspecs = (mergeRequest, metadata) => [
   `+refs/merge-requests/${mergeRequest.number}/head:refs/codiff/merge-requests/${mergeRequest.number}/head`,
@@ -345,16 +369,7 @@ const readMergeRequestState = async (launchPath, source) => {
     launchPath,
     reviewComments,
     root: repoRoot,
-    source: {
-      headSha: metadata.sha,
-      host: mergeRequest.host,
-      number: mergeRequest.number,
-      projectPath: mergeRequest.projectPath,
-      provider: 'gitlab',
-      title: metadata.title,
-      type: 'pull-request',
-      url: metadata.web_url || mergeRequest.url,
-    },
+    source: createMergeRequestSource(mergeRequest, metadata),
   };
 };
 
@@ -593,6 +608,7 @@ module.exports = {
   createGlabApiArgs,
   createGitLabPosition,
   createGitLabDiffLineMap,
+  createMergeRequestSource,
   createMergeRequestFetchRefspecs,
   getGitLabReviewQuickAction,
   listMergeRequestHistory,

@@ -61,6 +61,8 @@ choose.
 - Avoid generic filler, broad assurance language, and meta-explanatory labels.
 - Do not invent bugs, risks, tests, or validation. Describe what the diff and conversation
   actually support.
+- If a PR/MR description is available, use it only as author intent and orientation. Do not copy it
+  into the walkthrough JSON; the diff and hunk ids remain the source of truth.
 
 ## hunkId format
 

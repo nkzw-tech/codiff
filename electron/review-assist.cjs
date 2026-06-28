@@ -4,6 +4,7 @@ const { parseJSONMessage, truncate } = require('./agent-shared.cjs');
 
 const MAX_PATCH_CHARS = 24_000;
 const MAX_OTHER_FILES = 40;
+const MAX_SOURCE_DESCRIPTION_CHARS = 4_000;
 
 /**
  * @typedef {import('../core/types.ts').ChangedFile} ChangedFile
@@ -70,7 +71,13 @@ const buildReviewAssistantInput = (state, request) => {
       .slice(0, MAX_OTHER_FILES)
       .map(getFileDigest),
     root: state.root,
-    source: state.source,
+    source:
+      state.source.type === 'pull-request' && typeof state.source.description === 'string'
+        ? {
+            ...state.source,
+            description: truncate(state.source.description, MAX_SOURCE_DESCRIPTION_CHARS),
+          }
+        : state.source,
     walkthroughNote: request?.walkthroughNote ?? null,
   };
 };
@@ -86,6 +93,7 @@ A human reviewer wrote a rough inline review note and clicked Ask ${agentLabel}.
 Reply as a concise assistant in the same inline conversation.
 Use only the repository change digest below; do not inspect the repository or run shell commands.
 If there is walkthrough context, use it as review orientation, not as proof.
+If source.description is present, treat it as author-written PR/MR intent and orientation, not proof of behavior. The changed files and patch excerpt remain the source of truth for what changed.
 You are the code-review expert in this conversation, so explain the change directly.
 
 Your job:
