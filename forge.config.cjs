@@ -107,28 +107,38 @@ module.exports = {
     },
     executableName: 'codiff',
     ...(iconPath ? { icon: iconPath } : {}),
-    ignore: [
-      /^\/\.DS_Store$/,
-      /^\/\.cache(?:$|\/)/,
-      /^\/\.enum_manifest\.json$/,
-      /^\/\.env(?:$|[.])/,
-      /^\/\.git(?:$|\/)/,
-      /^\/\.gitignore$/,
-      /^\/\.github(?:$|\/)/,
-      /^\/\.vite-hooks(?:$|\/)/,
-      /^\/\.vscode(?:$|\/)/,
-      /^\/README\.md$/,
-      /^\/coverage(?:$|\/)/,
-      /^\/docs(?:$|\/)/,
-      /^\/forge\.config\.cjs$/,
-      /^\/index\.html$/,
-      /^\/out(?:$|\/)/,
-      /^\/pnpm-workspace\.yaml$/,
-      /^\/public(?:$|\/)/,
-      /^\/core(?:$|\/)/,
-      /^\/tsconfig/,
-      /^\/vite\.config\./,
-    ],
+    ignore: (filePath) => {
+      if (
+        filePath === '/core' ||
+        filePath === '/core/lib' ||
+        /^\/core\/lib\/.*\.cjs$/.test(filePath)
+      ) {
+        return false;
+      }
+
+      return [
+        /^\/\.DS_Store$/,
+        /^\/\.cache(?:$|\/)/,
+        /^\/\.enum_manifest\.json$/,
+        /^\/\.env(?:$|[.])/,
+        /^\/\.git(?:$|\/)/,
+        /^\/\.gitignore$/,
+        /^\/\.github(?:$|\/)/,
+        /^\/\.vite-hooks(?:$|\/)/,
+        /^\/\.vscode(?:$|\/)/,
+        /^\/README\.md$/,
+        /^\/coverage(?:$|\/)/,
+        /^\/docs(?:$|\/)/,
+        /^\/forge\.config\.cjs$/,
+        /^\/index\.html$/,
+        /^\/out(?:$|\/)/,
+        /^\/pnpm-workspace\.yaml$/,
+        /^\/public(?:$|\/)/,
+        /^\/core(?:$|\/)/,
+        /^\/tsconfig/,
+        /^\/vite\.config\./,
+      ].some((pattern) => pattern.test(filePath));
+    },
     name: 'Codiff',
     ...(osxNotarize ? { osxNotarize } : {}),
     osxSign: {
