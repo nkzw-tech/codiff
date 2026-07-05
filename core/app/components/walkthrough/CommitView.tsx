@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   changeTypeLabel,
   type CommitFile,
@@ -283,6 +283,19 @@ export function CommitView({
     setResult(next);
     setStatus('idle');
   };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void submit();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // https://github.com/react/react/issues/35499
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submit]);
 
   return (
     <div className="wt-commit">
