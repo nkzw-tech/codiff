@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   changeTypeLabel,
   type CommitFile,
@@ -18,6 +18,8 @@ export type CommitHandler = (request: WalkthroughCommitRequest) => Promise<Walkt
 export type CommitMessageHandler = (
   request: WalkthroughCommitMessageRequest,
 ) => Promise<WalkthroughCommitMessageResult>;
+/** Subscribe to live commit output (pre-commit hook logs); returns unsubscribe. */
+export type CommitOutputSubscriber = (callback: (chunk: string) => void) => () => void;
 
 export type CommitDraftState = {
   commitBody: string;
@@ -213,12 +215,14 @@ export function CommitView({
   draft,
   model,
   onCommit,
+  onCommitOutput,
   onUpdateMessage,
 }: {
   branch: string | null;
   draft: CommitDraftState;
   model: CommitModel;
   onCommit: CommitHandler;
+  onCommitOutput?: CommitOutputSubscriber;
   onUpdateMessage: CommitMessageHandler;
 }) {
   const selected = draft.commitSelected;
@@ -232,6 +236,7 @@ export function CommitView({
 
   const [status, setStatus] = useState<'idle' | 'submitting'>('idle');
   const [result, setResult] = useState<WalkthroughCommitResult | null>(null);
+  const [output, setOutput] = useState('');
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [bodyFlash, setBodyFlash] = useState(false);
@@ -275,14 +280,32 @@ export function CommitView({
     }
     setStatus('submitting');
     setResult(null);
-    const next = await onCommit({
-      body: draft.commitBody.trim(),
-      paths: selectedFiles.map((file) => file.path),
-      subject: subject.trim(),
-    });
-    setResult(next);
-    setStatus('idle');
+    setOutput('');
+    const unsubscribe = onCommitOutput?.((chunk) => setOutput((current) => current + chunk));
+    try {
+      const next = await onCommit({
+        body: draft.commitBody.trim(),
+        paths: selectedFiles.map((file) => file.path),
+        subject: subject.trim(),
+      });
+      setResult(next);
+    } finally {
+      unsubscribe?.();
+      setStatus('idle');
+    }
   };
+
+  const failed = result?.status === 'failed';
+  const showLog = output.length > 0 && (status === 'submitting' || failed);
+  const logRef = useRef<HTMLPreElement | null>(null);
+
+  // Keep the latest hook output in view as it streams in.
+  useEffect(() => {
+    const log = logRef.current;
+    if (log) {
+      log.scrollTop = log.scrollHeight;
+    }
+  }, [output]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -293,8 +316,6 @@ export function CommitView({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-    // https://github.com/react/react/issues/35499
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submit]);
 
   return (
@@ -331,7 +352,19 @@ export function CommitView({
             </div>
           ) : null}
           {result?.status === 'failed' ? (
-            <div className="wt-commit-error">{result.reason}</div>
+            <div className="wt-commit-error">
+              {output.trim() ? 'The commit failed — see the output below.' : result.reason}
+            </div>
+          ) : null}
+          {showLog ? (
+            <div className={`wt-commit-log${failed ? ' failed' : ''}`}>
+              <span className="wt-commit-log-title">
+                {failed ? 'Commit output' : 'Committing…'}
+              </span>
+              <pre className="wt-commit-log-body" ref={logRef}>
+                {output}
+              </pre>
+            </div>
           ) : null}
           <SubjectInput onChange={draft.setCommitSubject} value={draft.commitSubject} />
           <MessageDraft
