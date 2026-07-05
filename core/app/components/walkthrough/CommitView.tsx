@@ -11,7 +11,7 @@ import type {
   WalkthroughCommitRequest,
   WalkthroughCommitResult,
 } from '../../../types.ts';
-import { ArrowsClockwise, Check, GitBranch } from './icons.tsx';
+import { ArrowsClockwise, Check, GitBranch, X } from './icons.tsx';
 import { ChapterIcon, WalkthroughLineCount } from './parts.tsx';
 
 export type CommitHandler = (request: WalkthroughCommitRequest) => Promise<WalkthroughCommitResult>;
@@ -295,6 +295,11 @@ export function CommitView({
     }
   };
 
+  const dismissFailure = () => {
+    setResult((current) => (current?.status === 'failed' ? null : current));
+    setOutput('');
+  };
+
   const failed = result?.status === 'failed';
   const showLog = output.length > 0 && (status === 'submitting' || failed);
   const logRef = useRef<HTMLPreElement | null>(null);
@@ -316,6 +321,8 @@ export function CommitView({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+    // https://github.com/react/react/issues/35499
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submit]);
 
   return (
@@ -351,21 +358,6 @@ export function CommitView({
               </span>
             </div>
           ) : null}
-          {result?.status === 'failed' ? (
-            <div className="wt-commit-error">
-              {output.trim() ? 'The commit failed — see the output below.' : result.reason}
-            </div>
-          ) : null}
-          {showLog ? (
-            <div className={`wt-commit-log${failed ? ' failed' : ''}`}>
-              <span className="wt-commit-log-title">
-                {failed ? 'Commit output' : 'Committing…'}
-              </span>
-              <pre className="wt-commit-log-body" ref={logRef}>
-                {output}
-              </pre>
-            </div>
-          ) : null}
           <SubjectInput onChange={draft.setCommitSubject} value={draft.commitSubject} />
           <MessageDraft
             canUpdate={canUpdate}
@@ -396,24 +388,49 @@ export function CommitView({
         </div>
       </div>
       <div className="wt-commit-foot">
-        <span className="wt-commit-foot-actions">
-          <button
-            className="codiff-open-button wt-commit-btn"
-            disabled={!canCommit}
-            onClick={submit}
-            type="button"
-          >
-            <GitBranch size={16} />
-            <span>
-              {committed ? 'Committed' : status === 'submitting' ? 'Committing…' : 'Commit'}
-            </span>
-            {!allSelected && !committed ? (
-              <span className="lc">
-                {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}
+        {showLog ? (
+          <div className={`wt-commit-log${failed ? ' failed' : ''}`}>
+            <span className="wt-commit-log-title">{failed ? 'Commit output' : 'Committing…'}</span>
+            <pre className="wt-commit-log-body" ref={logRef}>
+              {output}
+            </pre>
+          </div>
+        ) : null}
+        <div className="wt-commit-foot-row">
+          {result?.status === 'failed' ? (
+            <span className="wt-commit-foot-error">
+              <span className="wt-commit-error-text">
+                {output.trim() ? 'The commit failed — see the output above.' : result.reason}
               </span>
-            ) : null}
-          </button>
-        </span>
+              <button
+                aria-label="Dismiss commit error"
+                className="wt-commit-dismiss"
+                onClick={dismissFailure}
+                type="button"
+              >
+                <X size={14} weight="bold" />
+              </button>
+            </span>
+          ) : null}
+          <span className="wt-commit-foot-actions">
+            <button
+              className="codiff-open-button wt-commit-btn"
+              disabled={!canCommit}
+              onClick={submit}
+              type="button"
+            >
+              <GitBranch size={16} />
+              <span>
+                {committed ? 'Committed' : status === 'submitting' ? 'Committing…' : 'Commit'}
+              </span>
+              {!allSelected && !committed ? (
+                <span className="lc">
+                  {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}
+                </span>
+              ) : null}
+            </button>
+          </span>
+        </div>
       </div>
     </div>
   );
