@@ -950,27 +950,39 @@
   border-radius: 10px;
 }
 
-.wt-commit-error {
-  background: color-mix(in srgb, var(--diff-deletion) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--diff-deletion) 32%, transparent);
-  border-radius: 32px;
-  color: var(--diff-deletion);
-  corner-shape: squircle;
-  font: 13px/1.5 var(--font-sans);
-  margin-bottom: 16px;
-  padding: 12px 16px;
+/* ---- Commit output & failure (in the footer) ----------------------------- */
+.wt-commit-error-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
 }
-
+.wt-commit-dismiss {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: 12px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  margin: 1px -4px 0 0;
+  opacity: 0.7;
+  padding: 2px;
+}
+.wt-commit-dismiss:hover {
+  opacity: 1;
+}
 .wt-commit-log {
   background: var(--code-bg);
   border: 1px solid var(--file-border);
-  border-radius: 16px;
+  border-radius: 12px;
   corner-shape: squircle;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 12px 16px;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 10px 14px;
 }
 .wt-commit-log.failed {
   border-color: color-mix(in srgb, var(--diff-deletion) 32%, transparent);
@@ -984,7 +996,7 @@
 .wt-commit-log-body {
   font: 12px/1.55 var(--font-mono);
   margin: 0;
-  max-height: 320px;
+  max-height: 240px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1217,15 +1229,29 @@
 
 /* ---- Footer / action bar ------------------------------------------------- */
 .wt-commit-foot {
-  align-items: center;
   background: var(--app-bg);
   border-top: 1px solid var(--file-border);
   display: flex;
   flex: none;
+  flex-direction: column;
+  padding: 3px 12px;
+}
+.wt-commit-foot-row {
+  align-items: center;
+  display: flex;
   gap: 12px;
   justify-content: flex-end;
-  min-height: 38px;
-  padding: 3px 12px;
+  min-height: 32px;
+  padding: 3px 0;
+}
+.wt-commit-foot-error {
+  align-items: center;
+  color: var(--diff-deletion);
+  display: flex;
+  flex: 1;
+  font: 13px/1.4 var(--font-sans);
+  gap: 8px;
+  min-width: 0;
 }
 .wt-commit-foot-actions {
   display: flex;
