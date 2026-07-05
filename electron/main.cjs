@@ -1618,7 +1618,11 @@ ipcMain.handle('codiff:askReviewAssistant', async (event, request) => {
 
 ipcMain.handle('codiff:createWalkthroughCommit', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const result = await createWalkthroughCommit(repositoryPath, request);
+  const result = await createWalkthroughCommit(repositoryPath, request, (chunk) => {
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('codiff:walkthroughCommitOutput', chunk);
+    }
+  });
   if (result.status === 'committed') {
     await resetRepositoryWatcher(event.sender.id, repositoryPath);
   }

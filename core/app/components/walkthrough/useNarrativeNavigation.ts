@@ -72,6 +72,13 @@ export const useNarrativeNavigation = (
       return;
     }
     seededFor.current = walkthrough;
+    if (mode === 'commit') {
+      // A refresh can land while the reviewer is on the commit screen — e.g.
+      // a failed commit attempt stages files, which regenerates the
+      // walkthrough. Don't yank them back to the first stop (that would also
+      // discard the visible commit error).
+      return;
+    }
     setMode('stop');
     setIndex(0);
     setScrollTarget({ index: 0, nonce: 0 });
@@ -81,7 +88,7 @@ export const useNarrativeNavigation = (
     setSupportVisited(false);
     const stopId = firstStopId(walkthrough);
     setVisited(new Set(stopId ? [stopId] : []));
-  }, [walkthrough]);
+  }, [mode, walkthrough]);
 
   useEffect(() => {
     const pathSet = new Set(commitPaths);

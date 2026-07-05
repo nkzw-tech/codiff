@@ -81,6 +81,12 @@ const codiff = {
     ipcRenderer.on('codiff:planCloseRequested', listener);
     return () => ipcRenderer.removeListener('codiff:planCloseRequested', listener);
   },
+  onWalkthroughCommitOutput: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {string} chunk */
+    const listener = (_event, chunk) => callback(String(chunk));
+    ipcRenderer.on('codiff:walkthroughCommitOutput', listener);
+    return () => ipcRenderer.removeListener('codiff:walkthroughCommitOutput', listener);
+  },
   onWindowFullScreenChanged: (callback) => {
     /** @param {Electron.IpcRendererEvent} _event @param {boolean} isFullScreen */
     const listener = (_event, isFullScreen) => callback(Boolean(isFullScreen));

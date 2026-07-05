@@ -182,6 +182,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   onPlanCloseRequested: vi.fn(() => () => {}),
   onRefreshRequest: vi.fn(() => () => {}),
   onRepositoryChanged: vi.fn(() => () => {}),
+  onWalkthroughCommitOutput: vi.fn(() => () => {}),
   onWindowFullScreenChanged: vi.fn(() => () => {}),
   openConfigFile: vi.fn(async () => {}),
   openFile: vi.fn(async () => {}),
