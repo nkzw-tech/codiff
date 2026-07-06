@@ -1,4 +1,7 @@
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
@@ -15,6 +18,9 @@ const {
   createMergeRequestFetchRefspecs,
   createMergeRequestSource,
   getGitLabReviewQuickAction,
+  getGlabCommand,
+  GLAB_NOT_FOUND_CODE,
+  GLAB_NOT_FOUND_MESSAGE,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
   parseGlabJsonPages,
@@ -39,6 +45,9 @@ const {
     metadata: Record<string, unknown>,
   ) => Record<string, unknown>;
   getGitLabReviewQuickAction: (event: 'APPROVE' | 'REQUEST_CHANGES') => string;
+  getGlabCommand: () => string;
+  GLAB_NOT_FOUND_CODE: string;
+  GLAB_NOT_FOUND_MESSAGE: string;
   normalizeGitLabReviewComment: (
     note: Record<string, unknown>,
     url: string,
@@ -70,6 +79,55 @@ describe('GitLab merge requests', () => {
       '-',
       'projects/1/merge_requests/2/discussions',
     ]);
+  });
+
+  test('resolves glab from the CODIFF_GLAB_PATH override', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codiff-glab-'));
+    const fakeGlabPath = join(directory, 'glab');
+    const previousGlabPath = process.env.CODIFF_GLAB_PATH;
+
+    try {
+      await writeFile(fakeGlabPath, '#!/usr/bin/env node\n');
+      await chmod(fakeGlabPath, 0o755);
+      process.env.CODIFF_GLAB_PATH = fakeGlabPath;
+
+      expect(getGlabCommand()).toBe(fakeGlabPath);
+    } finally {
+      if (previousGlabPath == null) {
+        delete process.env.CODIFF_GLAB_PATH;
+      } else {
+        process.env.CODIFF_GLAB_PATH = previousGlabPath;
+      }
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  test('rejects invalid explicit glab CLI overrides', () => {
+    const previousGlabPath = process.env.CODIFF_GLAB_PATH;
+    process.env.CODIFF_GLAB_PATH = '/tmp/codiff-missing-glab';
+
+    try {
+      expect(() => getGlabCommand()).toThrow('CODIFF_GLAB_PATH');
+      try {
+        getGlabCommand();
+      } catch (error) {
+        expect(error).toMatchObject({ code: GLAB_NOT_FOUND_CODE });
+      }
+    } finally {
+      if (previousGlabPath == null) {
+        delete process.env.CODIFF_GLAB_PATH;
+      } else {
+        process.env.CODIFF_GLAB_PATH = previousGlabPath;
+      }
+    }
+  });
+
+  test('explains where Codiff searches for glab when it is missing', () => {
+    expect(GLAB_NOT_FOUND_MESSAGE).toContain('PATH');
+    expect(GLAB_NOT_FOUND_MESSAGE).toContain('~/.local/bin/glab');
+    expect(GLAB_NOT_FOUND_MESSAGE).toContain('/opt/homebrew/bin/glab');
+    expect(GLAB_NOT_FOUND_MESSAGE).toContain('/usr/local/bin/glab');
+    expect(GLAB_NOT_FOUND_MESSAGE).toContain('CODIFF_GLAB_PATH=/absolute/path/to/glab');
   });
 
   test('parses arbitrary hosts and nested project paths', () => {

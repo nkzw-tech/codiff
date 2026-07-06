@@ -2,6 +2,9 @@
 
 const { createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { homedir } = require('node:os');
+const { join } = require('node:path');
+const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
 const {
   getFingerprint,
   git,
@@ -22,6 +25,49 @@ const { parseReviewUrl, readReviewRemotes } = require('../review-source.cjs');
  * @typedef {import('../../core/types.ts').PullRequestReviewComment} PullRequestReviewComment
  * @typedef {import('../../core/types.ts').ReviewSource} ReviewSource
  */
+
+const GLAB_NOT_FOUND_CODE = 'GLAB_NOT_FOUND';
+const GLAB_NOT_FOUND_MESSAGE =
+  'GitLab support requires glab. Install glab, authenticate it, and verify `glab --version` works in Terminal. Codiff searches PATH, ~/.local/bin/glab, /opt/homebrew/bin/glab, and /usr/local/bin/glab. If glab is installed somewhere else, launch Codiff with `CODIFF_GLAB_PATH=/absolute/path/to/glab codiff -w`.';
+
+/** @param {string} [detail] */
+const createGlabNotFoundError = (detail) =>
+  Object.assign(
+    new Error(detail ? `${GLAB_NOT_FOUND_MESSAGE} ${detail}` : GLAB_NOT_FOUND_MESSAGE),
+    {
+      code: GLAB_NOT_FOUND_CODE,
+    },
+  );
+
+const getGlabCommand = () => {
+  const glabPath = process.env.CODIFF_GLAB_PATH?.trim();
+  if (glabPath) {
+    if (isExecutableFile(glabPath)) {
+      return glabPath;
+    }
+
+    throw createGlabNotFoundError(
+      `CODIFF_GLAB_PATH is set to ${JSON.stringify(glabPath)}, but that file is not executable.`,
+    );
+  }
+
+  const pathCommand = findExecutableOnPath('glab');
+  if (pathCommand) {
+    return pathCommand;
+  }
+
+  for (const path of [
+    join(homedir(), '.local/bin/glab'),
+    '/opt/homebrew/bin/glab',
+    '/usr/local/bin/glab',
+  ]) {
+    if (isExecutableFile(path)) {
+      return path;
+    }
+  }
+
+  throw createGlabNotFoundError();
+};
 
 /** @param {string} value */
 const parseGitLabMergeRequestUrl = (value) => {
@@ -56,7 +102,15 @@ const createGlabApiArgs = (mergeRequest, args, input) => [
  */
 const glabApi = (repoRoot, mergeRequest, args, input) =>
   new Promise((resolve, reject) => {
-    const child = spawn('glab', createGlabApiArgs(mergeRequest, args, input), {
+    let command;
+    try {
+      command = getGlabCommand();
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    const child = spawn(command, createGlabApiArgs(mergeRequest, args, input), {
       cwd: repoRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -65,11 +119,7 @@ const glabApi = (repoRoot, mergeRequest, args, input) =>
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
     child.on('error', (error) => {
-      reject(
-        error.code === 'ENOENT'
-          ? new Error('GitLab support requires glab. Install glab and authenticate it first.')
-          : error,
-      );
+      reject(error.code === 'ENOENT' ? createGlabNotFoundError() : error);
     });
     child.on('close', (code) => {
       if (code === 0) {
@@ -605,12 +655,15 @@ const readMergeRequestImageContent = async (launchPath, source, requestedPath) =
 };
 
 module.exports = {
+  GLAB_NOT_FOUND_CODE,
+  GLAB_NOT_FOUND_MESSAGE,
   createGlabApiArgs,
   createGitLabPosition,
   createGitLabDiffLineMap,
   createMergeRequestSource,
   createMergeRequestFetchRefspecs,
   getGitLabReviewQuickAction,
+  getGlabCommand,
   listMergeRequestHistory,
   normalizeGitLabReviewComment,
   parseGlabJsonPages,
