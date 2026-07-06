@@ -499,7 +499,14 @@ export function CommitView({
           <div className={`wt-commit-log${failed ? ' failed' : ''}`}>
             <div className="wt-commit-log-head">
               <span className="wt-commit-log-title">
-                {failed ? 'Commit output' : 'Committing…'}
+                {failed ? (
+                  'Commit output'
+                ) : (
+                  <>
+                    <span className="wt-commit-log-pulse" />
+                    Committing…
+                  </>
+                )}
               </span>
               {failed ? (
                 <button

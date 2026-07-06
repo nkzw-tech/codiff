@@ -540,8 +540,8 @@ export function NarrativeWalkthroughView({
   navigation,
   onActiveReviewTargetChange,
   onCommit,
-  onRegenerateWalkthrough,
   onCommitOutput,
+  onRegenerateWalkthrough,
   onShareWalkthrough,
   onUpdateCommitMessage,
   regenerateDisabled,
@@ -556,8 +556,8 @@ export function NarrativeWalkthroughView({
   navigation: NarrativeNavigation;
   onActiveReviewTargetChange: (target: WalkthroughReviewTarget | null) => void;
   onCommit: CommitHandler;
-  onRegenerateWalkthrough?: () => void;
   onCommitOutput?: CommitOutputSubscriber;
+  onRegenerateWalkthrough?: () => void;
   onShareWalkthrough?: () => void;
   onUpdateCommitMessage: CommitMessageHandler;
   regenerateDisabled?: boolean;
