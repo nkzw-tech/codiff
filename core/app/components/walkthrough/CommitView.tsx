@@ -1,4 +1,4 @@
-import { Terminal } from '@xterm/xterm';
+import { init as initGhostty, Terminal } from 'ghostty-web';
 import { useEffect, useRef, useState } from 'react';
 import {
   changeTypeLabel,
@@ -14,7 +14,6 @@ import type {
 } from '../../../types.ts';
 import { ArrowsClockwise, Check, GitBranch, X } from './icons.tsx';
 import { ChapterIcon, WalkthroughLineCount } from './parts.tsx';
-import '@xterm/xterm/css/xterm.css';
 
 export type CommitHandler = (request: WalkthroughCommitRequest) => Promise<WalkthroughCommitResult>;
 export type CommitMessageHandler = (
@@ -40,14 +39,49 @@ type CheckState = 'on' | 'off' | 'partial';
 const TERMINAL_COLS = 80;
 const TERMINAL_ROWS = 12;
 
+// xterm.js's default ANSI palette (Tango); ghostty-web's own defaults differ.
+const ANSI_THEME = {
+  black: '#2e3436',
+  blue: '#3465a4',
+  brightBlack: '#555753',
+  brightBlue: '#729fcf',
+  brightCyan: '#34e2e2',
+  brightGreen: '#8ae234',
+  brightMagenta: '#ad7fa8',
+  brightRed: '#ef2929',
+  brightWhite: '#eeeeec',
+  brightYellow: '#fce94f',
+  cyan: '#06989a',
+  green: '#4e9a06',
+  magenta: '#75507b',
+  red: '#cc0000',
+  white: '#d3d7cf',
+  yellow: '#c4a000',
+};
+
 /**
- * Read-only xterm.js terminal that replays the streamed commit output, so ANSI
- * colors and cursor movement from pre-commit hooks render as they would in a
- * real shell.
+ * ghostty-web clears rows by painting the theme background, so a transparent
+ * background leaves stale glyphs behind; give it the color actually painted
+ * behind the terminal instead.
+ */
+function resolveBackdrop(element: HTMLElement): string {
+  for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+    const color = getComputedStyle(node).backgroundColor;
+    if (color !== 'transparent' && !color.startsWith('rgba')) {
+      return color;
+    }
+  }
+  return '#00000000';
+}
+
+/**
+ * Read-only ghostty-web terminal that replays the streamed commit output, so
+ * ANSI colors and cursor movement from pre-commit hooks render as they would
+ * in a real shell.
  */
 function CommitLogTerminal({ output }: { output: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const terminalRef = useRef<Terminal | null>(null);
+  const [terminal, setTerminal] = useState<Terminal | null>(null);
   const writtenRef = useRef(0);
 
   useEffect(() => {
@@ -55,34 +89,47 @@ function CommitLogTerminal({ output }: { output: string }) {
     if (!container) {
       return;
     }
-    const style = getComputedStyle(container);
-    const terminal = new Terminal({
-      allowTransparency: true,
-      cols: TERMINAL_COLS,
-      // Hook runners pipe their children, so some lines arrive with bare `\n`
-      // and would stairstep without this.
-      convertEol: true,
-      disableStdin: true,
-      fontFamily: style.fontFamily,
-      fontSize: 12,
-      rows: TERMINAL_ROWS,
-      theme: {
-        background: '#00000000',
-        cursor: '#00000000',
-        foreground: style.color,
-      },
+    let disposed = false;
+    let instance: Terminal | null = null;
+    // ghostty-web loads its WASM module asynchronously; output streamed in the
+    // meantime is replayed by the write effect once the terminal exists.
+    void initGhostty().then(() => {
+      if (disposed) {
+        return;
+      }
+      const style = getComputedStyle(container);
+      instance = new Terminal({
+        cols: TERMINAL_COLS,
+        // Hook runners pipe their children, so some lines arrive with bare `\n`
+        // and would stairstep without this.
+        convertEol: true,
+        disableStdin: true,
+        fontFamily: style.fontFamily,
+        fontSize: 12,
+        rows: TERMINAL_ROWS,
+        theme: {
+          ...ANSI_THEME,
+          background: resolveBackdrop(container),
+          cursor: '#00000000',
+          foreground: style.color,
+        },
+      });
+      instance.open(container);
+      // open() marks the container contenteditable and focusable for input;
+      // this terminal is read-only and the attributes draw a caret on click.
+      container.removeAttribute('contenteditable');
+      container.removeAttribute('tabindex');
+      writtenRef.current = 0;
+      setTerminal(instance);
     });
-    terminal.open(container);
-    terminalRef.current = terminal;
-    writtenRef.current = 0;
     return () => {
-      terminal.dispose();
-      terminalRef.current = null;
+      disposed = true;
+      instance?.dispose();
+      setTerminal(null);
     };
   }, []);
 
   useEffect(() => {
-    const terminal = terminalRef.current;
     if (!terminal) {
       return;
     }
@@ -94,7 +141,7 @@ function CommitLogTerminal({ output }: { output: string }) {
       terminal.write(output.slice(writtenRef.current));
       writtenRef.current = output.length;
     }
-  }, [output]);
+  }, [terminal, output]);
 
   return <div className="wt-commit-log-term" ref={containerRef} />;
 }
