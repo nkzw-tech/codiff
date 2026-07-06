@@ -180,6 +180,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   onFindInDiffs: vi.fn(() => () => {}),
   onMarkdownDocumentChanged: vi.fn(() => () => {}),
   onPlanCloseRequested: vi.fn(() => () => {}),
+  onRefreshRequest: vi.fn(() => () => {}),
   onRepositoryChanged: vi.fn(() => () => {}),
   onWindowFullScreenChanged: vi.fn(() => () => {}),
   openConfigFile: vi.fn(async () => {}),
@@ -2471,6 +2472,115 @@ test('repository changes show the update banner without refreshing the working t
 
     expect(container.querySelector('.repository-change-banner.visible')).not.toBeNull();
     expect(getRepositoryState).toHaveBeenCalledTimes(1);
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('clicking the change banner refreshes the repository in place', async () => {
+  const initialFile = {
+    fingerprint: 'src/app.ts:1',
+    path: 'src/app.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/app.ts:unstaged',
+        kind: 'unstaged',
+        patch: 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+  const addedFile = {
+    fingerprint: 'src/added.ts:1',
+    path: 'src/added.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/added.ts:unstaged',
+        kind: 'unstaged',
+        patch: 'diff --git a/src/added.ts b/src/added.ts\n@@ -0,0 +1 @@\n+created\n',
+      },
+    ],
+    status: 'added',
+  } satisfies ChangedFile;
+
+  let onRepositoryChanged: ((change: { root: string }) => void) | null = null;
+  let stateRequests = 0;
+  const getRepositoryState = vi.fn<Window['codiff']['getRepositoryState']>(async () => {
+    stateRequests += 1;
+    return stateRequests === 1
+      ? { ...repositoryState, files: [initialFile] }
+      : {
+          ...repositoryState,
+          files: [
+            addedFile,
+            {
+              ...initialFile,
+              fingerprint: 'src/app.ts:2',
+              sections: [
+                {
+                  binary: false,
+                  id: 'src/app.ts:unstaged',
+                  kind: 'unstaged',
+                  patch: 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+newer\n',
+                },
+              ],
+            },
+          ],
+        };
+  });
+
+  window.codiff = createCodiffMock({
+    getRepositoryState,
+    onRepositoryChanged: vi.fn((callback) => {
+      onRepositoryChanged = callback;
+      return () => {
+        onRepositoryChanged = null;
+      };
+    }),
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.loading')).toBeNull();
+      expect(onRepositoryChanged).not.toBeNull();
+    });
+    expect(container.textContent).not.toContain('added.ts');
+
+    await act(async () => {
+      onRepositoryChanged?.({ root: '/repo' });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const refreshButton = container.querySelector<HTMLButtonElement>('.repository-change-reload');
+    expect(refreshButton).not.toBeNull();
+    await act(async () => {
+      refreshButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // New file appears without a window reload, and the banner clears.
+    expect(getRepositoryState).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('added.ts');
+    expect(container.querySelector('.repository-change-banner.visible')).toBeNull();
+
+    // The changed file must not appear twice (old + new version).
+    const appOccurrences = container.textContent?.split('app.ts').length ?? 1;
+    expect(appOccurrences - 1).toBeLessThanOrEqual(2);
+    expect(container.textContent).not.toContain('-old\n+new\n');
   } finally {
     if (root) {
       await act(async () => root?.unmount());

@@ -77,6 +77,7 @@ declare global {
         ) => void,
       ) => () => void;
       onPlanCloseRequested: (callback: () => void) => () => void;
+      onRefreshRequest: (callback: () => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
       onWindowFullScreenChanged: (callback: (isFullScreen: boolean) => void) => () => void;
       openConfigFile: () => Promise<void>;

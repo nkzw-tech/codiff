@@ -351,6 +351,7 @@ export function Sidebar({
         />
       ) : mode === 'walkthrough' && narrativeWalkthrough ? (
         <NarrativeSidebar
+          changedPaths={reloadDeltaPaths}
           files={commitFiles}
           navigation={narrativeNavigation}
           onShareWalkthrough={onShareWalkthrough}

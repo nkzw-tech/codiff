@@ -5,8 +5,10 @@
 import { beforeEach, expect, test } from 'vite-plus/test';
 import {
   consumeReloadSelection,
+  getChangedPaths,
   getReloadDeltaPaths,
   getReloadHistorySource,
+  getReloadMainMode,
   getReloadSelectionPath,
   writeReloadSelection,
 } from '../lib/reload-selection.ts';
@@ -88,6 +90,22 @@ test('reload selection preserves history source for the current source', () => {
   ).toBeNull();
 });
 
+test('reload selection preserves the commit view for the current source', () => {
+  const changedFile = file('src/app.ts');
+  const currentState = state([changedFile]);
+
+  writeReloadSelection(currentState, changedFile.path, null, 'commit');
+
+  const selection = consumeReloadSelection();
+  expect(getReloadMainMode(selection, currentState)).toBe('commit');
+  expect(
+    getReloadMainMode(selection, {
+      ...currentState,
+      source: { ref: 'abc1234', type: 'commit' },
+    }),
+  ).toBeNull();
+});
+
 test('reload delta paths include only current files changed since reload', () => {
   const unchangedFile = file('src/unchanged.ts', 'same');
   const changedFile = file('src/changed.ts', 'before');
@@ -103,6 +121,27 @@ test('reload delta paths include only current files changed since reload', () =>
       state([unchangedFile, file('src/changed.ts', 'after'), file('src/new.ts', 'new', 'added')]),
     ),
   ).toEqual(new Set(['src/changed.ts', 'src/new.ts']));
+});
+
+test('changed paths cover added, modified, and status-changed files', () => {
+  const unchangedFile = file('src/unchanged.ts', 'same');
+  const previous = [
+    unchangedFile,
+    file('src/changed.ts', 'before'),
+    file('src/status.ts', 'same-status', 'modified'),
+    file('src/removed.ts', 'old'),
+  ];
+  const next = [
+    unchangedFile,
+    file('src/changed.ts', 'after'),
+    file('src/status.ts', 'same-status', 'added'),
+    file('src/new.ts', 'new', 'added'),
+  ];
+
+  expect(getChangedPaths(previous, next)).toEqual(
+    new Set(['src/changed.ts', 'src/status.ts', 'src/new.ts']),
+  );
+  expect(getChangedPaths(previous, previous)).toEqual(new Set());
 });
 
 test('reload selection is ignored when it belongs to another repository source', () => {

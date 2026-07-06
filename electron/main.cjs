@@ -895,7 +895,18 @@ const buildApplicationMenu = () =>
           },
           { type: 'separator' },
           { role: 'togglefullscreen' },
-          { role: 'reload' },
+          {
+            // In-place refresh handled by the renderer; the window itself is
+            // only reloaded via Force Reload below.
+            accelerator: 'CommandOrControl+R',
+            click: (_menuItem, browserWindow) => {
+              if (browserWindow instanceof BrowserWindow) {
+                browserWindow.webContents.send('codiff:refreshRequest');
+              }
+            },
+            label: 'Refresh Changes',
+          },
+          { role: 'forceReload' },
           {
             accelerator: 'CommandOrControl+Alt+J',
             click: (_menuItem, browserWindow) => {

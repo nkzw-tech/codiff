@@ -21,6 +21,7 @@ import { CommitView, type CommitHandler, type CommitMessageHandler } from './Com
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowsClockwise,
   CaretLeft,
   CaretRight,
   Check,
@@ -139,6 +140,36 @@ function SupportHeader({ current }: { current: boolean }) {
   );
 }
 
+function ChangedHeader({
+  current,
+  onRegenerate,
+  regenerateDisabled = false,
+}: {
+  current: boolean;
+  onRegenerate?: () => void;
+  regenerateDisabled?: boolean;
+}) {
+  return (
+    <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
+      <div className="wt-stage-title-row">
+        <h2 className="wt-stage-title">Changed</h2>
+        {onRegenerate ? (
+          <button
+            className="wt-regenerate"
+            disabled={regenerateDisabled}
+            onClick={onRegenerate}
+            type="button"
+          >
+            <ArrowsClockwise size={13} weight="bold" />
+            {regenerateDisabled ? 'Regenerating…' : 'Regenerate walkthrough'}
+          </button>
+        ) : null}
+      </div>
+      <Narration prose="These changes arrived after the walkthrough was generated and are not part of its narrative yet." />
+    </div>
+  );
+}
+
 const createWalkthroughBlocks = (
   files: ReadonlyArray<ChangedFile>,
   walkthroughView: WalkthroughView,
@@ -201,6 +232,9 @@ const createSupportBlocks = (
   selected: boolean,
   walkthroughView: WalkthroughView,
   showWhitespace: boolean,
+  changedPaths?: ReadonlySet<string>,
+  onRegenerateWalkthrough?: () => void,
+  regenerateDisabled?: boolean,
 ): ReadonlyArray<ReviewDiffBlock> => {
   const blocks: Array<ReviewDiffBlock> = [];
   for (const group of walkthroughView.supportByReason) {
@@ -221,7 +255,14 @@ const createSupportBlocks = (
     }
   }
 
-  for (const file of getUncoveredWalkthroughFiles(files, walkthroughView, showWhitespace)) {
+  const uncoveredFiles = getUncoveredWalkthroughFiles(files, walkthroughView, showWhitespace);
+  // Changes that arrived after the walkthrough was generated (e.g. via an
+  // in-place refresh) get their own "Changed" section; other uncovered hunks
+  // stay under "Support" as before.
+  const changedFiles = uncoveredFiles.filter((file) => changedPaths?.has(file.path));
+  const uncoveredSupportFiles = uncoveredFiles.filter((file) => !changedPaths?.has(file.path));
+
+  for (const file of uncoveredSupportFiles) {
     const blockId = `walkthrough:uncovered:${file.path}`;
     const isFirstBlock = blocks.length === 0;
     blocks.push({
@@ -237,6 +278,29 @@ const createSupportBlocks = (
       },
     });
   }
+
+  changedFiles.forEach((file, fileIndex) => {
+    const blockId = `walkthrough:changed:${file.path}`;
+    blocks.push({
+      file,
+      header:
+        fileIndex === 0 ? (
+          <ChangedHeader
+            current={selected}
+            onRegenerate={onRegenerateWalkthrough}
+            regenerateDisabled={regenerateDisabled}
+          />
+        ) : null,
+      headerSelected: selected,
+      id: blockId,
+      itemIdPrefix: blockId,
+      note: 'Changed after the walkthrough was generated.',
+      reviewIdentity: {
+        fingerprint: file.fingerprint,
+        key: blockId,
+      },
+    });
+  });
 
   return blocks;
 };
@@ -466,24 +530,30 @@ function Arc({
 
 export function NarrativeWalkthroughView({
   allowCommit = true,
+  changedPaths,
   files,
   navigation,
   onActiveReviewTargetChange,
   onCommit,
+  onRegenerateWalkthrough,
   onShareWalkthrough,
   onUpdateCommitMessage,
+  regenerateDisabled,
   renderDiffBlocks,
   shareWalkthroughDisabled,
   showWhitespace,
   walkthrough,
 }: {
   allowCommit?: boolean;
+  changedPaths?: ReadonlySet<string>;
   files: ReadonlyArray<ChangedFile>;
   navigation: NarrativeNavigation;
   onActiveReviewTargetChange: (target: WalkthroughReviewTarget | null) => void;
   onCommit: CommitHandler;
+  onRegenerateWalkthrough?: () => void;
   onShareWalkthrough?: () => void;
   onUpdateCommitMessage: CommitMessageHandler;
+  regenerateDisabled?: boolean;
   renderDiffBlocks: RenderWalkthroughDiffBlocks;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
@@ -501,9 +571,25 @@ export function NarrativeWalkthroughView({
   const supportBlocks = useMemo(
     () =>
       walkthroughView
-        ? createSupportBlocks(files, navigation.mode === 'support', walkthroughView, showWhitespace)
+        ? createSupportBlocks(
+            files,
+            navigation.mode === 'support',
+            walkthroughView,
+            showWhitespace,
+            changedPaths,
+            onRegenerateWalkthrough,
+            regenerateDisabled,
+          )
         : [],
-    [files, navigation.mode, showWhitespace, walkthroughView],
+    [
+      changedPaths,
+      files,
+      navigation.mode,
+      onRegenerateWalkthrough,
+      regenerateDisabled,
+      showWhitespace,
+      walkthroughView,
+    ],
   );
   const supportAvailable = supportBlocks.length > 0;
   const firstSupportBlockId = supportBlocks[0]?.id ?? null;

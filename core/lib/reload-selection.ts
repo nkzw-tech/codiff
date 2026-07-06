@@ -9,9 +9,12 @@ type ReloadSelectionFile = {
   status: GitFileStatus;
 };
 
+export type ReloadMainMode = 'commit' | 'review';
+
 type ReloadSelection = {
   files: ReadonlyArray<ReloadSelectionFile>;
   historySource?: ReviewSource | null;
+  mainMode?: ReloadMainMode;
   root: string;
   selectedPath: string | null;
   source: ReviewSource;
@@ -92,6 +95,7 @@ const isReloadSelection = (value: unknown): value is ReloadSelection =>
   Array.isArray(value.files) &&
   value.files.every(isReloadSelectionFile) &&
   (value.historySource == null || isReviewSource(value.historySource)) &&
+  (value.mainMode == null || value.mainMode === 'commit' || value.mainMode === 'review') &&
   typeof value.root === 'string' &&
   (value.selectedPath == null || typeof value.selectedPath === 'string') &&
   isReviewSource(value.source);
@@ -140,6 +144,26 @@ export const getReloadSelectionPath = (
     : null;
 };
 
+export const getChangedPaths = (
+  previousFiles: ReadonlyArray<ReloadSelectionFile>,
+  nextFiles: ReadonlyArray<ReloadSelectionFile>,
+): ReadonlySet<string> => {
+  const previousByPath = new Map(previousFiles.map((file) => [file.path, file]));
+  const changedPaths = new Set<string>();
+  for (const file of nextFiles) {
+    const previousFile = previousByPath.get(file.path);
+    if (
+      !previousFile ||
+      previousFile.fingerprint !== file.fingerprint ||
+      previousFile.status !== file.status
+    ) {
+      changedPaths.add(file.path);
+    }
+  }
+
+  return changedPaths;
+};
+
 export const getReloadDeltaPaths = (
   selection: ReloadSelection | null,
   state: RepositoryState,
@@ -149,20 +173,7 @@ export const getReloadDeltaPaths = (
     return new Set();
   }
 
-  const previousFiles = new Map(matchedSelection.files.map((file) => [file.path, file]));
-  const deltaPaths = new Set<string>();
-  for (const file of state.files) {
-    const previousFile = previousFiles.get(file.path);
-    if (
-      !previousFile ||
-      previousFile.fingerprint !== file.fingerprint ||
-      previousFile.status !== file.status
-    ) {
-      deltaPaths.add(file.path);
-    }
-  }
-
-  return deltaPaths;
+  return getChangedPaths(matchedSelection.files, state.files);
 };
 
 export const getReloadHistorySource = (
@@ -170,10 +181,16 @@ export const getReloadHistorySource = (
   state: RepositoryState,
 ): ReviewSource | null => getMatchingSelection(selection, state)?.historySource ?? null;
 
+export const getReloadMainMode = (
+  selection: ReloadSelection | null,
+  state: RepositoryState,
+): ReloadMainMode | null => getMatchingSelection(selection, state)?.mainMode ?? null;
+
 export const writeReloadSelection = (
   state: RepositoryState | null,
   selectedPath: string | null,
   historySource: ReviewSource | null = null,
+  mainMode: ReloadMainMode = 'review',
 ) => {
   const storage = getStorage();
   if (!storage || !state) {
@@ -190,6 +207,7 @@ export const writeReloadSelection = (
           status: file.status,
         })),
         historySource,
+        mainMode,
         root: state.root,
         selectedPath,
         source: state.source,

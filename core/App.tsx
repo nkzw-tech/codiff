@@ -69,8 +69,10 @@ import { isNativeInputTarget } from './lib/keyboard.ts';
 import { buildCommitModel, buildGenericCommitModel } from './lib/narrative-walkthrough.ts';
 import {
   consumeReloadSelection,
+  getChangedPaths,
   getReloadDeltaPaths,
   getReloadHistorySource,
+  getReloadMainMode,
   getReloadSelectionPath,
   writeReloadSelection,
 } from './lib/reload-selection.ts';
@@ -650,6 +652,17 @@ export default function App() {
         : {};
       const reloadSelectedPath = getReloadSelectionPath(reloadSelection, orderedState);
       const nextReloadDeltaPaths = getReloadDeltaPaths(reloadSelection, orderedState);
+      // Reopen the commit view after a reload, but only while it would still be
+      // openable (same conditions as openCommitView); e.g. once the commit
+      // lands the working tree may be empty and we fall back to the review.
+      const restoreCommitView =
+        getReloadMainMode(reloadSelection, orderedState) === 'commit' &&
+        orderedState.source.type === 'working-tree' &&
+        orderedState.files.length > 0;
+      if (restoreCommitView) {
+        setSidebarMode('tree');
+        setMainMode('commit');
+      }
 
       setHistoryEntries(history.entries);
       setHistoryHasMore(history.entries.length >= HISTORY_PAGE_SIZE);
@@ -1352,9 +1365,63 @@ export default function App() {
     [scrollPathIntoReview],
   );
 
-  const reloadWindow = useCallback(() => {
-    window.location.reload();
-  }, []);
+  // Refresh the repository state in place after the working tree changed.
+  // Unlike a window reload, this keeps all review UI state (selection, scroll,
+  // search, walkthrough navigation, commit drafts, pending comments) and only
+  // re-renders the files whose fingerprints actually moved.
+  const refreshRepository = useCallback(() => {
+    const previousState = stateRef.current;
+    if (!previousState || pendingSource) {
+      return;
+    }
+
+    const request = sourceRequestRef.current + 1;
+    sourceRequestRef.current = request;
+
+    Promise.all([
+      window.codiff.getRepositoryState(previousState.source),
+      window.codiff.getRepositoryHistory(historyLimit, historySourceRef.current ?? undefined),
+    ])
+      .then(([nextState, history]) => {
+        if (sourceRequestRef.current !== request) {
+          return;
+        }
+
+        const orderedState = {
+          ...nextState,
+          files: sortFiles(nextState.files),
+        };
+        const changedPaths = getChangedPaths(previousState.files, orderedState.files);
+
+        stateGenerationRef.current += 1;
+        setState(orderedState);
+        setReloadDeltaPaths(changedPaths);
+        for (const path of changedPaths) {
+          bumpItemVersion(path);
+        }
+        setHistoryEntries(history.entries);
+        setHistoryHasMore(history.entries.length >= historyLimit);
+        setSelectedPath((current) =>
+          current != null && orderedState.files.some((file) => file.path === current)
+            ? current
+            : (orderedState.files[0]?.path ?? null),
+        );
+        if (
+          mainModeRef.current === 'commit' &&
+          (orderedState.source.type !== 'working-tree' || orderedState.files.length === 0)
+        ) {
+          setMainMode('review');
+        }
+        setLocalChangesDetected(false);
+      })
+      .catch(() => {
+        // Keep the current state; the banner stays up as a retry affordance.
+      });
+  }, [bumpItemVersion, historyLimit, pendingSource]);
+
+  // ⌘R / the View menu's "Refresh Changes" item route here from the main
+  // process instead of reloading the window.
+  useEffect(() => window.codiff.onRefreshRequest(refreshRepository), [refreshRepository]);
 
   // Commit the files a reviewer chose from the walkthrough's staging set. The
   // working-tree watcher surfaces a "reload to see changes" banner afterwards.
@@ -1380,7 +1447,12 @@ export default function App() {
 
   useEffect(() => {
     const writeCurrentReloadSelection = () => {
-      writeReloadSelection(stateRef.current, selectedPathRef.current, historySourceRef.current);
+      writeReloadSelection(
+        stateRef.current,
+        selectedPathRef.current,
+        historySourceRef.current,
+        mainModeRef.current,
+      );
     };
 
     window.addEventListener('beforeunload', writeCurrentReloadSelection);
@@ -1514,6 +1586,58 @@ export default function App() {
     handle.addEventListener('pointercancel', handleEnd);
   }, []);
 
+  // Ask the connected agent for a narrative walkthrough of the given source.
+  // Results are dropped if the reviewer switched sources while it was running.
+  const loadNarrativeWalkthrough = useCallback((source: ReviewSource) => {
+    const sourceKey = getSourceKey(source);
+    setWalkthroughLoading(true);
+    setWalkthroughError(null);
+    window.codiff
+      .getNarrativeWalkthrough(source)
+      .then((result) => {
+        if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
+          return;
+        }
+
+        if (result.status === 'ready') {
+          setNarrativeWalkthrough(result.walkthrough);
+          if (sidebarModeRef.current === 'walkthrough') {
+            setSidebarMode('walkthrough');
+          } else {
+            setWalkthroughUnread(true);
+          }
+        } else {
+          setWalkthroughError(result);
+        }
+      })
+      .catch((error: unknown) => {
+        if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
+          return;
+        }
+
+        setWalkthroughError({
+          reason: error instanceof Error ? error.message : String(error),
+          status: 'unavailable',
+        });
+      })
+      .finally(() => {
+        if (getSourceKey(stateRef.current?.source ?? source) === sourceKey) {
+          setWalkthroughLoading(false);
+        }
+      });
+  }, []);
+
+  // Regenerate the walkthrough on demand, e.g. after an in-place refresh
+  // surfaced changes the current walkthrough doesn't narrate. The existing
+  // walkthrough stays visible until the new one arrives.
+  const regenerateWalkthrough = useCallback(() => {
+    const currentState = stateRef.current;
+    if (!currentState || currentState.files.length === 0 || walkthroughLoading) {
+      return;
+    }
+    loadNarrativeWalkthrough(currentState.source);
+  }, [loadNarrativeWalkthrough, walkthroughLoading]);
+
   const changeSidebarMode = useCallback(
     (mode: SidebarMode) => {
       setMainMode('review');
@@ -1539,44 +1663,9 @@ export default function App() {
         return;
       }
 
-      const sourceKey = getSourceKey(state.source);
-      setWalkthroughLoading(true);
-      setWalkthroughError(null);
-      window.codiff
-        .getNarrativeWalkthrough(state.source)
-        .then((result) => {
-          if (getSourceKey(stateRef.current?.source ?? state.source) !== sourceKey) {
-            return;
-          }
-
-          if (result.status === 'ready') {
-            setNarrativeWalkthrough(result.walkthrough);
-            if (sidebarModeRef.current === 'walkthrough') {
-              setSidebarMode('walkthrough');
-            } else {
-              setWalkthroughUnread(true);
-            }
-          } else {
-            setWalkthroughError(result);
-          }
-        })
-        .catch((error: unknown) => {
-          if (getSourceKey(stateRef.current?.source ?? state.source) !== sourceKey) {
-            return;
-          }
-
-          setWalkthroughError({
-            reason: error instanceof Error ? error.message : String(error),
-            status: 'unavailable',
-          });
-        })
-        .finally(() => {
-          if (getSourceKey(stateRef.current?.source ?? state.source) === sourceKey) {
-            setWalkthroughLoading(false);
-          }
-        });
+      loadNarrativeWalkthrough(state.source);
     },
-    [narrativeWalkthrough, state, walkthroughError, walkthroughLoading],
+    [loadNarrativeWalkthrough, narrativeWalkthrough, state, walkthroughError, walkthroughLoading],
   );
 
   const openCommitView = useCallback(() => {
@@ -1798,9 +1887,9 @@ export default function App() {
         title: 'Open Config File',
       }),
       registry.register({
-        execute: reloadWindow,
+        execute: refreshRepository,
         id: 'reload',
-        title: 'Reload Window',
+        title: 'Refresh Changes',
       }),
     ];
     setCommandBarCommands(registry.commands);
@@ -1816,7 +1905,7 @@ export default function App() {
     getReviewCommandTarget,
     openDiffSearch,
     openSelectedFile,
-    reloadWindow,
+    refreshRepository,
     setFileViewedState,
     toggleSidebar,
     toggleViewed,
@@ -2431,7 +2520,7 @@ export default function App() {
         </div>
       ) : null}
       <RepositoryChangeBanner
-        onReload={reloadWindow}
+        onRefresh={refreshRepository}
         visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
       />
       <WalkthroughOutdatedBanner
@@ -2546,12 +2635,15 @@ export default function App() {
           />
         ) : showNarrativeWalkthrough && narrativeWalkthrough ? (
           <NarrativeWalkthroughView
+            changedPaths={reloadDeltaPaths}
             files={state.files}
             navigation={narrativeNavigation}
             onActiveReviewTargetChange={updateActiveWalkthroughReviewTarget}
             onCommit={commitWalkthrough}
+            onRegenerateWalkthrough={regenerateWalkthrough}
             onShareWalkthrough={enabledShareWalkthrough}
             onUpdateCommitMessage={updateWalkthroughCommitMessage}
+            regenerateDisabled={walkthroughLoading}
             renderDiffBlocks={renderWalkthroughDiffBlocks}
             shareWalkthroughDisabled={walkthroughSharing}
             showWhitespace={showWhitespace}

@@ -329,6 +329,24 @@
   gap: 12px;
   margin: 0 0 12px;
 }
+.wt-regenerate {
+  align-items: center;
+  background: color-mix(in srgb, var(--tree-selection-focus) 13%, transparent);
+  border: 0;
+  border-radius: 14px;
+  color: var(--tree-selection-focus);
+  corner-shape: squircle;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font: 600 12px/1 var(--font-sans);
+  gap: 6px;
+  padding: 7px 12px;
+}
+.wt-regenerate:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 /* ---- Variation C — hybrid arc timeline ------------------------------------ */
 .wt-hybrid {
   display: flex;

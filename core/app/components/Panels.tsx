@@ -18,7 +18,6 @@ import {
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
 import type { RepositoryLoadError, ReviewComment } from '../../lib/app-types.ts';
-import { getReloadShortcutLabel } from '../../lib/keyboard.ts';
 import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
 import type {
   ChangedFile,
@@ -45,21 +44,26 @@ export function ReviewSourceLoading() {
 }
 
 export function RepositoryChangeBanner({
-  onReload,
+  onRefresh,
   visible,
 }: {
-  onReload: () => void;
+  onRefresh: () => void;
   visible: boolean;
 }) {
   const [dismissed, setDismissed] = useState(false);
+  // Re-arm the dismiss latch once the current change is refreshed away, so the
+  // banner comes back for the next change instead of staying dismissed forever.
+  if (!visible && dismissed) {
+    setDismissed(false);
+  }
   const isVisible = visible && !dismissed;
 
   return (
     <div aria-live="polite" className={`repository-change-banner${isVisible ? ' visible' : ''}`}>
       <span className="repository-change-banner-content">
         <span>Local changes detected,</span>
-        <button className="repository-change-reload" onClick={onReload} type="button">
-          {getReloadShortcutLabel()} to reload.
+        <button className="repository-change-reload" onClick={onRefresh} type="button">
+          refresh to see them.
         </button>
       </span>
       <button

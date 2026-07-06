@@ -93,6 +93,11 @@ const codiff = {
     ipcRenderer.on('codiff:repositoryChanged', listener);
     return () => ipcRenderer.removeListener('codiff:repositoryChanged', listener);
   },
+  onRefreshRequest: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('codiff:refreshRequest', listener);
+    return () => ipcRenderer.removeListener('codiff:refreshRequest', listener);
+  },
   openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
