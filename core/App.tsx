@@ -2707,8 +2707,8 @@ export default function App() {
             navigation={narrativeNavigation}
             onActiveReviewTargetChange={updateActiveWalkthroughReviewTarget}
             onCommit={commitWalkthrough}
-            onRegenerateWalkthrough={regenerateWalkthrough}
             onCommitOutput={subscribeToCommitOutput}
+            onRegenerateWalkthrough={regenerateWalkthrough}
             onShareWalkthrough={enabledShareWalkthrough}
             onUpdateCommitMessage={updateWalkthroughCommitMessage}
             regenerateDisabled={walkthroughLoading}

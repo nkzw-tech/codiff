@@ -975,37 +975,74 @@
 }
 .wt-commit-log {
   background: var(--code-bg);
-  border: 1px solid var(--file-border);
-  border-radius: 12px;
+  border-radius: 24px;
+  box-shadow:
+    0 0 0 1px var(--file-border),
+    4px 12px 50px -40px rgb(0 0 0 / 0.7);
   corner-shape: squircle;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 6px;
-  padding: 10px 14px;
+  margin: 8px 0 5px;
+  overflow: clip;
 }
 .wt-commit-log.failed {
-  border-color: color-mix(in srgb, var(--diff-deletion) 32%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--diff-deletion) 38%, var(--file-border)),
+    4px 12px 50px -40px rgb(0 0 0 / 0.7);
 }
 .wt-commit-log-head {
   align-items: center;
+  background: var(--app-bg);
+  box-shadow: inset 0 -1px 0 var(--file-border);
   display: flex;
+  gap: 8px;
   justify-content: space-between;
+  min-height: 34px;
+  padding: 0 14px;
+}
+.wt-commit-log.failed .wt-commit-log-head {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--diff-deletion) 38%, var(--file-border));
 }
 .wt-commit-log-head .wt-commit-dismiss {
   color: var(--muted);
-  margin: -4px -6px;
+  margin: 0 -6px 0 0;
 }
 .wt-commit-log-title {
+  align-items: center;
   color: var(--muted);
-  font: 600 11px/1 var(--font-sans);
+  display: inline-flex;
+  font: 700 11px/1 var(--font-sans);
+  gap: 7px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+.wt-commit-log.failed .wt-commit-log-title {
+  color: var(--diff-deletion);
+}
+.wt-commit-log-pulse {
+  animation: wt-commit-log-pulse 1.1s ease-in-out infinite;
+  background: var(--viewed);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+@keyframes wt-commit-log-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.72);
+  }
 }
 .wt-commit-log-term {
   color: var(--text);
   font-family: var(--font-mono);
   overflow-x: auto;
+  padding: 10px 14px 12px;
   /* Anchor ghostty-web's hidden absolutely-positioned input textarea here. */
   position: relative;
 }
