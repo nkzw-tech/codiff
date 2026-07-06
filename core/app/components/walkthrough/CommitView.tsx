@@ -1,3 +1,4 @@
+import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef, useState } from 'react';
 import {
   changeTypeLabel,
@@ -13,6 +14,7 @@ import type {
 } from '../../../types.ts';
 import { ArrowsClockwise, Check, GitBranch, X } from './icons.tsx';
 import { ChapterIcon, WalkthroughLineCount } from './parts.tsx';
+import '@xterm/xterm/css/xterm.css';
 
 export type CommitHandler = (request: WalkthroughCommitRequest) => Promise<WalkthroughCommitResult>;
 export type CommitMessageHandler = (
@@ -32,6 +34,70 @@ export type CommitDraftState = {
 };
 
 type CheckState = 'on' | 'off' | 'partial';
+
+// Cols must match the PTY spawned in electron/walkthrough-commit.cjs so hook
+// output wraps where the PTY wrapped it.
+const TERMINAL_COLS = 80;
+const TERMINAL_ROWS = 12;
+
+/**
+ * Read-only xterm.js terminal that replays the streamed commit output, so ANSI
+ * colors and cursor movement from pre-commit hooks render as they would in a
+ * real shell.
+ */
+function CommitLogTerminal({ output }: { output: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const writtenRef = useRef(0);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    const style = getComputedStyle(container);
+    const terminal = new Terminal({
+      allowTransparency: true,
+      cols: TERMINAL_COLS,
+      // Hook runners pipe their children, so some lines arrive with bare `\n`
+      // and would stairstep without this.
+      convertEol: true,
+      disableStdin: true,
+      fontFamily: style.fontFamily,
+      fontSize: 12,
+      rows: TERMINAL_ROWS,
+      theme: {
+        background: '#00000000',
+        cursor: '#00000000',
+        foreground: style.color,
+      },
+    });
+    terminal.open(container);
+    terminalRef.current = terminal;
+    writtenRef.current = 0;
+    return () => {
+      terminal.dispose();
+      terminalRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+    if (output.length < writtenRef.current) {
+      terminal.reset();
+      writtenRef.current = 0;
+    }
+    if (output.length > writtenRef.current) {
+      terminal.write(output.slice(writtenRef.current));
+      writtenRef.current = output.length;
+    }
+  }, [output]);
+
+  return <div className="wt-commit-log-term" ref={containerRef} />;
+}
 
 function CommitCheck({ state }: { state: CheckState }) {
   if (state === 'partial') {
@@ -301,16 +367,7 @@ export function CommitView({
   };
 
   const failed = result?.status === 'failed';
-  const showLog = output.length > 0 && (status === 'submitting' || failed);
-  const logRef = useRef<HTMLPreElement | null>(null);
-
-  // Keep the latest hook output in view as it streams in.
-  useEffect(() => {
-    const log = logRef.current;
-    if (log) {
-      log.scrollTop = log.scrollHeight;
-    }
-  }, [output]);
+  const showLog = status === 'submitting' || (failed && output.length > 0);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -390,10 +447,22 @@ export function CommitView({
       <div className="wt-commit-foot">
         {showLog ? (
           <div className={`wt-commit-log${failed ? ' failed' : ''}`}>
-            <span className="wt-commit-log-title">{failed ? 'Commit output' : 'Committing…'}</span>
-            <pre className="wt-commit-log-body" ref={logRef}>
-              {output}
-            </pre>
+            <div className="wt-commit-log-head">
+              <span className="wt-commit-log-title">
+                {failed ? 'Commit output' : 'Committing…'}
+              </span>
+              {failed ? (
+                <button
+                  aria-label="Dismiss commit error"
+                  className="wt-commit-dismiss"
+                  onClick={dismissFailure}
+                  type="button"
+                >
+                  <X size={14} weight="bold" />
+                </button>
+              ) : null}
+            </div>
+            <CommitLogTerminal output={output} />
           </div>
         ) : null}
         <div className="wt-commit-foot-row">
@@ -402,14 +471,16 @@ export function CommitView({
               <span className="wt-commit-error-text">
                 {output.trim() ? 'The commit failed — see the output above.' : result.reason}
               </span>
-              <button
-                aria-label="Dismiss commit error"
-                className="wt-commit-dismiss"
-                onClick={dismissFailure}
-                type="button"
-              >
-                <X size={14} weight="bold" />
-              </button>
+              {!showLog ? (
+                <button
+                  aria-label="Dismiss commit error"
+                  className="wt-commit-dismiss"
+                  onClick={dismissFailure}
+                  type="button"
+                >
+                  <X size={14} weight="bold" />
+                </button>
+              ) : null}
             </span>
           ) : null}
           <span className="wt-commit-foot-actions">

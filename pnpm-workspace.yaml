@@ -7,6 +7,7 @@ allowBuilds:
   '@swc/core': true
   electron: true
   electron-winstaller: true
+  node-pty: true
   protobufjs: false
 blockExoticSubdeps: false
 minimumReleaseAgeExclude:
