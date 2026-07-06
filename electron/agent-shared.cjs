@@ -9,6 +9,32 @@ const { delimiter, join } = require('node:path');
 const oneLine = (value, fallback = '') =>
   (typeof value === 'string' ? value : fallback).replace(/\s+/g, ' ').trim();
 
+const AGENT_ABORTED_CODE = 'AGENT_ABORTED';
+
+const createAgentAbortError = () =>
+  Object.assign(new Error('The agent run was canceled.'), { code: AGENT_ABORTED_CODE });
+
+/** @param {unknown} error */
+const isAgentAbortError = (error) =>
+  Boolean(
+    error && typeof error === 'object' && 'code' in error && error.code === AGENT_ABORTED_CODE,
+  );
+
+/**
+ * Kill the agent child process when `signal` aborts, settling the run with an
+ * abort error. Returns a cleanup used by the run's own settle paths.
+ *
+ * @param {AbortSignal | undefined} signal
+ * @param {() => void} onAbort
+ */
+const listenForAbort = (signal, onAbort) => {
+  if (!signal) {
+    return () => {};
+  }
+  signal.addEventListener('abort', onAbort, { once: true });
+  return () => signal.removeEventListener('abort', onAbort);
+};
+
 /** @param {string} value @param {number} maxLength */
 const truncate = (value, maxLength) => {
   if (value.length <= maxLength) {
@@ -223,6 +249,9 @@ const findExecutableOnPath = (command) => {
 
 module.exports = {
   buildSchemaReminder,
+  createAgentAbortError,
+  isAgentAbortError,
+  listenForAbort,
   cleanText,
   findExecutableOnPath,
   getExecutableNames,

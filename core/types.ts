@@ -558,6 +558,10 @@ export type NarrativeWalkthroughResult =
       code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'OPENCODE_NOT_FOUND' | 'PI_NOT_FOUND';
       reason: string;
       status: 'unavailable';
+    }
+  /** A newer generation superseded this one; the caller should ignore it. */
+  | {
+      status: 'canceled';
     };
 
 /** Commit the selected files from a walkthrough's staging set. */

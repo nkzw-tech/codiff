@@ -6,6 +6,7 @@ const { readFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const {
   cleanText,
+  isAgentAbortError,
   normalizeEnum,
   oneLine,
   parseJSONMessage,
@@ -742,6 +743,12 @@ const readNarrativeWalkthrough = async (state, agent, agentOptions, context, cus
       walkthrough,
     };
   } catch (error) {
+    // A canceled run means a newer generation superseded this one; the
+    // renderer ignores the result rather than surfacing it as a failure.
+    if (agentOptions?.signal?.aborted || isAgentAbortError(error)) {
+      return { status: 'canceled' };
+    }
+
     if (agent.isNotFoundError(error)) {
       return {
         code: agent.notFoundCode,

@@ -26,7 +26,7 @@ const {
     schema: unknown,
     outputName?: string,
     timeoutMessage?: string,
-    options?: { model?: string; timeoutMs?: number },
+    options?: { model?: string; onOutput?: (chunk: string) => void; timeoutMs?: number },
   ) => Promise<string>;
 };
 
@@ -101,6 +101,88 @@ process.stdin.on('end', () => {
     expect(args).toContain('--add-dir');
     expect(args).toContain(directory);
     expect(args).toContain('--no-session-persistence');
+  } finally {
+    if (previousClaudePath == null) {
+      delete process.env.CODIFF_CLAUDE_PATH;
+    } else {
+      process.env.CODIFF_CLAUDE_PATH = previousClaudePath;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('streams thinking and text from the stream-json trace and returns the result envelope', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-claude-stream-'));
+  const fakeClaudePath = join(directory, 'claude');
+  const argsPath = join(directory, 'args.txt');
+  const previousClaudePath = process.env.CODIFF_CLAUDE_PATH;
+
+  const lines = [
+    { subtype: 'init', type: 'system' },
+    {
+      event: { content_block: { type: 'thinking' }, type: 'content_block_start' },
+      type: 'stream_event',
+    },
+    {
+      event: {
+        delta: { thinking: 'Weighing the diff…', type: 'thinking_delta' },
+        type: 'content_block_delta',
+      },
+      type: 'stream_event',
+    },
+    {
+      event: { content_block: { type: 'text' }, type: 'content_block_start' },
+      type: 'stream_event',
+    },
+    {
+      event: {
+        delta: { text: '{"version":1}', type: 'text_delta' },
+        type: 'content_block_delta',
+      },
+      type: 'stream_event',
+    },
+    {
+      is_error: false,
+      result: '{"version":1}',
+      structured_output: { version: 1 },
+      type: 'result',
+    },
+  ];
+
+  try {
+    await writeFile(
+      fakeClaudePath,
+      `#!/usr/bin/env node
+const { appendFileSync } = require('node:fs');
+const argsPath = ${JSON.stringify(argsPath)};
+for (const arg of process.argv.slice(2)) {
+  appendFileSync(argsPath, arg + '\\n');
+}
+process.stdin.resume();
+process.stdin.on('end', () => {
+  process.stdout.write(${JSON.stringify(lines.map((line) => JSON.stringify(line)).join('\n'))});
+});
+`,
+    );
+    await chmod(fakeClaudePath, 0o755);
+    process.env.CODIFF_CLAUDE_PATH = fakeClaudePath;
+
+    let output = '';
+    await expect(
+      runClaude(directory, 'prompt', { type: 'object' }, 'walkthrough.json', 'Timed out.', {
+        onOutput: (chunk) => {
+          output += chunk;
+        },
+      }),
+    ).resolves.toBe('{"version":1}');
+
+    expect(output).toContain('Weighing the diff…');
+    expect(output).toContain('{"version":1}');
+
+    const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
+    expect(args).toContain('stream-json');
+    expect(args).toContain('--verbose');
+    expect(args).toContain('--include-partial-messages');
   } finally {
     if (previousClaudePath == null) {
       delete process.env.CODIFF_CLAUDE_PATH;

@@ -4,8 +4,10 @@ const { spawn } = require('node:child_process');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const {
+  createAgentAbortError,
   findExecutableOnPath,
   isExecutableFile,
+  listenForAbort,
   normalizeEnum,
   oneLine,
 } = require('./agent-shared.cjs');
@@ -25,6 +27,8 @@ const CLAUDE_NOT_LOGGED_IN_MESSAGE =
  *   fallbackModel?: string;
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
+ *   onOutput?: (chunk: string) => void;
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} ClaudeOptions
  */
@@ -127,12 +131,98 @@ const getClaudeLaunchError = (error) => {
 };
 
 /**
+ * Render Claude Code stream-json events as a live terminal trace and capture
+ * the final result envelope. Thinking is dimmed; text deltas stream verbatim.
+ *
+ * @param {(chunk: string) => void} [onOutput]
+ */
+const createClaudeStreamTracer = (onOutput) => {
+  /** @type {any} */
+  let resultEnvelope = null;
+  let sawContentBlock = false;
+
+  /** @param {unknown} input */
+  const handleEvent = (input) => {
+    const event = /** @type {any} */ (input);
+    if (!event || typeof event !== 'object') {
+      return;
+    }
+    if (event.type === 'result') {
+      resultEnvelope = event;
+      return;
+    }
+    if (event.type !== 'stream_event') {
+      return;
+    }
+
+    const streamEvent = event.event;
+    if (streamEvent?.type === 'content_block_start') {
+      if (sawContentBlock) {
+        onOutput?.('\n\n');
+      }
+      sawContentBlock = true;
+      if (streamEvent.content_block?.type === 'tool_use') {
+        onOutput?.(`\u001B[36m→ ${streamEvent.content_block.name}\u001B[39m\n`);
+      }
+      return;
+    }
+    if (streamEvent?.type !== 'content_block_delta') {
+      return;
+    }
+    const delta = streamEvent.delta;
+    if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+      onOutput?.(`\u001B[2m${delta.thinking}\u001B[22m`);
+    } else if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+      onOutput?.(delta.text);
+    }
+  };
+
+  let lineBuffer = '';
+  /** @param {string} text */
+  const push = (text) => {
+    lineBuffer += text;
+    let newlineIndex = lineBuffer.indexOf('\n');
+    while (newlineIndex !== -1) {
+      const line = lineBuffer.slice(0, newlineIndex).trim();
+      lineBuffer = lineBuffer.slice(newlineIndex + 1);
+      if (line) {
+        try {
+          handleEvent(JSON.parse(line));
+        } catch {
+          // Non-JSON diagnostics interleaved on stdout are ignored.
+        }
+      }
+      newlineIndex = lineBuffer.indexOf('\n');
+    }
+  };
+
+  const flush = () => {
+    const rest = lineBuffer.trim();
+    lineBuffer = '';
+    if (rest) {
+      try {
+        handleEvent(JSON.parse(rest));
+      } catch {
+        // Non-JSON diagnostics interleaved on stdout are ignored.
+      }
+    }
+    return resultEnvelope;
+  };
+
+  return { flush, push };
+};
+
+/**
  * Run Claude Code headless as a pure, read-only structured-output call.
  *
  * Mirrors the shape of {@link runCodex}: prompt is sent on stdin, output is a
  * JSON string validated against the provided schema. Tools are fully disabled
  * so Claude answers only from the prompt text, and session persistence is off
  * so the call leaves no transcript behind.
+ *
+ * Output is requested as stream-json with partial messages so the model's
+ * thinking and answer stream into `onOutput` while it works; the final result
+ * envelope arrives as a `result` event on the same stream.
  *
  * @param {string} repoRoot
  * @param {string} prompt
@@ -163,11 +253,20 @@ const runClaude = async (
         let stdout = '';
         let finished = false;
 
+        if (options.signal?.aborted) {
+          reject(createAgentAbortError());
+          return;
+        }
+
         const claudeCommand = getClaudeCommand();
         const claudeArgs = [
           '-p',
           '--output-format',
-          'json',
+          'stream-json',
+          // stream-json in print mode requires --verbose; partial messages
+          // surface thinking/text deltas while the model works.
+          '--verbose',
+          '--include-partial-messages',
           '--json-schema',
           JSON.stringify(schema),
           '--model',
@@ -193,12 +292,28 @@ const runClaude = async (
             reject(new Error(timeoutMessage));
           }
         }, timeoutMs);
+        const stopAbortListener = listenForAbort(options.signal, () => {
+          if (!finished) {
+            finished = true;
+            clearTimeout(timer);
+            child.kill('SIGTERM');
+            reject(createAgentAbortError());
+          }
+        });
 
+        // stdout carries the NDJSON event stream: the tracer renders it as a
+        // live trace and captures the final `result` envelope; stderr carries
+        // the CLI's own diagnostics.
+        const tracer = createClaudeStreamTracer(options.onOutput);
         child.stdout.on('data', (chunk) => {
-          stdout += chunk.toString();
+          const text = chunk.toString();
+          stdout += text;
+          tracer.push(text);
         });
         child.stderr.on('data', (chunk) => {
-          stderr += chunk.toString();
+          const text = chunk.toString();
+          stderr += text;
+          options.onOutput?.(text);
         });
         child.stdin.on('error', (error) => {
           stdinError = error;
@@ -206,9 +321,11 @@ const runClaude = async (
         child.on('error', (error) => {
           finished = true;
           clearTimeout(timer);
+          stopAbortListener();
           reject(getClaudeLaunchError(error));
         });
         child.on('close', (code, signal) => {
+          stopAbortListener();
           if (finished) {
             return;
           }
@@ -228,12 +345,15 @@ const runClaude = async (
           }
 
           /** @type {any} */
-          let envelope;
-          try {
-            envelope = JSON.parse(stdout);
-          } catch {
-            reject(new Error(oneLine(stdout, 'Claude Code did not return JSON.')));
-            return;
+          let envelope = tracer.flush();
+          if (!envelope) {
+            // Older CLIs (or plain `json` output) print a single envelope.
+            try {
+              envelope = JSON.parse(stdout);
+            } catch {
+              reject(new Error(oneLine(stdout, 'Claude Code did not return JSON.')));
+              return;
+            }
           }
 
           const resultText = typeof envelope?.result === 'string' ? envelope.result : '';

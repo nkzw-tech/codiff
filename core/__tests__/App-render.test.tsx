@@ -175,6 +175,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   })),
   isWindowFullScreen: vi.fn(async () => false),
   markPlanReady: vi.fn(async () => {}),
+  onAgentSelectionChanged: vi.fn(() => () => {}),
   onConfigChanged: vi.fn(() => () => {}),
   onCopyPendingCommentsRequest: vi.fn(() => () => {}),
   onFindInDiffs: vi.fn(() => () => {}),
@@ -183,6 +184,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   onRefreshRequest: vi.fn(() => () => {}),
   onRepositoryChanged: vi.fn(() => () => {}),
   onWalkthroughCommitOutput: vi.fn(() => () => {}),
+  onWalkthroughOutput: vi.fn(() => () => {}),
   onWindowFullScreenChanged: vi.fn(() => () => {}),
   openConfigFile: vi.fn(async () => {}),
   openFile: vi.fn(async () => {}),
@@ -2637,12 +2639,12 @@ test('walkthrough launch errors stay on the walkthrough tab without automatic re
     });
 
     await waitFor(() => {
-      expect(container.textContent).toContain('Walkthrough unavailable');
+      expect(container.textContent).toContain('Walkthrough failed');
     });
 
     expect(getTab('Walkthrough')?.getAttribute('aria-selected')).toBe('true');
-    expect(container.querySelector('.sidebar-walkthrough-status')).not.toBeNull();
-    expect(container.querySelector('.sidebar .file-tree-shell')).toBeNull();
+    expect(container.textContent).toContain('Codex walkthrough timed out.');
+    expect(container.querySelector('.wt-generation')).not.toBeNull();
     expect(getNarrativeWalkthrough).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -2654,8 +2656,8 @@ test('walkthrough launch errors stay on the walkthrough tab without automatic re
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(container.textContent).toContain('Walkthrough unavailable');
-    expect(container.querySelector('.sidebar .file-tree-shell')).toBeNull();
+    expect(container.textContent).toContain('Walkthrough failed');
+    expect(container.querySelector('.wt-generation')).not.toBeNull();
     expect(getNarrativeWalkthrough).toHaveBeenCalledTimes(1);
   } finally {
     if (root) {

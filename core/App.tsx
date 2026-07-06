@@ -24,6 +24,7 @@ import { PlanEditorView } from './app/components/PlanEditorView.tsx';
 import { ReviewCodeView, type ReviewDiffBlock } from './app/components/ReviewCodeView.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
 import { CommitView } from './app/components/walkthrough/CommitView.tsx';
+import { WalkthroughGenerationView } from './app/components/walkthrough/GenerationView.tsx';
 import {
   NarrativeWalkthroughView,
   type WalkthroughBlockScrollTarget,
@@ -39,6 +40,7 @@ import {
   defaultLaunchOptions,
   defaultTerminalHelperStatus,
   getAgentLabel,
+  getAgentSelectionKey,
   HISTORY_PAGE_SIZE,
 } from './lib/app-constants.ts';
 import {
@@ -252,6 +254,9 @@ export default function App() {
     null,
   );
   const [walkthroughLoading, setWalkthroughLoading] = useState(false);
+  const [walkthroughOutput, setWalkthroughOutput] = useState('');
+  // Remounts the generation terminal so each generation starts empty.
+  const [walkthroughAttempt, setWalkthroughAttempt] = useState(0);
   const [walkthroughUnread, setWalkthroughUnread] = useState(false);
   const [walkthroughSharing, setWalkthroughSharing] = useState(false);
   const [sharePlanEnabled, setSharePlanEnabled] = useState(false);
@@ -276,6 +281,12 @@ export default function App() {
   const markdownRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
   const viewedRef = useRef<Record<string, string>>({});
   const narrativeWalkthroughRef = useRef<NarrativeWalkthrough | null>(null);
+  const codiffConfigRef = useRef<CodiffConfig>(createDefaultConfig());
+  const launchOptionsRef = useRef<CodiffLaunchOptions>(defaultLaunchOptions);
+  // Agent/model pair the current walkthrough was generated with; an
+  // agent-selection change only regenerates when the effective pair changed.
+  const lastWalkthroughAgentKeyRef = useRef<string | null>(null);
+  const walkthroughLoadingRef = useRef(false);
   const navigationResetKey = state ? `${state.root}:${getSourceKey(state.source)}` : '';
   const narrativeNavigation = useNarrativeNavigation(
     narrativeWalkthrough,
@@ -526,6 +537,21 @@ export default function App() {
     });
   }, []);
 
+  /**
+   * Marks the walkthrough as generating and resets the streamed-output
+   * terminal, remembering the agent/model pair the generation will run with.
+   */
+  const beginWalkthroughGeneration = useCallback(() => {
+    lastWalkthroughAgentKeyRef.current = getAgentSelectionKey(
+      codiffConfigRef.current,
+      launchOptionsRef.current.agentBackend,
+    );
+    setWalkthroughLoading(true);
+    setWalkthroughError(null);
+    setWalkthroughOutput('');
+    setWalkthroughAttempt((current) => current + 1);
+  }, []);
+
   useEffect(() => {
     let canceled = false;
     let loadingPlan = false;
@@ -536,6 +562,7 @@ export default function App() {
       if (canceled) {
         return;
       }
+      launchOptionsRef.current = nextLaunchOptions;
       setLaunchOptions(nextLaunchOptions);
 
       if (nextLaunchOptions.planFile) {
@@ -605,47 +632,9 @@ export default function App() {
       setSidebarMode(
         shouldLoadNarrative ? 'walkthrough' : shouldStartInHistory ? 'history' : 'tree',
       );
-      setWalkthroughLoading(shouldLoadNarrative);
-
-      // Always consult the main process for a pre-authored walkthrough file, even
-      // when the diff is empty, so it can diagnose *why* (e.g. the changes were
-      // committed) rather than us guessing in the renderer.
-      const shouldFetchNarrative = shouldLoadNarrative || walkthroughFilePath != null;
-      const narrativeResult = shouldFetchNarrative
-        ? await window.codiff.getNarrativeWalkthrough(orderedState.source)
-        : null;
-      if (canceled) {
-        return;
+      if (shouldLoadNarrative) {
+        beginWalkthroughGeneration();
       }
-      const loadedNarrative =
-        narrativeResult?.status === 'ready' ? narrativeResult.walkthrough : null;
-      setNarrativeWalkthrough(loadedNarrative);
-
-      if (narrativeResult?.status === 'unavailable') {
-        setWalkthroughError(narrativeResult);
-      } else {
-        setWalkthroughError(null);
-      }
-
-      // When a walkthrough file was explicitly passed but did not anchor, drop
-      // the reviewer into the history view and float a dismissible banner
-      // explaining that the diff has moved on, rather than blocking with a modal.
-      if (walkthroughFilePath != null && loadedNarrative == null) {
-        setSidebarMode('history');
-        setWalkthroughFileError({
-          path: walkthroughFilePath,
-          reason:
-            narrativeResult?.status === 'unavailable'
-              ? narrativeResult.reason
-              : !filesPresent
-                ? 'No changed files were found for this diff, so the walkthrough file has nothing to anchor to.'
-                : 'The walkthrough file could not be loaded.',
-        });
-      } else {
-        setWalkthroughFileError(null);
-      }
-
-      setWalkthroughLoading(false);
 
       const nextViewed = usesViewedFileState(orderedState.source)
         ? readViewed(orderedState.root)
@@ -683,6 +672,53 @@ export default function App() {
       if (reloadSelectedPath) {
         scrollPathIntoReview(reloadSelectedPath, 'instant');
       }
+
+      // Fetch the narrative only after the repository state above is rendered,
+      // so the generation terminal is on screen while the agent streams output.
+      // Always consult the main process for a pre-authored walkthrough file,
+      // even when the diff is empty, so it can diagnose *why* (e.g. the changes
+      // were committed) rather than us guessing in the renderer.
+      const shouldFetchNarrative = shouldLoadNarrative || walkthroughFilePath != null;
+      if (!shouldFetchNarrative) {
+        setNarrativeWalkthrough(null);
+        setWalkthroughError(null);
+        setWalkthroughFileError(null);
+        setWalkthroughLoading(false);
+        return;
+      }
+      const narrativeResult = await window.codiff.getNarrativeWalkthrough(orderedState.source);
+      if (canceled || narrativeResult.status === 'canceled') {
+        return;
+      }
+      const loadedNarrative =
+        narrativeResult.status === 'ready' ? narrativeResult.walkthrough : null;
+      setNarrativeWalkthrough(loadedNarrative);
+
+      if (narrativeResult.status === 'unavailable') {
+        setWalkthroughError(narrativeResult);
+      } else {
+        setWalkthroughError(null);
+      }
+
+      // When a walkthrough file was explicitly passed but did not anchor, drop
+      // the reviewer into the history view and float a dismissible banner
+      // explaining that the diff has moved on, rather than blocking with a modal.
+      if (walkthroughFilePath != null && loadedNarrative == null) {
+        setSidebarMode('history');
+        setWalkthroughFileError({
+          path: walkthroughFilePath,
+          reason:
+            narrativeResult.status === 'unavailable'
+              ? narrativeResult.reason
+              : !filesPresent
+                ? 'No changed files were found for this diff, so the walkthrough file has nothing to anchor to.'
+                : 'The walkthrough file could not be loaded.',
+        });
+      } else {
+        setWalkthroughFileError(null);
+      }
+
+      setWalkthroughLoading(false);
     };
 
     load().catch((error: unknown) => {
@@ -701,12 +737,22 @@ export default function App() {
     return () => {
       canceled = true;
     };
-  }, [scrollPathIntoReview]);
+  }, [beginWalkthroughGeneration, scrollPathIntoReview]);
 
   useEffect(
     () =>
       window.codiff.onRepositoryChanged(() => {
         setLocalChangesDetected(true);
+      }),
+    [],
+  );
+
+  // The main process only streams output for this window's live generation,
+  // and each generation resets the buffer, so appending is safe here.
+  useEffect(
+    () =>
+      window.codiff.onWalkthroughOutput((chunk) => {
+        setWalkthroughOutput((current) => current + chunk);
       }),
     [],
   );
@@ -894,6 +940,7 @@ export default function App() {
       if (!canceled) {
         const nextPreferences = getPreferencesFromConfig(nextConfig);
         preferencesRef.current = nextPreferences;
+        codiffConfigRef.current = nextConfig;
         setCodiffConfig(nextConfig);
         setPreferences(nextPreferences);
       }
@@ -903,6 +950,9 @@ export default function App() {
       const previousShowWhitespace = preferencesRef.current.showWhitespace;
       const nextPreferences = getPreferencesFromConfig(nextConfig);
       preferencesRef.current = nextPreferences;
+      // Synchronously, so the agent-selection listener (fired right after this
+      // event) compares against the config that triggered it.
+      codiffConfigRef.current = nextConfig;
       setCodiffConfig(nextConfig);
       setPreferences(nextPreferences);
 
@@ -1072,6 +1122,10 @@ export default function App() {
   useEffect(() => {
     walkthroughErrorRef.current = walkthroughError;
   }, [walkthroughError]);
+
+  useEffect(() => {
+    walkthroughLoadingRef.current = walkthroughLoading;
+  }, [walkthroughLoading]);
 
   const showWhitespace = preferences.showWhitespace;
   const showOutdated = preferences.showOutdated;
@@ -1591,46 +1645,48 @@ export default function App() {
     handle.addEventListener('pointercancel', handleEnd);
   }, []);
 
-  // Ask the connected agent for a narrative walkthrough of the given source.
-  // Results are dropped if the reviewer switched sources while it was running.
-  const loadNarrativeWalkthrough = useCallback((source: ReviewSource) => {
-    const sourceKey = getSourceKey(source);
-    setWalkthroughLoading(true);
-    setWalkthroughError(null);
-    window.codiff
-      .getNarrativeWalkthrough(source)
-      .then((result) => {
-        if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
-          return;
-        }
-
-        if (result.status === 'ready') {
-          setNarrativeWalkthrough(result.walkthrough);
-          if (sidebarModeRef.current === 'walkthrough') {
-            setSidebarMode('walkthrough');
-          } else {
-            setWalkthroughUnread(true);
+  const requestNarrativeWalkthrough = useCallback(
+    (source: ReviewSource) => {
+      const sourceKey = getSourceKey(source);
+      beginWalkthroughGeneration();
+      window.codiff
+        .getNarrativeWalkthrough(source)
+        .then((result) => {
+          if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
+            return;
           }
-        } else {
-          setWalkthroughError(result);
-        }
-      })
-      .catch((error: unknown) => {
-        if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
-          return;
-        }
+          // A canceled generation was superseded by a newer one, which now
+          // owns the loading state and the terminal.
+          if (result.status === 'canceled') {
+            return;
+          }
 
-        setWalkthroughError({
-          reason: error instanceof Error ? error.message : String(error),
-          status: 'unavailable',
-        });
-      })
-      .finally(() => {
-        if (getSourceKey(stateRef.current?.source ?? source) === sourceKey) {
+          if (result.status === 'ready') {
+            setNarrativeWalkthrough(result.walkthrough);
+            if (sidebarModeRef.current === 'walkthrough') {
+              setSidebarMode('walkthrough');
+            } else {
+              setWalkthroughUnread(true);
+            }
+          } else {
+            setWalkthroughError(result);
+          }
           setWalkthroughLoading(false);
-        }
-      });
-  }, []);
+        })
+        .catch((error: unknown) => {
+          if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
+            return;
+          }
+
+          setWalkthroughError({
+            reason: error instanceof Error ? error.message : String(error),
+            status: 'unavailable',
+          });
+          setWalkthroughLoading(false);
+        });
+    },
+    [beginWalkthroughGeneration],
+  );
 
   // Regenerate the walkthrough on demand, e.g. after an in-place refresh
   // surfaced changes the current walkthrough doesn't narrate. The existing
@@ -1640,8 +1696,44 @@ export default function App() {
     if (!currentState || currentState.files.length === 0 || walkthroughLoading) {
       return;
     }
-    loadNarrativeWalkthrough(currentState.source);
-  }, [loadNarrativeWalkthrough, walkthroughLoading]);
+    requestNarrativeWalkthrough(currentState.source);
+  }, [requestNarrativeWalkthrough, walkthroughLoading]);
+
+  // Switching the agent or its model regenerates any walkthrough in play —
+  // shown, generating (the main process kills the superseded agent run), or
+  // failed — with the fresh run streaming into the generation terminal.
+  useEffect(
+    () =>
+      window.codiff.onAgentSelectionChanged(() => {
+        const currentState = stateRef.current;
+        // Pre-authored walkthrough files are not agent-generated.
+        if (
+          !currentState ||
+          currentState.files.length === 0 ||
+          launchOptionsRef.current.walkthroughFile != null
+        ) {
+          return;
+        }
+        if (
+          !narrativeWalkthroughRef.current &&
+          !walkthroughLoadingRef.current &&
+          !walkthroughErrorRef.current
+        ) {
+          return;
+        }
+        const nextKey = getAgentSelectionKey(
+          codiffConfigRef.current,
+          launchOptionsRef.current.agentBackend,
+        );
+        if (lastWalkthroughAgentKeyRef.current === nextKey) {
+          return;
+        }
+
+        setNarrativeWalkthrough(null);
+        requestNarrativeWalkthrough(currentState.source);
+      }),
+    [requestNarrativeWalkthrough],
+  );
 
   const changeSidebarMode = useCallback(
     (mode: SidebarMode) => {
@@ -1668,9 +1760,15 @@ export default function App() {
         return;
       }
 
-      loadNarrativeWalkthrough(state.source);
+      requestNarrativeWalkthrough(state.source);
     },
-    [loadNarrativeWalkthrough, narrativeWalkthrough, state, walkthroughError, walkthroughLoading],
+    [
+      narrativeWalkthrough,
+      requestNarrativeWalkthrough,
+      state,
+      walkthroughError,
+      walkthroughLoading,
+    ],
   );
 
   const openCommitView = useCallback(() => {
@@ -1692,6 +1790,12 @@ export default function App() {
   const closeCommitView = useCallback(() => {
     setSidebarMode('tree');
     setMainMode('review');
+  }, []);
+
+  const dismissWalkthroughFailure = useCallback(() => {
+    setWalkthroughError(null);
+    setWalkthroughOutput('');
+    setSidebarMode('tree');
   }, []);
 
   const toggleViewed = useCallback(
@@ -2406,6 +2510,14 @@ export default function App() {
   const emptySourceDetail = getEmptySourceDetail(state.source, state.root);
 
   const showNarrativeWalkthrough = narrativeWalkthrough != null && sidebarMode === 'walkthrough';
+  // The generation terminal owns the right-hand pane while the agent runs and
+  // stays up on failure; the agent-unavailable panel wins for NOT_FOUND errors
+  // since no agent ever produced output.
+  const showWalkthroughGeneration =
+    sidebarMode === 'walkthrough' &&
+    !showNarrativeWalkthrough &&
+    !showAgentUnavailablePanel &&
+    (walkthroughLoading || walkthroughError != null);
   const plainCommitModel = narrativeNavigation.walkthroughView
     ? buildCommitModel(narrativeNavigation.walkthroughView, state.files)
     : buildGenericCommitModel(state.files);
@@ -2621,8 +2733,6 @@ export default function App() {
           shareWalkthroughDisabled={walkthroughSharing}
           showWhitespace={showWhitespace}
           viewed={viewed}
-          walkthroughError={walkthroughError}
-          walkthroughLoading={walkthroughLoading}
           walkthroughUnread={walkthroughUnread}
         />
       </aside>
@@ -2655,6 +2765,13 @@ export default function App() {
             shareWalkthroughDisabled={walkthroughSharing}
             showWhitespace={showWhitespace}
             walkthrough={narrativeWalkthrough}
+          />
+        ) : showWalkthroughGeneration ? (
+          <WalkthroughGenerationView
+            attempt={walkthroughAttempt}
+            error={walkthroughLoading ? null : (walkthroughError?.reason ?? null)}
+            onDismiss={dismissWalkthroughFailure}
+            output={walkthroughOutput}
           />
         ) : showAgentUnavailablePanel ? (
           <div className="empty-state">

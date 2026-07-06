@@ -15,7 +15,9 @@ const { readPiSessionContext } = require('./pi-session-context.cjs');
  *   fallbackModel?: string;
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
+ *   onOutput?: (chunk: string) => void;
  *   onPartialText?: (delta: string) => void;
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} AgentOptions
  * @typedef {{

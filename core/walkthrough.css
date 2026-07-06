@@ -1047,6 +1047,28 @@
   position: relative;
 }
 
+/* Full-pane walkthrough generation terminal (right-hand review pane). */
+.wt-generation {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 20px;
+}
+.wt-generation-log {
+  align-self: flex-start;
+  height: fit-content;
+  margin-top: 0;
+  max-width: 760px;
+  width: 100%;
+}
+.wt-generation-error {
+  color: var(--diff-deletion);
+  font: 13px/1.4 var(--font-sans);
+  word-break: break-word;
+}
+
 .wt-commit-recap {
   align-items: center;
   background: color-mix(in srgb, var(--viewed) 8%, var(--code-bg));

@@ -11,12 +11,7 @@ import {
 } from 'react';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
-import type {
-  DiffLineCount,
-  PullRequestSource,
-  SidebarMode,
-  WalkthroughError,
-} from '../../lib/app-types.ts';
+import type { DiffLineCount, PullRequestSource, SidebarMode } from '../../lib/app-types.ts';
 import {
   formatLineCountNumber,
   formatTreeLineCount,
@@ -60,8 +55,6 @@ export function Sidebar({
   shareWalkthroughDisabled,
   showWhitespace,
   viewed,
-  walkthroughError,
-  walkthroughLoading,
   walkthroughUnread,
 }: {
   branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
@@ -91,8 +84,6 @@ export function Sidebar({
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
   viewed: Record<string, string>;
-  walkthroughError: WalkthroughError | null;
-  walkthroughLoading: boolean;
   walkthroughUnread: boolean;
 }) {
   const allowSelectionScroll = useRef(false);
@@ -359,21 +350,6 @@ export function Sidebar({
           showWhitespace={showWhitespace}
           walkthrough={narrativeWalkthrough}
         />
-      ) : mode === 'walkthrough' ? (
-        <>
-          {walkthroughLoading ? (
-            <div className="sidebar-walkthrough-status-shell">
-              <div className="sidebar-walkthrough-status codex">
-                <strong>Generating walkthrough…</strong>
-              </div>
-            </div>
-          ) : walkthroughError ? (
-            <div className="sidebar-walkthrough-status" title={walkthroughError.reason}>
-              <strong>Walkthrough unavailable</strong>
-              <span>{walkthroughError.reason}</span>
-            </div>
-          ) : null}
-        </>
       ) : (
         <div className="file-tree-shell" ref={treeHostRef}>
           <FileTree className="file-tree" model={model} onClick={handleTreeClick} />

@@ -5,8 +5,10 @@ const { homedir } = require('node:os');
 const { join } = require('node:path');
 const {
   buildSchemaReminder,
+  createAgentAbortError,
   findExecutableOnPath,
   isExecutableFile,
+  listenForAbort,
   normalizeEnum,
   normalizeStructuredOutput,
   oneLine,
@@ -26,7 +28,9 @@ const PI_NOT_FOUND_MESSAGE =
  *   fallbackModel?: string;
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
+ *   onOutput?: (chunk: string) => void;
  *   onPartialText?: (delta: string) => void;
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} PiOptions
  */
@@ -133,6 +137,11 @@ const runPi = async (
       let stdout = '';
       let finished = false;
 
+      if (options.signal?.aborted) {
+        reject(createAgentAbortError());
+        return;
+      }
+
       const piCommand = getPiCommand();
       const piArgs = [
         '--print',
@@ -157,14 +166,25 @@ const runPi = async (
           reject(new Error(timeoutMessage));
         }
       }, timeoutMs);
+      const stopAbortListener = listenForAbort(options.signal, () => {
+        if (!finished) {
+          finished = true;
+          clearTimeout(timer);
+          child.kill('SIGTERM');
+          reject(createAgentAbortError());
+        }
+      });
 
       child.stdout.on('data', (chunk) => {
         const text = chunk.toString();
         stdout += text;
         options.onPartialText?.(text);
+        options.onOutput?.(text);
       });
       child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString();
+        const text = chunk.toString();
+        stderr += text;
+        options.onOutput?.(text);
       });
       child.stdin.on('error', (error) => {
         stdinError = error;
@@ -172,9 +192,11 @@ const runPi = async (
       child.on('error', (error) => {
         finished = true;
         clearTimeout(timer);
+        stopAbortListener();
         reject(getPiLaunchError(error));
       });
       child.on('close', (code, signal) => {
+        stopAbortListener();
         if (finished) {
           return;
         }

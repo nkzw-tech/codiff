@@ -5,8 +5,10 @@ const { homedir } = require('node:os');
 const { join } = require('node:path');
 const {
   buildSchemaReminder,
+  createAgentAbortError,
   findExecutableOnPath,
   isExecutableFile,
+  listenForAbort,
   normalizeStructuredOutput,
   oneLine,
 } = require('./agent-shared.cjs');
@@ -148,7 +150,9 @@ const normalizeOpenCodeOutput = (output, schema) =>
  *   fallbackModel?: string;
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
+ *   onOutput?: (chunk: string) => void;
  *   onPartialText?: (delta: string) => void;
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} [options]
  */
@@ -174,6 +178,11 @@ const runOpenCode = async (
         let stdinError = null;
         let stdout = '';
         let finished = false;
+
+        if (options.signal?.aborted) {
+          reject(createAgentAbortError());
+          return;
+        }
 
         const opencodeCommand = getOpenCodeCommand();
         const opencodeArgs = [
@@ -203,12 +212,24 @@ const runOpenCode = async (
             reject(new Error(timeoutMessage));
           }
         }, timeoutMs);
+        const stopAbortListener = listenForAbort(options.signal, () => {
+          if (!finished) {
+            finished = true;
+            clearTimeout(timer);
+            child.kill('SIGTERM');
+            reject(createAgentAbortError());
+          }
+        });
 
+        // stdout carries only the final JSON payload, so it is not streamed;
+        // stderr carries the CLI's live diagnostics.
         child.stdout.on('data', (chunk) => {
           stdout += chunk.toString();
         });
         child.stderr.on('data', (chunk) => {
-          stderr += chunk.toString();
+          const text = chunk.toString();
+          stderr += text;
+          options.onOutput?.(text);
         });
         child.stdin.on('error', (error) => {
           stdinError = error;
@@ -216,9 +237,11 @@ const runOpenCode = async (
         child.on('error', (error) => {
           finished = true;
           clearTimeout(timer);
+          stopAbortListener();
           reject(getOpenCodeLaunchError(error));
         });
         child.on('close', (code, signal) => {
+          stopAbortListener();
           if (finished) {
             return;
           }

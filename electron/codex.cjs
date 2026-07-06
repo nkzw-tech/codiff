@@ -6,8 +6,10 @@ const { homedir, tmpdir } = require('node:os');
 const { join } = require('node:path');
 const {
   cleanText,
+  createAgentAbortError,
   findExecutableOnPath,
   isExecutableFile,
+  listenForAbort,
   normalizeEnum,
   oneLine,
   parseJSONMessage,
@@ -28,7 +30,9 @@ const CODEX_NOT_FOUND_MESSAGE =
  *   fallbackModel?: string;
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
+ *   onOutput?: (chunk: string) => void;
  *   reasoningEffort?: 'low' | 'medium' | 'high';
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} CodexOptions
  */
@@ -239,6 +243,11 @@ const runCodex = async (
         let stdout = '';
         let finished = false;
 
+        if (options.signal?.aborted) {
+          reject(createAgentAbortError());
+          return;
+        }
+
         const codexCommand = getCodexCommand();
         const codexArgs = [
           'exec',
@@ -272,12 +281,24 @@ const runCodex = async (
             reject(new Error(timeoutMessage));
           }
         }, timeoutMs);
+        const stopAbortListener = listenForAbort(options.signal, () => {
+          if (!finished) {
+            finished = true;
+            clearTimeout(timer);
+            child.kill('SIGTERM');
+            reject(createAgentAbortError());
+          }
+        });
 
         child.stdout.on('data', (chunk) => {
-          stdout += chunk.toString();
+          const text = chunk.toString();
+          stdout += text;
+          options.onOutput?.(text);
         });
         child.stderr.on('data', (chunk) => {
-          stderr += chunk.toString();
+          const text = chunk.toString();
+          stderr += text;
+          options.onOutput?.(text);
         });
         child.stdin.on('error', (error) => {
           stdinError = error;
@@ -285,9 +306,11 @@ const runCodex = async (
         child.on('error', (error) => {
           finished = true;
           clearTimeout(timer);
+          stopAbortListener();
           reject(getCodexLaunchError(error));
         });
         child.on('close', async (code, signal) => {
+          stopAbortListener();
           if (finished) {
             return;
           }

@@ -128,6 +128,8 @@ const windowIdentities = new Map();
 const windowRepositories = new Map();
 /** @type {Map<number, CodiffLaunchOptions>} */
 const windowLaunchOptions = new Map();
+/** Live walkthrough generation per window, aborted when superseded. @type {Map<number, AbortController>} */
+const walkthroughGenerations = new Map();
 /** @type {Map<number, Promise<RepositoryState>>} */
 const windowInitialRepositoryStates = new Map();
 /** @type {Map<number, string>} */
@@ -317,8 +319,32 @@ const sendConfigChanged = () => {
   }
 };
 
-/** @param {Partial<CodiffConfig>} nextConfig */
-const updateConfig = (nextConfig) => {
+// Settings that change which agent CLI or model generates walkthroughs; a
+// change re-triggers any visible walkthrough generation in the renderer.
+const AGENT_SELECTION_SETTING_KEYS = /** @type {const} */ ([
+  'agentBackend',
+  'claudeModel',
+  'openAIModel',
+  'opencodeModel',
+  'piModel',
+]);
+
+const sendAgentSelectionChanged = () => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('codiff:agentSelectionChanged');
+    }
+  }
+};
+
+/**
+ * @param {Partial<CodiffConfig>} nextConfig
+ * @param {{silentAgentSelection?: boolean}} [options] Set `silentAgentSelection`
+ * when the model change is a fallback applied mid-generation, so the renderer
+ * does not cancel that very generation to start another one.
+ */
+const updateConfig = (nextConfig, options = {}) => {
+  const previousSettings = config.settings;
   config = {
     keymap: { ...config.keymap, ...nextConfig.keymap },
     settings: {
@@ -349,6 +375,12 @@ const updateConfig = (nextConfig) => {
   writeConfig(config);
   refreshInstalledAgentFiles();
   sendConfigChanged();
+  if (
+    !options.silentAgentSelection &&
+    AGENT_SELECTION_SETTING_KEYS.some((key) => config.settings[key] !== previousSettings[key])
+  ) {
+    sendAgentSelectionChanged();
+  }
   Menu.setApplicationMenu(buildApplicationMenu());
 };
 
@@ -378,7 +410,11 @@ const getAgentOptions = (agent) => ({
   model: config.settings[agent.modelSettingKey],
   /** @param {string} fallbackModel */
   onModelFallback: async (fallbackModel) => {
-    updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } });
+    // A fallback is not a user model switch; don't re-trigger generations.
+    updateConfig(
+      { settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } },
+      { silentAgentSelection: true },
+    );
   },
 });
 
@@ -1066,6 +1102,8 @@ const createWindow = (
   });
   window.on('closed', () => {
     openWindows.delete(window);
+    walkthroughGenerations.get(webContentsId)?.abort();
+    walkthroughGenerations.delete(webContentsId);
     const watcher = repositoryWatchers.get(webContentsId);
     if (watcher?.checkTimer) {
       clearTimeout(watcher.checkTimer);
@@ -1550,13 +1588,51 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
       launchOptions?.walkthroughContext,
       await agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
     );
-    return readNarrativeWalkthrough(
-      state,
-      agent,
-      getAgentOptions(agent),
-      walkthroughContext,
-      config.settings.walkthroughPrompt,
+
+    // Only one generation runs per window: a new request supersedes (and
+    // kills) the previous agent process, and only the live generation may
+    // stream output to the renderer's terminal.
+    const senderId = event.sender.id;
+    walkthroughGenerations.get(senderId)?.abort();
+    const generation = new AbortController();
+    walkthroughGenerations.set(senderId, generation);
+    /** @param {string} chunk */
+    const sendOutput = (chunk) => {
+      if (walkthroughGenerations.get(senderId) === generation && !event.sender.isDestroyed()) {
+        event.sender.send('codiff:walkthroughOutput', chunk);
+      }
+    };
+
+    sendOutput(
+      `Generating walkthrough with ${agent.label} (${config.settings[agent.modelSettingKey]})…\r\n\r\n`,
     );
+    try {
+      return await readNarrativeWalkthrough(
+        state,
+        agent,
+        {
+          ...getAgentOptions(agent),
+          /** @param {string} fallbackModel @param {string} originalModel */
+          onModelFallback: async (fallbackModel, originalModel) => {
+            sendOutput(
+              `\r\nModel ${originalModel} unavailable — retried with ${fallbackModel}.\r\n`,
+            );
+            updateConfig(
+              { settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } },
+              { silentAgentSelection: true },
+            );
+          },
+          onOutput: sendOutput,
+          signal: generation.signal,
+        },
+        walkthroughContext,
+        config.settings.walkthroughPrompt,
+      );
+    } finally {
+      if (walkthroughGenerations.get(senderId) === generation) {
+        walkthroughGenerations.delete(senderId);
+      }
+    }
   } catch (error) {
     return {
       reason: error instanceof Error ? error.message : String(error),
