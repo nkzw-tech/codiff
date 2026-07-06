@@ -119,6 +119,10 @@ function CommitLogTerminal({ output }: { output: string }) {
       // this terminal is read-only and the attributes draw a caret on click.
       container.removeAttribute('contenteditable');
       container.removeAttribute('tabindex');
+      // A fresh terminal can inherit rows from a previously disposed one:
+      // dispose() never frees the WASM-side terminal, and new instances get
+      // recycled row memory from the shared WASM module. Erase everything.
+      instance.write('\u001B[2J\u001B[3J\u001B[H');
       writtenRef.current = 0;
       setTerminal(instance);
     });
@@ -130,17 +134,13 @@ function CommitLogTerminal({ output }: { output: string }) {
   }, []);
 
   useEffect(() => {
-    if (!terminal) {
+    // Output only grows within one commit attempt; each attempt remounts this
+    // component (keyed by the parent), so a fresh terminal starts empty.
+    if (!terminal || output.length <= writtenRef.current) {
       return;
     }
-    if (output.length < writtenRef.current) {
-      terminal.reset();
-      writtenRef.current = 0;
-    }
-    if (output.length > writtenRef.current) {
-      terminal.write(output.slice(writtenRef.current));
-      writtenRef.current = output.length;
-    }
+    terminal.write(output.slice(writtenRef.current));
+    writtenRef.current = output.length;
   }, [terminal, output]);
 
   return <div className="wt-commit-log-term" ref={containerRef} />;
@@ -350,6 +350,8 @@ export function CommitView({
   const [status, setStatus] = useState<'idle' | 'submitting'>('idle');
   const [result, setResult] = useState<WalkthroughCommitResult | null>(null);
   const [output, setOutput] = useState('');
+  // Remounts the log terminal on each commit attempt so it starts empty.
+  const [attempt, setAttempt] = useState(0);
   const [updating, setUpdating] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [bodyFlash, setBodyFlash] = useState(false);
@@ -394,6 +396,7 @@ export function CommitView({
     setStatus('submitting');
     setResult(null);
     setOutput('');
+    setAttempt((current) => current + 1);
     const unsubscribe = onCommitOutput?.((chunk) => setOutput((current) => current + chunk));
     try {
       const next = await onCommit({
@@ -509,7 +512,7 @@ export function CommitView({
                 </button>
               ) : null}
             </div>
-            <CommitLogTerminal output={output} />
+            <CommitLogTerminal key={attempt} output={output} />
           </div>
         ) : null}
         <div className="wt-commit-foot-row">
