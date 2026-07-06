@@ -53,8 +53,14 @@ export const useNarrativeNavigation = (
   const commitPathSetRef = useRef(new Set(commitPaths));
   const commitResetKeyRef = useRef(resetKey);
   const commitSubjectDirtyRef = useRef(false);
-  const pendingStopScrollIndexRef = useRef<number | null>(null);
-  const pendingSupportScrollRef = useRef(false);
+  // Pending scroll locks remember which walkthrough they were set for, so a
+  // walkthrough refresh implicitly invalidates them without a render-time
+  // ref write.
+  const pendingStopScrollRef = useRef<{
+    index: number;
+    walkthrough: NarrativeWalkthrough | null;
+  } | null>(null);
+  const pendingSupportScrollRef = useRef<{ walkthrough: NarrativeWalkthrough | null } | null>(null);
 
   const setCommitSubject = useCallback((value: string) => {
     commitSubjectDirtyRef.current = true;
@@ -66,29 +72,26 @@ export const useNarrativeNavigation = (
     setCommitBodyState(value);
   }, []);
 
-  const seededFor = useRef<NarrativeWalkthrough | null>(null);
-  useEffect(() => {
-    if (!walkthrough || seededFor.current === walkthrough) {
-      return;
+  // Reset navigation when a new walkthrough arrives, adjusting state during
+  // render rather than in an effect (see
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
+  const [seededFor, setSeededFor] = useState<NarrativeWalkthrough | null>(null);
+  if (walkthrough && seededFor !== walkthrough) {
+    setSeededFor(walkthrough);
+    // A refresh can land while the reviewer is on the commit screen — e.g.
+    // a failed commit attempt stages files, which regenerates the
+    // walkthrough. Don't yank them back to the first stop (that would also
+    // discard the visible commit error).
+    if (mode !== 'commit') {
+      setMode('stop');
+      setIndex(0);
+      setScrollTarget({ index: 0, nonce: 0 });
+      setSupportScrollRequest(0);
+      setSupportVisited(false);
+      const stopId = firstStopId(walkthrough);
+      setVisited(new Set(stopId ? [stopId] : []));
     }
-    seededFor.current = walkthrough;
-    if (mode === 'commit') {
-      // A refresh can land while the reviewer is on the commit screen — e.g.
-      // a failed commit attempt stages files, which regenerates the
-      // walkthrough. Don't yank them back to the first stop (that would also
-      // discard the visible commit error).
-      return;
-    }
-    setMode('stop');
-    setIndex(0);
-    setScrollTarget({ index: 0, nonce: 0 });
-    pendingStopScrollIndexRef.current = null;
-    pendingSupportScrollRef.current = false;
-    setSupportScrollRequest(0);
-    setSupportVisited(false);
-    const stopId = firstStopId(walkthrough);
-    setVisited(new Set(stopId ? [stopId] : []));
-  }, [mode, walkthrough]);
+  }
 
   useEffect(() => {
     const pathSet = new Set(commitPaths);
@@ -158,11 +161,11 @@ export const useNarrativeNavigation = (
       setMode('stop');
       setIndex(clamped);
       markVisited(walkthroughView.sequence[clamped]?.id);
-      pendingStopScrollIndexRef.current = clamped;
-      pendingSupportScrollRef.current = false;
+      pendingStopScrollRef.current = { index: clamped, walkthrough };
+      pendingSupportScrollRef.current = null;
       setScrollTarget((current) => ({ index: clamped, nonce: current.nonce + 1 }));
     },
-    [walkthroughView, markVisited],
+    [walkthrough, walkthroughView, markVisited],
   );
 
   const goNext = useCallback(() => goStop(index + 1), [goStop, index]);
@@ -174,31 +177,37 @@ export const useNarrativeNavigation = (
         return;
       }
       const clamped = Math.max(0, Math.min(walkthroughView.sequence.length - 1, target));
-      if (pendingSupportScrollRef.current) {
-        return;
+      const pendingSupport = pendingSupportScrollRef.current;
+      if (pendingSupport) {
+        if (pendingSupport.walkthrough === walkthrough) {
+          return;
+        }
+        pendingSupportScrollRef.current = null;
       }
-      const pendingStopScrollIndex = pendingStopScrollIndexRef.current;
-      if (pendingStopScrollIndex != null && pendingStopScrollIndex !== clamped) {
-        return;
-      }
-      if (pendingStopScrollIndex === clamped) {
-        pendingStopScrollIndexRef.current = null;
+      const pendingStop = pendingStopScrollRef.current;
+      if (pendingStop && pendingStop.walkthrough !== walkthrough) {
+        pendingStopScrollRef.current = null;
+      } else if (pendingStop) {
+        if (pendingStop.index !== clamped) {
+          return;
+        }
+        pendingStopScrollRef.current = null;
       }
       setMode('stop');
       setIndex((current) => (current === clamped ? current : clamped));
       markVisited(walkthroughView.sequence[clamped]?.id);
     },
-    [walkthroughView, markVisited],
+    [walkthrough, walkthroughView, markVisited],
   );
 
   const releaseStopScrollLock = useCallback(() => {
-    pendingStopScrollIndexRef.current = null;
-    pendingSupportScrollRef.current = false;
+    pendingStopScrollRef.current = null;
+    pendingSupportScrollRef.current = null;
   }, []);
 
   const leaveStopMode = useCallback(() => {
-    pendingStopScrollIndexRef.current = null;
-    pendingSupportScrollRef.current = false;
+    pendingStopScrollRef.current = null;
+    pendingSupportScrollRef.current = null;
   }, []);
 
   const openSupport = useCallback(() => {
@@ -207,14 +216,14 @@ export const useNarrativeNavigation = (
       setIndex(walkthroughView.sequence.length - 1);
     }
     setMode('support');
-    pendingSupportScrollRef.current = true;
+    pendingSupportScrollRef.current = { walkthrough };
     setSupportScrollRequest((current) => current + 1);
     setSupportVisited(true);
-  }, [walkthroughView, leaveStopMode]);
+  }, [walkthrough, walkthroughView, leaveStopMode]);
 
   const syncSupportFromScroll = useCallback(() => {
-    pendingSupportScrollRef.current = false;
-    pendingStopScrollIndexRef.current = null;
+    pendingSupportScrollRef.current = null;
+    pendingStopScrollRef.current = null;
     setMode('support');
     setSupportVisited(true);
   }, []);
