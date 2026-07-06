@@ -73,6 +73,10 @@ function CommitStatsChips({ stats }: { stats: CommitMetadata['stats'] }) {
   );
 }
 
+function isSamePerson(a: CommitMetadata['author'], b: CommitMetadata['committer']): boolean {
+  return a.name === b.name && a.email === b.email && a.date === b.date;
+}
+
 function CommitPersonRow({ label, person }: { label: string; person: CommitMetadata['author'] }) {
   return (
     <div className="commit-details-person">
@@ -194,8 +198,14 @@ export function CommitDetailsPanel({
         </section>
       ) : null}
       <section aria-label="Commit metadata" className="commit-details-grid">
-        <CommitPersonRow label="Author" person={metadata.author} />
-        <CommitPersonRow label="Committer" person={metadata.committer} />
+        {isSamePerson(metadata.author, metadata.committer) ? (
+          <CommitPersonRow label="Author & Committer" person={metadata.author} />
+        ) : (
+          <>
+            <CommitPersonRow label="Author" person={metadata.author} />
+            <CommitPersonRow label="Committer" person={metadata.committer} />
+          </>
+        )}
         <div className="commit-details-cell">
           <h3>Refs</h3>
           {metadata.refs.length > 0 ? (
