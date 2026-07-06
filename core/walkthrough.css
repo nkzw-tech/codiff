@@ -1006,9 +1006,8 @@
   color: var(--text);
   font-family: var(--font-mono);
   overflow-x: auto;
-}
-.wt-commit-log-term .xterm-viewport {
-  background: transparent !important;
+  /* Anchor ghostty-web's hidden absolutely-positioned input textarea here. */
+  position: relative;
 }
 
 .wt-commit-recap {
