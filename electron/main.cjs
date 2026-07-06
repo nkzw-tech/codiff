@@ -1641,6 +1641,13 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
   }
 });
 
+ipcMain.handle('codiff:cancelNarrativeWalkthrough', (event) => {
+  const generation = walkthroughGenerations.get(event.sender.id);
+  walkthroughGenerations.delete(event.sender.id);
+  // Kills the agent CLI; the pending generation resolves as 'canceled'.
+  generation?.abort();
+});
+
 ipcMain.handle('codiff:shareWalkthrough', async (event, snapshot) => {
   return shareSnapshot(getWalkthroughShareContext(event.sender.id), snapshot);
 });

@@ -10,14 +10,15 @@ import { LogTerminal } from './LogTerminal.tsx';
 export function WalkthroughGenerationView({
   attempt,
   error,
-  onDismiss,
+  onClose,
   output,
 }: {
   /** Remounts the terminal so each generation starts empty. */
   attempt: number;
   /** Failure reason; null while the generation is still running. */
   error: string | null;
-  onDismiss: () => void;
+  /** Cancels a running generation or dismisses a failed one. */
+  onClose: () => void;
   output: string;
 }) {
   const failed = error != null;
@@ -28,16 +29,14 @@ export function WalkthroughGenerationView({
           <span className="wt-commit-log-title">
             {failed ? 'Walkthrough failed' : 'Generating walkthrough…'}
           </span>
-          {failed ? (
-            <button
-              aria-label="Dismiss walkthrough error"
-              className="wt-commit-dismiss"
-              onClick={onDismiss}
-              type="button"
-            >
-              <X size={14} weight="bold" />
-            </button>
-          ) : null}
+          <button
+            aria-label={failed ? 'Dismiss walkthrough error' : 'Cancel walkthrough generation'}
+            className="wt-commit-dismiss"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={14} weight="bold" />
+          </button>
         </div>
         <LogTerminal className="wt-commit-log-term" key={attempt} output={output} rows={24} />
         {failed ? <div className="wt-generation-error">{error}</div> : null}

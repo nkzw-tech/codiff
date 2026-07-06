@@ -1792,7 +1792,16 @@ export default function App() {
     setMainMode('review');
   }, []);
 
-  const dismissWalkthroughFailure = useCallback(() => {
+  /**
+   * Closes the generation terminal: kills a still-running agent (the pending
+   * request resolves as 'canceled' and is ignored), clears any failure, and
+   * returns to the tree. The Walkthrough tab starts a fresh generation.
+   */
+  const closeWalkthroughGeneration = useCallback(() => {
+    if (walkthroughLoadingRef.current) {
+      void window.codiff.cancelNarrativeWalkthrough();
+    }
+    setWalkthroughLoading(false);
     setWalkthroughError(null);
     setWalkthroughOutput('');
     setSidebarMode('tree');
@@ -2770,7 +2779,7 @@ export default function App() {
           <WalkthroughGenerationView
             attempt={walkthroughAttempt}
             error={walkthroughLoading ? null : (walkthroughError?.reason ?? null)}
-            onDismiss={dismissWalkthroughFailure}
+            onClose={closeWalkthroughGeneration}
             output={walkthroughOutput}
           />
         ) : showAgentUnavailablePanel ? (
