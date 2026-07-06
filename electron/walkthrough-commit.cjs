@@ -5,7 +5,10 @@
 // reviewer chose to include. Only those paths are committed — any other staged
 // changes are left untouched — so a reviewer can land part of a working tree.
 
-const { spawn } = require('node:child_process');
+const { accessSync, chmodSync, constants } = require('node:fs');
+const { dirname, join } = require('node:path');
+
+const pty = require('node-pty');
 
 const { git, validateRepositoryPath } = require('./git-state/common.cjs');
 
@@ -14,42 +17,85 @@ const { git, validateRepositoryPath } = require('./git-state/common.cjs');
  * @typedef {import('../core/types.ts').WalkthroughCommitResult} WalkthroughCommitResult
  */
 
+// Cols must match the xterm instance in
+// core/app/components/walkthrough/CommitView.tsx so hook output wraps where the
+// renderer's terminal does.
+const TERMINAL_COLS = 80;
+const TERMINAL_ROWS = 24;
+
+// pnpm drops the executable bit on node-pty's prebuilt macOS spawn-helper,
+// which makes every pty.spawn fail with `posix_spawnp failed`.
+const ensureSpawnHelperIsExecutable = () => {
+  if (process.platform !== 'darwin') {
+    return;
+  }
+  const helper = join(
+    dirname(require.resolve('node-pty/package.json')),
+    'prebuilds',
+    `darwin-${process.arch}`,
+    'spawn-helper',
+  );
+  try {
+    accessSync(helper, constants.X_OK);
+  } catch {
+    try {
+      chmodSync(helper, 0o755);
+    } catch {
+      // Fall through to pty.spawn, which reports the real failure.
+    }
+  }
+};
+
+/** Remove ANSI escape sequences (colors, cursor movement, OSC) from text. */
+/** @param {string} text */
+const stripAnsi = (text) =>
+  text.replaceAll(
+    // eslint-disable-next-line no-control-regex
+    /\u001B(?:\[[0-9;?]*[ -\/]*[@-~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)?|[@-Z\\^_])/g,
+    '',
+  );
+
 /**
- * Run `git commit`, forwarding stdout and stderr chunks as they arrive so the
- * renderer can show pre-commit hook output live. On failure the rejection
- * carries the full combined output — hooks write their diagnostics to stdout,
- * which stderr-only capture would drop.
+ * Run `git commit` inside a pseudo-terminal, forwarding output chunks as they
+ * arrive so the renderer can show pre-commit hook output live. The PTY makes
+ * git and its hooks believe they are attached to a real terminal, so they emit
+ * the same colors and progress output they would in a shell.
  *
  * @param {string} repoPath
  * @param {ReadonlyArray<string>} args
- * @param {string} input
  * @param {((chunk: string) => void) | undefined} onOutput
  * @returns {Promise<void>}
  */
-const gitStreaming = (repoPath, args, input, onOutput) =>
+const gitStreaming = (repoPath, args, onOutput) =>
   new Promise((resolve, reject) => {
-    const child = spawn('git', ['-C', repoPath, ...args], {
-      stdio: ['pipe', 'pipe', 'pipe'],
+    ensureSpawnHelperIsExecutable();
+    /** @type {import('node-pty').IPty} */
+    let child;
+    try {
+      child = pty.spawn('git', ['-C', repoPath, ...args], {
+        cols: TERMINAL_COLS,
+        cwd: repoPath,
+        env: process.env,
+        name: 'xterm-256color',
+        rows: TERMINAL_ROWS,
+      });
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+    let combined = '';
+    child.onData((chunk) => {
+      combined += chunk;
+      onOutput?.(chunk);
     });
-    /** @type {Array<Buffer>} */
-    const combined = [];
-    /** @param {Buffer} chunk */
-    const forward = (chunk) => {
-      combined.push(chunk);
-      onOutput?.(chunk.toString('utf8'));
-    };
-    child.stdout.on('data', forward);
-    child.stderr.on('data', forward);
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
+    child.onExit(({ exitCode }) => {
+      if (exitCode === 0) {
         resolve();
       } else {
-        const output = Buffer.concat(combined).toString('utf8').trim();
-        reject(new Error(output || `git exited with status ${code}`));
+        const output = stripAnsi(combined).trim();
+        reject(new Error(output || `git exited with status ${exitCode}`));
       }
     });
-    child.stdin.end(input);
   });
 
 /**
@@ -86,7 +132,7 @@ const createWalkthroughCommit = async (repoPath, request, onOutput) => {
     // Stage exactly the chosen paths (covers untracked files too), then commit
     // only those paths so previously-staged work on other files stays staged.
     await git(repoPath, ['add', '--', ...paths]);
-    await gitStreaming(repoPath, ['commit', '-F', '-', '--', ...paths], message, onOutput);
+    await gitStreaming(repoPath, ['commit', '-m', message, '--', ...paths], onOutput);
     const hash = (await git(repoPath, ['rev-parse', 'HEAD'])).trim();
     return { hash, status: 'committed' };
   } catch (error) {

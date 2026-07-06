@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
+    "node-pty": "^1.1.0",
     "proper-lockfile": "^4.1.2"
   },
   "devDependencies": {
@@ -64,6 +65,7 @@
     "@types/react-dom": "^19.2.3",
     "@typescript/native-preview": "7.0.0-dev.20260630.1",
     "@vitejs/plugin-react": "^6.0.3",
+    "@xterm/xterm": "^6.0.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "electron": "^43.0.0",
     "eslint-plugin-no-only-tests": "^3.4.0",

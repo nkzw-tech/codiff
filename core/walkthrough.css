@@ -987,19 +987,28 @@
 .wt-commit-log.failed {
   border-color: color-mix(in srgb, var(--diff-deletion) 32%, transparent);
 }
+.wt-commit-log-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.wt-commit-log-head .wt-commit-dismiss {
+  color: var(--muted);
+  margin: -4px -6px;
+}
 .wt-commit-log-title {
   color: var(--muted);
   font: 600 11px/1 var(--font-sans);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.wt-commit-log-body {
-  font: 12px/1.55 var(--font-mono);
-  margin: 0;
-  max-height: 240px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
+.wt-commit-log-term {
+  color: var(--text);
+  font-family: var(--font-mono);
+  overflow-x: auto;
+}
+.wt-commit-log-term .xterm-viewport {
+  background: transparent !important;
 }
 
 .wt-commit-recap {
