@@ -5,7 +5,8 @@
 // reviewer chose to include. Only those paths are committed — any other staged
 // changes are left untouched — so a reviewer can land part of a working tree.
 
-const { accessSync, chmodSync, constants } = require('node:fs');
+const { accessSync, chmodSync, constants, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { tmpdir } = require('node:os');
 const { dirname, join } = require('node:path');
 
 const pty = require('node-pty');
@@ -55,6 +56,10 @@ const stripAnsi = (text) =>
     '',
   );
 
+/** @param {string} text */
+const normalizeTerminalOutput = (text) =>
+  stripAnsi(text).replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+
 /**
  * Run `git commit` inside a pseudo-terminal, forwarding output chunks as they
  * arrive so the renderer can show pre-commit hook output live. The PTY makes
@@ -92,7 +97,7 @@ const gitStreaming = (repoPath, args, onOutput) =>
       if (exitCode === 0) {
         resolve();
       } else {
-        const output = stripAnsi(combined).trim();
+        const output = normalizeTerminalOutput(combined).trim();
         reject(new Error(output || `git exited with status ${exitCode}`));
       }
     });
@@ -132,7 +137,14 @@ const createWalkthroughCommit = async (repoPath, request, onOutput) => {
     // Stage exactly the chosen paths (covers untracked files too), then commit
     // only those paths so previously-staged work on other files stays staged.
     await git(repoPath, ['add', '--', ...paths]);
-    await gitStreaming(repoPath, ['commit', '-m', message, '--', ...paths], onOutput);
+    const tempDirectory = mkdtempSync(join(tmpdir(), 'codiff-commit-message-'));
+    const messagePath = join(tempDirectory, 'message.txt');
+    try {
+      writeFileSync(messagePath, message);
+      await gitStreaming(repoPath, ['commit', '-F', messagePath, '--', ...paths], onOutput);
+    } finally {
+      rmSync(tempDirectory, { force: true, recursive: true });
+    }
     const hash = (await git(repoPath, ['rev-parse', 'HEAD'])).trim();
     return { hash, status: 'committed' };
   } catch (error) {
