@@ -116,6 +116,19 @@ const isClaudeModelAvailabilityError = (value) =>
   );
 
 /**
+ * Extract the terminal result envelope from Claude Code's `--output-format json`
+ * output. Older CLIs emit a single result object; v2.1+ emit an array of stream
+ * events (`system`, `assistant`, …, `result`) whose last `result` event carries
+ * `result` and `structured_output`. Returns the parsed value unchanged when it
+ * is already an object.
+ *
+ * @param {unknown} parsed
+ * @returns {any}
+ */
+const extractResultEnvelope = (parsed) =>
+  Array.isArray(parsed) ? (parsed.findLast((event) => event?.type === 'result') ?? {}) : parsed;
+
+/**
  * @param {unknown} error
  */
 const getClaudeLaunchError = (error) => {
@@ -230,7 +243,7 @@ const runClaude = async (
           /** @type {any} */
           let envelope;
           try {
-            envelope = JSON.parse(stdout);
+            envelope = extractResultEnvelope(JSON.parse(stdout));
           } catch {
             reject(new Error(oneLine(stdout, 'Claude Code did not return JSON.')));
             return;
@@ -280,6 +293,7 @@ module.exports = {
   CLAUDE_NOT_FOUND_MESSAGE,
   CLAUDE_TIMEOUT_MS,
   DEFAULT_CLAUDE_MODEL,
+  extractResultEnvelope,
   FALLBACK_CLAUDE_MODEL,
   getClaudeCommand,
   isClaudeModelAvailabilityError,

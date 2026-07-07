@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const {
   CLAUDE_NOT_FOUND_CODE,
   DEFAULT_CLAUDE_MODEL,
+  extractResultEnvelope,
   getClaudeCommand,
   isClaudeModelAvailabilityError,
   isClaudeNotLoggedInError,
@@ -16,6 +17,7 @@ const {
 } = require('../claude.cjs') as {
   CLAUDE_NOT_FOUND_CODE: string;
   DEFAULT_CLAUDE_MODEL: string;
+  extractResultEnvelope: (parsed: unknown) => any;
   getClaudeCommand: () => string;
   isClaudeModelAvailabilityError: (value: string) => boolean;
   isClaudeNotLoggedInError: (value: string) => boolean;
@@ -29,6 +31,31 @@ const {
     options?: { model?: string; timeoutMs?: number },
   ) => Promise<string>;
 };
+
+test('extracts the terminal result event from stream-array output', () => {
+  // v2.1+ CLIs emit `--output-format json` as an array of stream events.
+  const envelope = extractResultEnvelope([
+    { type: 'system' },
+    { type: 'assistant' },
+    {
+      type: 'result',
+      is_error: false,
+      result: '{"answer":"4"}',
+      structured_output: { answer: '4' },
+    },
+  ]);
+  expect(envelope).toMatchObject({ is_error: false, structured_output: { answer: '4' } });
+});
+
+test('passes a single result object through unchanged', () => {
+  // Older CLIs emit a single result envelope.
+  const single = { is_error: false, result: '{"answer":"4"}' };
+  expect(extractResultEnvelope(single)).toBe(single);
+});
+
+test('falls back to an empty envelope when no result event is present', () => {
+  expect(extractResultEnvelope([{ type: 'system' }, { type: 'assistant' }])).toEqual({});
+});
 
 test('normalizes Claude Code model preferences to known models', () => {
   expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8');
@@ -101,6 +128,39 @@ process.stdin.on('end', () => {
     expect(args).toContain('--add-dir');
     expect(args).toContain(directory);
     expect(args).toContain('--no-session-persistence');
+  } finally {
+    if (previousClaudePath == null) {
+      delete process.env.CODIFF_CLAUDE_PATH;
+    } else {
+      process.env.CODIFF_CLAUDE_PATH = previousClaudePath;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('reads the result event from newer stream-array output', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-claude-array-'));
+  const fakeClaudePath = join(directory, 'claude');
+  const previousClaudePath = process.env.CODIFF_CLAUDE_PATH;
+
+  try {
+    await writeFile(
+      fakeClaudePath,
+      `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('end', () => {
+  process.stdout.write(${JSON.stringify(
+    '[{"type":"system"},{"type":"assistant"},{"type":"result","is_error":false,"result":"{\\"version\\":1}","structured_output":{"version":1}}]',
+  )});
+});
+`,
+    );
+    await chmod(fakeClaudePath, 0o755);
+    process.env.CODIFF_CLAUDE_PATH = fakeClaudePath;
+
+    await expect(
+      runClaude(directory, 'prompt', { type: 'object' }, 'walkthrough.json', 'Timed out.'),
+    ).resolves.toBe('{"version":1}');
   } finally {
     if (previousClaudePath == null) {
       delete process.env.CODIFF_CLAUDE_PATH;
