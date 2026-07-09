@@ -70,6 +70,7 @@ import {
 } from './lib/diff.ts';
 import { compactPath, fuzzyMatches, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
+import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
 import { buildCommitModel, buildGenericCommitModel } from './lib/narrative-walkthrough.ts';
 import {
   consumeReloadSelection,
@@ -228,6 +229,7 @@ const getReloadSourceForLaunch = (
 
 export default function App() {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [expandedGenerated, setExpandedGenerated] = useState<Set<string>>(() => new Set());
   const [activeDiffSearchMatchIndex, setActiveDiffSearchMatchIndex] = useState(0);
   const [diffSearchFocusRequest, setDiffSearchFocusRequest] = useState(0);
   const [diffSearchQuery, setDiffSearchQuery] = useState('');
@@ -301,6 +303,7 @@ export default function App() {
   const stateRef = useRef<RepositoryState | null>(null);
   const activeReviewCommandTargetRef = useRef<ReviewCommandTarget | null>(null);
   const collapsedRef = useRef<Set<string>>(new Set());
+  const expandedGeneratedRef = useRef<Set<string>>(new Set());
   const preferencesRef = useRef<CodiffPreferences>(defaultPreferences);
   const reviewCommentsRef = useRef<ReadonlyArray<ReviewComment>>([]);
   const selectedPathRef = useRef<string | null>(null);
@@ -558,6 +561,13 @@ export default function App() {
         }
         return next;
       });
+      if (nextViewed) {
+        setExpandedGenerated((current) => {
+          const next = new Set(current);
+          next.delete(file.path);
+          return next;
+        });
+      }
       bumpItemVersion(file.path);
     },
     [bumpItemVersion],
@@ -571,6 +581,7 @@ export default function App() {
 
     sourceSessionsRef.current.set(getSourceKey(currentState.source), {
       collapsed: new Set(collapsedRef.current),
+      expandedGenerated: new Set(expandedGeneratedRef.current),
       narrativeWalkthrough: narrativeWalkthroughRef.current,
       reviewComments: reviewCommentsRef.current,
       selectedPath: selectedPathRef.current,
@@ -733,6 +744,7 @@ export default function App() {
       setState(orderedState);
       setLoadError(null);
       setCollapsed(getCollapsedViewedPaths(orderedState.files, nextViewed));
+      setExpandedGenerated(new Set());
       setItemVersionByKey({});
       setFocusCommentId(null);
       setFocusCommentRequest(0);
@@ -1026,6 +1038,7 @@ export default function App() {
           setReviewComments(getReviewCommentsFromState(orderedState));
           setViewed(nextViewed);
           setCollapsed(getCollapsedViewedPaths(orderedState.files, nextViewed));
+          setExpandedGenerated(new Set());
           setLoadError(null);
         })
         .catch((error: unknown) => {
@@ -1096,6 +1109,10 @@ export default function App() {
   useEffect(() => {
     collapsedRef.current = collapsed;
   }, [collapsed]);
+
+  useEffect(() => {
+    expandedGeneratedRef.current = expandedGenerated;
+  }, [expandedGenerated]);
 
   useEffect(() => {
     reviewCommentsRef.current = reviewComments;
@@ -1601,11 +1618,13 @@ export default function App() {
               : (orderedState.files[0]?.path ?? null);
           const nextCollapsed =
             session?.collapsed ?? getCollapsedViewedPaths(orderedState.files, nextViewed);
+          const nextExpandedGenerated = session?.expandedGenerated ?? new Set<string>();
 
           stateGenerationRef.current += 1;
           setState(orderedState);
           setHistorySource(getHistorySource(orderedState.source) ?? historySource);
           setCollapsed(new Set(nextCollapsed));
+          setExpandedGenerated(new Set(nextExpandedGenerated));
           setItemVersionByKey({});
           setReviewComments(session?.reviewComments ?? getReviewCommentsFromState(orderedState));
           setReloadDeltaPaths(new Set());
@@ -1814,6 +1833,13 @@ export default function App() {
       });
 
       setCollapsed((current) => updateReviewIdentityCollapsed(current, reviewIdentity, isViewed));
+      if (!isViewed) {
+        setExpandedGenerated((current) => {
+          const next = new Set(current);
+          next.delete(reviewIdentity.key);
+          return next;
+        });
+      }
       bumpItemVersion(reviewIdentity.key);
     },
     [bumpItemVersion],
@@ -2025,6 +2051,15 @@ export default function App() {
           next.delete(reviewKey);
         } else {
           next.add(reviewKey);
+        }
+        return next;
+      });
+      setExpandedGenerated((current) => {
+        const next = new Set(current);
+        if (isCollapsed && isGeneratedWalkthroughFile(file)) {
+          next.add(reviewKey);
+        } else {
+          next.delete(reviewKey);
         }
         return next;
       });
@@ -2542,6 +2577,7 @@ export default function App() {
     commitMetadata,
     diffLineHeight,
     diffStyle,
+    expandedGenerated,
     focusCommentId,
     focusCommentRequest,
     gitIdentity,

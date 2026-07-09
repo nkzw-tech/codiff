@@ -39,8 +39,10 @@ choose.
 - **`support[]`** — changed hunks that should stay off the main path. Use it for generated files,
   lockfiles, snapshots, docs-only changes, and repeated mechanical edits unless they are essential
   to review. Codiff adds any omitted live-diff hunks to support. Generated-like files are one
-  synthetic hunk per changed section; never split them, but keep behavior-relevant snapshots or
-  artifacts on the main path.
+  synthetic hunk per changed section; never split them, use `reason: "Generated files"` for
+  generated-only support items so they render together, but keep behavior-relevant snapshots or
+  artifacts on the main path. Codiff also recognizes `linguist-generated` and `gitlab-generated`
+  attributes from `.gitattributes`.
 - **`changeType?` / `commitNote?`** — optional commit composer metadata for committable
   walkthroughs.
 - **`commit?`** — for working-tree walkthroughs, include `title` and `body` when there is enough

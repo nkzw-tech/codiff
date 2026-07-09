@@ -828,7 +828,7 @@ test('adds unreferenced live hunks to support so changed code remains visible', 
   const result = normalizeNarrativeWalkthrough(input, files);
 
   expect(result.support.map((item: any) => item.reason)).toEqual([
-    'Other changes',
+    'Generated files',
     'Other changes',
   ]);
   expect(result.support.map((item: any) => item.hunkIds)).toEqual([
@@ -856,7 +856,65 @@ test('adds unreferenced generated files to support as one review unit', () => {
     deleted: 18,
     hunkIds: ['src/__generated__/api.ts:staged:h1'],
     hunks: [{ kind: 'synthetic', path: 'src/__generated__/api.ts' }],
+    reason: 'Generated files',
   });
+});
+
+test('uses generated metadata for files without generated-looking paths', () => {
+  const input = baseInput();
+  input.support = [];
+  const generatedFile = {
+    generated: true,
+    path: 'api/client.ts',
+    sections: [{ id: 'api/client.ts:staged', kind: 'staged', patch: manyHunkPatch }],
+    status: 'modified',
+  };
+
+  const result = normalizeNarrativeWalkthrough(input, [...files, generatedFile]);
+  const generatedSupport = result.support.find(
+    (item: any) => item.hunks[0]?.path === 'api/client.ts',
+  );
+
+  expect(generatedSupport).toMatchObject({
+    hunkIds: ['api/client.ts:staged:h1'],
+    hunks: [{ kind: 'synthetic', path: 'api/client.ts' }],
+    reason: 'Generated files',
+  });
+});
+
+test('groups authored generated support under the generated-files reason', () => {
+  const input = baseInput();
+  input.support = [
+    {
+      hunkIds: ['pnpm-lock.yaml:staged:h1'],
+      id: 'lockfile',
+      reason: 'Dependency updates',
+    },
+  ];
+
+  const result = normalizeNarrativeWalkthrough(input, files);
+
+  expect(result.support.find((item: any) => item.id === 'lockfile')?.reason).toBe(
+    'Generated files',
+  );
+});
+
+test('keeps explicitly selected generated files in the main walkthrough path', () => {
+  const input = baseInput();
+  input.chapters[0].stops.push({
+    hunkIds: ['pnpm-lock.yaml:staged:h1'],
+    id: 'lockfile-stop',
+    importance: 'normal',
+    prose: 'The lockfile records the resolved dependency update.',
+  });
+  input.support = [];
+
+  const result = normalizeNarrativeWalkthrough(input, files);
+
+  expect(result.chapters[0].stops.map((stop: any) => stop.id)).toContain('lockfile-stop');
+  expect(
+    result.support.some((item: any) => item.hunkIds.includes('pnpm-lock.yaml:staged:h1')),
+  ).toBe(false);
 });
 
 test('normalizes ordered cross-file hunk groups under one stop', () => {

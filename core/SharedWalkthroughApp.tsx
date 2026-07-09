@@ -62,7 +62,7 @@ import {
 } from './lib/diff.ts';
 import { compactPath, fileTreeSort, fuzzyMatches, sortFiles, statusForTree } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
-import { isGeneratedWalkthroughPath } from './lib/narrative-walkthrough-diff.js';
+import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
 import {
   getCommentKey,
   getReviewCommentsFromState,
@@ -1051,6 +1051,7 @@ function ReviewSurface({
   );
   const keymap = useMemo(() => createDefaultConfig().keymap, []);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const [expandedGenerated, setExpandedGenerated] = useState<ReadonlySet<string>>(() => new Set());
   const [fileSearchQuery, setFileSearchQuery] = useState('');
   const [itemVersionByKey, setItemVersionByKey] = useState<Record<string, number>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(
@@ -1140,9 +1141,7 @@ function ReviewSurface({
       ? selectedPath
       : (visibleFiles[0]?.path ?? null);
   const initialMarkdownPreviewSectionIds = useMemo(() => {
-    const nonGeneratedFiles = snapshot.files.filter(
-      (file) => !isGeneratedWalkthroughPath(file.path),
-    );
+    const nonGeneratedFiles = snapshot.files.filter((file) => !isGeneratedWalkthroughFile(file));
     if (
       nonGeneratedFiles.length === 0 ||
       !nonGeneratedFiles.every((file) => isMarkdownFilePath(file.path))
@@ -1611,13 +1610,22 @@ function ReviewSurface({
   }, []);
 
   const toggleCollapsed = useCallback(
-    (_file: ChangedFile, isCollapsed: boolean, reviewKey: string) => {
+    (file: ChangedFile, isCollapsed: boolean, reviewKey: string) => {
       setCollapsed((current) => {
         const next = new Set(current);
         if (isCollapsed) {
           next.delete(reviewKey);
         } else {
           next.add(reviewKey);
+        }
+        return next;
+      });
+      setExpandedGenerated((current) => {
+        const next = new Set(current);
+        if (isCollapsed && isGeneratedWalkthroughFile(file)) {
+          next.add(reviewKey);
+        } else {
+          next.delete(reviewKey);
         }
         return next;
       });
@@ -1629,6 +1637,13 @@ function ReviewSurface({
     (_file: ChangedFile, isViewed: boolean, reviewIdentity: ReviewIdentity) => {
       setViewed((current) => updateReviewIdentityViewed(current, reviewIdentity, isViewed));
       setCollapsed((current) => updateReviewIdentityCollapsed(current, reviewIdentity, isViewed));
+      if (!isViewed) {
+        setExpandedGenerated((current) => {
+          const next = new Set(current);
+          next.delete(reviewIdentity.key);
+          return next;
+        });
+      }
       bumpItemVersion(reviewIdentity.key);
     },
     [bumpItemVersion],
@@ -1685,6 +1700,7 @@ function ReviewSurface({
     diffLineHeight,
     diffStyle: snapshot.preferences.diffStyle,
     disableWorkerPool: true,
+    expandedGenerated,
     focusCommentId,
     focusCommentRequest,
     gitIdentity,

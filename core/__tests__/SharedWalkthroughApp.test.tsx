@@ -207,7 +207,10 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
 
 test('shared walkthroughs initially preview Markdown when other files are generated', async () => {
   const file = createMarkdownFile();
-  const generatedFile = createChangedFile('src/__generated__/api.ts');
+  const generatedFile = {
+    ...createChangedFile('src/api.ts'),
+    generated: true,
+  };
   const source = { type: 'working-tree' } as const;
   const walkthrough = {
     agent: 'codex',

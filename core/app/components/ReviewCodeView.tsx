@@ -80,6 +80,7 @@ import {
 import { getItemVersion } from '../../lib/item-version.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { sanitizeMarkdownImages } from '../../lib/markdown.tsx';
+import { isGeneratedWalkthroughFile } from '../../lib/narrative-walkthrough-diff.js';
 import {
   getCommentKey,
   getReviewCommentLineLabel,
@@ -115,6 +116,7 @@ import { DiffLineCountBadge } from './Sidebar.tsx';
 import { useCopiedState } from './useCopiedState.ts';
 
 const emptyMarkdownPreviewSectionIds = new Set<string>();
+const emptyExpandedGenerated = new Set<string>();
 const markdownPreviewPlugins = [
   frontmatterPlugin(),
   imagePlugin({
@@ -255,6 +257,11 @@ function CodeViewHeader({
         {sectionCount > 1 ? (
           <span className={`codiff-section-badge ${section.kind}`}>
             {sectionLabel[section.kind]}
+          </span>
+        ) : null}
+        {isGeneratedWalkthroughFile(file) ? (
+          <span className="codiff-generated-badge" title="Generated file">
+            Generated
           </span>
         ) : null}
       </div>
@@ -2368,6 +2375,7 @@ export function ReviewCodeView({
   diffLineHeight = DIFF_LINE_HEIGHT,
   diffStyle,
   disableWorkerPool = false,
+  expandedGenerated = emptyExpandedGenerated,
   files,
   focusCommentId,
   focusCommentRequest,
@@ -2425,6 +2433,7 @@ export function ReviewCodeView({
   diffLineHeight?: number;
   diffStyle: CodiffDiffStyle;
   disableWorkerPool?: boolean;
+  expandedGenerated?: ReadonlySet<string>;
   files: ReadonlyArray<ChangedFile>;
   focusCommentId: string | null;
   focusCommentRequest: number;
@@ -2718,7 +2727,10 @@ export function ReviewCodeView({
       const reviewIdentity = block.reviewIdentity ?? getReviewIdentity(file, reviewIdentityByPath);
       const reviewKey = reviewIdentity.key;
       const isViewed = isReviewIdentityViewed(viewed, reviewIdentity);
-      const isCollapsed = collapsed.has(reviewKey) && !forceExpandedPaths.has(file.path);
+      const isCollapsed =
+        !forceExpandedPaths.has(file.path) &&
+        !expandedGenerated.has(reviewKey) &&
+        (collapsed.has(reviewKey) || isGeneratedWalkthroughFile(file));
       const visibleSections = getVisibleDiffSections(file, showWhitespace);
       const lineCount = getDiffLineCountFromVisibleSections(visibleSections);
       const sections = isCollapsed ? visibleSections.slice(0, 1) : visibleSections;
@@ -2909,6 +2921,7 @@ export function ReviewCodeView({
     commentsBySection,
     diffLineHeight,
     diffStyle,
+    expandedGenerated,
     forceExpandedPaths,
     imagePreviewLayoutPassBySection,
     isReadOnly,

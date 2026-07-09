@@ -80,6 +80,10 @@ const isGeneratedWalkthroughPath = (path) => {
   );
 };
 
+/** @param {{generated?: boolean; path: string}} file */
+const isGeneratedWalkthroughFile = (file) =>
+  file.generated === true || isGeneratedWalkthroughPath(file.path);
+
 /** @param {string} path */
 const getGeneratedWalkthroughSummary = (path) => {
   const parts = getPathParts(path).map((part) => part.toLowerCase());
@@ -231,7 +235,7 @@ const shouldCreateSyntheticHunk = (file, section) => {
 };
 
 /**
- * @param {{oldPath?: string; path: string; status: string}} file
+ * @param {{generated?: boolean; oldPath?: string; path: string; status: string}} file
  * @param {{binary?: boolean; id: string; kind: string; loadState?: string; patch?: string; summary?: {reason?: string}}} section
  */
 const createSyntheticSectionHunk = (file, section, lineCount = { added: 0, deleted: 0 }) => ({
@@ -247,7 +251,7 @@ const createSyntheticSectionHunk = (file, section, lineCount = { added: 0, delet
   status: file.status,
   summary:
     section.summary?.reason ??
-    (isGeneratedWalkthroughPath(file.path) ? getGeneratedWalkthroughSummary(file.path) : undefined),
+    (isGeneratedWalkthroughFile(file) ? getGeneratedWalkthroughSummary(file.path) : undefined),
 });
 
 /**
@@ -255,12 +259,12 @@ const createSyntheticSectionHunk = (file, section, lineCount = { added: 0, delet
  * Most are textual patch hunks; non-text or metadata-only sections get one
  * synthetic hunk so walkthroughs remain hunk-based for every visible change.
  *
- * @param {{oldPath?: string; path: string; status: string}} file
+ * @param {{generated?: boolean; oldPath?: string; path: string; status: string}} file
  * @param {{binary?: boolean; id: string; kind: string; loadState?: string; patch?: string; summary?: {reason?: string}}} section
  */
 const getSectionWalkthroughHunks = (file, section) => {
   const patchHunks = extractPatchHunks(section.patch || '');
-  if (patchHunks.length > 0 && isGeneratedWalkthroughPath(file.path)) {
+  if (patchHunks.length > 0 && isGeneratedWalkthroughFile(file)) {
     return [createSyntheticSectionHunk(file, section, sumHunkLineCounts(patchHunks))];
   }
 
@@ -363,6 +367,7 @@ export {
   HUNK_HEADER,
   hunkDisplayEnd,
   hunkDisplayStart,
+  isGeneratedWalkthroughFile,
   isGeneratedWalkthroughPath,
   isSyntheticWalkthroughHunk,
   parseHunkHeader,

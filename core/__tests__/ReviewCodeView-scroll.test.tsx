@@ -125,6 +125,53 @@ const createLoadedMarkdownFile = (contents: string, fingerprint: string) => {
   };
 };
 
+test('generated files are collapsed by default and can be explicitly expanded per review', async () => {
+  const file = createChangedFile('src/__generated__/api.ts');
+  const reviewKey = 'walkthrough:generated-api';
+  const blocks: ReadonlyArray<ReviewDiffBlock> = [
+    {
+      file,
+      id: reviewKey,
+      reviewIdentity: {
+        fingerprint: file.fingerprint,
+        key: reviewKey,
+      },
+    },
+  ];
+  const view = await renderReact(<ReviewCodeViewHarness blocks={blocks} files={[]} />);
+
+  try {
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('[aria-label="Expand file"]')?.getAttribute('aria-expanded'),
+      ).toBe('false');
+      expect(view.container.querySelector('.codiff-generated-badge')?.textContent).toBe(
+        'Generated',
+      );
+    });
+
+    await view.rerender(
+      <ReviewCodeViewHarness
+        blocks={blocks}
+        expandedGenerated={new Set([reviewKey])}
+        files={[]}
+        itemVersionByKey={{ [reviewKey]: 1 }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('[aria-label="Collapse file"]')?.getAttribute('aria-expanded'),
+      ).toBe('true');
+      expect(view.container.querySelector('.codiff-generated-badge')?.textContent).toBe(
+        'Generated',
+      );
+    });
+  } finally {
+    await view.cleanup();
+  }
+});
+
 test('switching edited Markdown back to a diff flushes and refreshes it first', async () => {
   const order: Array<string> = [];
   const initialFile = createLoadedMarkdownFile('# Edited\n', 'plan.md:initial');

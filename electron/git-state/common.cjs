@@ -75,11 +75,13 @@ const gitBuffer = async (repoPath, args) => {
  * @param {string} repoPath
  * @param {ReadonlyArray<string>} args
  * @param {string | Buffer} input
+ * @param {{env?: NodeJS.ProcessEnv}} [options]
  * @returns {Promise<Buffer>}
  */
-const gitBufferWithInput = (repoPath, args, input) =>
+const gitBufferWithInput = (repoPath, args, input, options = {}) =>
   new Promise((resolve, reject) => {
     const child = spawn('git', ['-C', repoPath, ...args], {
+      env: options.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     /** @type {Array<Buffer>} */
@@ -89,6 +91,11 @@ const gitBufferWithInput = (repoPath, args, input) =>
 
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.stdin.on('error', (error) => {
+      if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE') {
+        reject(error);
+      }
+    });
     child.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) {

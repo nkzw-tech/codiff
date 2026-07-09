@@ -50,6 +50,7 @@ const {
   readRepositoryChangeSignature,
   readWorkingTreeState,
 } = require('./git-state/working-tree.cjs');
+const { annotateGeneratedFiles } = require('./generated-files.cjs');
 
 /**
  * @typedef {import('../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
@@ -79,7 +80,7 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
                 showWhitespace: options.showWhitespace,
               });
   const branch = (await gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD'])).trim() || null;
-  return { ...state, branch };
+  return annotateGeneratedFiles({ ...state, branch });
 };
 
 /**

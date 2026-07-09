@@ -128,6 +128,7 @@ export type WalkthroughNote = {
 
 export type SourceSession = {
   collapsed: Set<string>;
+  expandedGenerated: Set<string>;
   /** Populated by a generated or pre-authored narrative walkthrough document. */
   narrativeWalkthrough?: NarrativeWalkthrough | null;
   reviewComments: ReadonlyArray<ReviewComment>;

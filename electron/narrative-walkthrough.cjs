@@ -25,7 +25,7 @@ const {
   getSectionWalkthroughHunks,
   hunkDisplayEnd,
   hunkDisplayStart,
-  isGeneratedWalkthroughPath,
+  isGeneratedWalkthroughFile,
   isSyntheticWalkthroughHunk,
   sumHunkLineCounts,
 } = require('../core/lib/narrative-walkthrough-diff.cjs');
@@ -138,10 +138,14 @@ const defaultSideForStatus = (status) => {
  */
 const indexFiles = (files, hunkIdByAlias = new Map()) => {
   const hunkById = new Map();
+  const generatedHunkIds = new Set();
   for (const file of files) {
     for (const section of file.sections || []) {
       for (const hunk of getSectionWalkthroughHunks(file, section)) {
         hunkById.set(hunk.id, hunk);
+        if (isGeneratedWalkthroughFile(file)) {
+          generatedHunkIds.add(hunk.id);
+        }
       }
     }
   }
@@ -152,7 +156,7 @@ const indexFiles = (files, hunkIdByAlias = new Map()) => {
     }
   }
 
-  return { hunkById };
+  return { generatedHunkIds, hunkById };
 };
 
 const resolveHunks = (hunkIds, index) => {
@@ -371,7 +375,9 @@ const normalizeAuthoredSupport = (input, index, coveredHunkIds, itemIds) => {
       continue;
     }
 
-    group.reason = cleanText(item?.reason, 'Other changes');
+    group.reason = group.hunkIds.every((hunkId) => index.generatedHunkIds.has(hunkId))
+      ? 'Generated files'
+      : cleanText(item?.reason, 'Other changes');
     const note = cleanText(item?.note);
     if (note) {
       group.note = note;
@@ -415,7 +421,9 @@ const addUnreferencedSupport = (support, index, coveredHunkIds, itemIds) => {
         hunkIds: chunk.map((hunk) => hunk.id),
         hunks: chunk.map(normalizeHunk),
         id,
-        reason: 'Other changes',
+        reason: chunk.every((hunk) => index.generatedHunkIds.has(hunk.id))
+          ? 'Generated files'
+          : 'Other changes',
         title: path,
       });
       itemIds.add(id);
@@ -567,7 +575,7 @@ const buildPromptInput = (state) => {
   const input = {
     branch: state.branch,
     files: state.files.map((file) => {
-      const generated = isGeneratedWalkthroughPath(file.path);
+      const generated = isGeneratedWalkthroughFile(file);
       return {
         ...(generated
           ? {
@@ -712,7 +720,7 @@ Grouping contract:
 - Do not group a whole large file into one stop when its hunks implement distinct workflows, state transitions, or submission paths.
 - Put hunkIds in the exact display order you want Codiff to render. Out-of-line and cross-file order is allowed when it improves reviewer comprehension.
 - Do not provide added/deleted counts, status, oldPath, section ids, display labels, path, repo, source, generatedAt, agent, or meta; Codiff computes those.
-- Leave secondary, mechanical, docs-only, generated, styling, fixture, and repeated-pattern hunks out of chapters[]. Codiff automatically places every unreferenced hunk in support.
+- Leave secondary, mechanical, docs-only, generated, styling, fixture, and repeated-pattern hunks out of chapters[]. Codiff automatically places every unreferenced hunk in support. Use reason "Generated files" for generated-only support items so they render together.
 - For working-tree sources, include commit.title and commit.body by default unless there are no commit-worthy files. Put the subject line in commit.title, not as the first line of commit.body.
 `;
 };

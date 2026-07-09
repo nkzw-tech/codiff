@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -28,6 +28,14 @@ type PullRequestFileContent = {
   fingerprint?: string;
   loadState?: string;
   summary?: unknown;
+};
+
+type GeneratedFilesModule = {
+  readGeneratedAttributePaths: (
+    repoRoot: string,
+    paths: ReadonlyArray<string>,
+    source?: string,
+  ) => Promise<ReadonlySet<string>>;
 };
 
 type GitStateModule = {
@@ -117,6 +125,8 @@ type GitStateModule = {
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
+const { readGeneratedAttributePaths } =
+  require('../../electron/generated-files.cjs') as GeneratedFilesModule;
 const {
   collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
@@ -177,6 +187,91 @@ const withRepo = async (run: (repo: string) => Promise<void>) => {
     await rm(repo, { force: true, recursive: true });
   }
 };
+
+test('readRepositoryState marks generated files from gitattributes and path heuristics', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(
+      repo,
+      '.gitattributes',
+      '*.gen.yaml gitlab-generated\n*.generated.txt linguist-generated\nignored.txt -linguist-generated\n',
+    );
+    await writeRepoFile(repo, 'service.gen.yaml', 'generated\n');
+    await writeRepoFile(repo, 'schema.generated.txt', 'generated\n');
+    await writeRepoFile(repo, 'ignored.txt', 'source\n');
+    await writeRepoFile(repo, 'pnpm-lock.yaml', 'lockfileVersion: 9\n');
+
+    const state = await readRepositoryState(repo);
+    const generatedByPath = new Map(state.files.map((file) => [file.path, file.generated]));
+
+    expect(generatedByPath.get('service.gen.yaml')).toBe(true);
+    expect(generatedByPath.get('schema.generated.txt')).toBe(true);
+    expect(generatedByPath.get('pnpm-lock.yaml')).toBe(true);
+    expect(generatedByPath.get('ignored.txt')).toBeUndefined();
+  });
+});
+
+test('commit reviews evaluate generated attributes from the reviewed commit', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.api.ts linguist-generated\n');
+    await writeRepoFile(repo, 'client.api.ts', 'export const client = 1;\n');
+    await commitAll(repo, 'generated client');
+    const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    await writeRepoFile(repo, '.gitattributes', '*.api.ts -linguist-generated\n');
+    const state = await readRepositoryState(repo, { ref: commit, type: 'commit' });
+
+    expect(state.files.find((file) => file.path === 'client.api.ts')?.generated).toBe(true);
+  });
+});
+
+test('historical generated attributes fall back to a temporary index without --source', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.api.ts linguist-generated\n');
+    await writeRepoFile(repo, 'client.api.ts', 'export const client = 1;\n');
+    await commitAll(repo, 'generated client');
+    const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    await writeRepoFile(repo, '.gitattributes', '*.api.ts -linguist-generated\n');
+    const wrapperDirectory = await mkdtemp(join(tmpdir(), 'codiff-old-git-'));
+    const wrapperPath = join(wrapperDirectory, 'git');
+    await writeFile(
+      wrapperPath,
+      `#!/bin/sh
+for argument in "$@"; do
+  if [ "$argument" = "--source" ]; then
+    echo "error: unknown option 'source'" >&2
+    exit 129
+  fi
+done
+PATH="$CODIFF_TEST_ORIGINAL_PATH"
+export PATH
+exec git "$@"
+`,
+    );
+    await chmod(wrapperPath, 0o755);
+
+    const originalPath = process.env.PATH;
+    const originalGitPath = process.env.CODIFF_TEST_ORIGINAL_PATH;
+    process.env.CODIFF_TEST_ORIGINAL_PATH = originalPath ?? '';
+    process.env.PATH = `${wrapperDirectory}:${originalPath ?? ''}`;
+    try {
+      const generatedPaths = await readGeneratedAttributePaths(repo, ['client.api.ts'], commit);
+      expect(generatedPaths).toEqual(new Set(['client.api.ts']));
+    } finally {
+      if (originalPath == null) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = originalPath;
+      }
+      if (originalGitPath == null) {
+        delete process.env.CODIFF_TEST_ORIGINAL_PATH;
+      } else {
+        process.env.CODIFF_TEST_ORIGINAL_PATH = originalGitPath;
+      }
+      await rm(wrapperDirectory, { force: true, recursive: true });
+    }
+  });
+});
 
 test('parseStatus reads staged rename paths in porcelain v1 -z order', () => {
   expect(parseStatus('R  new.txt\0old.txt\0')).toEqual([

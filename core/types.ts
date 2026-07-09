@@ -31,6 +31,7 @@ export type GitFileStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'untr
 
 export type ChangedFile = {
   fingerprint: string;
+  generated?: boolean;
   oldPath?: string;
   path: string;
   sections: ReadonlyArray<DiffSection>;

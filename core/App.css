@@ -2713,6 +2713,7 @@ html[data-codiff-platform='darwin'] .sidebar {
 
 .codiff-status-badge,
 .codiff-section-badge,
+.codiff-generated-badge,
 .codiff-line-count,
 .codiff-file-comment-button,
 .codiff-load-button,
@@ -2726,11 +2727,17 @@ html[data-codiff-platform='darwin'] .sidebar {
 
 .codiff-status-badge,
 .codiff-section-badge,
+.codiff-generated-badge,
 .codiff-line-count {
   background: rgb(127 127 127 / 0.11);
   color: var(--muted);
   padding: 5px 9px;
   white-space: nowrap;
+}
+
+.codiff-generated-badge {
+  background: color-mix(in srgb, var(--sidebar-ref) 15%, transparent);
+  color: var(--sidebar-ref);
 }
 
 .codiff-line-count {
