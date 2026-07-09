@@ -1,4 +1,9 @@
-import { parseDiffFromFile, parsePatchFiles, type FileDiffMetadata } from '@pierre/diffs';
+import {
+  parseDiffFromFile,
+  parsePatchFiles,
+  type FileDiffLoadedFiles,
+  type FileDiffMetadata,
+} from '@pierre/diffs';
 import type { ChangedFile, DiffSection } from '../types.ts';
 import type { DiffLineCount } from './app-types.ts';
 
@@ -21,8 +26,62 @@ export const isPatchOnlyDiffSection = (section: DiffSection) =>
   section.newFile == null;
 
 export const shouldLoadDiffSectionContents = (section: DiffSection) =>
-  section.summary?.canLoad !== false &&
-  (section.loadState === 'deferred' || isPatchOnlyDiffSection(section));
+  section.summary?.canLoad !== false && section.loadState === 'deferred';
+
+// Diff search needs full context lines in app state, so it also preloads
+// patch-only sections through the eager (state-replacing) flow.
+export const shouldPreloadSectionContentsForSearch = (section: DiffSection) =>
+  shouldLoadDiffSectionContents(section) ||
+  (section.summary?.canLoad !== false && isPatchOnlyDiffSection(section));
+
+// Full file contents fetched lazily for patch-only sections via the CodeView
+// `loadDiffFiles` option. Kept outside React state so the library's in-place
+// hydration of the rendered diff is not reset by re-renders. Keyed without the
+// whitespace flag so re-parses after a whitespace toggle reuse the contents.
+const getLoadedContentsKey = (file: ChangedFile, section: DiffSection) =>
+  `${file.fingerprint}:${section.id}:${getSectionCacheIdentity(section)}`;
+
+const loadedSectionContents = new Map<string, FileDiffLoadedFiles>();
+const pendingSectionLoads = new Map<string, Promise<FileDiffLoadedFiles>>();
+
+const fileDiffSectionLookup = new WeakMap<
+  FileDiffMetadata,
+  { file: ChangedFile; section: DiffSection }
+>();
+
+export const getSectionForFileDiff = (fileDiff: FileDiffMetadata) =>
+  fileDiffSectionLookup.get(fileDiff);
+
+export const getLoadedSectionContents = (file: ChangedFile, section: DiffSection) =>
+  loadedSectionContents.get(getLoadedContentsKey(file, section));
+
+export const loadSectionContents = (
+  file: ChangedFile,
+  section: DiffSection,
+  load: (file: ChangedFile, section: DiffSection) => Promise<FileDiffLoadedFiles>,
+): Promise<FileDiffLoadedFiles> => {
+  const key = getLoadedContentsKey(file, section);
+  const loaded = loadedSectionContents.get(key);
+  if (loaded) {
+    return Promise.resolve(loaded);
+  }
+
+  const pending = pendingSectionLoads.get(key);
+  if (pending) {
+    return pending;
+  }
+
+  const promise = load(file, section)
+    .then((files) => {
+      loadedSectionContents.set(key, files);
+      return files;
+    })
+    .finally(() => {
+      pendingSectionLoads.delete(key);
+    });
+  pendingSectionLoads.set(key, promise);
+  return promise;
+};
 
 const joinDiffLines = (lines: ReadonlyArray<string>) =>
   lines.some((line) => line.includes('\n')) ? lines.join('') : lines.join('\n');
@@ -73,10 +132,11 @@ export const getMarkdownPreviewContents = (
     return null;
   }
 
-  if (section.newFile) {
+  const newFile = section.newFile ?? getLoadedSectionContents(file, section)?.newFile;
+  if (newFile) {
     return {
       addedLines: getAddedLineNumbers(file, fileDiff),
-      contents: section.newFile.contents,
+      contents: newFile.contents,
     };
   }
 
@@ -278,13 +338,37 @@ export const parseSectionDiffWithOptions = (
   } else if (section.patch.trim().length === 0) {
     fileDiff = createEmptyFileDiff(file, section);
   } else {
-    const parsedFileDiff = parsePatchFiles(section.patch)[0]?.files[0];
-    fileDiff = parsedFileDiff
-      ? {
+    const loaded = getLoadedSectionContents(file, section);
+    if (loaded?.oldFile && loaded.newFile) {
+      try {
+        fileDiff = {
+          ...parseDiffFromFile(loaded.oldFile, loaded.newFile, {
+            ignoreWhitespace: !showWhitespace,
+          }),
+          cacheKey,
+        };
+      } catch {
+        fileDiff = createEmptyFileDiff(file, section);
+      }
+    } else {
+      const parsedFileDiff = parsePatchFiles(section.patch)[0]?.files[0];
+      if (parsedFileDiff) {
+        fileDiff = {
           ...parsedFileDiff,
           cacheKey,
+        };
+        // `loadDiffFiles` hydration mutates this object in place while the
+        // parse cache key derives from section identity, so the same object
+        // keeps being returned across re-renders — required for hydration to
+        // persist. Binary/summary placeholders are intentionally never
+        // registered; they must not be hydrated.
+        if (section.summary?.canLoad !== false) {
+          fileDiffSectionLookup.set(fileDiff, { file, section });
         }
-      : createBinaryFileDiff(file, section);
+      } else {
+        fileDiff = createBinaryFileDiff(file, section);
+      }
+    }
   }
 
   parsedDiffCache.set(cacheKey, fileDiff);

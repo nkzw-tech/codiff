@@ -13,6 +13,7 @@ import {
   type CodeViewOptions,
   type CodeViewScrollTarget,
   type DiffLineAnnotation,
+  type FileDiffLoadedFiles,
   type FileDiffMetadata,
   type LineAnnotation,
   type SelectedLineRange,
@@ -73,8 +74,10 @@ import {
   getDiffLineCountFromVisibleSections,
   getItemId,
   getMarkdownPreviewContents,
+  getSectionForFileDiff,
   getVisibleDiffSections,
   isMarkdownFilePath,
+  loadSectionContents,
   shouldLoadDiffSectionContents,
 } from '../../lib/diff.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
@@ -211,7 +214,7 @@ function CodeViewHeader({
     walkthroughNote,
   } = meta;
   const canOpenFile = file.status !== 'deleted';
-  const canLoadSection = section.loadState === 'deferred' && shouldLoadDiffSectionContents(section);
+  const canLoadSection = shouldLoadDiffSectionContents(section);
 
   return (
     <div
@@ -2373,6 +2376,7 @@ export function ReviewCodeView({
   onDeleteComment,
   onLoadImageContent,
   onLoadSection,
+  onLoadSectionContents,
   onOpenFile,
   onRefreshMarkdown,
   onResolveThread = noopResolveThread,
@@ -2430,6 +2434,7 @@ export function ReviewCodeView({
   onDeleteComment: (commentId: string) => void;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
   onLoadSection: (file: ChangedFile, section: DiffSection) => void;
+  onLoadSectionContents?: (file: ChangedFile, section: DiffSection) => Promise<FileDiffLoadedFiles>;
   onOpenFile?: (file: ChangedFile) => void;
   onRefreshMarkdown?: (file: ChangedFile, section: DiffSection) => Promise<boolean>;
   onResolveThread?: (threadId: string, resolved: boolean) => Promise<void> | void;
@@ -3064,6 +3069,26 @@ export function ReviewCodeView({
     ],
   );
 
+  // Lets the library fetch full file contents when the user expands unchanged
+  // context on a patch-only diff; the partial FileDiffMetadata is hydrated in
+  // place (see `parseSectionDiffWithOptions` for the identity contract).
+  const loadDiffFiles = useMemo(() => {
+    if (!onLoadSectionContents || isReadOnly) {
+      return undefined;
+    }
+
+    return (fileDiff: FileDiffMetadata) => {
+      const target = getSectionForFileDiff(fileDiff);
+      if (!target) {
+        return Promise.reject(
+          new Error(`No loadable diff section registered for '${fileDiff.name}'.`),
+        );
+      }
+
+      return loadSectionContents(target.file, target.section, onLoadSectionContents);
+    };
+  }, [isReadOnly, onLoadSectionContents]);
+
   const codeViewOptions: CodeViewOptions<ReviewAnnotationMetadata> = useMemo(
     () =>
       ({
@@ -3081,6 +3106,7 @@ export function ReviewCodeView({
           paddingBottom: bottomInset,
         },
         lineHoverHighlight: 'both',
+        loadDiffFiles,
         onGutterUtilityClick: (range, context) => {
           if (isReadOnly) {
             return;
@@ -3101,10 +3127,7 @@ export function ReviewCodeView({
             return;
           }
 
-          if (
-            meta.section.loadState === 'deferred' &&
-            shouldLoadDiffSectionContents(meta.section)
-          ) {
+          if (shouldLoadDiffSectionContents(meta.section)) {
             onLoadSection(meta.file, meta.section);
             return;
           }
@@ -3161,8 +3184,7 @@ export function ReviewCodeView({
           );
           node.classList.toggle(
             'codiff-loadable-summary-item',
-            metadata?.section.loadState === 'deferred' &&
-              shouldLoadDiffSectionContents(metadata.section),
+            metadata != null && shouldLoadDiffSectionContents(metadata.section),
           );
           node.classList.toggle(
             'codiff-loading-summary-item',
@@ -3186,6 +3208,7 @@ export function ReviewCodeView({
       diffStyle,
       isReadOnly,
       itemMetadata,
+      loadDiffFiles,
       loadingSectionIds,
       onCreateComment,
       onLoadSection,

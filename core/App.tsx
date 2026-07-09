@@ -1,3 +1,4 @@
+import type { FileDiffLoadedFiles } from '@pierre/diffs';
 import {
   useCallback,
   useEffect,
@@ -67,6 +68,7 @@ import {
   getItemId,
   isPatchOnlyDiffSection,
   shouldLoadDiffSectionContents,
+  shouldPreloadSectionContentsForSearch,
 } from './lib/diff.ts';
 import { compactPath, fuzzyMatches, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
@@ -437,6 +439,36 @@ export default function App() {
         });
     },
     [bumpItemVersion],
+  );
+
+  // Fetches full file contents for a patch-only section so the CodeView
+  // `loadDiffFiles` option can hydrate the rendered diff in place. Unlike
+  // `loadDiffSection`, this must not touch React state: replacing the section
+  // would reset the hydrated diff object's identity.
+  const loadDiffSectionContents = useCallback(
+    async (file: ChangedFile, section: DiffSection): Promise<FileDiffLoadedFiles> => {
+      const currentState = stateRef.current;
+      if (!currentState || !supportsLazyDiffContent(currentState.source)) {
+        throw new Error(`Cannot load diff contents for '${file.path}'.`);
+      }
+
+      const loadedSection = await window.codiff.getDiffSectionContent({
+        force: true,
+        kind: section.kind,
+        path: file.path,
+        showWhitespace: preferencesRef.current.showWhitespace,
+        source: currentState.source,
+      });
+      if (!loadedSection.newFile) {
+        throw new Error(`No file contents available for '${file.path}'.`);
+      }
+
+      return {
+        newFile: loadedSection.newFile,
+        oldFile: loadedSection.oldFile ?? null,
+      };
+    },
+    [],
   );
 
   const refreshMarkdownFile = useCallback(
@@ -842,7 +874,7 @@ export default function App() {
         fileHasVisibleDiff(file, preferences.showWhitespace),
     );
     const requests = searchableFiles.flatMap((file) =>
-      file.sections.filter(shouldLoadDiffSectionContents).map((section) => ({
+      file.sections.filter(shouldPreloadSectionContentsForSearch).map((section) => ({
         file,
         section,
       })),
@@ -2554,6 +2586,7 @@ export default function App() {
     onDeleteComment: deleteComment,
     onLoadImageContent: window.codiff.getDiffImageContent,
     onLoadSection: loadDiffSection,
+    onLoadSectionContents: loadDiffSectionContents,
     onOpenFile: openFile,
     onRefreshMarkdown: refreshMarkdownFile,
     onSaveCommentEdit: updateComment,

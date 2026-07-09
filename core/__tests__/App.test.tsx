@@ -5,10 +5,13 @@ import {
   canRenderImagePreview,
   getDiffLineCount,
   getMarkdownPreviewContents,
+  getSectionForFileDiff,
   getTotalDiffLineCount,
   getVisibleDiffSections,
   fileHasVisibleDiff,
+  loadSectionContents,
   shouldLoadDiffSectionContents,
+  shouldPreloadSectionContentsForSearch,
 } from '../lib/diff.ts';
 import { isDiffSearchShortcut } from '../lib/keyboard.ts';
 import { renderInlineMarkdown, sanitizeMarkdownImages } from '../lib/markdown.tsx';
@@ -70,16 +73,36 @@ test('pure renames are visible without content hunks', () => {
   expect(fileHasVisibleDiff(file, false)).toBe(true);
 });
 
-test('patch-only text sections are loadable for full context expansion', () => {
+test('patch-only text sections hydrate lazily instead of eager loading', () => {
+  const patchOnlySection = {
+    binary: false,
+    id: 'src/app.ts:unstaged',
+    kind: 'unstaged',
+    loadState: 'ready',
+    patch: 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  } as const;
+
+  // Patch-only sections expand via `loadDiffFiles` hydration, not the eager
+  // Load flow, but diff search still preloads their full contents.
+  expect(shouldLoadDiffSectionContents(patchOnlySection)).toBe(false);
+  expect(shouldPreloadSectionContentsForSearch(patchOnlySection)).toBe(true);
+
   expect(
     shouldLoadDiffSectionContents({
-      binary: false,
-      id: 'src/app.ts:unstaged',
-      kind: 'unstaged',
-      loadState: 'ready',
-      patch: 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n',
+      ...patchOnlySection,
+      loadState: 'deferred',
     }),
   ).toBe(true);
+
+  expect(
+    shouldPreloadSectionContentsForSearch({
+      ...patchOnlySection,
+      summary: {
+        canLoad: false,
+        reason: 'Codiff could not load full file context.',
+      },
+    }),
+  ).toBe(false);
 
   expect(
     shouldLoadDiffSectionContents({
@@ -112,6 +135,98 @@ test('patch-only text sections are loadable for full context expansion', () => {
       },
     }),
   ).toBe(false);
+});
+
+test('patch-only diffs are registered for lazy hydration and side-cached contents upgrade re-parses', async () => {
+  const section = {
+    binary: false,
+    id: 'src/lazy.ts:unstaged',
+    kind: 'unstaged',
+    loadState: 'ready',
+    patch:
+      'diff --git a/src/lazy.ts b/src/lazy.ts\n--- a/src/lazy.ts\n+++ b/src/lazy.ts\n@@ -2,3 +2,3 @@\n b\n-c\n+C\n d\n',
+  } as const;
+  const file = {
+    fingerprint: 'lazy-hydration',
+    path: 'src/lazy.ts',
+    sections: [section],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  const { fileDiff } = getVisibleDiffSections(file, false)[0];
+  expect(fileDiff.isPartial).toBe(true);
+  // Stable identity across re-parses: hydration mutates this object in place.
+  expect(getVisibleDiffSections(file, false)[0].fileDiff).toBe(fileDiff);
+
+  const target = getSectionForFileDiff(fileDiff);
+  expect(target?.file).toBe(file);
+  expect(target?.section).toBe(section);
+
+  let loadCount = 0;
+  const load = async () => {
+    loadCount += 1;
+    return {
+      newFile: { contents: 'a\nb\nC\nd\ne\n', name: 'src/lazy.ts' },
+      oldFile: { contents: 'a\nb\nc\nd\ne\n', name: 'src/lazy.ts' },
+    };
+  };
+
+  // Concurrent loads dedupe; later calls resolve from the cache.
+  const [first, second] = await Promise.all([
+    loadSectionContents(file, section, load),
+    loadSectionContents(file, section, load),
+  ]);
+  const third = await loadSectionContents(file, section, load);
+  expect(loadCount).toBe(1);
+  expect(second).toBe(first);
+  expect(third).toBe(first);
+
+  // A re-parse (here via the whitespace toggle) now produces a full diff from
+  // the cached contents instead of resetting to a partial patch parse.
+  const reparsed = getVisibleDiffSections(file, true)[0].fileDiff;
+  expect(reparsed.isPartial).toBe(false);
+});
+
+test('non-loadable and placeholder diffs are not registered for hydration', () => {
+  const nonLoadableFile = {
+    fingerprint: 'non-loadable',
+    path: 'src/locked.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/locked.ts:unstaged',
+        kind: 'unstaged',
+        loadState: 'ready',
+        patch:
+          'diff --git a/src/locked.ts b/src/locked.ts\n--- a/src/locked.ts\n+++ b/src/locked.ts\n@@ -1 +1 @@\n-old\n+new\n',
+        summary: {
+          canLoad: false,
+          reason: 'Codiff could not load full file context.',
+        },
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  const binaryFile = {
+    fingerprint: 'binary-placeholder',
+    path: 'assets/logo.bin',
+    sections: [
+      {
+        binary: true,
+        id: 'assets/logo.bin:unstaged',
+        kind: 'unstaged',
+        patch: '',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  for (const file of [nonLoadableFile, binaryFile]) {
+    const { fileDiff } = getVisibleDiffSections(file, false)[0];
+    expect(fileDiff.isPartial).toBe(true);
+    expect(getSectionForFileDiff(fileDiff)).toBeUndefined();
+  }
 });
 
 test('empty patch-only sections are not visible or countable', () => {
