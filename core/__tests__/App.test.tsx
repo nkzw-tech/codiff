@@ -181,15 +181,15 @@ test('patch-only diffs are registered for lazy hydration and side-cached content
   expect(second).toBe(first);
   expect(third).toBe(first);
 
-  // Loading evicts the stale partial parse: any re-parse — same or different
-  // whitespace flag — now produces a full diff from the cached contents
-  // instead of the partial patch parse. (Inside CodeView the library hydrates
-  // a clone, so the app-side object must be upgraded on rebuild.)
-  const reparsedSameFlag = getVisibleDiffSections(file, false)[0].fileDiff;
-  expect(reparsedSameFlag.isPartial).toBe(false);
-  expect(reparsedSameFlag).not.toBe(fileDiff);
+  // CodeView hydrates the cached object in place (as of 1.3.0-beta.9), so a
+  // re-parse under the same cache key keeps returning the same object. A
+  // re-parse under a different key (e.g. the whitespace toggle) starts from a
+  // fresh patch parse and is hydrated from the cached contents instead of
+  // resetting to a partial diff.
+  expect(getVisibleDiffSections(file, false)[0].fileDiff).toBe(fileDiff);
   const reparsedFlippedFlag = getVisibleDiffSections(file, true)[0].fileDiff;
   expect(reparsedFlippedFlag.isPartial).toBe(false);
+  expect(reparsedFlippedFlag).not.toBe(fileDiff);
 });
 
 test('non-loadable and placeholder diffs are not registered for hydration', () => {

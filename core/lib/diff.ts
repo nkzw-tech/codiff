@@ -74,14 +74,11 @@ export const loadSectionContents = (
 
   const promise = load(file, section)
     .then((files) => {
+      // CodeView hydrates the cached partial object in place once these
+      // contents reach it, so cache hits keep returning the hydrated diff.
+      // The hydrated re-parse branch in `parseSectionDiffWithOptions` covers
+      // re-parses under a different cache key (e.g. a whitespace toggle).
       loadedSectionContents.set(key, files);
-      // Inside CodeView the library hydrates a clone and keeps it internally,
-      // so the partial object cached here never becomes full. Evict it so the
-      // next items rebuild re-parses from the loaded contents; otherwise a
-      // later version bump re-delivers the stale partial and resets the
-      // expanded diff.
-      parsedDiffCache.delete(`${key}:ws`);
-      parsedDiffCache.delete(`${key}:ignore-ws`);
       return files;
     })
     .finally(() => {
@@ -352,11 +349,11 @@ export const parseSectionDiffWithOptions = (
       let hydrated: FileDiffMetadata | null = null;
       if (loaded) {
         try {
-          // Hydrate the patch parse with the library's own routine so the hunk
-          // geometry matches the clone CodeView hydrated internally after a
-          // `loadDiffFiles` expansion. A geometry mismatch (e.g. via
-          // parseDiffFromFile) breaks the renderer's expansion state when the
-          // rebuilt object replaces the clone.
+          // A fresh parse under a new cache key (e.g. a whitespace toggle)
+          // starts partial again even though contents were already fetched.
+          // Hydrate it with the library's own routine so the hunk geometry
+          // matches what CodeView produced when it hydrated the previous
+          // object in place after a `loadDiffFiles` expansion.
           hydrated = hydratePartialDiff('merge', parsedFileDiff, loaded);
         } catch {
           hydrated = null;
@@ -370,11 +367,11 @@ export const parseSectionDiffWithOptions = (
           ...parsedFileDiff,
           cacheKey,
         };
-        // The library hydrates a clone of this object when the user expands
-        // unchanged context; `loadSectionContents` evicts this cache entry
-        // once contents arrive so the next rebuild goes through the hydrated
-        // branch above. Binary/summary placeholders are intentionally never
-        // registered; they must not be hydrated.
+        // CodeView hydrates this object in place when the user expands
+        // unchanged context, so the cache key must derive from section
+        // identity and keep returning the same object. Binary/summary
+        // placeholders are intentionally never registered; they must not be
+        // hydrated.
         if (section.summary?.canLoad !== false) {
           fileDiffSectionLookup.set(fileDiff, { file, section });
         }

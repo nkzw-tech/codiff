@@ -17,7 +17,7 @@
     "@nkzw/mdx-editor": "^0.2.1",
     "@nkzw/use-relative-time": "^1.2.3",
     "@phosphor-icons/react": "^2.1.10",
-    "@pierre/diffs": "1.3.0-beta.8",
+    "@pierre/diffs": "1.3.0-beta.9",
     "@pierre/trees": "1.0.0-beta.5",
     "ghostty-web": "^0.4.0",
     "lucide-react": "^1.23.0"

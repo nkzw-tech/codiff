@@ -132,8 +132,8 @@ importers:
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@pierre/diffs':
-        specifier: 1.3.0-beta.8
-        version: 1.3.0-beta.8(@shikijs/themes@4.3.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        specifier: 1.3.0-beta.9
+        version: 1.3.0-beta.9(@shikijs/themes@4.3.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@pierre/trees':
         specifier: 1.0.0-beta.5
         version: 1.0.0-beta.5(@pierre/theme@1.1.0)(@shikijs/themes@4.3.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.3.1)
@@ -1492,8 +1492,8 @@ packages:
       react: '>= 16.8'
       react-dom: '>= 16.8'
 
-  '@pierre/diffs@1.3.0-beta.8':
-    resolution: {integrity: sha512-Z2cRpsyKvE//oxoL074gYsd9VzU822C0QnsHcUZ6s0ftG1MC2tPNrEX9ijCUZickOjgPzw3bxQS8J/Drakhmmg==}
+  '@pierre/diffs@1.3.0-beta.9':
+    resolution: {integrity: sha512-XoSLsyHA9UjNb/5UGQoKN1Bqma+ecHHaaM2T2edYdeJ67iS27qivWNoKq+uWjKhRzZEB4JQQRzlXxKy79UvY9A==}
     peerDependencies:
       react: ^18.3.1 || ^19.0.0
       react-dom: ^18.3.1 || ^19.0.0
@@ -7569,7 +7569,7 @@ snapshots:
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
 
-  '@pierre/diffs@1.3.0-beta.8(@shikijs/themes@4.3.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@pierre/diffs@1.3.0-beta.9(@shikijs/themes@4.3.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@pierre/theme': 1.1.0
       '@pierre/theming': 0.0.2(@pierre/theme@1.1.0)(@shikijs/themes@4.3.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(shiki@4.3.1)
