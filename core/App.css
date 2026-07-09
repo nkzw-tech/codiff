@@ -1560,6 +1560,22 @@ html[data-codiff-platform='darwin'] .sidebar {
   font-size: 14px;
 }
 
+/* The PR/commit description card renders in CodeView's non-virtualized header
+   region at the top of the scroll content; the host div inherits the
+   scroller's inline padding, so only vertical spacing is needed here. */
+.code-view [data-diffs-code-view-header] .codiff-code-view-source-description {
+  margin-top: 11px;
+}
+
+/* The title bar sticks to the top of the scroller while the card is in view
+   and unsticks naturally as the card scrolls past (sticky cannot escape the
+   panel; `overflow: clip` does not create a scroll container). */
+.code-view [data-diffs-code-view-header] .codiff-source-description-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
 .codiff-source-description-panel-body {
   background: var(--code-bg);
 }

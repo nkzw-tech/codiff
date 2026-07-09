@@ -43,6 +43,7 @@ vi.mock('@pierre/diffs/react', async () => {
           annotation: { metadata: unknown },
           item: CodeViewItem<unknown>,
         ) => React.ReactNode;
+        renderCodeViewHeader?: () => React.ReactNode;
         renderCustomHeader?: (item: CodeViewItem<unknown>) => React.ReactNode;
       },
       ref: React.ForwardedRef<unknown>,
@@ -109,6 +110,13 @@ vi.mock('@pierre/diffs/react', async () => {
       return React.createElement(
         'div',
         { className: props.className },
+        props.renderCodeViewHeader
+          ? React.createElement(
+              'div',
+              { 'data-diffs-code-view-header': '', key: 'code-view-header' },
+              props.renderCodeViewHeader(),
+            )
+          : null,
         props.items.map((item) =>
           React.createElement(
             'div',

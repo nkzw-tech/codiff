@@ -889,15 +889,15 @@ test('read-only markdown previews trigger CodeView layout remeasurement after he
 
   try {
     const markdownItemId = `diff:${markdownSectionId}`;
-    const sourceItemId = 'source-description:github:https://github.com/nkzw-tech/codiff/pull/12';
     const initialMarkdownVersion = getCodeViewItemVersion(markdownItemId);
-    const initialSourceVersion = getCodeViewItemVersion(sourceItemId);
 
     const markdownPreview = app.container.querySelector<HTMLElement>(
       '[aria-label="Preview plan.md"]',
     );
+    // The source description renders in CodeView's header region, where height
+    // changes are observed by the viewer directly instead of item versions.
     const sourceDescription = app.container.querySelector<HTMLElement>(
-      '[aria-label="Preview source description"]',
+      '[data-diffs-code-view-header] [aria-label="Preview source description"]',
     );
 
     expect(markdownPreview).not.toBeNull();
@@ -905,12 +905,10 @@ test('read-only markdown previews trigger CodeView layout remeasurement after he
 
     await act(async () => {
       markdownPreview?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-      sourceDescription?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     });
 
     await waitFor(() => {
       expect(getCodeViewItemVersion(markdownItemId)).not.toBe(initialMarkdownVersion);
-      expect(getCodeViewItemVersion(sourceItemId)).not.toBe(initialSourceVersion);
     });
   } finally {
     await app.cleanup();

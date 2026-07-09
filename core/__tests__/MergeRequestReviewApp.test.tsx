@@ -138,7 +138,9 @@ test('merge request reviews expose navigation, actions, and lazy walkthrough gen
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
     expect(view.container.querySelector('.codiff-web-source-description')).toBeNull();
     await waitFor(() => {
-      const sourceDescription = view.container.querySelector('.codiff-source-description-item');
+      const sourceDescription = view.container.querySelector(
+        '[data-diffs-code-view-header] .codiff-code-view-source-description',
+      );
       expect(sourceDescription).not.toBeNull();
       expect(sourceDescription?.closest('.code-view')).not.toBeNull();
       expect(sourceDescription?.textContent).toContain('Review in Codiff');
@@ -1115,7 +1117,9 @@ test('merge request walkthrough shows the merge request description before the f
 
     await waitFor(() => {
       const surface = view.container.querySelector('.wt-diff-surface');
-      const descriptionPanel = surface?.querySelector('.codiff-source-description-item');
+      const descriptionPanel = surface?.querySelector(
+        '[data-diffs-code-view-header] .codiff-code-view-source-description',
+      );
       expect(descriptionPanel).not.toBeNull();
       expect(descriptionPanel?.querySelector('.codiff-file-header')).not.toBeNull();
       expect(surface?.textContent?.indexOf('Review in Codiff')).toBeLessThan(

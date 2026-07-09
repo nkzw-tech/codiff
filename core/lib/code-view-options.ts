@@ -195,35 +195,6 @@ export const codeViewUnsafeCSS = `
     display: none;
   }
 
-  /* Review descriptions render through CodeView's file layout with no real code. */
-  :host(.codiff-source-description-item) {
-    --diffs-scrollbar-gutter-override: 0px;
-  }
-
-  :host(.codiff-source-description-item) [data-file] [data-code] {
-    overflow: visible;
-    padding-bottom: 0;
-    padding-top: 0;
-    scrollbar-width: none;
-  }
-
-  :host(.codiff-source-description-item) [data-file] [data-code]::-webkit-scrollbar {
-    display: none;
-  }
-
-  :host(.codiff-source-description-item) [data-file] :is([data-line], [data-column-number], [data-gutter-buffer], [data-gutter-gap]) {
-    display: none;
-  }
-
-  :host(.codiff-source-description-item) [data-file] :is([data-code], [data-content]) {
-    display: block;
-  }
-
-  :host(.codiff-source-description-item) [data-file] [data-line-annotation] {
-    background: transparent;
-    grid-column: 1 / -1;
-  }
-
   .review-comment-thread {
     padding: 8px 0 8px 16px;
   }
