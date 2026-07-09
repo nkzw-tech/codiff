@@ -1,4 +1,5 @@
 import {
+  hydratePartialDiff,
   parseDiffFromFile,
   parsePatchFiles,
   type FileDiffLoadedFiles,
@@ -74,6 +75,13 @@ export const loadSectionContents = (
   const promise = load(file, section)
     .then((files) => {
       loadedSectionContents.set(key, files);
+      // Inside CodeView the library hydrates a clone and keeps it internally,
+      // so the partial object cached here never becomes full. Evict it so the
+      // next items rebuild re-parses from the loaded contents; otherwise a
+      // later version bump re-delivers the stale partial and resets the
+      // expanded diff.
+      parsedDiffCache.delete(`${key}:ws`);
+      parsedDiffCache.delete(`${key}:ignore-ws`);
       return files;
     })
     .finally(() => {
@@ -338,36 +346,41 @@ export const parseSectionDiffWithOptions = (
   } else if (section.patch.trim().length === 0) {
     fileDiff = createEmptyFileDiff(file, section);
   } else {
-    const loaded = getLoadedSectionContents(file, section);
-    if (loaded?.oldFile && loaded.newFile) {
-      try {
-        fileDiff = {
-          ...parseDiffFromFile(loaded.oldFile, loaded.newFile, {
-            ignoreWhitespace: !showWhitespace,
-          }),
-          cacheKey,
-        };
-      } catch {
-        fileDiff = createEmptyFileDiff(file, section);
+    const parsedFileDiff = parsePatchFiles(section.patch)[0]?.files[0];
+    if (parsedFileDiff) {
+      const loaded = parsedFileDiff.isPartial ? getLoadedSectionContents(file, section) : undefined;
+      let hydrated: FileDiffMetadata | null = null;
+      if (loaded) {
+        try {
+          // Hydrate the patch parse with the library's own routine so the hunk
+          // geometry matches the clone CodeView hydrated internally after a
+          // `loadDiffFiles` expansion. A geometry mismatch (e.g. via
+          // parseDiffFromFile) breaks the renderer's expansion state when the
+          // rebuilt object replaces the clone.
+          hydrated = hydratePartialDiff('merge', parsedFileDiff, loaded);
+        } catch {
+          hydrated = null;
+        }
       }
-    } else {
-      const parsedFileDiff = parsePatchFiles(section.patch)[0]?.files[0];
-      if (parsedFileDiff) {
+
+      if (hydrated) {
+        fileDiff = hydrated;
+      } else {
         fileDiff = {
           ...parsedFileDiff,
           cacheKey,
         };
-        // `loadDiffFiles` hydration mutates this object in place while the
-        // parse cache key derives from section identity, so the same object
-        // keeps being returned across re-renders — required for hydration to
-        // persist. Binary/summary placeholders are intentionally never
+        // The library hydrates a clone of this object when the user expands
+        // unchanged context; `loadSectionContents` evicts this cache entry
+        // once contents arrive so the next rebuild goes through the hydrated
+        // branch above. Binary/summary placeholders are intentionally never
         // registered; they must not be hydrated.
         if (section.summary?.canLoad !== false) {
           fileDiffSectionLookup.set(fileDiff, { file, section });
         }
-      } else {
-        fileDiff = createBinaryFileDiff(file, section);
       }
+    } else {
+      fileDiff = createBinaryFileDiff(file, section);
     }
   }
 
