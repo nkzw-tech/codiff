@@ -1369,13 +1369,16 @@ function ReviewSurface({
       const pendingComments = reviewCommentsRef.current.filter(
         (comment) => !comment.isReadOnly && !comment.threadId && comment.body.trim(),
       );
+      if (event === 'COMMENT' && pendingComments.length === 0 && !body?.trim()) {
+        return;
+      }
       const pendingIds = new Set(pendingComments.map((comment) => comment.id));
       setPullRequestReviewSubmitting(event);
       const formattedComments = pendingComments.map(toPullRequestReviewComment);
       const submission = body
         ? interactive.onSubmitReview(event, formattedComments, body)
         : interactive.onSubmitReview(event, formattedComments);
-      void submission
+      return submission
         .then(() => {
           setLocalReviewComments((current) =>
             current.filter((comment) => !pendingIds.has(comment.id)),
@@ -1383,6 +1386,7 @@ function ReviewSurface({
         })
         .catch((error: unknown) => {
           window.alert(error instanceof Error ? error.message : String(error));
+          throw error;
         })
         .finally(() => setPullRequestReviewSubmitting(null));
     },
@@ -1742,9 +1746,13 @@ function ReviewSurface({
     interactive && source.type === 'pull-request' ? (
       <PullRequestReviewButtons
         disabled={pullRequestReviewSubmitting != null || pullRequestCloseSubmitting}
+        hasPendingComments={localReviewComments.some(
+          (comment) => !comment.isReadOnly && !comment.threadId && Boolean(comment.body.trim()),
+        )}
         onClosePullRequest={closePullRequest}
         onSubmitReview={submitReview}
         reviewStatus={source.reviewStatus}
+        showCommentReview={source.provider === 'github' || source.host === 'github.com'}
       >
         {sourceMergeStatusBadge}
       </PullRequestReviewButtons>

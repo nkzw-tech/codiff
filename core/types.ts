@@ -58,6 +58,7 @@ export type PullRequestReviewActionStatus = {
 export type PullRequestReviewStatus = {
   approve?: PullRequestReviewActionStatus;
   close?: PullRequestReviewActionStatus;
+  comment?: PullRequestReviewActionStatus;
   requestChanges?: PullRequestReviewActionStatus;
 };
 
@@ -769,7 +770,7 @@ export type PullRequestGeneralCommentThread = {
   isResolved?: boolean;
 };
 
-export type PullRequestReviewEvent = 'APPROVE' | 'REQUEST_CHANGES';
+export type PullRequestReviewEvent = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
 
 export type SubmitPullRequestCommentRequest = {
   comment: PullRequestReviewComment;

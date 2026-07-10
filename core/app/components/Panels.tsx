@@ -1,6 +1,7 @@
 import { MarkdownEditor, type MarkdownEditorHandle } from '@nkzw/mdx-editor';
 import { CaretDownIcon as CaretDown } from '@phosphor-icons/react/CaretDown';
 import { CaretUpIcon as CaretUp } from '@phosphor-icons/react/CaretUp';
+import { ChatCircleIcon as ChatCircle } from '@phosphor-icons/react/ChatCircle';
 import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { CheckCircleIcon as CheckCircle } from '@phosphor-icons/react/CheckCircle';
 import { PowerIcon as Power } from '@phosphor-icons/react/Power';
@@ -358,7 +359,12 @@ export function CopyCommentsButton({
 const getPullRequestReviewActionStatus = (
   reviewStatus: PullRequestReviewStatus | undefined,
   event: PullRequestReviewEvent,
-) => (event === 'APPROVE' ? reviewStatus?.approve : reviewStatus?.requestChanges);
+) =>
+  event === 'APPROVE'
+    ? reviewStatus?.approve
+    : event === 'COMMENT'
+      ? reviewStatus?.comment
+      : reviewStatus?.requestChanges;
 
 export const isPullRequestReviewActionDisabled = (
   reviewStatus: PullRequestReviewStatus | undefined,
@@ -371,9 +377,10 @@ const getPullRequestReviewActionTitle = (
   fallback: string,
 ) => getPullRequestReviewActionStatus(reviewStatus, event)?.reason ?? fallback;
 
-function PullRequestReviewAction({
+export function PullRequestReviewAction({
   disabled,
   event,
+  hasPendingComments = false,
   icon,
   label,
   onSubmitReview,
@@ -381,9 +388,10 @@ function PullRequestReviewAction({
 }: {
   disabled: boolean;
   event: PullRequestReviewEvent;
+  hasPendingComments?: boolean;
   icon: ReactNode;
   label: string;
-  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => void;
+  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   title: string;
 }) {
   const [body, setBody] = useState('');
@@ -394,7 +402,24 @@ function PullRequestReviewAction({
   const popoverId = useId();
   const trimmedBody = body.trim();
   const isApprove = event === 'APPROVE';
-  const commentLabel = isApprove ? 'Add approval comment' : 'Add request changes comment';
+  const isComment = event === 'COMMENT';
+  const variant = isApprove ? 'approve' : isComment ? 'comment' : 'request-changes';
+  const actionLabel = isApprove
+    ? 'Approve review'
+    : isComment
+      ? 'Submit review comments'
+      : 'Request changes';
+  const commentLabel = isApprove
+    ? 'Add approval comment'
+    : isComment
+      ? 'Add review comment'
+      : 'Add request changes comment';
+  const placeholder = isApprove
+    ? 'Add an approval comment…'
+    : isComment
+      ? 'Add a review comment…'
+      : 'Add a change request comment…';
+  const primaryDisabled = disabled || (isComment && !hasPendingComments);
 
   useEffect(() => {
     if (!open) {
@@ -435,10 +460,21 @@ function PullRequestReviewAction({
     if (disabled || !trimmedBody) {
       return;
     }
-    onSubmitReview(event, trimmedBody);
-    setBody('');
-    setOpen(false);
+    void Promise.resolve(onSubmitReview(event, trimmedBody))
+      .then(() => {
+        setBody('');
+        setOpen(false);
+      })
+      .catch(() => {});
   }, [disabled, event, onSubmitReview, trimmedBody]);
+
+  const submitWithoutComment = useCallback(() => {
+    if (primaryDisabled) {
+      return;
+    }
+    setOpen(false);
+    void Promise.resolve(onSubmitReview(event)).catch(() => {});
+  }, [event, onSubmitReview, primaryDisabled]);
 
   const handleEditorKeyDown = useCallback(
     (keyboardEvent: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -459,20 +495,19 @@ function PullRequestReviewAction({
   return (
     <div className="review-submit-action" ref={rootRef}>
       <div
-        className={`codiff-open-button review-submit-button ${
-          isApprove ? 'approve' : 'request-changes'
-        }`}
+        className={`codiff-open-button review-submit-button ${variant}`}
         data-disabled={disabled || undefined}
       >
         <button
-          aria-label={isApprove ? 'Approve review' : 'Request changes'}
+          aria-label={actionLabel}
           className="review-submit-primary"
-          disabled={disabled}
-          onClick={() => {
-            setOpen(false);
-            onSubmitReview(event);
-          }}
-          title={title}
+          disabled={primaryDisabled}
+          onClick={submitWithoutComment}
+          title={
+            isComment && !hasPendingComments
+              ? 'Add an inline comment or write a review comment from the menu'
+              : title
+          }
           type="button"
         >
           {icon}
@@ -514,7 +549,7 @@ function PullRequestReviewAction({
             density="compact"
             onChange={setBody}
             onKeyDown={handleEditorKeyDown}
-            placeholder={isApprove ? 'Add an approval comment…' : 'Add a change request comment…'}
+            placeholder={placeholder}
             readOnly={disabled}
             ref={editorRef}
             spellCheck
@@ -523,9 +558,7 @@ function PullRequestReviewAction({
           />
           <div className="review-submit-popover-footer">
             <button
-              className={`codiff-open-button review-submit-popover-submit ${
-                isApprove ? 'approve' : 'request-changes'
-              }`}
+              className={`codiff-open-button review-submit-popover-submit ${variant}`}
               disabled={disabled || !trimmedBody}
               onClick={submitWithComment}
               type="button"
@@ -543,21 +576,28 @@ function PullRequestReviewAction({
 export function PullRequestReviewButtons({
   children,
   disabled,
+  hasPendingComments,
   onClosePullRequest,
   onSubmitReview,
   reviewStatus,
+  showCommentReview = false,
 }: {
   children?: ReactNode;
   disabled: boolean;
+  hasPendingComments: boolean;
   onClosePullRequest?: () => void;
-  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => void;
+  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   reviewStatus?: PullRequestReviewStatus;
+  showCommentReview?: boolean;
 }) {
   const approveBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'APPROVE');
+  const commentBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'COMMENT');
   const requestChangesBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'REQUEST_CHANGES');
   const closeStatus = reviewStatus?.close;
   const closeVisible = onClosePullRequest && closeStatus && closeStatus.disabled !== true;
-  const hasReviewActions = !approveBlocked || !requestChangesBlocked || closeVisible;
+  const commentVisible = showCommentReview && !commentBlocked;
+  const hasReviewActions =
+    commentVisible || !approveBlocked || !requestChangesBlocked || closeVisible;
   if (!hasReviewActions && !children) {
     return null;
   }
@@ -568,6 +608,24 @@ export function PullRequestReviewButtons({
       className="source-description-review-actions"
     >
       {children}
+      {commentVisible ? (
+        <PullRequestReviewAction
+          disabled={disabled}
+          event="COMMENT"
+          hasPendingComments={hasPendingComments}
+          icon={
+            <ChatCircle
+              aria-hidden
+              className="review-submit-icon comment"
+              size={15}
+              weight="bold"
+            />
+          }
+          label="Comment"
+          onSubmitReview={onSubmitReview}
+          title={getPullRequestReviewActionTitle(reviewStatus, 'COMMENT', 'Submit review comments')}
+        />
+      ) : null}
       {!approveBlocked ? (
         <PullRequestReviewAction
           disabled={disabled}

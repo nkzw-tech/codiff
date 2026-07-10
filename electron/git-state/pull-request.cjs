@@ -948,20 +948,31 @@ const submitPullRequestReview = async (launchPath, request) => {
       '--input',
       '-',
     ],
-    {
-      body:
-        request.body ||
-        (request.event === 'REQUEST_CHANGES' && request.comments.length === 0
-          ? 'Requesting changes.'
-          : ''),
-      comments: request.comments.map(normalizePullRequestComment),
-      event: request.event,
-    },
+    createPullRequestReviewPayload(request),
   );
+};
+
+/** @param {SubmitPullRequestReviewRequest} request */
+const createPullRequestReviewPayload = (request) => {
+  const body = request.body?.trim() || '';
+  if (request.event === 'COMMENT' && request.comments.length === 0 && !body) {
+    throw new Error('A comment review requires an inline comment or a review comment.');
+  }
+
+  return {
+    body:
+      body ||
+      (request.event === 'REQUEST_CHANGES' && request.comments.length === 0
+        ? 'Requesting changes.'
+        : ''),
+    comments: request.comments.map(normalizePullRequestComment),
+    event: request.event,
+  };
 };
 
 module.exports = {
   collectResolvedReviewCommentIds,
+  createPullRequestReviewPayload,
   createPatchFromPullRequestFile,
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSection,

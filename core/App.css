@@ -3493,6 +3493,10 @@ diffs-container .review-comment-thread {
   color: var(--viewed);
 }
 
+.review-submit-button.comment {
+  color: var(--text);
+}
+
 .review-submit-button.close {
   color: var(--text);
 }
@@ -3542,6 +3546,10 @@ diffs-container .review-comment-thread {
 
 .review-submit-popover-submit.approve {
   color: var(--viewed);
+}
+
+.review-submit-popover-submit.comment {
+  color: var(--text);
 }
 
 .copy-comments-button:hover {

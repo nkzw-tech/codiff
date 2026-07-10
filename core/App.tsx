@@ -2386,9 +2386,12 @@ export default function App() {
       const pendingComments = reviewCommentsRef.current.filter(
         (comment) => !comment.isReadOnly && !comment.threadId && comment.body.trim(),
       );
+      if (event === 'COMMENT' && pendingComments.length === 0 && !body?.trim()) {
+        return;
+      }
       const pendingCommentIds = new Set(pendingComments.map((comment) => comment.id));
       setPullRequestReviewSubmitting(event);
-      void window.codiff
+      return window.codiff
         .submitPullRequestReview({
           ...(body ? { body } : {}),
           comments: pendingComments.map(toPullRequestReviewComment),
@@ -2402,6 +2405,7 @@ export default function App() {
         })
         .catch((error: unknown) => {
           window.alert(error instanceof Error ? error.message : String(error));
+          throw error;
         })
         .finally(() => {
           setPullRequestReviewSubmitting(null);
@@ -2640,8 +2644,15 @@ export default function App() {
     sourceDescriptionActions: isPullRequest ? (
       <PullRequestReviewButtons
         disabled={pullRequestReviewSubmitting != null}
+        hasPendingComments={reviewComments.some(
+          (comment) => !comment.isReadOnly && !comment.threadId && Boolean(comment.body.trim()),
+        )}
         onSubmitReview={submitPullRequestReview}
         reviewStatus={state.source.type === 'pull-request' ? state.source.reviewStatus : undefined}
+        showCommentReview={
+          state.source.type === 'pull-request' &&
+          (state.source.provider === 'github' || state.source.host === 'github.com')
+        }
       />
     ) : undefined,
     theme: preferences.theme,
