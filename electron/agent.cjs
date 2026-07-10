@@ -27,7 +27,10 @@ const { readPiSessionContext } = require('./pi-session-context.cjs');
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onPartialText?: (delta: string) => void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
+ *   onSessionId?: (sessionId: string) => void;
+ *   persistSession?: boolean;
  *   reasoningEffort?: 'low' | 'medium' | 'high';
+ *   resumeSessionId?: string;
  *   timeoutMs?: number;
  * }} AgentOptions
  * @typedef {{

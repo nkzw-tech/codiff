@@ -712,6 +712,16 @@ html[data-codiff-platform='darwin'] .collapsed-sidebar-bar {
   background: rgb(127 127 127 / 0.2);
 }
 
+.sidebar-refresh-button {
+  flex: none;
+  margin-left: 4px;
+}
+
+.sidebar-refresh-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
 .sidebar-resizer {
   -webkit-app-region: no-drag;
   border-left: 1px solid var(--sidebar-border);

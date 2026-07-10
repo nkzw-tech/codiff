@@ -136,9 +136,11 @@ import type {
   SharedWalkthroughSnapshot,
   TerminalHelperStatus,
   NarrativeWalkthrough,
+  NarrativeWalkthroughResult,
   WalkthroughCommitMessageRequest,
   WalkthroughCommitRequest,
   WalkthroughProgressEvent,
+  WalkthroughStaleness,
   DiffSection,
 } from './types.ts';
 
@@ -279,6 +281,9 @@ export default function App() {
     null,
   );
   const [walkthroughError, setWalkthroughError] = useState<WalkthroughError | null>(null);
+  const [walkthroughStaleness, setWalkthroughStaleness] = useState<WalkthroughStaleness | null>(
+    null,
+  );
   const [walkthroughFileError, setWalkthroughFileError] = useState<WalkthroughFileError | null>(
     null,
   );
@@ -316,6 +321,7 @@ export default function App() {
   const markdownRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
   const viewedRef = useRef<Record<string, string>>({});
   const narrativeWalkthroughRef = useRef<NarrativeWalkthrough | null>(null);
+  const walkthroughStalenessRef = useRef<WalkthroughStaleness | null>(null);
   const walkthroughOutdatedPathsRef = useRef<ReadonlySet<string>>(new Set());
   const navigationResetKey = state ? `${state.root}:${getSourceKey(state.source)}` : '';
   const narrativeNavigation = useNarrativeNavigation(
@@ -620,6 +626,7 @@ export default function App() {
       viewed: viewedRef.current,
       walkthroughError: walkthroughErrorRef.current,
       walkthroughOutdatedPaths: walkthroughOutdatedPathsRef.current,
+      walkthroughStaleness: walkthroughStalenessRef.current,
     });
   }, []);
 
@@ -713,17 +720,27 @@ export default function App() {
 
       // Always consult the main process for a pre-authored walkthrough file, even
       // when the diff is empty, so it can diagnose *why* (e.g. the changes were
-      // committed) rather than us guessing in the renderer.
-      const shouldFetchNarrative = shouldLoadNarrative || walkthroughFilePath != null;
-      const narrativeResult = shouldFetchNarrative
-        ? await window.codiff.getNarrativeWalkthrough(orderedState.source)
-        : null;
+      // committed) rather than us guessing in the renderer. Otherwise, prefer the
+      // walkthrough saved on disk and only generate when none exists.
+      let narrativeResult: NarrativeWalkthroughResult | null = null;
+      if (walkthroughFilePath != null) {
+        narrativeResult = await window.codiff.getNarrativeWalkthrough(orderedState.source);
+      } else if (shouldLoadNarrative) {
+        const stored = await window.codiff.getWalkthroughStatus(orderedState.source);
+        narrativeResult =
+          stored.status === 'ready'
+            ? { staleness: stored.staleness, status: 'ready', walkthrough: stored.walkthrough }
+            : await window.codiff.getNarrativeWalkthrough(orderedState.source);
+      }
       if (canceled) {
         return;
       }
       const loadedNarrative =
         narrativeResult?.status === 'ready' ? narrativeResult.walkthrough : null;
       setNarrativeWalkthrough(loadedNarrative);
+      setWalkthroughStaleness(
+        narrativeResult?.status === 'ready' ? (narrativeResult.staleness ?? null) : null,
+      );
 
       if (narrativeResult?.status === 'unavailable') {
         setWalkthroughError(narrativeResult);
@@ -1197,6 +1214,10 @@ export default function App() {
   }, [narrativeWalkthrough]);
 
   useEffect(() => {
+    walkthroughStalenessRef.current = walkthroughStaleness;
+  }, [walkthroughStaleness]);
+
+  useEffect(() => {
     walkthroughOutdatedPathsRef.current = walkthroughOutdatedPaths;
   }, [walkthroughOutdatedPaths]);
 
@@ -1554,6 +1575,23 @@ export default function App() {
           setMainMode('review');
         }
         setLocalChangesDetected(false);
+
+        // The head/working tree may have moved, so recompute how stale the shown
+        // walkthrough is (without replacing it).
+        if (narrativeWalkthroughRef.current) {
+          window.codiff
+            .getWalkthroughStatus(orderedState.source)
+            .then((status) => {
+              if (
+                sourceRequestRef.current === request &&
+                status.status === 'ready' &&
+                narrativeWalkthroughRef.current
+              ) {
+                setWalkthroughStaleness(status.staleness);
+              }
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {
         // Keep the current state; the banner stays up as a retry affordance.
@@ -1664,6 +1702,7 @@ export default function App() {
           setViewed(nextViewed);
           setSelectedPath(nextSelectedPath);
           setNarrativeWalkthrough(session?.narrativeWalkthrough ?? null);
+          setWalkthroughStaleness(session?.walkthroughStaleness ?? null);
           setWalkthroughError(session?.walkthroughError ?? null);
           setWalkthroughLoading(false);
           setWalkthroughUnread(false);
@@ -1738,60 +1777,110 @@ export default function App() {
 
   // Ask the connected agent for a narrative walkthrough of the given source.
   // Results are dropped if the reviewer switched sources while it was running.
-  const loadNarrativeWalkthrough = useCallback((source: ReviewSource) => {
+  const loadNarrativeWalkthrough = useCallback(
+    (source: ReviewSource, previousWalkthrough?: NarrativeWalkthrough) => {
+      const sourceKey = getSourceKey(source);
+      setWalkthroughProgress((current) => ({
+        phase: null,
+        responseLabelIndex: nextWalkthroughResponseLabelIndex(current.responseLabelIndex),
+        stageRevision: current.stageRevision + 1,
+      }));
+      setWalkthroughLoading(true);
+      setWalkthroughError(null);
+      window.codiff
+        .getNarrativeWalkthrough(source, previousWalkthrough ? { previousWalkthrough } : undefined)
+        .then((result) => {
+          if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
+            return;
+          }
+
+          if (result.status === 'ready') {
+            setNarrativeWalkthrough(result.walkthrough);
+            setWalkthroughStaleness(result.staleness ?? null);
+            setWalkthroughOutdatedPaths(new Set());
+            if (sidebarModeRef.current === 'walkthrough') {
+              setSidebarMode('walkthrough');
+            } else {
+              setWalkthroughUnread(true);
+            }
+          } else {
+            setWalkthroughError(result);
+          }
+        })
+        .catch((error: unknown) => {
+          if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
+            return;
+          }
+
+          setWalkthroughError({
+            reason: error instanceof Error ? error.message : String(error),
+            status: 'unavailable',
+          });
+        })
+        .finally(() => {
+          if (getSourceKey(stateRef.current?.source ?? source) === sourceKey) {
+            setWalkthroughLoading(false);
+          }
+        });
+    },
+    [],
+  );
+
+  // Load the walkthrough saved on disk for this source, without regenerating.
+  // Resolves true when one was found and shown. Drops stale results.
+  const loadStoredWalkthrough = useCallback((source: ReviewSource): Promise<boolean> => {
     const sourceKey = getSourceKey(source);
-    setWalkthroughProgress((current) => ({
-      phase: null,
-      responseLabelIndex: nextWalkthroughResponseLabelIndex(current.responseLabelIndex),
-      stageRevision: current.stageRevision + 1,
-    }));
-    setWalkthroughLoading(true);
-    setWalkthroughError(null);
-    window.codiff
-      .getNarrativeWalkthrough(source)
+    return window.codiff
+      .getWalkthroughStatus(source)
       .then((result) => {
+        if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
+          return false;
+        }
+        if (result.status === 'ready') {
+          setNarrativeWalkthrough(result.walkthrough);
+          setWalkthroughStaleness(result.staleness);
+          setWalkthroughError(null);
+          setWalkthroughOutdatedPaths(new Set());
+          return true;
+        }
+        return false;
+      })
+      .catch(() => false);
+  }, []);
+
+  // Prefer the saved walkthrough on open; only generate when none is saved.
+  const loadWalkthroughForSource = useCallback(
+    (source: ReviewSource) => {
+      const sourceKey = getSourceKey(source);
+      setWalkthroughLoading(true);
+      setWalkthroughError(null);
+      loadStoredWalkthrough(source).then((found) => {
         if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
           return;
         }
-
-        if (result.status === 'ready') {
-          setNarrativeWalkthrough(result.walkthrough);
-          setWalkthroughOutdatedPaths(new Set());
-          if (sidebarModeRef.current === 'walkthrough') {
-            setSidebarMode('walkthrough');
-          } else {
+        if (found) {
+          setWalkthroughLoading(false);
+          if (sidebarModeRef.current !== 'walkthrough') {
             setWalkthroughUnread(true);
           }
         } else {
-          setWalkthroughError(result);
-        }
-      })
-      .catch((error: unknown) => {
-        if (getSourceKey(stateRef.current?.source ?? source) !== sourceKey) {
-          return;
-        }
-
-        setWalkthroughError({
-          reason: error instanceof Error ? error.message : String(error),
-          status: 'unavailable',
-        });
-      })
-      .finally(() => {
-        if (getSourceKey(stateRef.current?.source ?? source) === sourceKey) {
-          setWalkthroughLoading(false);
+          loadNarrativeWalkthrough(source);
         }
       });
-  }, []);
+    },
+    [loadNarrativeWalkthrough, loadStoredWalkthrough],
+  );
 
   // Regenerate the walkthrough on demand, e.g. after an in-place refresh
   // surfaced changes the current walkthrough doesn't narrate. The existing
-  // walkthrough stays visible until the new one arrives.
+  // walkthrough stays visible until the new one arrives. The current walkthrough
+  // is passed so the agent updates it in place for the new changes.
   const regenerateWalkthrough = useCallback(() => {
     const currentState = stateRef.current;
     if (!currentState || currentState.files.length === 0 || walkthroughLoading) {
       return;
     }
-    loadNarrativeWalkthrough(currentState.source);
+    loadNarrativeWalkthrough(currentState.source, narrativeWalkthroughRef.current ?? undefined);
   }, [loadNarrativeWalkthrough, walkthroughLoading]);
 
   const changeSidebarMode = useCallback(
@@ -1819,9 +1908,9 @@ export default function App() {
         return;
       }
 
-      loadNarrativeWalkthrough(state.source);
+      loadWalkthroughForSource(state.source);
     },
-    [loadNarrativeWalkthrough, narrativeWalkthrough, state, walkthroughError, walkthroughLoading],
+    [loadWalkthroughForSource, narrativeWalkthrough, state, walkthroughError, walkthroughLoading],
   );
 
   const openCommitView = useCallback(() => {
@@ -2573,6 +2662,36 @@ export default function App() {
     state.source.type !== 'working-tree' ? ` · ${getSourceLabel(state.source)}` : '';
   const emptySourceDetail = getEmptySourceDetail(state.source, state.root);
 
+  // Re-read the diff in place so a reviewer can pull in new commits/changes
+  // without reloading the window. Rendered in the sidebar's PR/source bar.
+  const refreshRepositoryButton = (
+    <button
+      aria-label="Refresh changes"
+      className="sidebar-toggle-button sidebar-refresh-button"
+      disabled={Boolean(pendingSource)}
+      onClick={refreshRepository}
+      title="Refresh changes"
+      type="button"
+    >
+      <svg
+        aria-hidden
+        fill="none"
+        height="16"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        viewBox="0 0 24 24"
+        width="16"
+      >
+        <path d="M21 2v6h-6" />
+        <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+        <path d="M3 22v-6h6" />
+        <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+      </svg>
+    </button>
+  );
+
   const showNarrativeWalkthrough = narrativeWalkthrough != null && sidebarMode === 'walkthrough';
   const plainCommitModel = narrativeNavigation.walkthroughView
     ? buildCommitModel(narrativeNavigation.walkthroughView, state.files)
@@ -2711,6 +2830,7 @@ export default function App() {
             {sidebarLabel}
             {sidebarSourceLabel}
           </div>
+          {refreshRepositoryButton}
         </div>
       ) : null}
       <RepositoryChangeBanner
@@ -2778,6 +2898,7 @@ export default function App() {
               {sidebarLabel}
               {sidebarSourceLabel}
             </div>
+            {refreshRepositoryButton}
           </div>
         </div>
         <Sidebar
@@ -2796,6 +2917,7 @@ export default function App() {
           onActivatePath={activatePath}
           onLoadMoreHistory={loadMoreHistory}
           onModeChange={changeSidebarMode}
+          onRegenerateWalkthrough={regenerateWalkthrough}
           onSearchQueryChange={
             sidebarMode === 'history' ? setHistorySearchQuery : setFileSearchQuery
           }
@@ -2804,6 +2926,7 @@ export default function App() {
           onShareWalkthrough={enabledShareWalkthrough}
           onToggleCommitView={showPlainCommitView ? closeCommitView : openCommitView}
           pullRequestSource={historySource?.type === 'pull-request' ? historySource : null}
+          regenerateDisabled={walkthroughLoading}
           reloadDeltaPaths={reloadDeltaPaths}
           searchQuery={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
           selectedPath={visibleSelectedPath}
@@ -2814,6 +2937,7 @@ export default function App() {
           walkthroughLoading={walkthroughLoading}
           walkthroughOutdatedPaths={walkthroughOutdatedPaths}
           walkthroughProgress={walkthroughProgress}
+          walkthroughStaleness={walkthroughStaleness}
           walkthroughUnread={walkthroughUnread}
         />
       </aside>

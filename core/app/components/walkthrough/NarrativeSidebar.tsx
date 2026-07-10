@@ -2,6 +2,7 @@ import { getAgentLabel } from '../../../lib/app-constants.ts';
 import { renderInlineMarkdown } from '../../../lib/markdown.tsx';
 import {
   buildCommitModel,
+  describeWalkthroughStaleness,
   formatWalkthroughFileLineRows,
   getUncoveredWalkthroughFileLineItems,
   isWalkthroughCommittable,
@@ -9,7 +10,7 @@ import {
   type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, NarrativeWalkthrough } from '../../../types.ts';
+import type { ChangedFile, NarrativeWalkthrough, WalkthroughStaleness } from '../../../types.ts';
 import { ArrowsClockwise, Check, GitBranch, Path, ShareNetwork } from './icons.tsx';
 import { ChapterIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
@@ -203,18 +204,24 @@ export function NarrativeSidebar({
   changedPaths,
   files,
   navigation,
+  onRegenerate,
   onShareWalkthrough,
+  regenerateDisabled = false,
   shareWalkthroughDisabled = false,
   showWhitespace,
+  staleness,
   walkthrough,
 }: {
   allowCommit?: boolean;
   changedPaths?: ReadonlySet<string>;
   files: ReadonlyArray<ChangedFile>;
   navigation: NarrativeNavigation;
+  onRegenerate?: () => void;
   onShareWalkthrough?: () => void;
+  regenerateDisabled?: boolean;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
+  staleness?: WalkthroughStaleness | null;
   walkthrough: NarrativeWalkthrough;
 }) {
   const { walkthroughView } = navigation;
@@ -235,6 +242,27 @@ export function NarrativeSidebar({
 
   return (
     <div className="walkthrough-list">
+      {onRegenerate || staleness ? (
+        <div className={`wt-staleness${staleness?.isLatest ? ' latest' : ' stale'}`}>
+          <span className="wt-staleness-label">
+            {staleness?.isLatest ? <Check size={13} weight="bold" /> : null}
+            {staleness ? describeWalkthroughStaleness(staleness) : 'Saved from an earlier state'}
+          </span>
+          {onRegenerate ? (
+            <button
+              className="wt-staleness-sync"
+              disabled={regenerateDisabled}
+              onClick={onRegenerate}
+              title="Regenerate the walkthrough for the latest changes"
+              type="button"
+            >
+              <ArrowsClockwise size={13} weight="bold" />
+              {regenerateDisabled ? 'Syncing…' : staleness?.isLatest ? 'Regenerate' : 'Sync'}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="wt-focus">
         <span className="wt-focus-label">Review focus</span>
         <p>{renderInlineMarkdown(walkthrough.focus)}</p>

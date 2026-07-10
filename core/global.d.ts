@@ -10,6 +10,7 @@ import type {
   DiffSection,
   DiffSectionContentRequest,
   GitIdentity,
+  NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
   PlanHandoffStatus,
   PlanReview,
@@ -32,6 +33,7 @@ import type {
   WalkthroughCommitRequest,
   WalkthroughCommitResult,
   WalkthroughProgressEvent,
+  WalkthroughStatusResult,
 } from './types.ts';
 
 declare module '*.css';
@@ -56,12 +58,16 @@ declare global {
         kind: CodiffMarkdownDocument['kind'];
         path: string;
       }) => Promise<CodiffMarkdownDocument>;
-      getNarrativeWalkthrough: (source?: ReviewSource) => Promise<NarrativeWalkthroughResult>;
+      getNarrativeWalkthrough: (
+        source?: ReviewSource,
+        options?: NarrativeWalkthroughRequestOptions,
+      ) => Promise<NarrativeWalkthroughResult>;
       getPlanReview: () => Promise<PlanReview | null>;
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
+      getWalkthroughStatus: (source?: ReviewSource) => Promise<WalkthroughStatusResult>;
       increaseCodeFontSize: () => Promise<void>;
       installAgentSkill: () => Promise<AgentSkillStatus>;
       installTerminalHelper: () => Promise<TerminalHelperStatus>;

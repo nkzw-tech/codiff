@@ -26,7 +26,14 @@ const {
     schema: unknown,
     outputName?: string,
     timeoutMessage?: string,
-    options?: { model?: string; onProgress?: (phase: string) => void; timeoutMs?: number },
+    options?: {
+      model?: string;
+      onProgress?: (phase: string) => void;
+      onSessionId?: (sessionId: string) => void;
+      persistSession?: boolean;
+      resumeSessionId?: string;
+      timeoutMs?: number;
+    },
   ) => Promise<string>;
 };
 
@@ -104,6 +111,56 @@ process.stdin.on('end', () => {
     expect(args).toContain('--add-dir');
     expect(args).toContain(directory);
     expect(args).toContain('--no-session-persistence');
+  } finally {
+    if (previousClaudePath == null) {
+      delete process.env.CODIFF_CLAUDE_PATH;
+    } else {
+      process.env.CODIFF_CLAUDE_PATH = previousClaudePath;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('resumes a persisted Claude session and captures its session id', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-claude-resume-'));
+  const fakeClaudePath = join(directory, 'claude');
+  const argsPath = join(directory, 'args.txt');
+  const previousClaudePath = process.env.CODIFF_CLAUDE_PATH;
+
+  try {
+    await writeFile(
+      fakeClaudePath,
+      `#!/usr/bin/env node
+const { appendFileSync } = require('node:fs');
+const argsPath = ${JSON.stringify(argsPath)};
+for (const arg of process.argv.slice(2)) {
+  appendFileSync(argsPath, arg + '\\n');
+}
+process.stdin.resume();
+process.stdin.on('end', () => {
+  process.stdout.write(${JSON.stringify(
+    '{"is_error":false,"session_id":"sess-123","result":"{\\"version\\":1}","structured_output":{"version":1}}',
+  )});
+});
+`,
+    );
+    await chmod(fakeClaudePath, 0o755);
+    process.env.CODIFF_CLAUDE_PATH = fakeClaudePath;
+    const sessionIds: Array<string> = [];
+
+    await expect(
+      runClaude(directory, 'prompt', { type: 'object' }, 'walkthrough.json', 'Timed out.', {
+        onSessionId: (sessionId) => sessionIds.push(sessionId),
+        persistSession: true,
+        resumeSessionId: 'sess-abc',
+      }),
+    ).resolves.toBe('{"version":1}');
+
+    const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
+    expect(args).toContain('--resume');
+    expect(args).toContain('sess-abc');
+    expect(args).not.toContain('--no-session-persistence');
+    expect(sessionIds).toEqual(['sess-123']);
   } finally {
     if (previousClaudePath == null) {
       delete process.env.CODIFF_CLAUDE_PATH;

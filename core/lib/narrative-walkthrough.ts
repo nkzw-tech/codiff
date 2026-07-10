@@ -7,6 +7,7 @@ import type {
   WalkthroughHunk,
   WalkthroughHunkGroup,
   WalkthroughIcon,
+  WalkthroughStaleness,
   WalkthroughSupportGroup,
   WalkthroughStop,
 } from '../types.ts';
@@ -20,6 +21,28 @@ import {
 export type NarrativeLineCount = {
   added: number;
   deleted: number;
+};
+
+/** Human-readable summary of how far a saved walkthrough has drifted. */
+export const describeWalkthroughStaleness = (staleness: WalkthroughStaleness): string => {
+  if (staleness.isLatest) {
+    return 'Up to date with the latest commit';
+  }
+  if (staleness.diverged) {
+    return 'History changed since this walkthrough was generated';
+  }
+  const parts: Array<string> = [];
+  if (staleness.commitsBehind > 0) {
+    parts.push(
+      `${staleness.commitsBehind} commit${staleness.commitsBehind === 1 ? '' : 's'} behind`,
+    );
+  }
+  if (!staleness.treeMatches) {
+    parts.push('working tree changed');
+  }
+  return parts.length > 0
+    ? parts.join(' · ')
+    : 'This walkthrough may not match the current changes';
 };
 
 /** A stop with a global position in the walkthrough. */

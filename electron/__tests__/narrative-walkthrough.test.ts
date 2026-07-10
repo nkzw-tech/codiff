@@ -346,11 +346,14 @@ test('scales walkthrough timeouts with reviewable files and hunks', () => {
   const mediumTimeout = getNarrativeWalkthroughTimeoutMs(createState(32));
   const largeTimeout = getNarrativeWalkthroughTimeoutMs(createState(100));
 
-  expect(smallTimeout).toBe(90_000);
+  // Every walkthrough gets well over ten minutes so generation (and resumed
+  // regeneration) is not killed prematurely.
+  expect(smallTimeout).toBe(660_000);
+  expect(smallTimeout).toBeGreaterThan(600_000);
   expect(mediumTimeout).toBeGreaterThan(smallTimeout);
-  expect(mediumTimeout).toBeLessThan(300_000);
-  expect(largeTimeout).toBe(300_000);
-  expect(getNarrativeWalkthroughTimeoutMs(createState(4), 180_000)).toBe(180_000);
+  expect(mediumTimeout).toBeLessThan(900_000);
+  expect(largeTimeout).toBe(900_000);
+  expect(getNarrativeWalkthroughTimeoutMs(createState(4), 800_000)).toBe(800_000);
 });
 
 test('prompts generated walkthroughs with custom user guidance without replacing core constraints', () => {
@@ -371,6 +374,53 @@ test('prompts generated walkthroughs with custom user guidance without replacing
   expect(prompt).toContain('Answer in Japanese and use concise reviewer-facing explanations.');
   expect(prompt).toContain('Return JSON only.');
   expect(prompt).toContain('Repository change digest:');
+});
+
+test('passes the previous walkthrough into a regeneration prompt', () => {
+  const prompt = buildNarrativeWalkthroughPrompt(
+    {
+      branch: 'main',
+      files: files.slice(0, 1),
+      generatedAt: 1,
+      root: '/repo',
+      source: { type: 'working-tree' },
+    },
+    null,
+    'Claude Code',
+    undefined,
+    {
+      chapters: [
+        {
+          blurb: 'Entry point',
+          stops: [{ prose: 'Guards against duplicate submits.', title: 'Prevent double submit' }],
+          title: 'Runtime',
+        },
+      ],
+      focus: 'Harden the submit path.',
+      title: 'Submit hardening',
+    },
+  );
+
+  expect(prompt).toContain('Previous walkthrough to update:');
+  expect(prompt).toContain('Prevent double submit');
+  expect(prompt).toContain('Re-anchor every stop to the current digest');
+  expect(prompt).toContain('Repository change digest:');
+});
+
+test('omits the previous-walkthrough block when none is provided', () => {
+  const prompt = buildNarrativeWalkthroughPrompt(
+    {
+      branch: 'main',
+      files: files.slice(0, 1),
+      generatedAt: 1,
+      root: '/repo',
+      source: { type: 'working-tree' },
+    },
+    null,
+    'Codex',
+  );
+
+  expect(prompt).not.toContain('Previous walkthrough to update:');
 });
 
 test('omits blank custom walkthrough prompt guidance', () => {

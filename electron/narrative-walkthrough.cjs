@@ -46,8 +46,12 @@ const MAX_TOTAL_PATCH_CHARS = 60_000;
 const MAX_LARGE_TOTAL_PATCH_CHARS = 35_000;
 const MAX_SECTION_PATCH_CHARS = 2_500;
 const MAX_LARGE_SECTION_PATCH_CHARS = 700;
-const BASE_WALKTHROUGH_TIMEOUT_MS = 90_000;
-const MAX_WALKTHROUGH_TIMEOUT_MS = 300_000;
+// Walkthrough generation can run a full agent turn (and, on regeneration, a
+// resumed session that re-reads prior context), so allow well over ten minutes
+// before giving up. The base is the floor every generation gets; the max caps
+// the size-based scaling.
+const BASE_WALKTHROUGH_TIMEOUT_MS = 660_000;
+const MAX_WALKTHROUGH_TIMEOUT_MS = 900_000;
 const INCLUDED_WALKTHROUGH_FILES = 8;
 const INCLUDED_WALKTHROUGH_HUNKS = 12;
 const TIMEOUT_MS_PER_EXTRA_FILE = 1_000;
@@ -648,6 +652,46 @@ Use these instructions to customize language, tone, and review detail. If they c
     : '';
 };
 
+/**
+ * A compact, hunk-id-free summary of the walkthrough being replaced. Passed on
+ * regeneration so the agent revises the existing narrative for the new diff
+ * instead of authoring from scratch. Hunk ids are omitted on purpose: the new
+ * request uses fresh request-local aliases, so the model must re-anchor against
+ * the digest below rather than reuse stale ids.
+ * @param {any} previousWalkthrough
+ */
+const buildPreviousWalkthroughInput = (previousWalkthrough) => {
+  if (!previousWalkthrough || typeof previousWalkthrough !== 'object') {
+    return '';
+  }
+
+  const chapters = (Array.isArray(previousWalkthrough.chapters) ? previousWalkthrough.chapters : [])
+    .map((chapter) => ({
+      blurb: oneLine(chapter?.blurb),
+      stops: (Array.isArray(chapter?.stops) ? chapter.stops : []).map((stop) => ({
+        prose: truncate(cleanText(stop?.prose), MAX_PROSE_CHARS),
+        title: oneLine(stop?.title),
+      })),
+      title: oneLine(chapter?.title),
+    }))
+    .filter((chapter) => chapter.title || chapter.stops.length > 0);
+  if (chapters.length === 0) {
+    return '';
+  }
+
+  const summary = {
+    chapters,
+    focus: oneLine(previousWalkthrough.focus),
+    title: oneLine(previousWalkthrough.title),
+  };
+
+  return `Previous walkthrough to update:
+${JSON.stringify(summary)}
+
+The reviewer already has this walkthrough. Re-author it for the CURRENT digest: keep stops that are still accurate (you may reuse their titles and prose), revise prose where the referenced code changed, add stops for new changes, and drop stops whose code is gone. Re-anchor every stop to the current digest's hunk aliases; never reuse ids from the previous walkthrough. Return the full updated walkthrough JSON in the schema above.
+`;
+};
+
 /** @param {RepositoryState} state */
 const getWalkthroughSize = (state) => ({
   fileCount: state.files.length,
@@ -725,7 +769,13 @@ Grouping contract:
 `;
 };
 
-const buildNarrativeWalkthroughRequest = (state, context, agentLabel = 'Codex', customPrompt) => {
+const buildNarrativeWalkthroughRequest = (
+  state,
+  context,
+  agentLabel = 'Codex',
+  customPrompt,
+  previousWalkthrough,
+) => {
   const { hunkIdByAlias, input } = buildPromptInput(state);
   return {
     hunkIdByAlias,
@@ -738,16 +788,31 @@ ${buildWalkthroughSizingGuidance(state)}
 
 ${buildWalkthroughContextInput(context, agentLabel)}
 ${buildCustomPromptInput(customPrompt)}
+${buildPreviousWalkthroughInput(previousWalkthrough)}
 Repository change digest:
 ${JSON.stringify(input)}
 `,
   };
 };
 
-const buildNarrativeWalkthroughPrompt = (state, context, agentLabel = 'Codex', customPrompt) =>
-  buildNarrativeWalkthroughRequest(state, context, agentLabel, customPrompt).prompt;
+const buildNarrativeWalkthroughPrompt = (
+  state,
+  context,
+  agentLabel = 'Codex',
+  customPrompt,
+  previousWalkthrough,
+) =>
+  buildNarrativeWalkthroughRequest(state, context, agentLabel, customPrompt, previousWalkthrough)
+    .prompt;
 
-const readNarrativeWalkthrough = async (state, agent, agentOptions, context, customPrompt) => {
+const readNarrativeWalkthrough = async (
+  state,
+  agent,
+  agentOptions,
+  context,
+  customPrompt,
+  previousWalkthrough,
+) => {
   try {
     const timeoutMs = getNarrativeWalkthroughTimeoutMs(state, agent.defaultTimeoutMs);
     const { fileCount, hunkCount } = getWalkthroughSize(state);
@@ -756,6 +821,7 @@ const readNarrativeWalkthrough = async (state, agent, agentOptions, context, cus
       context,
       agent.label,
       customPrompt,
+      previousWalkthrough,
     );
     agentOptions?.onProgress?.('agent-generation');
     const response = await agent.run(

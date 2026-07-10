@@ -26,6 +26,9 @@ const CLAUDE_NOT_LOGGED_IN_MESSAGE =
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
+ *   onSessionId?: (sessionId: string) => void;
+ *   persistSession?: boolean;
+ *   resumeSessionId?: string;
  *   timeoutMs?: number;
  * }} ClaudeOptions
  */
@@ -109,6 +112,12 @@ const isClaudeNotLoggedInError = (value) =>
 /** @param {unknown} value @returns {string} */
 const normalizeClaudeModel = (value) =>
   normalizeEnum(value, CLAUDE_MODEL_IDS, DEFAULT_CLAUDE_MODEL);
+
+/** @param {string} value */
+const isClaudeSessionResumeError = (value) =>
+  /\b(?:no conversation found|session .*not found|could not (?:find|load) .*session|no such session|invalid session id)\b/i.test(
+    value,
+  );
 
 /** @param {string} value */
 const isClaudeModelAvailabilityError = (value) =>
@@ -232,8 +241,8 @@ const runClaude = async (
   const fallbackModel = normalizeClaudeModel(options.fallbackModel || FALLBACK_CLAUDE_MODEL);
   const timeoutMs = options.timeoutMs ?? CLAUDE_TIMEOUT_MS;
 
-  /** @param {string} claudeModel @returns {Promise<string>} */
-  const invokeClaude = async (claudeModel) =>
+  /** @param {string} claudeModel @param {string} [resumeSessionId] @returns {Promise<string>} */
+  const invokeClaude = async (claudeModel, resumeSessionId) =>
     /** @type {Promise<string>} */ (
       new Promise((resolve, reject) => {
         let stderr = '';
@@ -257,7 +266,11 @@ const runClaude = async (
           repoRoot,
           '--permission-mode',
           'dontAsk',
-          '--no-session-persistence',
+          // Resuming keeps the prior walkthrough context so regeneration can
+          // update it; a persisted session leaves a transcript we can resume
+          // later. Otherwise stay stateless and leave nothing behind.
+          ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
+          ...(options.persistSession || resumeSessionId ? [] : ['--no-session-persistence']),
           '--tools',
           '',
         ];
@@ -322,6 +335,10 @@ const runClaude = async (
             }
           }
 
+          if (typeof envelope?.session_id === 'string' && envelope.session_id) {
+            options.onSessionId?.(envelope.session_id);
+          }
+
           const resultText = typeof envelope?.result === 'string' ? envelope.result : '';
           if (envelope?.is_error) {
             reject(
@@ -346,15 +363,30 @@ const runClaude = async (
       })
     );
 
+  // A stored session id may be stale (transcript pruned, different machine).
+  // Retry once without resuming rather than failing the whole generation.
+  /** @param {string} claudeModel @returns {Promise<string>} */
+  const invokeWithResume = async (claudeModel) => {
+    try {
+      return await invokeClaude(claudeModel, options.resumeSessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (options.resumeSessionId && isClaudeSessionResumeError(message)) {
+        return invokeClaude(claudeModel, undefined);
+      }
+      throw error;
+    }
+  };
+
   try {
-    return await invokeClaude(model);
+    return await invokeWithResume(model);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (model === fallbackModel || !isClaudeModelAvailabilityError(message)) {
       throw error;
     }
 
-    const response = await invokeClaude(fallbackModel);
+    const response = await invokeWithResume(fallbackModel);
     await options.onModelFallback?.(fallbackModel, model);
     return response;
   }

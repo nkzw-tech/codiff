@@ -211,6 +211,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     installed: true,
     path: '/usr/local/bin/codiff',
   })),
+  getWalkthroughStatus: vi.fn(async () => ({ status: 'none' as const })),
   increaseCodeFontSize: vi.fn(async () => {}),
   installAgentSkill: vi.fn(async () => ({
     installed: true,
@@ -1728,6 +1729,105 @@ test('a walkthrough file loads even without the walkthrough launch flag', async 
 
     expect(getNarrativeWalkthrough).toHaveBeenCalledTimes(1);
     expect(container.querySelector('.walkthrough-error')).toBeNull();
+  } finally {
+    if (root) {
+      await act(async () => root?.unmount());
+    }
+    container.remove();
+  }
+});
+
+test('a walkthrough launch shows the saved walkthrough instead of regenerating', async () => {
+  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const savedWalkthrough = {
+    agent: 'claude',
+    chapters: [
+      {
+        blurb: 'Review the implementation.',
+        icon: 'gear',
+        id: 'impl',
+        stops: [
+          {
+            added: 1,
+            deleted: 1,
+            hunkIds: ['src/app.ts:unstaged:h1'],
+            hunks: [
+              {
+                added: 1,
+                anchor: { display: 'src/app.ts', sectionId: 'src/app.ts:unstaged', side: 'both' },
+                deleted: 1,
+                id: 'src/app.ts:unstaged:h1',
+                path: 'src/app.ts',
+                status: 'modified',
+              },
+            ],
+            id: 'saved-path',
+            importance: 'critical',
+            prose: 'Review this saved file.',
+            summary: 'The saved path.',
+            title: 'Saved stop',
+          },
+        ],
+        title: 'Implementation',
+      },
+    ],
+    focus: 'Focus.',
+    generatedAt: '2026-06-07T00:00:00.000Z',
+    kind: 'narrative',
+    repo: { branch: 'main', root: '/repo' },
+    source,
+    support: [],
+    title: 'Saved narrative',
+    version: 4,
+  } satisfies NarrativeWalkthrough;
+
+  const getNarrativeWalkthrough = vi.fn(async () => ({
+    reason: 'Should not be called.',
+    status: 'unavailable' as const,
+  }));
+  const getWalkthroughStatus = vi.fn(async () => ({
+    staleness: {
+      commitsBehind: 0,
+      currentHead: 'abc1234',
+      diverged: false,
+      generatedHead: 'abc1234',
+      isLatest: true,
+      treeMatches: true,
+    },
+    status: 'ready' as const,
+    walkthrough: savedWalkthrough,
+  }));
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      source,
+      walkthrough: true,
+    })),
+    getNarrativeWalkthrough,
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [createChangedFile('src/app.ts')],
+      source,
+    })),
+    getWalkthroughStatus,
+  });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<App />);
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('.wt-stage-title')?.textContent).toContain('Saved stop');
+    });
+
+    expect(getWalkthroughStatus).toHaveBeenCalled();
+    expect(getNarrativeWalkthrough).not.toHaveBeenCalled();
   } finally {
     if (root) {
       await act(async () => root?.unmount());

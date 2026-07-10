@@ -576,6 +576,7 @@ export type NarrativeWalkthrough = {
 
 export type NarrativeWalkthroughResult =
   | {
+      staleness?: WalkthroughStaleness;
       status: 'ready';
       walkthrough: NarrativeWalkthrough;
     }
@@ -584,6 +585,39 @@ export type NarrativeWalkthroughResult =
       reason: string;
       status: 'unavailable';
     };
+
+/**
+ * How far a saved walkthrough has drifted from the current repository state.
+ * `commitsBehind` counts commits added since it was generated; `treeMatches`
+ * is false when the working tree (or head) fingerprint changed. `diverged` is
+ * true when the generating commit is no longer in the current history.
+ */
+export type WalkthroughStaleness = {
+  commitsBehind: number;
+  currentHead: string | null;
+  diverged: boolean;
+  generatedHead: string | null;
+  isLatest: boolean;
+  treeMatches: boolean;
+};
+
+/** Result of loading a saved walkthrough from disk without regenerating. */
+export type WalkthroughStatusResult =
+  | {
+      staleness: WalkthroughStaleness;
+      status: 'ready';
+      walkthrough: NarrativeWalkthrough;
+    }
+  | { status: 'none' };
+
+/** Options for a walkthrough generation request. */
+export type NarrativeWalkthroughRequestOptions = {
+  /**
+   * The walkthrough currently shown, passed on regeneration so the agent can
+   * update it in place for the new changes instead of authoring from scratch.
+   */
+  previousWalkthrough?: NarrativeWalkthrough;
+};
 
 /** Commit the selected files from a walkthrough's staging set. */
 export type WalkthroughCommitRequest = {

@@ -8,6 +8,7 @@ import type {
   PullRequestCodeQualityFinding,
   PullRequestExistingReviewComment,
   ReviewSource,
+  WalkthroughStaleness,
 } from '../types.ts';
 
 export type WalkthroughError = Extract<NarrativeWalkthroughResult, { status: 'unavailable' }>;
@@ -143,6 +144,7 @@ export type SourceSession = {
   viewed: Record<string, string>;
   walkthroughError: WalkthroughError | null;
   walkthroughOutdatedPaths: ReadonlySet<string>;
+  walkthroughStaleness?: WalkthroughStaleness | null;
 };
 
 export type RepositoryLoadError = {

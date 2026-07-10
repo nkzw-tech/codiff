@@ -27,7 +27,13 @@ import {
 import { fileTreeSort, statusForTree } from '../../lib/files.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { getShortRef, getSourceKey } from '../../lib/source.ts';
-import type { ChangedFile, HistoryEntry, NarrativeWalkthrough, ReviewSource } from '../../types.ts';
+import type {
+  ChangedFile,
+  HistoryEntry,
+  NarrativeWalkthrough,
+  ReviewSource,
+  WalkthroughStaleness,
+} from '../../types.ts';
 import { Gravatar } from './Gravatar.tsx';
 import { NarrativeSidebar } from './walkthrough/NarrativeSidebar.tsx';
 import type { NarrativeNavigation } from './walkthrough/useNarrativeNavigation.ts';
@@ -49,12 +55,14 @@ export function Sidebar({
   onActivatePath,
   onLoadMoreHistory,
   onModeChange,
+  onRegenerateWalkthrough,
   onSearchQueryChange,
   onSelectPath,
   onSelectSource,
   onShareWalkthrough,
   onToggleCommitView,
   pullRequestSource,
+  regenerateDisabled,
   reloadDeltaPaths,
   searchQuery,
   selectedPath,
@@ -65,6 +73,7 @@ export function Sidebar({
   walkthroughLoading,
   walkthroughOutdatedPaths,
   walkthroughProgress,
+  walkthroughStaleness,
   walkthroughUnread,
 }: {
   branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
@@ -82,12 +91,14 @@ export function Sidebar({
   onActivatePath: (path: string) => void;
   onLoadMoreHistory: () => void;
   onModeChange: (mode: SidebarMode) => void;
+  onRegenerateWalkthrough?: () => void;
   onSearchQueryChange: (query: string) => void;
   onSelectPath: (path: string) => void;
   onSelectSource: (source: ReviewSource) => void;
   onShareWalkthrough?: () => void;
   onToggleCommitView: () => void;
   pullRequestSource: PullRequestSource | null;
+  regenerateDisabled?: boolean;
   reloadDeltaPaths: ReadonlySet<string>;
   searchQuery: string;
   selectedPath: string | null;
@@ -102,6 +113,7 @@ export function Sidebar({
     responseLabelIndex: number;
     stageRevision: number;
   };
+  walkthroughStaleness?: WalkthroughStaleness | null;
   walkthroughUnread: boolean;
 }) {
   const allowSelectionScroll = useRef(false);
@@ -363,9 +375,12 @@ export function Sidebar({
           changedPaths={walkthroughOutdatedPaths}
           files={commitFiles}
           navigation={narrativeNavigation}
+          onRegenerate={onRegenerateWalkthrough}
           onShareWalkthrough={onShareWalkthrough}
+          regenerateDisabled={regenerateDisabled}
           shareWalkthroughDisabled={shareWalkthroughDisabled}
           showWhitespace={showWhitespace}
+          staleness={walkthroughStaleness}
           walkthrough={narrativeWalkthrough}
         />
       ) : mode === 'walkthrough' ? (

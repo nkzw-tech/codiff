@@ -88,6 +88,8 @@ const {
 } = require('./walkthrough-sharing.cjs');
 const { createCloudflareAccessClient } = require('./cloudflare-access.cjs');
 const { mergeWalkthroughContexts } = require('./walkthrough-context.cjs');
+const { readStoredWalkthrough, writeStoredWalkthrough } = require('./walkthrough-store.cjs');
+const { gitOrEmpty } = require('./git-state/common.cjs');
 const {
   MarkdownDocumentConflictError,
   readMarkdownDocument,
@@ -133,6 +135,11 @@ const windowLaunchOptions = new Map();
 const windowInitialRepositoryStates = new Map();
 /** @type {Map<number, number>} */
 const walkthroughProgressGenerations = new Map();
+// Reuse the agent session that authored a PR's walkthrough so regenerating it
+// resumes the same conversation instead of starting cold. Keyed by agent +
+// repository + review source. Not persisted across app restarts.
+/** @type {Map<string, string>} */
+const walkthroughSessionIds = new Map();
 /** @type {Map<number, string>} */
 const planInitialVersions = new Map();
 /** @type {Set<number>} */
@@ -384,6 +391,94 @@ const getAgentOptions = (agent) => ({
     updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } });
   },
 });
+
+/**
+ * Stable key identifying "the walkthrough for this PR" so a regeneration can
+ * reuse the agent session that authored the previous one.
+ * @param {import('./agent.cjs').Agent} agent
+ * @param {string} repositoryPath
+ * @param {ReviewSource} source
+ */
+const getWalkthroughSessionKey = (agent, repositoryPath, source) => {
+  const sourceKey =
+    source.type === 'commit'
+      ? `commit:${source.ref}`
+      : source.type === 'branch-diff'
+        ? `branch-diff:${source.ref}:${source.baseRef}:${source.headRef}`
+        : source.type === 'branch'
+          ? `branch:${source.ref}`
+          : source.type === 'range'
+            ? `range:${source.base}${source.symmetric ? '...' : '..'}${source.head}`
+            : source.type === 'pull-request'
+              ? `pull-request:${source.provider ?? ''}:${source.projectPath ?? `${source.owner ?? ''}/${source.repo ?? ''}`}#${source.number ?? source.url ?? ''}`
+              : 'working-tree';
+  return `${agent.id}:${repositoryPath}:${sourceKey}`;
+};
+
+/**
+ * Compare a saved walkthrough against the current head + working tree so the UI
+ * can report how stale it is.
+ * @param {string} repositoryPath
+ * @param {{ head?: string; signature?: string }} stored
+ * @returns {Promise<import('../core/types.ts').WalkthroughStaleness>}
+ */
+const computeWalkthroughStaleness = async (repositoryPath, stored) => {
+  const generatedHead = typeof stored.head === 'string' && stored.head ? stored.head : null;
+  const current = await readRepositoryChangeSignature(repositoryPath).catch(() => null);
+  const currentHead = current?.head?.trim() || null;
+  const treeMatches = Boolean(
+    current && stored.signature && current.signature === stored.signature,
+  );
+
+  let commitsBehind = 0;
+  let diverged = false;
+  if (generatedHead && currentHead && generatedHead !== currentHead) {
+    const count = (
+      await gitOrEmpty(repositoryPath, ['rev-list', '--count', `${generatedHead}..${currentHead}`])
+    ).trim();
+    if (/^\d+$/.test(count)) {
+      commitsBehind = Number(count);
+      // The generating commit is no longer an ancestor of HEAD (rewritten or a
+      // different branch) when nothing is reachable ahead of it.
+      diverged = commitsBehind === 0;
+    } else {
+      diverged = true;
+    }
+  }
+
+  return {
+    commitsBehind,
+    currentHead,
+    diverged,
+    generatedHead,
+    isLatest: !diverged && commitsBehind === 0 && treeMatches,
+    treeMatches,
+  };
+};
+
+/**
+ * Persist a freshly generated walkthrough plus the head + working-tree signature
+ * it was generated against, so it can be reloaded and staleness-checked later.
+ * @param {string} sessionKey
+ * @param {string} repositoryPath
+ * @param {import('../core/types.ts').NarrativeWalkthrough} walkthrough
+ * @param {string | undefined} sessionId
+ */
+const persistWalkthrough = async (sessionKey, repositoryPath, walkthrough, sessionId) => {
+  try {
+    const signature = await readRepositoryChangeSignature(repositoryPath);
+    writeStoredWalkthrough(sessionKey, {
+      generatedAt: walkthrough.generatedAt || new Date().toISOString(),
+      head: (signature.head || '').trim(),
+      sessionId,
+      signature: signature.signature,
+      version: 1,
+      walkthrough,
+    });
+  } catch {
+    // Persistence is best-effort; a failure must not break generation.
+  }
+};
 
 /** @param {CodiffTheme} theme */
 const updateTheme = (theme) => {
@@ -1496,7 +1591,7 @@ ipcMain.handle('codiff:installTerminalHelper', async (event) => {
   return getTerminalHelperStatus();
 });
 
-ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
+ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) => {
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
   walkthroughProgressGenerations.set(event.sender.id, progressGeneration);
@@ -1512,6 +1607,15 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
       source || launchOptions?.source,
     );
     const agent = resolveWindowAgent(event.sender.id);
+    const sessionKey = getWalkthroughSessionKey(agent, repositoryPath, state.source);
+    // Seed the resume id from the last saved walkthrough so session reuse
+    // survives an app restart, not just an in-memory run.
+    if (!walkthroughSessionIds.has(sessionKey)) {
+      const stored = readStoredWalkthrough(sessionKey);
+      if (stored?.sessionId) {
+        walkthroughSessionIds.set(sessionKey, stored.sessionId);
+      }
+    }
     const walkthroughFile = launchOptions?.walkthroughFile;
     if (walkthroughFile) {
       let contents;
@@ -1540,16 +1644,25 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
       }
 
       try {
+        const walkthrough = normalizeNarrativeWalkthrough(input, state.files, {
+          agent: agent.id,
+          branch: state.branch,
+          context: sessionContext,
+          generatedAt: state.generatedAt,
+          root: state.root,
+          source: state.source,
+        });
+        await persistWalkthrough(
+          sessionKey,
+          repositoryPath,
+          walkthrough,
+          walkthroughSessionIds.get(sessionKey),
+        );
+        const stored = readStoredWalkthrough(sessionKey);
         return {
+          staleness: stored ? await computeWalkthroughStaleness(repositoryPath, stored) : undefined,
           status: 'ready',
-          walkthrough: normalizeNarrativeWalkthrough(input, state.files, {
-            agent: agent.id,
-            branch: state.branch,
-            context: sessionContext,
-            generatedAt: state.generatedAt,
-            root: state.root,
-            source: state.source,
-          }),
+          walkthrough,
         };
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -1572,18 +1685,71 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source) => {
       launchOptions?.walkthroughContext,
       await agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
     );
-    return readNarrativeWalkthrough(
-      state,
-      agent,
-      { ...getAgentOptions(agent), onProgress: reportProgress },
-      walkthroughContext,
-      config.settings.walkthroughPrompt,
+    // Resume the session that authored this PR's previous walkthrough so a
+    // regeneration updates it in place, and remember whatever session id the
+    // run ends up using for the next regeneration.
+    const result = /** @type {import('../core/types.ts').NarrativeWalkthroughResult} */ (
+      await readNarrativeWalkthrough(
+        state,
+        agent,
+        {
+          ...getAgentOptions(agent),
+          onProgress: reportProgress,
+          onSessionId: (/** @type {string} */ sessionId) =>
+            walkthroughSessionIds.set(sessionKey, sessionId),
+          persistSession: true,
+          resumeSessionId: walkthroughSessionIds.get(sessionKey),
+        },
+        walkthroughContext,
+        config.settings.walkthroughPrompt,
+        options?.previousWalkthrough,
+      )
     );
+
+    if (result.status === 'ready') {
+      // Save the walkthrough with the commit + working-tree signature it was
+      // generated against so reopening Codiff shows it without regenerating.
+      await persistWalkthrough(
+        sessionKey,
+        repositoryPath,
+        result.walkthrough,
+        walkthroughSessionIds.get(sessionKey),
+      );
+      const stored = readStoredWalkthrough(sessionKey);
+      if (stored) {
+        result.staleness = await computeWalkthroughStaleness(repositoryPath, stored);
+      }
+    }
+    return result;
   } catch (error) {
     return {
       reason: error instanceof Error ? error.message : String(error),
       status: 'unavailable',
     };
+  }
+});
+
+// Load the saved walkthrough for a repo + source without regenerating, plus how
+// stale it is relative to the current head/working tree. Returns 'none' when
+// nothing is saved so the renderer can fall back to generating.
+ipcMain.handle('codiff:getWalkthroughStatus', async (event, source) => {
+  try {
+    const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+    const launchOptions = windowLaunchOptions.get(event.sender.id);
+    const agent = resolveWindowAgent(event.sender.id);
+    const reviewSource = source || launchOptions?.source || { type: 'working-tree' };
+    const sessionKey = getWalkthroughSessionKey(agent, repositoryPath, reviewSource);
+    const stored = readStoredWalkthrough(sessionKey);
+    if (!stored) {
+      return { status: 'none' };
+    }
+    return {
+      staleness: await computeWalkthroughStaleness(repositoryPath, stored),
+      status: 'ready',
+      walkthrough: stored.walkthrough,
+    };
+  } catch {
+    return { status: 'none' };
   }
 });
 
