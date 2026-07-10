@@ -1107,6 +1107,59 @@ test('review comment typing stays local until a comment action commits it', asyn
   }
 });
 
+test('failed pull request comments keep their draft and can be retried', async () => {
+  const file = createChangedFile('src/comment.ts');
+  const comment = {
+    body: 'Keep this comment.',
+    filePath: file.path,
+    id: 'comment-1',
+    lineNumber: 1,
+    remoteSubmit: {
+      error:
+        'You already have a pending GitHub review on this pull request. Submit or discard it on GitHub, then retry. Your comment draft is still here.',
+      status: 'error' as const,
+    },
+    sectionId: 'src/comment.ts:unstaged',
+    side: 'additions' as const,
+  } satisfies ReviewComment;
+  const onSubmitComment = vi.fn();
+  const onUpdateComment = vi.fn();
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      comments={[comment]}
+      files={[file]}
+      isPullRequest
+      onSubmitComment={onSubmitComment}
+      onUpdateComment={onUpdateComment}
+    />,
+  );
+
+  try {
+    const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
+    expect(textarea?.value).toBe('Keep this comment.');
+    expect(view.container.querySelector('.review-comment-error')?.textContent).toBe(
+      comment.remoteSubmit.error,
+    );
+
+    const commentButton = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === 'Comment',
+    );
+    if (!commentButton) {
+      throw new Error('Expected Comment button.');
+    }
+
+    await act(async () => {
+      commentButton.click();
+    });
+
+    expect(onUpdateComment).not.toHaveBeenCalled();
+    expect(onSubmitComment).toHaveBeenCalledWith(comment.id);
+    expect(textarea?.value).toBe(comment.body);
+  } finally {
+    await view.cleanup();
+  }
+});
+
 test('file comments can be created for GitLab merge requests but not GitHub pull requests', async () => {
   const file = createChangedFile('src/comment.ts');
   const onCreateComment = vi.fn();

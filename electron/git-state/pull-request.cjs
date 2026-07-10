@@ -903,6 +903,25 @@ const normalizePullRequestComment = (comment) => {
   return payload;
 };
 
+const PENDING_REVIEW_COMMENT_ERROR =
+  'You already have a pending GitHub review on this pull request. Submit or discard it on GitHub, then retry. Your comment draft is still here.';
+
+/** @param {unknown} error */
+const isGitHubValidationError = (error) =>
+  error instanceof Error && /(?:validation failed|http 422)/i.test(error.message);
+
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
+const hasPendingPullRequestReview = async (repoRoot, pullRequest) => {
+  const pages = JSON.parse(
+    await ghApi(repoRoot, [
+      '--paginate',
+      '--slurp',
+      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/reviews?per_page=100`,
+    ]),
+  );
+  return Array.isArray(pages) && pages.flat().some((review) => review?.state === 'PENDING');
+};
+
 /** @param {string} launchPath @param {SubmitPullRequestCommentRequest} request */
 const submitPullRequestComment = async (launchPath, request) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
@@ -925,7 +944,17 @@ const submitPullRequestComment = async (launchPath, request) => {
       '-',
     ],
     payload,
-  );
+  ).catch(async (error) => {
+    if (isGitHubValidationError(error)) {
+      const hasPendingReview = await hasPendingPullRequestReview(repoRoot, pullRequest).catch(
+        () => false,
+      );
+      if (hasPendingReview) {
+        throw new Error(PENDING_REVIEW_COMMENT_ERROR);
+      }
+    }
+    throw error;
+  });
   const comment = normalizeGitHubReviewComment(JSON.parse(rawComment));
   if (!comment) {
     throw new Error('GitHub accepted the comment but did not return line metadata.');
@@ -961,12 +990,15 @@ const submitPullRequestReview = async (launchPath, request) => {
 };
 
 module.exports = {
+  PENDING_REVIEW_COMMENT_ERROR,
   collectResolvedReviewCommentIds,
   createPatchFromPullRequestFile,
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSection,
   createPullRequestSource,
   getPullRequestHeadImageSource,
+  hasPendingPullRequestReview,
+  isGitHubValidationError,
   listPullRequestHistory,
   normalizeGitHubCommit,
   normalizeGitHubPullRequestCommit,
