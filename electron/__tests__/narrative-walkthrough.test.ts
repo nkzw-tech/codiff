@@ -423,6 +423,21 @@ test('omits the previous-walkthrough block when none is provided', () => {
   expect(prompt).not.toContain('Previous walkthrough to update:');
 });
 
+test('instructs the agent to order chapters bottom-up by architectural layer', () => {
+  const prompt = buildNarrativeWalkthroughPrompt({
+    branch: 'main',
+    files: files.slice(0, 1),
+    generatedAt: 1,
+    root: '/repo',
+    source: { type: 'working-tree' },
+  });
+
+  expect(prompt).toContain('Ordering contract:');
+  expect(prompt).toContain('Order chapters bottom-up by architectural layer');
+  expect(prompt).toContain('data layer first');
+  expect(prompt).toContain('only club together closely related entities');
+});
+
 test('omits blank custom walkthrough prompt guidance', () => {
   const prompt = buildNarrativeWalkthroughPrompt(
     {

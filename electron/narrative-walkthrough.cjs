@@ -752,10 +752,15 @@ const buildWalkthroughSizingGuidance = (state) => {
 - Use stable item ids like s1, s2, ... for main stops. Do not invent hunk ids.
 - Default to one review idea per stop. Include multiple hunkIds when the hunks implement the same idea, especially in small diffs.
 
+Ordering contract:
+- Order chapters bottom-up by architectural layer, following the change from the root of the stack toward the surface: data layer first (database schema, migrations, SQL), then domain models/entities, then repositories/data access, then services/business logic, then API (handlers, routes, controllers, resolvers), then UI (components, views, styles), and finally peripheral changes (config, build/tooling, tests, docs).
+- Skip layers this diff does not touch, but keep the remaining layers in that bottom-up order. Order stops within and across chapters the same way.
+- Within a single layer, only club together closely related entities — hunks for the same entity or feature (e.g. one model and its repository, or one endpoint and its request/response types). Do not put unrelated entities in the same chapter or stop just because they share a layer; give each distinct entity its own stop.
+
 Grouping contract:
 - Target ${targetStops} main-path stops and at most ${MAX_WALKTHROUGH_STOPS}. Prefer the low end when it still preserves distinct state transitions, submission paths, or runtime contracts.
 - Use ${targetChapterInstruction}. A chapter is a conceptual group, not a file. For one- or two-file diffs, prefer one chapter unless there are clearly separate review phases.
-- Chapter titles render in a compact top bar: keep each title to 1-2 short words and at most 16 characters, e.g. "UI", "CLI", "Tests", "Docs", "Runtime", "Cleanup".
+- Chapter titles render in a compact top bar: keep each title to 1-2 short words and at most 16 characters, and prefer naming the layer, e.g. "DB", "Model", "Service", "API", "UI", "Tests".
 - Every stop must have a concise semantic title that names the review idea in roughly 2-6 words, e.g. "Prevent duplicate payments" or "Preserve offline drafts". Never use a filename or path as a stop title.
 - A stop may contain at most ${MAX_HUNKS_PER_WALKTHROUGH_GROUP} hunkIds. Use multiple hunkIds when the prose needs those hunks read together to understand one invariant, behavior, or repeated pattern.
 - Generated-like files have "generated": true and one synthetic hunk per changed section. Never split them; main-path them only when they explain behavior, like snapshots proving output.
