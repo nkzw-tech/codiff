@@ -486,7 +486,11 @@ export default function App() {
     (file: ChangedFile, _section: DiffSection) => {
       const refresh = async () => {
         const currentState = stateRef.current;
-        if (!currentState || currentState.source.type !== 'working-tree') {
+        if (
+          !currentState ||
+          (currentState.source.type !== 'working-tree' &&
+            currentState.source.type !== 'branch-working-tree')
+        ) {
           return true;
         }
         const sourceRequest = sourceRequestRef.current;
@@ -576,7 +580,7 @@ export default function App() {
         if (!nextViewed) {
           const next = { ...current };
           delete next[file.path];
-          if (repositoryState.source.type === 'working-tree') {
+          if (usesViewedFileState(repositoryState.source)) {
             writeViewed(repositoryState.root, next);
           }
           return next;
@@ -586,7 +590,7 @@ export default function App() {
           ...current,
           [file.path]: file.fingerprint,
         };
-        if (repositoryState.source.type === 'working-tree') {
+        if (usesViewedFileState(repositoryState.source)) {
           writeViewed(repositoryState.root, next);
         }
         return next;
@@ -1879,7 +1883,7 @@ export default function App() {
 
       setViewed((current) => {
         const next = updateReviewIdentityViewed(current, reviewIdentity, isViewed);
-        if (currentState.source.type === 'working-tree') {
+        if (usesViewedFileState(currentState.source)) {
           writeViewed(currentState.root, next);
         }
         return next;
@@ -2770,7 +2774,11 @@ export default function App() {
       ) : null}
       <RepositoryChangeBanner
         onRefresh={refreshRepository}
-        visible={localChangesDetected && (pendingSource ?? state.source).type === 'working-tree'}
+        visible={
+          localChangesDetected &&
+          ((pendingSource ?? state.source).type === 'working-tree' ||
+            (pendingSource ?? state.source).type === 'branch-working-tree')
+        }
       />
       <WalkthroughOutdatedBanner
         onDismiss={() => setWalkthroughFileError(null)}
@@ -2836,7 +2844,20 @@ export default function App() {
           </div>
         </div>
         <Sidebar
-          branchSource={historySource?.type === 'branch-diff' ? historySource : null}
+          branchSource={
+            historySource?.type === 'branch-diff'
+              ? historySource
+              : historySource?.type === 'branch-working-tree' &&
+                  historySource.baseRef &&
+                  historySource.headRef
+                ? {
+                    baseRef: historySource.baseRef,
+                    headRef: historySource.headRef,
+                    ref: historySource.ref,
+                    type: 'branch-diff',
+                  }
+                : null
+          }
           commitFiles={state.files}
           commitViewOpen={showPlainCommitView}
           currentSource={pendingSource ?? state.source}

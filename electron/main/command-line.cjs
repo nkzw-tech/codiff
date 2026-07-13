@@ -367,7 +367,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
               : sourceBranchRef && sourcePullRequestNumber == null
                 ? {
                     ref: sourceBranchRef,
-                    type: 'branch',
+                    type: 'branch-working-tree',
                   }
                 : undefined,
       walkthrough:

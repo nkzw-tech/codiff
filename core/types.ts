@@ -125,6 +125,20 @@ export type ReviewSource =
       type: 'branch-diff';
     }
   | {
+      /**
+       * Resolved base commit for the branch part of the comparison. Optional
+       * because the CLI can construct this source from just a branch name
+       * (`codiff main`), before merge-base resolution happens; the resolved
+       * state's `source` always carries a concrete value.
+       */
+      baseRef?: string;
+      /** Resolved head commit for the branch part of the comparison. See {@link baseRef}. */
+      headRef?: string;
+      /** Target branch the current branch was compared against. */
+      ref: string;
+      type: 'branch-working-tree';
+    }
+  | {
       /** Base ref (left side). For symmetric ranges the diff starts at its merge-base with head. */
       base: string;
       /** Head ref (right side). */

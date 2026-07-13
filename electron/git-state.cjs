@@ -6,6 +6,9 @@ const {
   readBranchImageContent,
   readBranchSectionContent,
   readBranchState,
+  readBranchWorkingTreeImageContent,
+  readBranchWorkingTreeSectionContent,
+  readBranchWorkingTreeState,
   readCommitImageContent,
   readCommitSectionContent,
   readCommitState,
@@ -76,10 +79,14 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
           ? await readRangeState(launchPath, source.base, source.head, source.symmetric)
           : source.type === 'branch' || source.type === 'branch-diff'
             ? await readBranchState(launchPath, source)
-            : await readWorkingTreeState(launchPath, {
-                eagerContents: false,
-                showWhitespace: options.showWhitespace,
-              });
+            : source.type === 'branch-working-tree'
+              ? await readBranchWorkingTreeState(launchPath, source, {
+                  showWhitespace: options.showWhitespace,
+                })
+              : await readWorkingTreeState(launchPath, {
+                  eagerContents: false,
+                  showWhitespace: options.showWhitespace,
+                });
   const comparisonState =
     source.type === 'commit' ||
     source.type === 'range' ||
@@ -115,9 +122,11 @@ const readWalkthroughRepositoryState = async (launchPath, source, options = {}) 
 const isGitLabReviewSource = (source) =>
   source.provider === 'gitlab' || parseReviewUrl(source.url)?.provider === 'gitlab';
 
-/** @param {Extract<ReviewSource, {type: 'branch' | 'branch-diff'}>} source */
+/** @param {Extract<ReviewSource, {type: 'branch' | 'branch-diff' | 'branch-working-tree'}>} source */
 const getBranchHistoryRef = (source) =>
-  source.type === 'branch-diff' ? `${source.baseRef}..${source.headRef}` : `${source.ref}..HEAD`;
+  source.type !== 'branch' && source.baseRef && source.headRef
+    ? `${source.baseRef}..${source.headRef}`
+    : `${source.ref}..HEAD`;
 
 /** @param {string} launchPath @param {number} [limit] @param {ReviewSource} [source] @returns {Promise<RepositoryHistory>} */
 const readRepositoryHistory = (launchPath, limit, source) =>
@@ -130,7 +139,9 @@ const readRepositoryHistory = (launchPath, limit, source) =>
     : listRepositoryHistory(
         launchPath,
         limit,
-        source?.type === 'branch' || source?.type === 'branch-diff'
+        source?.type === 'branch' ||
+          source?.type === 'branch-diff' ||
+          source?.type === 'branch-working-tree'
           ? getBranchHistoryRef(source)
           : undefined,
       );
@@ -150,11 +161,13 @@ const readDiffSectionContent = async (launchPath, request) =>
       ? readBranchSectionContent(launchPath, request.source, request.path, {
           force: request.force,
         })
-      : request.kind === 'commit' || request.source?.type === 'commit'
-        ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
-            force: request.force,
-          })
-        : readWorkingTreeDiffSectionContent(launchPath, request);
+      : request.source?.type === 'branch-working-tree'
+        ? readBranchWorkingTreeSectionContent(launchPath, request)
+        : request.kind === 'commit' || request.source?.type === 'commit'
+          ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
+              force: request.force,
+            })
+          : readWorkingTreeDiffSectionContent(launchPath, request);
 
 /** @param {string} launchPath @param {DiffImageContentRequest} request @returns {Promise<DiffImageContentResult>} */
 const readDiffImageContent = (launchPath, request) =>
@@ -172,9 +185,11 @@ const readDiffImageContent = (launchPath, request) =>
         )
       : request.source?.type === 'branch' || request.source?.type === 'branch-diff'
         ? readBranchImageContent(launchPath, request.source, request.path)
-        : request.kind === 'commit' || request.source?.type === 'commit'
-          ? readCommitImageContent(launchPath, request.source?.ref || 'HEAD', request.path)
-          : readWorkingTreeDiffImageContent(launchPath, request);
+        : request.source?.type === 'branch-working-tree'
+          ? readBranchWorkingTreeImageContent(launchPath, request)
+          : request.kind === 'commit' || request.source?.type === 'commit'
+            ? readCommitImageContent(launchPath, request.source?.ref || 'HEAD', request.path)
+            : readWorkingTreeDiffImageContent(launchPath, request);
 
 module.exports = {
   PENDING_REVIEW_COMMENT_ERROR,

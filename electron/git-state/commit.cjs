@@ -1,6 +1,6 @@
 // @ts-check
 
-const { fileSort, getGravatarHash, git, normalizeStatus } = require('./common.cjs');
+const { fileSort, getFingerprint, getGravatarHash, git, normalizeStatus } = require('./common.cjs');
 const {
   readComparisonImageContent,
   readComparisonSectionContent,
@@ -11,14 +11,23 @@ const {
   applyGeneratedAttributeStates,
   readGeneratedAttributeStates,
 } = require('../generated-files.cjs');
+const {
+  readDiffImageContent: readWorkingTreeDiffImageContent,
+  readDiffSectionContent: readWorkingTreeDiffSectionContent,
+  readWorkingTreeState,
+} = require('./working-tree.cjs');
 
 /**
+ * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
+ * @typedef {import('../../core/types.ts').DiffImageContentRequest} DiffImageContentRequest
  * @typedef {import('../../core/types.ts').DiffImageContentResult} DiffImageContentResult
+ * @typedef {import('../../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../../core/types.ts').ReviewSource} ReviewSource
  * @typedef {import('./common.cjs').StatusItem} StatusItem
  * @typedef {Extract<ReviewSource, {type: 'branch'}>} BranchSource
  * @typedef {Extract<ReviewSource, {type: 'branch-diff'}>} BranchDiffSource
+ * @typedef {Extract<ReviewSource, {type: 'branch-working-tree'}>} BranchWorkingTreeSource
  * @typedef {Extract<ReviewSource, {type: 'commit'}>} CommitSource
  * @typedef {Extract<ReviewSource, {type: 'range'}>} RangeSource
  * @typedef {BranchSource | BranchDiffSource | CommitSource | RangeSource} ComparisonSource
@@ -486,6 +495,158 @@ const readBranchSectionContent = (launchPath, input, requestedPath, options = {}
 const readBranchImageContent = (launchPath, input, requestedPath) =>
   readComparisonSourceImageContent(launchPath, normalizeBranchSourceInput(input), requestedPath);
 
+/**
+ * Reduce a `branch-working-tree` input (which may or may not already carry a
+ * resolved baseRef/headRef) down to the plain branch/branch-diff shape that
+ * {@link readBranchState} already understands.
+ * @param {string | BranchSource | BranchDiffSource | BranchWorkingTreeSource} input
+ * @returns {string | BranchSource | BranchDiffSource}
+ */
+const toBranchComparisonInput = (input) => {
+  if (typeof input !== 'object' || input.type !== 'branch-working-tree') {
+    return input;
+  }
+
+  return input.baseRef && input.headRef
+    ? { baseRef: input.baseRef, headRef: input.headRef, ref: input.ref, type: 'branch-diff' }
+    : { ref: input.ref, type: 'branch' };
+};
+
+/**
+ * Merge a resolved branch-diff `ChangedFile` and a working-tree `ChangedFile`
+ * for the same path into a single entry whose sections are the concatenation
+ * of both (branch commit section(s) first, then staged/unstaged section(s)),
+ * with the fingerprint recomputed from the combined sections.
+ * @param {ChangedFile | undefined} branchFile
+ * @param {ChangedFile | undefined} workingTreeFile
+ * @returns {ChangedFile}
+ */
+const mergeChangedFile = (branchFile, workingTreeFile) => {
+  if (!branchFile) {
+    return /** @type {ChangedFile} */ (workingTreeFile);
+  }
+
+  if (!workingTreeFile) {
+    return branchFile;
+  }
+
+  const sections = [...branchFile.sections, ...workingTreeFile.sections];
+  const fingerprint = getFingerprint(
+    `${workingTreeFile.status}\n${workingTreeFile.oldPath || branchFile.oldPath || ''}\n${sections
+      .map(
+        (section) =>
+          `${section.loadState || 'ready'}\n${section.binary ? 'binary' : 'text'}\n${
+            section.patch
+          }\n${section.summary?.reason || ''}\n${section.summary?.fingerprint || ''}\n${
+            section.oldFile?.contents || ''
+          }\n${section.newFile?.contents || ''}`,
+      )
+      .join('\n')}`,
+  );
+
+  return {
+    fingerprint,
+    oldPath: workingTreeFile.oldPath || branchFile.oldPath,
+    path: workingTreeFile.path,
+    sections,
+    // The working-tree status reflects the most current state of the file
+    // (e.g. a branch-added file that was subsequently deleted locally).
+    status: workingTreeFile.status,
+  };
+};
+
+/**
+ * Merge a resolved branch-diff `RepositoryState` and a working-tree
+ * `RepositoryState` into a combined `branch-working-tree` state: file lists
+ * are unioned by path, and files present in both have their sections
+ * concatenated (branch commit section(s) followed by staged/unstaged
+ * section(s)).
+ * @param {RepositoryState} branchState
+ * @param {RepositoryState} workingTreeState
+ * @returns {RepositoryState}
+ */
+const mergeBranchAndWorkingTreeState = (branchState, workingTreeState) => {
+  const branchSource = /** @type {BranchDiffSource} */ (branchState.source);
+  const branchFilesByPath = new Map(branchState.files.map((file) => [file.path, file]));
+  const workingTreeFilesByPath = new Map(workingTreeState.files.map((file) => [file.path, file]));
+  const paths = [...new Set([...branchFilesByPath.keys(), ...workingTreeFilesByPath.keys()])];
+
+  const files = paths
+    .map((path) => mergeChangedFile(branchFilesByPath.get(path), workingTreeFilesByPath.get(path)))
+    .sort(fileSort);
+
+  return {
+    ...branchState,
+    files,
+    generatedAt: Date.now(),
+    source: {
+      baseRef: branchSource.baseRef,
+      headRef: branchSource.headRef,
+      ref: branchSource.ref,
+      type: 'branch-working-tree',
+    },
+  };
+};
+
+/**
+ * @param {string} launchPath
+ * @param {string | BranchSource | BranchDiffSource | BranchWorkingTreeSource} input
+ * @param {{showWhitespace?: boolean}} [options]
+ * @returns {Promise<RepositoryState>}
+ */
+const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
+  const [branchState, workingTreeState] = await Promise.all([
+    readBranchState(launchPath, toBranchComparisonInput(input)),
+    readWorkingTreeState(launchPath, {
+      eagerContents: false,
+      showWhitespace: options.showWhitespace,
+    }),
+  ]);
+  return mergeBranchAndWorkingTreeState(branchState, workingTreeState);
+};
+
+/**
+ * By the time a section/image content request comes in for a
+ * `branch-working-tree` source, that source is always the fully resolved
+ * copy round-tripped from `RepositoryState.source` (baseRef/headRef are only
+ * absent momentarily, at CLI-argument construction time, before the initial
+ * state has been read).
+ * @param {BranchWorkingTreeSource} source
+ * @returns {BranchDiffSource}
+ */
+const toResolvedBranchDiffSource = (source) => {
+  if (!source.baseRef || !source.headRef) {
+    throw new Error('Cannot load branch-working-tree content before the branch diff is resolved.');
+  }
+
+  return { baseRef: source.baseRef, headRef: source.headRef, ref: source.ref, type: 'branch-diff' };
+};
+
+/**
+ * @param {string} launchPath
+ * @param {DiffSectionContentRequest} request
+ */
+const readBranchWorkingTreeSectionContent = (launchPath, request) => {
+  const source = /** @type {BranchWorkingTreeSource} */ (request.source);
+  return request.kind === 'staged' || request.kind === 'unstaged'
+    ? readWorkingTreeDiffSectionContent(launchPath, request)
+    : readBranchSectionContent(launchPath, toResolvedBranchDiffSource(source), request.path, {
+        force: request.force,
+      });
+};
+
+/**
+ * @param {string} launchPath
+ * @param {DiffImageContentRequest} request
+ * @returns {Promise<DiffImageContentResult>}
+ */
+const readBranchWorkingTreeImageContent = (launchPath, request) => {
+  const source = /** @type {BranchWorkingTreeSource} */ (request.source);
+  return request.kind === 'staged' || request.kind === 'unstaged'
+    ? readWorkingTreeDiffImageContent(launchPath, request)
+    : readBranchImageContent(launchPath, toResolvedBranchDiffSource(source), request.path);
+};
+
 /** @param {string} launchPath @param {number} [limit] @param {string} [ref] */
 const listRepositoryHistory = async (launchPath, limit = 200, ref = 'HEAD') => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
@@ -542,6 +703,9 @@ module.exports = {
   readBranchImageContent,
   readBranchSectionContent,
   readBranchState,
+  readBranchWorkingTreeImageContent,
+  readBranchWorkingTreeSectionContent,
+  readBranchWorkingTreeState,
   readCommitImageContent,
   readCommitSectionContent,
   readCommitState,

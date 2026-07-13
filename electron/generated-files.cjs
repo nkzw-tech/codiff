@@ -25,7 +25,10 @@ const getGeneratedAttributeSource = (source) =>
         ? source.headRef
         : source.type === 'pull-request'
           ? source.headSha
-          : undefined;
+          : // `branch-working-tree` includes live uncommitted files, so the generated
+            // attribute state must be computed live (like `working-tree`) rather than
+            // pinned to a fixed ref.
+            undefined;
 
 /** @param {Buffer} output */
 const parseGeneratedAttributeStates = (output) => {

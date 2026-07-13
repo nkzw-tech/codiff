@@ -625,6 +625,28 @@ function HistorySidebar({
               author: null,
               committedAt: null,
               gravatarUrl: undefined,
+              key: getSourceKey({
+                baseRef: branchSource.baseRef,
+                headRef: branchSource.headRef,
+                ref: branchSource.ref,
+                type: 'branch-working-tree',
+              }),
+              kind: 'entry' as const,
+              ref: 'branch+',
+              source: {
+                baseRef: branchSource.baseRef,
+                headRef: branchSource.headRef,
+                ref: branchSource.ref,
+                type: 'branch-working-tree',
+              } satisfies ReviewSource,
+              subject: `Branch + uncommitted (vs ${branchSource.ref})`,
+            }
+          : null,
+        !normalizedQuery
+          ? {
+              author: null,
+              committedAt: null,
+              gravatarUrl: undefined,
               key: 'working-tree',
               kind: 'entry' as const,
               ref: '',
@@ -707,7 +729,9 @@ function HistorySidebar({
             <span className="history-entry-ref">
               {row.source.type === 'commit'
                 ? getShortRef(row.source.ref)
-                : row.source.type === 'pull-request' || row.source.type === 'branch-diff'
+                : row.source.type === 'pull-request' ||
+                    row.source.type === 'branch-diff' ||
+                    row.source.type === 'branch-working-tree'
                   ? row.ref
                   : 'local'}
             </span>

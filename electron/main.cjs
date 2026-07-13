@@ -1006,10 +1006,16 @@ const createWindow = (
   if (initialRepositoryState) {
     windowInitialRepositoryStates.set(webContentsId, initialRepositoryState);
   }
-  if (!launchOptions.planFile && !launchOptions.source) {
+  if (
+    !launchOptions.planFile &&
+    (!launchOptions.source || launchOptions.source.type === 'branch-working-tree')
+  ) {
     void initialRepositoryState
       .then((state) => {
-        if (state.source.type === 'working-tree' && !window.isDestroyed()) {
+        if (
+          (state.source.type === 'working-tree' || state.source.type === 'branch-working-tree') &&
+          !window.isDestroyed()
+        ) {
           startRepositoryWatcher(window, repositoryPath);
         }
       })

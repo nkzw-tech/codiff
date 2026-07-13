@@ -146,6 +146,24 @@ const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
     return base && head ? `branch-diff:${source.ref}:${base}:${head}` : null;
   }
 
+  if (source.type === 'branch-working-tree') {
+    if (
+      typeof source.baseRef === 'string' &&
+      typeof source.headRef === 'string' &&
+      source.baseRef &&
+      source.headRef
+    ) {
+      const base = resolveCommitRef(repositoryRoot, source.baseRef);
+      const head = resolveCommitRef(repositoryRoot, source.headRef);
+      return base && head ? `branch-working-tree:${source.ref}:${base}:${head}` : null;
+    }
+
+    const head = resolveCommitRef(repositoryRoot, 'HEAD');
+    const target = resolveCommitRef(repositoryRoot, source.ref);
+    const nextBase = target && head ? resolveMergeBase(repositoryRoot, target, head) : null;
+    return nextBase && head ? `branch-working-tree:${source.ref}:${nextBase}:${head}` : null;
+  }
+
   if (source.type === 'pull-request') {
     return getPullRequestSourceKey(source);
   }

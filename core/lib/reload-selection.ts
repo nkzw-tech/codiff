@@ -58,7 +58,7 @@ const isReviewSource = (value: unknown): value is ReviewSource => {
     return typeof value.ref === 'string';
   }
 
-  if (value.type === 'branch-diff') {
+  if (value.type === 'branch-diff' || value.type === 'branch-working-tree') {
     return (
       typeof value.ref === 'string' &&
       typeof value.baseRef === 'string' &&
