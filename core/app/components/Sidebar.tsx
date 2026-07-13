@@ -625,6 +625,18 @@ function HistorySidebar({
               author: null,
               committedAt: null,
               gravatarUrl: undefined,
+              key: 'working-tree',
+              kind: 'entry' as const,
+              ref: '',
+              source: { type: 'working-tree' } satisfies ReviewSource,
+              subject: 'Uncommitted changes',
+            }
+          : null,
+        !normalizedQuery
+          ? {
+              author: null,
+              committedAt: null,
+              gravatarUrl: undefined,
               key: getSourceKey({
                 baseRef: branchSource.baseRef,
                 headRef: branchSource.headRef,
@@ -640,18 +652,6 @@ function HistorySidebar({
                 type: 'branch-working-tree',
               } satisfies ReviewSource,
               subject: `Branch + uncommitted (vs ${branchSource.ref})`,
-            }
-          : null,
-        !normalizedQuery
-          ? {
-              author: null,
-              committedAt: null,
-              gravatarUrl: undefined,
-              key: 'working-tree',
-              kind: 'entry' as const,
-              ref: '',
-              source: { type: 'working-tree' } satisfies ReviewSource,
-              subject: 'Uncommitted changes',
             }
           : null,
         !normalizedQuery

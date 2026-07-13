@@ -1008,7 +1008,9 @@ const createWindow = (
   }
   if (
     !launchOptions.planFile &&
-    (!launchOptions.source || launchOptions.source.type === 'branch-working-tree')
+    (!launchOptions.source ||
+      launchOptions.source.type === 'branch' ||
+      launchOptions.source.type === 'branch-working-tree')
   ) {
     void initialRepositoryState
       .then((state) => {

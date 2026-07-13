@@ -214,6 +214,18 @@ const updateWalkthroughOutdatedPathsForRefresh = (
   return next;
 };
 
+const isLaunchHistoryBranchSource = (
+  source: ReviewSource | undefined,
+): source is Extract<ReviewSource, { type: 'branch' }> => source?.type === 'branch';
+
+const getLaunchReviewSource = (launchOptions: CodiffLaunchOptions): ReviewSource | undefined =>
+  isLaunchHistoryBranchSource(launchOptions.source) ? undefined : launchOptions.source;
+
+const getLaunchHistoryBranchSource = (
+  launchOptions: CodiffLaunchOptions,
+): Extract<ReviewSource, { type: 'branch' }> | undefined =>
+  isLaunchHistoryBranchSource(launchOptions.source) ? launchOptions.source : undefined;
+
 const getReloadSourceForLaunch = (
   reloadSelection: ReturnType<typeof consumeReloadSelection>,
   launchOptions: CodiffLaunchOptions,
@@ -222,11 +234,12 @@ const getReloadSourceForLaunch = (
     return undefined;
   }
 
-  if (!launchOptions.source) {
+  const launchReviewSource = getLaunchReviewSource(launchOptions);
+  if (!launchReviewSource) {
     return reloadSelection.source;
   }
 
-  return getSourceKey(reloadSelection.source) === getSourceKey(launchOptions.source)
+  return getSourceKey(reloadSelection.source) === getSourceKey(launchReviewSource)
     ? reloadSelection.source
     : undefined;
 };
@@ -688,12 +701,21 @@ export default function App() {
         ...nextState,
         files: sortFiles(nextState.files),
       };
-      const nextHistorySource =
+      let nextHistorySource: ReviewSource | null =
         getReloadHistorySource(reloadSelection, orderedState) ??
-        getHistorySource(orderedState.source);
+        getHistorySource(orderedState.source) ??
+        null;
+      const launchHistoryBranch = getLaunchHistoryBranchSource(nextLaunchOptions);
+      if (!nextHistorySource && launchHistoryBranch) {
+        const branchState = await window.codiff.getRepositoryState(launchHistoryBranch);
+        if (canceled) {
+          return;
+        }
+        nextHistorySource = branchState.source.type === 'branch-diff' ? branchState.source : null;
+      }
       const history = await window.codiff.getRepositoryHistory(
         HISTORY_PAGE_SIZE,
-        nextHistorySource,
+        nextHistorySource ?? undefined,
       );
 
       if (canceled) {
