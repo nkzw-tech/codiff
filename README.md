@@ -255,3 +255,7 @@ vp check
 vp test
 vp build
 ```
+
+## Contributing
+
+Found an issue, or want to improve something? Open a PR.
