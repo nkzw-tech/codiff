@@ -2179,9 +2179,15 @@ export default function App() {
         return;
       }
 
-      const emptyDraft = reviewCommentsRef.current.find(
-        (candidate) => !candidate.isReadOnly && candidate.body.length === 0,
-      );
+      const activeDraft = activeReviewCommentDraftRef.current;
+      const emptyDraft = reviewCommentsRef.current.find((candidate) => {
+        if (candidate.isReadOnly || candidate.body.length > 0) {
+          return false;
+        }
+        const hasUnflushedContent =
+          activeDraft?.id === candidate.id && activeDraft.body.trim().length > 0;
+        return !hasUnflushedContent;
+      });
       if (emptyDraft) {
         const id = crypto.randomUUID();
         setFocusCommentId(id);
