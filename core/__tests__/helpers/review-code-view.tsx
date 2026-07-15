@@ -11,6 +11,7 @@ const codeViewMockState = vi.hoisted(() => ({
   lastItems: [] as ReadonlyArray<{ id: string; type: string; version?: unknown }>,
   lastOptions: null as Record<string, unknown> | null,
   postRenderNodes: [] as Array<HTMLElement>,
+  renderCount: 0,
   scrollTo: vi.fn(),
 }));
 export const codeViewMock = codeViewMockState;
@@ -19,6 +20,7 @@ export const resetCodeViewMock = () => {
   codeViewMock.lastItems = [];
   codeViewMock.lastOptions = null;
   codeViewMock.postRenderNodes = [];
+  codeViewMock.renderCount = 0;
   codeViewMock.scrollTo.mockClear();
 };
 
@@ -54,6 +56,7 @@ vi.mock('@pierre/diffs/react', async () => {
       const scrollTopRef = React.useRef(0);
 
       React.useLayoutEffect(() => {
+        codeViewMock.renderCount += 1;
         itemsRef.current = props.items;
         codeViewMock.lastItems = props.items;
         codeViewMock.lastOptions = props.options ?? null;

@@ -1276,7 +1276,6 @@ function ReviewCommentEditor({
   onCommentDraftChange,
   onCommentFocus,
   onDeleteComment,
-  onHeightChange,
   onSaveCommentEdit,
   onSubmitComment,
   onUpdateComment,
@@ -1295,7 +1294,6 @@ function ReviewCommentEditor({
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
   onDeleteComment: (commentId: string) => void;
-  onHeightChange: () => void;
   onSaveCommentEdit: (commentId: string, body: string) => Promise<void> | void;
   onSubmitComment: (commentId: string) => void;
   onUpdateComment: (commentId: string, body: string) => void;
@@ -1585,21 +1583,6 @@ function ReviewCommentEditor({
       onDeleteComment,
     ],
   );
-  const previousHeightRef = useRef<number | null>(null);
-  const handleHeightChange = useCallback(
-    (height: number) => {
-      if (previousHeightRef.current == null) {
-        previousHeightRef.current = height;
-        return;
-      }
-      if (previousHeightRef.current !== height) {
-        previousHeightRef.current = height;
-        onHeightChange();
-      }
-    },
-    [onHeightChange],
-  );
-
   return (
     <Fragment>
       <div className="review-comment">
@@ -1723,7 +1706,6 @@ function ReviewCommentEditor({
                     className="review-comment-markdown-editor"
                     contentClassName="review-comment-input read-only"
                     fallback={<div className="review-comment-input read-only" />}
-                    onHeightChange={handleHeightChange}
                     value={displayedBody}
                     variant="embedded"
                   />
@@ -1740,7 +1722,6 @@ function ReviewCommentEditor({
                       className="review-comment-markdown-editor review-comment-edit-preview"
                       contentClassName="review-comment-input read-only"
                       fallback={<div className="review-comment-input read-only" />}
-                      onHeightChange={handleHeightChange}
                       value={displayedBody}
                       variant="embedded"
                     />
@@ -1755,7 +1736,6 @@ function ReviewCommentEditor({
                       contentClassName="review-comment-input"
                       density="compact"
                       onChange={handleEditDraftChange}
-                      onHeightChange={handleHeightChange}
                       onKeyDown={handleEditKeyDown}
                       readOnly={editSubmitting}
                       ref={setEditEditorRef}
@@ -1774,7 +1754,6 @@ function ReviewCommentEditor({
               className="review-comment-markdown-editor"
               contentClassName="review-comment-input read-only"
               fallback={<div className="review-comment-input read-only" />}
-              onHeightChange={handleHeightChange}
               value={displayedBody}
               variant="embedded"
             />
@@ -1789,7 +1768,6 @@ function ReviewCommentEditor({
                 onBlur={handleBlur}
                 onChange={handleChange}
                 onFocus={handleFocus}
-                onHeightChange={handleHeightChange}
                 onKeyDown={handleKeyDown}
                 placeholder="Write a review comment…"
                 ref={comment.id === focusCommentId ? focusEditorRef : undefined}
@@ -1823,7 +1801,6 @@ function ReviewCommentEditor({
                   ariaLabel={`${agentLabel} reply`}
                   className="review-comment-codex-reply-markdown"
                   density="compact"
-                  onHeightChange={handleHeightChange}
                   value={comment.codexReply.body ?? comment.codexReply.error ?? ''}
                   variant="embedded"
                 />
@@ -1878,7 +1855,6 @@ function ReviewCommentThreadGroup({
   onCommentDraftChange,
   onCommentFocus,
   onDeleteComment,
-  onHeightChange,
   onReplyToThread,
   onResolveThread = noopResolveThread,
   onSaveCommentEdit,
@@ -1898,7 +1874,6 @@ function ReviewCommentThreadGroup({
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
   onDeleteComment: (commentId: string) => void;
-  onHeightChange: () => void;
   onReplyToThread: (threadId: string, comment: ReviewComment) => void;
   onResolveThread?: (threadId: string, resolved: boolean) => Promise<void> | void;
   onSaveCommentEdit: (commentId: string, body: string) => Promise<void> | void;
@@ -1975,7 +1950,6 @@ function ReviewCommentThreadGroup({
             onCommentDraftChange={onCommentDraftChange}
             onCommentFocus={onCommentFocus}
             onDeleteComment={onDeleteComment}
-            onHeightChange={onHeightChange}
             onSaveCommentEdit={onSaveCommentEdit}
             onSubmitComment={onSubmitComment}
             onUpdateComment={onUpdateComment}
@@ -2054,6 +2028,7 @@ function ReviewAnnotation({
   onUpdateComment: (commentId: string, body: string) => void;
 }) {
   const focusEditorRef = useRef<MarkdownEditorHandle>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
   const setFocusEditorRef = useCallback((node: MarkdownEditorHandle | null) => {
     focusEditorRef.current = node;
   }, []);
@@ -2069,13 +2044,32 @@ function ReviewAnnotation({
     }
   }, [focusCommentId, focusCommentRequest, hasFocusedComment]);
 
+  // Observe the whole thread so independent markdown blocks cannot invalidate each other.
+  useLayoutEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) {
+      return;
+    }
+
+    let height = thread.getBoundingClientRect().height;
+    const observer = new ResizeObserver(() => {
+      const nextHeight = thread.getBoundingClientRect().height;
+      if (height !== nextHeight) {
+        height = nextHeight;
+        onHeightChange();
+      }
+    });
+    observer.observe(thread);
+    return () => observer.disconnect();
+  }, [annotationComments.length, onHeightChange]);
+
   if (annotationComments.length === 0) {
     return null;
   }
   const commentGroups = groupReviewCommentsByThread(annotationComments);
 
   return (
-    <div className="review-comment-thread">
+    <div className="review-comment-thread" ref={threadRef}>
       {commentGroups.map((group) => (
         <ReviewCommentThreadGroup
           agentId={agentId}
@@ -2092,7 +2086,6 @@ function ReviewAnnotation({
           onCommentDraftChange={onCommentDraftChange}
           onCommentFocus={onCommentFocus}
           onDeleteComment={onDeleteComment}
-          onHeightChange={onHeightChange}
           onReplyToThread={onReplyToThread}
           onResolveThread={onResolveThread}
           onSaveCommentEdit={onSaveCommentEdit}

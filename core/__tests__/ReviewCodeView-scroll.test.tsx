@@ -22,6 +22,9 @@ import {
 
 const markdownEditorMock = vi.hoisted(() => ({
   flush: vi.fn<() => Promise<boolean>>(async () => true),
+  heightByAriaLabel: new Map<string, number>(),
+  heightReportLimit: Number.POSITIVE_INFINITY,
+  heightReports: 0,
 }));
 
 vi.mock('../app/components/MarkdownDocumentEditor.tsx', async () => {
@@ -69,8 +72,14 @@ vi.mock('@nkzw/mdx-editor', async () => {
         focus: () => inputRef.current?.focus(),
       }));
       React.useEffect(() => {
-        onHeightChange?.(100);
-      }, [onHeightChange]);
+        if (
+          onHeightChange &&
+          markdownEditorMock.heightReports < markdownEditorMock.heightReportLimit
+        ) {
+          markdownEditorMock.heightReports += 1;
+          onHeightChange(markdownEditorMock.heightByAriaLabel.get(props.ariaLabel ?? '') ?? 100);
+        }
+      }, [onHeightChange, props.ariaLabel]);
       return (
         <textarea
           aria-label={props.ariaLabel}
@@ -96,6 +105,9 @@ beforeEach(() => {
   resetCodeViewMock();
   markdownEditorMock.flush.mockClear();
   markdownEditorMock.flush.mockResolvedValue(true);
+  markdownEditorMock.heightByAriaLabel.clear();
+  markdownEditorMock.heightReportLimit = Number.POSITIVE_INFINITY;
+  markdownEditorMock.heightReports = 0;
 });
 
 const getCodeViewItemVersion = (id: string) =>
@@ -1285,6 +1297,46 @@ test('review comment typing stays local until a comment action commits it', asyn
       await act(async () => root?.unmount());
     }
     container.remove();
+  }
+});
+
+test('a Codex reply does not repeatedly invalidate the diff item layout', async () => {
+  const file = createChangedFile('src/comment.ts');
+  const comment = {
+    body: 'Please explain this change.',
+    filePath: file.path,
+    id: 'comment-1',
+    lineNumber: 1,
+    sectionId: 'src/comment.ts:unstaged',
+    side: 'additions',
+  } satisfies ReviewComment;
+  markdownEditorMock.heightByAriaLabel.set('Comment on src/comment.ts New line 1', 100);
+  markdownEditorMock.heightByAriaLabel.set('Codex reply', 320);
+  markdownEditorMock.heightReportLimit = 6;
+  const view = await renderReact(<ReviewCodeViewHarness comments={[comment]} files={[file]} />);
+
+  try {
+    const renderCountBeforeReply = codeViewMock.renderCount;
+
+    await view.rerender(
+      <ReviewCodeViewHarness
+        comments={[
+          {
+            ...comment,
+            codexReply: {
+              body: 'This reply is tall enough to use a different markdown measurement.',
+              status: 'ready',
+            },
+          },
+        ]}
+        files={[file]}
+      />,
+    );
+
+    expect(view.container.querySelector('[aria-label="Codex reply"]')).not.toBeNull();
+    expect(codeViewMock.renderCount).toBe(renderCountBeforeReply + 1);
+  } finally {
+    await view.cleanup();
   }
 });
 
