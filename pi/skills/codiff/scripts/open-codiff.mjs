@@ -7,6 +7,9 @@
 // Usage:
 //   node scripts/open-codiff.mjs --file <path> [target]
 //   node scripts/open-codiff.mjs --plan <path> [repository]
+//   node scripts/open-codiff.mjs --diff [target] [repository]
+//
+// `--diff` opens Codiff's plain diff viewer with no narrative walkthrough.
 //
 // `--file <path>` is forwarded to Codiff as `--walkthrough-file`. Any non-flag target
 // (commit, HEAD, PR number, or repository path) is forwarded verbatim; when no repository
@@ -222,6 +225,7 @@ const forwardedArgs = [];
 let openSharedWalkthrough = false;
 let planFile = '';
 let shareWalkthrough = false;
+let simpleDiff = false;
 let walkthroughFile = '';
 for (let index = 0; index < rawArgs.length; index += 1) {
   const arg = rawArgs[index];
@@ -251,10 +255,41 @@ for (let index = 0; index < rawArgs.length; index += 1) {
     openSharedWalkthrough = true;
     continue;
   }
+  if (arg === '--diff') {
+    simpleDiff = true;
+    continue;
+  }
   forwardedArgs.push(arg);
 }
 
 const sessionCwd = getFallbackSessionCwd();
+
+// `--diff`: open Codiff's plain diff viewer. No walkthrough JSON is authored; any
+// forwarded target (commit, HEAD, branch, PR/MR, range, or path) is passed verbatim.
+if (simpleDiff) {
+  const hasRepositoryTarget = forwardedArgs.some(
+    (arg) => !arg.startsWith('-') && existsSync(resolve(sessionCwd, arg)),
+  );
+  const resolvedSessionId = threadId || findPiSessionIdForCwd(sessionCwd) || '';
+  const codiffCommand = getCodiffCommand();
+  const result = spawnSync(
+    codiffCommand.command,
+    [
+      ...codiffCommand.args,
+      '--agent',
+      'pi',
+      ...(resolvedSessionId ? ['--pi-session', resolvedSessionId] : []),
+      ...forwardedArgs,
+      ...(hasRepositoryTarget ? [] : [sessionCwd]),
+    ],
+    { cwd: sessionCwd, encoding: 'utf8', stdio: 'inherit' },
+  );
+  if (result.error) {
+    process.stderr.write(`${result.error.message}\n`);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 0);
+}
 
 if (planFile && shareWalkthrough) {
   const planFilePath = resolve(sessionCwd, planFile);

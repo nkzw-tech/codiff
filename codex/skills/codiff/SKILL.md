@@ -1,6 +1,6 @@
 ---
 name: codiff
-description: Open Codiff for a narrative code walkthrough, a blocking plan handoff, or a shared walkthrough URL. Use when the user writes "$codiff", "/codiff", "$codiff plan", "$codiff share", "show me codiff", "open Codiff", or asks to review a change or edit a plan in Codiff.
+description: Open Codiff for a narrative code walkthrough, a plain diff view, a blocking plan handoff, or a shared walkthrough URL. Use when the user writes "$codiff", "/codiff", "$codiff diff", "$codiff plan", "$codiff share", "show me codiff", "open Codiff", or asks to review a change or edit a plan in Codiff.
 metadata:
   short-description: Review code or hand off a plan in Codiff
 ---
@@ -23,6 +23,8 @@ change. Codiff owns the format and authoring guidance, so this skill only handle
 - Use **plan mode** for `$codiff plan` or when the user explicitly asks to edit or approve a
   plan in Codiff before execution.
 - Use **desktop mode** for plain `$codiff`, `/codiff`, "open Codiff", or "show me Codiff".
+- Use **simple diff mode** for `$codiff diff`, or when the user asks for the plain diff, the raw
+  diff, "just the diff", or a diff view without a narrative walkthrough.
 - In share mode, only pass `--open` when the user explicitly asks to open the resulting share in
   a browser. Otherwise return the URL without opening it.
 
@@ -73,6 +75,27 @@ approval document.
 
 3. Add `--open` only when the user explicitly asks to open the shared plan in a browser.
 4. Return only the `/p/…` URL printed by the command.
+
+## Simple Diff Mode
+
+Open Codiff's plain diff viewer with no narrative walkthrough. There is nothing to author — just
+launch it:
+
+```bash
+node scripts/open-codiff.mjs --diff
+```
+
+By default this reviews the staged and unstaged changes in the session's repository. Forward an
+explicit target after the flag when the user names one — a commit, `HEAD`, a branch, a PR/MR, a
+range, or a repository path:
+
+```bash
+node scripts/open-codiff.mjs --diff HEAD
+node scripts/open-codiff.mjs --diff main /path/to/repository
+node scripts/open-codiff.mjs --diff '#75'
+```
+
+This mode does not author or share JSON. Do not summarize the diff back to the user after opening it.
 
 ## Walkthrough Workflow
 
