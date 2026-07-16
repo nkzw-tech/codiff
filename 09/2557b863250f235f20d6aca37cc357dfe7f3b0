@@ -1,0 +1,20 @@
+web/src/App.tsx
+  s_f4ca83444c8a7c::t_66331d07ff5091 1-2,163-164,166
+  s_f4ca83444c8a7c::t_5e7311352ca9cb 177-186,202-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "092557b863250f235f20d6aca37cc357dfe7f3b0",
+  "prompts": {},
+  "sessions": {
+    "s_f4ca83444c8a7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f69ff-dd9f-7721-9487-e76c7205bc7c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
