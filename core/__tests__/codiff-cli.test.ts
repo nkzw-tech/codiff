@@ -73,6 +73,7 @@ test('parseArguments treats a hash positional as a commit ref', () => {
   expect(parseArguments(['-w', commitRef])).toEqual({
     commitRef,
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: null,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
@@ -85,6 +86,7 @@ test('parseArguments treats HEAD positional revisions as commit refs', () => {
   expect(parseArguments(['HEAD'])).toEqual({
     commitRef: 'HEAD',
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: null,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
@@ -95,6 +97,7 @@ test('parseArguments treats HEAD positional revisions as commit refs', () => {
   expect(parseArguments(['HEAD^1'])).toEqual({
     commitRef: 'HEAD^1',
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: null,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
@@ -109,6 +112,7 @@ test('parseArguments treats plain branch refs as branch refs', async () => {
       branchRef: 'feature',
       commitRef: null,
       help: false,
+      pullRequestBranch: null,
       pullRequestNumber: null,
       pullRequestUrl: null,
       requestedPath: refRepositoryPath,
@@ -174,6 +178,7 @@ test('parseArguments keeps existing hash-like paths as repository paths', async 
     expect(parseArguments([repositoryPath])).toEqual({
       commitRef: null,
       help: false,
+      pullRequestBranch: null,
       pullRequestNumber: null,
       pullRequestUrl: null,
       requestedPath: repositoryPath,
@@ -222,6 +227,7 @@ test('parseArguments treats GitHub pull request URLs as review sources', () => {
   expect(parseArguments([pullRequestUrl])).toEqual({
     commitRef: null,
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: null,
     pullRequestUrl,
     requestedPath: resolve(process.cwd()),
@@ -234,6 +240,7 @@ test('parseArguments treats PR number shorthands as review sources', () => {
   expect(parseArguments(['#75'])).toEqual({
     commitRef: null,
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: 75,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
@@ -246,12 +253,21 @@ test('parseArguments treats PR marker arguments as review sources', () => {
   expect(parseArguments(['pr', '75'])).toEqual({
     commitRef: null,
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: 75,
     pullRequestProvider: 'github',
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
     version: false,
     walkthrough: false,
+  });
+});
+
+test('parseArguments treats PR marker branch values as review sources', () => {
+  expect(parseArguments(['pr', 'my-feature-branch'])).toMatchObject({
+    pullRequestBranch: 'my-feature-branch',
+    pullRequestNumber: null,
+    pullRequestProvider: 'github',
   });
 });
 
@@ -268,6 +284,7 @@ test('parseArguments recognizes Codex walkthrough seed options', () => {
     codexSessionId: '019e5e57-e7d6-7392-9ad1-ad959319d2fb',
     commitRef: null,
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: null,
     pullRequestUrl: null,
     requestedPath: resolve(process.cwd()),
@@ -347,6 +364,7 @@ test('parseArguments treats hash-prefixed PR marker values as review sources', (
   expect(parseArguments(['pr', '#75'])).toEqual({
     commitRef: null,
     help: false,
+    pullRequestBranch: null,
     pullRequestNumber: 75,
     pullRequestProvider: 'github',
     pullRequestUrl: null,
@@ -358,6 +376,7 @@ test('parseArguments treats hash-prefixed PR marker values as review sources', (
 
 test('parseArguments treats GitLab MR marker values as review sources', () => {
   expect(parseArguments(['mr', '23'])).toMatchObject({
+    pullRequestBranch: null,
     pullRequestNumber: 23,
     pullRequestProvider: 'gitlab',
   });

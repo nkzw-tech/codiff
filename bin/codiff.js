@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -131,7 +131,7 @@ const run = async () => {
     opencodeSessionId,
     piSessionId,
     planFilePath,
-    pullRequestNumber,
+    pullRequestBranch,
     pullRequestProvider,
     range,
     requestedPath,
@@ -140,13 +140,39 @@ const run = async () => {
     walkthroughContextPath,
     walkthroughFilePath,
   } = parsedArguments;
-  let { pullRequestUrl } = parsedArguments;
+  let { pullRequestNumber, pullRequestUrl } = parsedArguments;
 
   if (planFilePath && (!existsSync(planFilePath) || !/\.md$/i.test(planFilePath))) {
     process.stderr.write(`codiff: plan file not found or not Markdown: ${planFilePath}\n`);
     process.exitCode = 1;
     return;
   }
+  if (pullRequestBranch && !pullRequestUrl && pullRequestNumber == null) {
+    if (pullRequestProvider === 'gitlab') {
+      process.stderr.write('codiff: branch lookup is GitHub-only for now.\n');
+      process.exit(1);
+    }
+    // Branch lookup currently supports GitHub only.
+    try {
+      const output = execFileSync(
+        'gh',
+        ['pr', 'view', pullRequestBranch, '--json', 'number', '-q', '.number'],
+        { cwd: requestedPath, encoding: 'utf8' },
+      ).trim();
+      if (!/^[1-9]\d*$/.test(output)) {
+        throw new Error('No open pull request found.');
+      }
+      pullRequestNumber = Number(output);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message === 'No open pull request found.'
+          ? error.message
+          : `Could not find an open pull request for branch "${pullRequestBranch}".`;
+      process.stderr.write(`codiff: ${message}\n`);
+      process.exit(1);
+    }
+  }
+
   if (!pullRequestUrl && pullRequestNumber != null) {
     try {
       pullRequestUrl = resolvePullRequestUrl(

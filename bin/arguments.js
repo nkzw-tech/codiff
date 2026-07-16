@@ -94,6 +94,7 @@ const usageExamples = [
   { command: 'codiff a1b2c3d', description: 'Review a specific commit.' },
   { command: "codiff '#75'", description: 'Review pull request #75.' },
   { command: 'codiff pr 75', description: 'Review pull request #75 (alternate syntax).' },
+  { command: 'codiff pr my-feature-branch', description: 'Review the open PR for a branch.' },
   { command: 'codiff mr 75', description: 'Review GitLab merge request !75.' },
   { command: 'codiff --plan plan.md', description: 'Edit a plan and wait for handoff.' },
   { command: 'codiff --plan plan.md --share', description: 'Share a Markdown plan.' },
@@ -275,6 +276,7 @@ export const parseArguments = (args) => {
     values.agent === 'pi'
       ? values.agent
       : null;
+  let pullRequestBranch = null;
   let pullRequestNumber = null;
   let pullRequestProvider = null;
   let pullRequestUrl = null;
@@ -305,11 +307,16 @@ export const parseArguments = (args) => {
       }
 
       const markerProvider = getReviewProviderMarker(arg);
-      const nextNumber = markerProvider
-        ? parsePullRequestNumberValue(positionals[index + 1] ?? '')
-        : null;
+      const nextValue = markerProvider ? positionals[index + 1] : null;
+      const nextNumber = nextValue ? parsePullRequestNumberValue(nextValue) : null;
       if (nextNumber != null) {
         pullRequestNumber = nextNumber;
+        pullRequestProvider = markerProvider;
+        index += 1;
+        continue;
+      }
+      if (markerProvider && nextValue) {
+        pullRequestBranch = nextValue;
         pullRequestProvider = markerProvider;
         index += 1;
         continue;
@@ -368,6 +375,7 @@ export const parseArguments = (args) => {
     ...(range ? { range } : {}),
     commitRef,
     help: values.help === true,
+    pullRequestBranch,
     pullRequestNumber,
     ...(pullRequestProvider ? { pullRequestProvider } : {}),
     pullRequestUrl,

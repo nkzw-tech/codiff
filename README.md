@@ -51,6 +51,7 @@ Review a GitHub pull request or GitLab merge request using the current repositor
 
 ```bash
 codiff pr 75
+codiff pr my-feature-branch
 codiff mr 23
 ```
 
