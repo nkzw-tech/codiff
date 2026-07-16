@@ -1,0 +1,31 @@
+web/wrangler.jsonc
+  s_4ebfd9dd549587::t_daa185c6d47bdc 6-10,18-51
+bin/arguments.js
+  s_f4ca83444c8a7c::t_55494caa3c334f 59-63,155-160,436
+bin/share-codiff.mjs
+  s_f4ca83444c8a7c::t_09b9b34772fb1c 119,122,129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fd1e0070956f61c085934ffdccd3fb00d732e82a",
+  "prompts": {},
+  "sessions": {
+    "s_4ebfd9dd549587": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a07-4a1f-7ef1-911c-fa4a86d6c77c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    },
+    "s_f4ca83444c8a7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f69ff-dd9f-7721-9487-e76c7205bc7c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
