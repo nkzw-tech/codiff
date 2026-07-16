@@ -1,0 +1,31 @@
+bin/arguments.js
+  s_86ac7e38c29348::t_97371b4d3f75c8 97-100,257-294,320,351-352,359-370,425
+core/__tests__/codiff-cli.test.ts
+  s_86ac7e38c29348::t_2ae68af6c7a15f 20,71-107,296-306,459-501,526-574,1485
+README.md
+  s_86ac7e38c29348::t_b2bf91118b7737 54,58-60
+bin/codiff-app
+  s_86ac7e38c29348::t_e29eab4d3c2073 57,93,107,224,228,231-236,340,343,423-437
+bin/codiff.js
+  s_86ac7e38c29348::t_0cadabf81b8296 16,134,151,153-159
+bin/share-codiff.mjs
+  s_86ac7e38c29348::t_e2945d0542220a 9,83-95
+core/__tests__/codiff-share-cli.test.ts
+  s_86ac7e38c29348::t_d3dda9e9cdc134 297-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ea9bc087334941774c3a4547d2645d288cd0ae96",
+  "prompts": {},
+  "sessions": {
+    "s_86ac7e38c29348": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6911-d3af-74d0-a324-d9bdf4347567",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
