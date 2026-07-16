@@ -1,0 +1,19 @@
+web/wrangler.jsonc
+  s_4ebfd9dd549587::t_daa185c6d47bdc 6-10,18-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "147a577f7df121b4daa8c2f3b59d875940db1b27",
+  "prompts": {},
+  "sessions": {
+    "s_4ebfd9dd549587": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6a07-4a1f-7ef1-911c-fa4a86d6c77c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
