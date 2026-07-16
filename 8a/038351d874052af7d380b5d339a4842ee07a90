@@ -1,0 +1,23 @@
+core/package.json
+  s_c6d75dd970c4b4::t_27a53fb454761c 4-17,19-24,27-34,36-53,61-62,64-65
+pnpm-lock.yaml
+  s_c6d75dd970c4b4::t_6432764e1f3718 131-136,149-151,2640-2642,2684-2687,4856-4863,7933-7936,7977-7978,10424-10427
+core/app/components/Panels.tsx
+  s_c6d75dd970c4b4::t_221e202bc8de16 32,499,561-562,569,664-665,667,669,675,775,779-783,785,789,877-879,881,888,890-892,894,899
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8a038351d874052af7d380b5d339a4842ee07a90",
+  "prompts": {},
+  "sessions": {
+    "s_c6d75dd970c4b4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65d0-fe39-7073-a0de-4105a89da793",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
