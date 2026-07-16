@@ -4,6 +4,7 @@ import type { AgentSkillStatus, CodiffLaunchOptions, TerminalHelperStatus } from
 export const HISTORY_PAGE_SIZE = 30;
 
 export const defaultLaunchOptions: CodiffLaunchOptions = {
+  codiffVersion: '',
   repositoryPathProvided: false,
   walkthrough: false,
 };

@@ -411,6 +411,8 @@ export type WalkthroughContext = {
 };
 
 export type CodiffLaunchOptions = {
+  /** The running Codiff app version, from the packaged `app.getVersion()`. */
+  codiffVersion: string;
   agentBackend?: 'codex' | 'claude' | 'opencode' | 'pi';
   claudeSessionId?: string;
   codexSessionId?: string;

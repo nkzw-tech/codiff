@@ -167,6 +167,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     name: 'Reviewer',
   })),
   getLaunchOptions: vi.fn(async () => ({
+    codiffVersion: '',
     repositoryPathProvided: true,
     walkthrough: false,
   })),
@@ -832,6 +833,7 @@ test('repository reload does not let stale selection override launch source', as
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       source: launchSource,
       walkthrough: false,
@@ -938,6 +940,7 @@ test('walkthrough file reload shows files changed since reload as stale', async 
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       walkthrough: false,
       walkthroughFile: '/tmp/walkthrough.json',
@@ -1488,6 +1491,7 @@ test('narrative walkthrough stops show pull request descriptions once', async ()
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       source,
       walkthrough: true,
@@ -1604,6 +1608,7 @@ test('narrative walkthrough stops do not repeat commit details', async () => {
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       source,
       walkthrough: true,
@@ -1699,6 +1704,7 @@ test('a walkthrough file loads even without the walkthrough launch flag', async 
   }));
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       source,
       walkthrough: false,
@@ -1837,6 +1843,7 @@ test('plan mode opens the Markdown editor without loading repository state', asy
       name: 'Current User',
     })),
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       planFile: '/tmp/plan.md',
       planResultFile: '/tmp/result.json',
       repositoryPathProvided: true,
@@ -2142,6 +2149,7 @@ test('plan mode resolves stored comments whose anchors were already removed', as
   } satisfies PlanReview;
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       planFile: '/tmp/plan.md',
       planResultFile: '/tmp/result.json',
       repositoryPathProvided: true,
@@ -2272,6 +2280,7 @@ test('plan mode keeps comments open when their anchors are removed during the cu
   } satisfies PlanReview;
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       planFile: '/tmp/plan.md',
       planResultFile: '/tmp/result.json',
       repositoryPathProvided: true,
@@ -2354,6 +2363,7 @@ test('closing plan mode flushes and returns a closed handoff', async () => {
   window.codiff = createCodiffMock({
     completePlan,
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       planFile: '/tmp/plan.md',
       planResultFile: '/tmp/result.json',
       repositoryPathProvided: true,
@@ -2490,6 +2500,7 @@ test('plan mode recovers from an unreadable review sidecar', async () => {
   const markPlanReady = vi.fn(async () => {});
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       planFile: '/tmp/plan.md',
       planResultFile: '/tmp/result.json',
       repositoryPathProvided: true,
@@ -2538,6 +2549,7 @@ test('a walkthrough file that no longer anchors surfaces a dismissible banner', 
   const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       source,
       walkthrough: false,
@@ -2788,6 +2800,7 @@ test('refreshing all changes re-resolves the branch snapshot', async () => {
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       source: { ref: 'main', type: 'branch-working-tree' as const },
       walkthrough: false,
@@ -2990,6 +3003,7 @@ test('regenerating a walkthrough clears refresh-only changed sections', async ()
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       walkthrough: true,
     })),
@@ -3129,6 +3143,7 @@ test('drops a walkthrough regeneration when the same source refreshes again', as
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       walkthrough: true,
     })),
@@ -3225,6 +3240,7 @@ test('walkthrough launch errors stay on the walkthrough tab without automatic re
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       walkthrough: true,
     })),
@@ -3305,6 +3321,7 @@ test('walkthrough progress events replace the loading line without exposing agen
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      codiffVersion: '',
       repositoryPathProvided: true,
       walkthrough: true,
     })),
@@ -3438,6 +3455,7 @@ test('Pi not-found walkthrough errors show the agent recovery panel', async () =
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
       agentBackend: 'pi' as const,
+      codiffVersion: '',
       repositoryPathProvided: true,
       walkthrough: true,
     })),

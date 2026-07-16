@@ -875,7 +875,7 @@ const createWindow = (
     windowIdentities.set(webContentsId, identity);
   }
   windowRepositories.set(webContentsId, identity?.repositoryRoot || repositoryPath);
-  windowLaunchOptions.set(webContentsId, launchOptions);
+  windowLaunchOptions.set(webContentsId, { ...launchOptions, codiffVersion: app.getVersion() });
   const initialRepositoryStatePromise = launchOptions.planFile
     ? null
     : readInitialRepositoryStateWithConfig(repositoryPath, launchOptions);
@@ -1127,7 +1127,10 @@ const focusOrCreateWindow = (
   if (matchingWindow) {
     if (launchOptions.planFile || launchOptions.walkthrough || launchOptions.walkthroughFile) {
       windowRepositories.set(matchingWebContentsId, identity?.repositoryRoot || repositoryPath);
-      windowLaunchOptions.set(matchingWebContentsId, launchOptions);
+      windowLaunchOptions.set(matchingWebContentsId, {
+        ...launchOptions,
+        codiffVersion: app.getVersion(),
+      });
       if (launchOptions.planFile) {
         planInitialVersions.delete(matchingWebContentsId);
         readyPlanWindows.delete(matchingWebContentsId);
@@ -1347,13 +1350,12 @@ ipcMain.handle('codiff:markPlanReady', async (event) => {
   writePlanResult(event.sender.id, 'open');
 });
 
-ipcMain.handle(
-  'codiff:getLaunchOptions',
-  (event) =>
-    windowLaunchOptions.get(event.sender.id) || {
-      repositoryPathProvided: false,
-      walkthrough: false,
-    },
+ipcMain.handle('codiff:getLaunchOptions', (event) =>
+  windowLaunchOptions.get(event.sender.id) || {
+    codiffVersion: app.getVersion(),
+    repositoryPathProvided: false,
+    walkthrough: false,
+  },
 );
 
 ipcMain.handle('codiff:getAgentSkillStatus', (event) => {

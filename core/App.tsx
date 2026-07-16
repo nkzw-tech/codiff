@@ -332,6 +332,7 @@ export default function App() {
     walkthroughSharing,
     walkthroughUnread,
   } = useAppWalkthrough({
+    codiffVersion: launchOptions.codiffVersion,
     preferencesRef,
     state,
     stateGenerationRef,

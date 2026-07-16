@@ -25,6 +25,7 @@ import type { WalkthroughFileError } from '../components/WalkthroughFileError.ts
 type MainMode = 'commit' | 'review';
 
 type UseAppWalkthroughOptions = {
+  codiffVersion: string;
   preferencesRef: RefObject<CodiffPreferences>;
   state: RepositoryState | null;
   stateGenerationRef: RefObject<number>;
@@ -34,6 +35,7 @@ type UseAppWalkthroughOptions = {
 const emptyFiles: ReadonlyArray<ChangedFile> = [];
 
 export function useAppWalkthrough({
+  codiffVersion,
   preferencesRef,
   state,
   stateGenerationRef,
@@ -279,7 +281,7 @@ export function useAppWalkthrough({
     const snapshot: SharedWalkthroughSnapshot = {
       branch: currentState.branch,
       codeQualityFindings: currentState.codeQualityFindings,
-      codiffVersion: 'dev',
+      codiffVersion,
       exportedAt: new Date().toISOString(),
       files: currentState.files,
       kind: 'codiff-walkthrough-share',
@@ -316,7 +318,7 @@ export function useAppWalkthrough({
       .finally(() => {
         setWalkthroughSharing(false);
       });
-  }, [preferencesRef, shareWalkthroughEnabled, stateRef, walkthroughSharing]);
+  }, [codiffVersion, preferencesRef, shareWalkthroughEnabled, stateRef, walkthroughSharing]);
 
   const plainCommitModel = useMemo(
     () =>

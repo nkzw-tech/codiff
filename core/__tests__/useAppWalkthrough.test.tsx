@@ -38,12 +38,14 @@ const createRepositoryState = (): RepositoryState => ({
 });
 
 function AppWalkthroughHarness({
+  codiffVersion = '',
   onController,
   preferencesRef,
   state,
   stateGenerationRef,
   stateRef,
 }: {
+  codiffVersion?: string;
   onController: (controller: AppWalkthroughController) => void;
   preferencesRef: Parameters<typeof useAppWalkthrough>[0]['preferencesRef'];
   state: RepositoryState;
@@ -51,6 +53,7 @@ function AppWalkthroughHarness({
   stateRef: Parameters<typeof useAppWalkthrough>[0]['stateRef'];
 }) {
   const controller = useAppWalkthrough({
+    codiffVersion,
     preferencesRef,
     state,
     stateGenerationRef,
