@@ -1,0 +1,19 @@
+pnpm-lock.yaml
+  s_c6d75dd970c4b4::t_bb7caa7b16c507 106,147-174,7393,7409,10306,10347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3317f87ef256c439dc8a44f0152dbf7bde50a502",
+  "prompts": {},
+  "sessions": {
+    "s_c6d75dd970c4b4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f65d0-fe39-7073-a0de-4105a89da793",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
