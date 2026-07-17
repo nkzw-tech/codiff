@@ -68,16 +68,17 @@ const renderAppReviewComments = async (state: RepositoryState) => {
     }
     return stateRef.current;
   };
-  return Object.assign(
-    await renderReact(
+  return {
+    ...(await renderReact(
       <AppReviewCommentsHarness
         onCommentFileChange={onCommentFileChange}
         onState={(comments) => (stateRef.current = comments)}
         state={state}
       />,
-    ),
-    { getState, onCommentFileChange },
-  );
+    )),
+    getState,
+    onCommentFileChange,
+  };
 };
 
 afterEach(() => {

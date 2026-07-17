@@ -53,21 +53,24 @@ const renderReviewCommentDrafts = async ({
 } = {}) => {
   const onCommentFileChange = vi.fn();
   const stateRef: { current: ReviewCommentDrafts | null } = { current: null };
-  const view = await renderReact(
-    <ReviewCommentDraftsHarness
-      canCreateComment={canCreateComment}
-      initialComments={initialComments}
-      onCommentFileChange={onCommentFileChange}
-      onState={(state) => (stateRef.current = state)}
-    />,
-  );
   const getState = () => {
     if (!stateRef.current) {
       throw new Error('Review comment drafts did not render.');
     }
     return stateRef.current;
   };
-  return Object.assign(view, { getState, onCommentFileChange });
+  return {
+    ...(await renderReact(
+      <ReviewCommentDraftsHarness
+        canCreateComment={canCreateComment}
+        initialComments={initialComments}
+        onCommentFileChange={onCommentFileChange}
+        onState={(state) => (stateRef.current = state)}
+      />,
+    )),
+    getState,
+    onCommentFileChange,
+  };
 };
 
 test('review comment drafts create, update, focus, and delete local comments', async () => {

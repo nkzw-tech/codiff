@@ -82,22 +82,21 @@ const renderWalkthroughController = async ({
     }
     return controller;
   };
-  const view = await renderReact(
-    <AppWalkthroughHarness
-      onController={(nextController) => (controller = nextController)}
-      preferencesRef={preferencesRef}
-      state={state}
-      stateGenerationRef={stateGenerationRef}
-      stateRef={stateRef}
-    />,
-  );
-
-  return Object.assign(view, {
+  return {
+    ...(await renderReact(
+      <AppWalkthroughHarness
+        onController={(nextController) => (controller = nextController)}
+        preferencesRef={preferencesRef}
+        state={state}
+        stateGenerationRef={stateGenerationRef}
+        stateRef={stateRef}
+      />,
+    )),
     getController,
     preferencesRef,
     stateGenerationRef,
     stateRef,
-  });
+  };
 };
 
 test('walkthrough controller lazily generates, refreshes, and transitions modes', async () => {
