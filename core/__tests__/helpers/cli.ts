@@ -5,14 +5,7 @@ import { join } from 'node:path';
 const loggerScript =
   '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$OPEN_ARGS_FILE"\ndone\n';
 
-export type FakeOpenLogger = AsyncDisposable & {
-  directory: string;
-  env: NodeJS.ProcessEnv;
-  readArgs: () => Promise<Array<string>>;
-  reset: () => Promise<void>;
-};
-
-export const createFakeOpenLogger = async (): Promise<FakeOpenLogger> => {
+export const createFakeOpenLogger = async () => {
   const directory = await mkdtemp(join(tmpdir(), 'codiff-app-helper-'));
   const fakeBin = join(directory, 'bin');
   const logPath = join(directory, 'open-args.txt');
@@ -37,17 +30,7 @@ export const createFakeOpenLogger = async (): Promise<FakeOpenLogger> => {
   };
 };
 
-export type FakeCommandLogger = AsyncDisposable & {
-  commandPath: string;
-  directory: string;
-  env: NodeJS.ProcessEnv;
-  readArgs: () => Promise<Array<string>>;
-};
-
-export const createFakeCommandLogger = async (
-  prefix: string,
-  commandName: string,
-): Promise<FakeCommandLogger> => {
+export const createFakeCommandLogger = async (prefix: string, commandName: string) => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   const commandPath = join(directory, commandName);
   const logPath = join(directory, 'args.txt');

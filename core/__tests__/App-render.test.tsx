@@ -349,16 +349,11 @@ const renderAppForOpenFileShortcut = async (file: ChangedFile) => {
     expect(container.querySelector('.codiff-file-header')).not.toBeNull();
   });
 
-  const cleanup = async () => {
-    await act(async () => root.unmount());
-    container.remove();
-  };
-
   return {
-    cleanup,
     openFile,
     async [Symbol.asyncDispose]() {
-      await cleanup();
+      await act(async () => root.unmount());
+      container.remove();
     },
   };
 };
@@ -436,8 +431,6 @@ test('stale persisted collapsed sidebar state does not hide the sidebar on launc
     true,
   );
   expect(app.container.querySelector('.review-top-bar')).toBe(topBar);
-
-  await app.cleanup();
 });
 
 test('empty repository state fills the review pane for centered layout', async () => {

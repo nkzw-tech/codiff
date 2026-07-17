@@ -1355,7 +1355,6 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
   await using _resource = {
     async [Symbol.asyncDispose]() {
       platform.mockRestore();
-      await view.cleanup();
     },
   };
   const commentButton = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(

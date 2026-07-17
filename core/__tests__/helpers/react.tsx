@@ -1,13 +1,7 @@
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-export type ReactRenderResult = AsyncDisposable & {
-  cleanup: () => Promise<void>;
-  container: HTMLDivElement;
-  rerender: (nextElement: ReactNode) => Promise<void>;
-};
-
-export const renderReact = async (element: ReactNode): Promise<ReactRenderResult> => {
+export const renderReact = async (element: ReactNode) => {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -16,15 +10,7 @@ export const renderReact = async (element: ReactNode): Promise<ReactRenderResult
     root.render(element);
   });
 
-  const cleanup = async () => {
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
-  };
-
   return {
-    cleanup,
     container,
     rerender: async (nextElement: ReactNode) => {
       await act(async () => {
@@ -32,7 +18,10 @@ export const renderReact = async (element: ReactNode): Promise<ReactRenderResult
       });
     },
     async [Symbol.asyncDispose]() {
-      await cleanup();
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
     },
   };
 };

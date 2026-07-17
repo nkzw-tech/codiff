@@ -21,16 +21,11 @@ const renderButton = async (element: React.ReactNode) => {
     root.render(element);
   });
 
-  const cleanup = async () => {
-    await act(async () => root?.unmount());
-    container.remove();
-  };
-
   return {
-    cleanup,
     container,
     async [Symbol.asyncDispose]() {
-      await cleanup();
+      await act(async () => root?.unmount());
+      container.remove();
     },
   };
 };

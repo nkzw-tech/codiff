@@ -62,13 +62,7 @@ const renderReviewButtons = async (disabled = false) => {
     );
   });
 
-  const cleanup = async () => {
-    await act(async () => root.unmount());
-    container.remove();
-  };
-
   return {
-    cleanup,
     container,
     onSubmitReview,
     rerender: async (nextDisabled: boolean) => {
@@ -83,7 +77,8 @@ const renderReviewButtons = async (disabled = false) => {
       });
     },
     async [Symbol.asyncDispose]() {
-      await cleanup();
+      await act(async () => root.unmount());
+      container.remove();
     },
   };
 };

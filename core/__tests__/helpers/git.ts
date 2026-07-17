@@ -1,8 +1,10 @@
+import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTemporaryEnvironment } from './resources.ts';
 
-const emptyGitHooksPath = join(import.meta.dirname, 'empty-git-hooks');
+const emptyGitHooksPath = mkdtempSync(join(tmpdir(), 'codiff-empty-git-hooks-'));
 
 export const getGitTestEnvironment = (
   overrides: Readonly<Record<string, string | undefined>> = {},
