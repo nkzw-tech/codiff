@@ -64,7 +64,9 @@ const parseGitHubPullRequestUrl = (value) => {
 /** @param {string} value @returns {GitHubRemote | null} */
 const parseGitHubRemoteUrl = (value) => {
   const trimmed = value.trim();
-  const sshMatch = trimmed.match(/^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
+  // GitHub organizations with SSO issue SSH remotes as `org-<id>@github.com`
+  // instead of `git@github.com`, so both users are recognized.
+  const sshMatch = trimmed.match(/^(?:git|org-\d+)@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i);
   if (sshMatch) {
     return {
       owner: sshMatch[1],
@@ -118,6 +120,62 @@ const getRemotePriority = (remote) =>
       ? 2
       : 3;
 
+/** @param {string} repoRoot @returns {Promise<GitHubRepositoryReference>} */
+const readGitHubRepositoryReference = (repoRoot) =>
+  new Promise((resolve, reject) => {
+    const child = spawn('gh', ['repo', 'view', '--json', 'owner,name'], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    /** @type {Array<Buffer>} */
+    const stdout = [];
+    /** @type {Array<Buffer>} */
+    const stderr = [];
+
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        const errorOutput = Buffer.concat(stderr).toString('utf8').trim();
+        reject(new Error(errorOutput || `gh repo view exited with code ${code}.`));
+        return;
+      }
+
+      try {
+        const data = JSON.parse(Buffer.concat(stdout).toString('utf8'));
+        const owner = data?.owner?.login;
+        const repo = data?.name;
+        if (owner && repo) {
+          resolve({ owner, repo });
+          return;
+        }
+        reject(new Error('gh repo view did not return the repository owner and name.'));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('gh repo view returned invalid JSON.'));
+      }
+    });
+  });
+
+/** @type {Map<string, Promise<GitHubRepositoryReference | null>>} */
+const repositoryReferenceCache = new Map();
+
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<boolean>} */
+const gitHubRepositoryMatchesPullRequest = async (repoRoot, pullRequest) => {
+  let reference = repositoryReferenceCache.get(repoRoot);
+  if (!reference) {
+    reference = readGitHubRepositoryReference(repoRoot).catch(() => null);
+    repositoryReferenceCache.set(repoRoot, reference);
+  }
+
+  const repository = await reference;
+  return (
+    repository != null &&
+    repository.owner.toLowerCase() === pullRequest.owner.toLowerCase() &&
+    repository.repo.toLowerCase() === pullRequest.repo.toLowerCase()
+  );
+};
+
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<GitHubRemote>} */
 const selectPullRequestRemote = async (repoRoot, pullRequest) => {
   const remotes = await readLocalGitHubRemotes(repoRoot);
@@ -129,13 +187,25 @@ const selectPullRequestRemote = async (repoRoot, pullRequest) => {
     )
     .sort((left, right) => getRemotePriority(left) - getRemotePriority(right))[0];
 
-  if (!remote) {
-    throw new Error(
-      `Pull request ${pullRequest.owner}/${pullRequest.repo} does not match a GitHub remote in this repository.`,
-    );
+  if (remote) {
+    return remote;
   }
 
-  return remote;
+  // Remotes using SSH host aliases or `insteadOf` rewrites hide the github.com
+  // host from URL parsing. Only when such a remote exists, ask gh to resolve
+  // the repository and fall back to that remote's name so git can fetch.
+  const names = (await gitOrEmpty(repoRoot, ['remote']))
+    .split('\n')
+    .map((name) => name.trim())
+    .filter((name) => name && !remotes.some((remote) => remote.name === name));
+  const name = names.includes('origin') ? 'origin' : names[0];
+  if (name && (await gitHubRepositoryMatchesPullRequest(repoRoot, pullRequest))) {
+    return { direction: 'fetch', name, owner: pullRequest.owner, repo: pullRequest.repo };
+  }
+
+  throw new Error(
+    `Pull request ${pullRequest.owner}/${pullRequest.repo} does not match a GitHub remote in this repository.`,
+  );
 };
 
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest */

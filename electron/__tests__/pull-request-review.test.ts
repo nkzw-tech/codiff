@@ -155,3 +155,97 @@ process.stdin.on('end', () => {
     await removeGitTestDirectory(directory);
   }
 });
+
+test('matches pull requests to remotes with custom SSH users or through gh', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-pull-request-review-'));
+  const sshUserRepo = join(directory, 'ssh-user-repo');
+  const aliasedRepo = join(directory, 'aliased-repo');
+  const fakeBin = join(directory, 'bin');
+  const fakeGh = join(fakeBin, 'gh');
+  const callsPath = join(directory, 'calls.jsonl');
+  const previousPath = process.env.PATH;
+  const previousCallsPath = process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS;
+
+  try {
+    await Promise.all([mkdir(sshUserRepo), mkdir(aliasedRepo), mkdir(fakeBin)]);
+    await execFileAsync('git', ['-C', sshUserRepo, 'init']);
+    await execFileAsync('git', [
+      '-C',
+      sshUserRepo,
+      'remote',
+      'add',
+      'origin',
+      'org-12345@github.com:acme/widgets.git',
+    ]);
+    await execFileAsync('git', ['-C', aliasedRepo, 'init']);
+    await execFileAsync('git', [
+      '-C',
+      aliasedRepo,
+      'remote',
+      'add',
+      'origin',
+      'git@github-work:acme/widgets.git',
+    ]);
+    await writeFile(
+      fakeGh,
+      `#!/usr/bin/env node
+const { appendFileSync } = require('node:fs');
+const args = process.argv.slice(2);
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { input += chunk; });
+process.stdin.on('end', () => {
+  appendFileSync(
+    process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS,
+    JSON.stringify({ args, input }) + '\\n',
+  );
+  process.stdout.write(
+    args[0] === 'repo' && args[1] === 'view'
+      ? '{"owner":{"login":"acme"},"name":"widgets"}'
+      : '{}',
+  );
+});
+`,
+    );
+    await chmod(fakeGh, 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+    process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS = callsPath;
+
+    const review = {
+      body: 'Looks good.',
+      comments: [],
+      event: 'APPROVE' as const,
+      source: {
+        provider: 'github' as const,
+        type: 'pull-request' as const,
+        url: 'https://github.com/acme/widgets/pull/42',
+      },
+    };
+
+    await submitPullRequestReview(sshUserRepo, review);
+    await submitPullRequestReview(aliasedRepo, review);
+
+    const calls = (await readFile(callsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { args: ReadonlyArray<string>; input: string });
+    expect(calls).toHaveLength(3);
+    // The custom SSH user matches through remote parsing alone — no gh lookup.
+    expect(calls[0].args).toContain('repos/acme/widgets/pulls/42/reviews');
+    // The aliased host hides github.com, so the repository resolves through gh.
+    expect(calls[1].args.join(' ')).toBe('repo view --json owner,name');
+    expect(calls[2].args).toContain('repos/acme/widgets/pulls/42/reviews');
+  } finally {
+    if (previousPath == null) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = previousPath;
+    }
+    if (previousCallsPath == null) {
+      delete process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS;
+    } else {
+      process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS = previousCallsPath;
+    }
+    await removeGitTestDirectory(directory);
+  }
+});
