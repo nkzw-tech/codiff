@@ -12,7 +12,7 @@ import type {
   RepositoryState,
   ReviewSource,
 } from '../types.ts';
-import { getGitTestEnvironment, withGitTestEnvironment } from './helpers/git.ts';
+import { getGitTestEnvironmentForSubprocess, withGitTestEnvironment } from './helpers/git.ts';
 import { createTemporaryDirectory, createTemporaryEnvironment } from './helpers/resources.ts';
 
 type StatusEntry = {
@@ -169,7 +169,7 @@ const {
 const git = async (repo: string, args: ReadonlyArray<string>) => {
   const { stdout } = await execFileAsync('git', ['-C', repo, ...args], {
     encoding: 'utf8',
-    env: getGitTestEnvironment(),
+    env: getGitTestEnvironmentForSubprocess(),
     maxBuffer: 1024 * 1024 * 16,
   });
   return stdout;

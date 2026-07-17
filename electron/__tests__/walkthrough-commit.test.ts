@@ -4,7 +4,10 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import { getGitTestEnvironment, withGitTestEnvironment } from '../../core/__tests__/helpers/git.ts';
+import {
+  getGitTestEnvironmentForSubprocess,
+  withGitTestEnvironment,
+} from '../../core/__tests__/helpers/git.ts';
 import {
   createTemporaryDirectory,
   createTemporaryEnvironment,
@@ -24,7 +27,7 @@ const execFileAsync = promisify(execFile);
 const git = async (repoPath: string, args: ReadonlyArray<string>) => {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
     encoding: 'utf8',
-    env: getGitTestEnvironment(),
+    env: getGitTestEnvironmentForSubprocess(),
   });
   return stdout;
 };
