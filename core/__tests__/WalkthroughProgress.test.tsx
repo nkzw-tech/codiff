@@ -35,62 +35,56 @@ test('reserves timer space, reveals 3s without shifting, and resets for each sta
   document.body.append(container);
   let root: Root | null = createRoot(container);
 
-  try {
-    await act(async () => {
-      root?.render(<WalkthroughProgress phase={null} responseLabelIndex={0} stageRevision={0} />);
-    });
-
-    const timer = () => container.querySelector<HTMLElement>('.walkthrough-progress-timer');
-    expect(container.textContent).toContain('Generating walkthrough…');
-    expect(timer()?.textContent).toBe('0s');
-    expect(timer()?.classList.contains('visible')).toBe(false);
-
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
-    });
-    expect(timer()?.textContent).toBe('3s');
-    expect(timer()?.classList.contains('visible')).toBe(true);
-
-    await act(async () => {
-      root?.render(
-        <WalkthroughProgress phase="agent-generation" responseLabelIndex={0} stageRevision={1} />,
-      );
-    });
-    expect(container.textContent).toContain('Analyzing changes…');
-    expect(timer()?.textContent).toBe('0s');
-    expect(timer()?.classList.contains('visible')).toBe(false);
-
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
-    });
-    expect(timer()?.textContent).toBe('3s');
-
-    await act(async () => {
-      root?.render(
-        <WalkthroughProgress phase="agent-generation" responseLabelIndex={0} stageRevision={1} />,
-      );
-    });
-    expect(container.textContent).toContain('Analyzing changes…');
-    expect(timer()?.textContent).toBe('3s');
-    expect(timer()?.classList.contains('visible')).toBe(true);
-
-    await act(async () => {
-      root?.render(
-        <WalkthroughProgress phase="response-received" responseLabelIndex={4} stageRevision={2} />,
-      );
-    });
-    expect(container.textContent).toContain('Creating walkthrough…');
-    expect(timer()?.textContent).toBe('0s');
-    expect(timer()?.classList.contains('visible')).toBe(false);
-
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
-    });
-    expect(timer()?.textContent).toBe('3s');
-    expect(timer()?.classList.contains('visible')).toBe(true);
-  } finally {
-    await act(async () => root?.unmount());
-    root = null;
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root?.unmount());
+      root = null;
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root?.render(<WalkthroughProgress phase={null} responseLabelIndex={0} stageRevision={0} />);
+  });
+  const timer = () => container.querySelector<HTMLElement>('.walkthrough-progress-timer');
+  expect(container.textContent).toContain('Generating walkthrough…');
+  expect(timer()?.textContent).toBe('0s');
+  expect(timer()?.classList.contains('visible')).toBe(false);
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  expect(timer()?.textContent).toBe('3s');
+  expect(timer()?.classList.contains('visible')).toBe(true);
+  await act(async () => {
+    root?.render(
+      <WalkthroughProgress phase="agent-generation" responseLabelIndex={0} stageRevision={1} />,
+    );
+  });
+  expect(container.textContent).toContain('Analyzing changes…');
+  expect(timer()?.textContent).toBe('0s');
+  expect(timer()?.classList.contains('visible')).toBe(false);
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  expect(timer()?.textContent).toBe('3s');
+  await act(async () => {
+    root?.render(
+      <WalkthroughProgress phase="agent-generation" responseLabelIndex={0} stageRevision={1} />,
+    );
+  });
+  expect(container.textContent).toContain('Analyzing changes…');
+  expect(timer()?.textContent).toBe('3s');
+  expect(timer()?.classList.contains('visible')).toBe(true);
+  await act(async () => {
+    root?.render(
+      <WalkthroughProgress phase="response-received" responseLabelIndex={4} stageRevision={2} />,
+    );
+  });
+  expect(container.textContent).toContain('Creating walkthrough…');
+  expect(timer()?.textContent).toBe('0s');
+  expect(timer()?.classList.contains('visible')).toBe(false);
+  await act(async () => {
+    vi.advanceTimersByTime(3000);
+  });
+  expect(timer()?.textContent).toBe('3s');
+  expect(timer()?.classList.contains('visible')).toBe(true);
 });

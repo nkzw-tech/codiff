@@ -62,20 +62,22 @@ function AppReviewCommentsHarness({
 const renderAppReviewComments = async (state: RepositoryState) => {
   const onCommentFileChange = vi.fn();
   const stateRef: { current: AppReviewComments | null } = { current: null };
-  const view = await renderReact(
-    <AppReviewCommentsHarness
-      onCommentFileChange={onCommentFileChange}
-      onState={(comments) => (stateRef.current = comments)}
-      state={state}
-    />,
-  );
   const getState = () => {
     if (!stateRef.current) {
       throw new Error('App review comments did not render.');
     }
     return stateRef.current;
   };
-  return { getState, onCommentFileChange, view };
+  return Object.assign(
+    await renderReact(
+      <AppReviewCommentsHarness
+        onCommentFileChange={onCommentFileChange}
+        onState={(comments) => (stateRef.current = comments)}
+        state={state}
+      />,
+    ),
+    { getState, onCommentFileChange },
+  );
 };
 
 afterEach(() => {
@@ -88,36 +90,32 @@ test('app review comments request and store assistant replies', async () => {
     status: 'ready' as const,
   }));
   window.codiff = { askReviewAssistant } as unknown as Window['codiff'];
-  const { getState, onCommentFileChange, view } = await renderAppReviewComments(workingTreeState);
+  await using view = await renderAppReviewComments(workingTreeState);
+  const { getState, onCommentFileChange } = view;
 
-  try {
-    await act(async () => {
-      getState().setReviewComments([comment]);
+  await act(async () => {
+    getState().setReviewComments([comment]);
+  });
+  await act(async () => {
+    getState().askCodex(comment.id);
+  });
+  expect(askReviewAssistant).toHaveBeenCalledWith({
+    comment: {
+      body: comment.body,
+      filePath: comment.filePath,
+      lineNumber: comment.lineNumber,
+      sectionId: comment.sectionId,
+      side: comment.side,
+    },
+    source: workingTreeState.source,
+  });
+  await waitFor(() => {
+    expect(getState().reviewComments[0]?.codexReply).toEqual({
+      body: 'Use the shared parser.',
+      status: 'ready',
     });
-    await act(async () => {
-      getState().askCodex(comment.id);
-    });
-
-    expect(askReviewAssistant).toHaveBeenCalledWith({
-      comment: {
-        body: comment.body,
-        filePath: comment.filePath,
-        lineNumber: comment.lineNumber,
-        sectionId: comment.sectionId,
-        side: comment.side,
-      },
-      source: workingTreeState.source,
-    });
-    await waitFor(() => {
-      expect(getState().reviewComments[0]?.codexReply).toEqual({
-        body: 'Use the shared parser.',
-        status: 'ready',
-      });
-    });
-    expect(onCommentFileChange).toHaveBeenCalledTimes(2);
-  } finally {
-    await view.cleanup();
-  }
+  });
+  expect(onCommentFileChange).toHaveBeenCalledTimes(2);
 });
 
 test('app review comments submit a draft and replace it with the remote comment', async () => {
@@ -135,78 +133,70 @@ test('app review comments submit a draft and replace it with the remote comment'
     url: 'https://github.com/nkzw-tech/codiff/pull/42#discussion_r1',
   }));
   window.codiff = { submitPullRequestComment } as unknown as Window['codiff'];
-  const { getState, onCommentFileChange, view } = await renderAppReviewComments(pullRequestState);
+  await using view = await renderAppReviewComments(pullRequestState);
+  const { getState, onCommentFileChange } = view;
 
-  try {
-    await act(async () => {
-      getState().setReviewComments([comment]);
-    });
-    await act(async () => {
-      getState().submitPullRequestComment(comment.id);
-    });
-
-    expect(submitPullRequestComment).toHaveBeenCalledWith({
-      comment: {
+  await act(async () => {
+    getState().setReviewComments([comment]);
+  });
+  await act(async () => {
+    getState().submitPullRequestComment(comment.id);
+  });
+  expect(submitPullRequestComment).toHaveBeenCalledWith({
+    comment: {
+      body: comment.body,
+      filePath: comment.filePath,
+      lineNumber: comment.lineNumber,
+      side: comment.side,
+    },
+    source: pullRequestState.source,
+  });
+  await waitFor(() => {
+    expect(getState().reviewComments).toEqual([
+      {
+        author: {
+          login: 'reviewer',
+          name: 'Reviewer',
+        },
         body: comment.body,
         filePath: comment.filePath,
+        id: 'remote-comment',
+        isReadOnly: true,
         lineNumber: comment.lineNumber,
+        sectionId: comment.sectionId,
         side: comment.side,
+        submittedAt: '2026-07-15T00:00:00.000Z',
+        url: 'https://github.com/nkzw-tech/codiff/pull/42#discussion_r1',
       },
-      source: pullRequestState.source,
-    });
-    await waitFor(() => {
-      expect(getState().reviewComments).toEqual([
-        {
-          author: {
-            login: 'reviewer',
-            name: 'Reviewer',
-          },
-          body: comment.body,
-          filePath: comment.filePath,
-          id: 'remote-comment',
-          isReadOnly: true,
-          lineNumber: comment.lineNumber,
-          sectionId: comment.sectionId,
-          side: comment.side,
-          submittedAt: '2026-07-15T00:00:00.000Z',
-          url: 'https://github.com/nkzw-tech/codiff/pull/42#discussion_r1',
-        },
-      ]);
-    });
-    expect(onCommentFileChange).toHaveBeenCalledTimes(2);
-  } finally {
-    await view.cleanup();
-  }
+    ]);
+  });
+  expect(onCommentFileChange).toHaveBeenCalledTimes(2);
 });
 
 test('app review comments submit and clear pending review drafts', async () => {
   const submitPullRequestReview = vi.fn(async () => {});
   window.codiff = { submitPullRequestReview } as unknown as Window['codiff'];
-  const { getState, view } = await renderAppReviewComments(pullRequestState);
+  await using view = await renderAppReviewComments(pullRequestState);
+  const { getState } = view;
 
-  try {
-    await act(async () => {
-      getState().setReviewComments([comment]);
-    });
-    await act(async () => {
-      await getState().submitPullRequestReview('COMMENT');
-    });
-
-    expect(submitPullRequestReview).toHaveBeenCalledWith({
-      comments: [
-        {
-          body: comment.body,
-          filePath: comment.filePath,
-          lineNumber: comment.lineNumber,
-          side: comment.side,
-        },
-      ],
-      event: 'COMMENT',
-      source: pullRequestState.source,
-    });
-    expect(getState().reviewComments).toEqual([]);
-    expect(getState().pullRequestReviewSubmitting).toBeNull();
-  } finally {
-    await view.cleanup();
-  }
+  await act(async () => {
+    getState().setReviewComments([comment]);
+  });
+  await act(async () => {
+    await getState().submitPullRequestReview('COMMENT');
+  });
+  expect(submitPullRequestReview).toHaveBeenCalledWith({
+    comments: [
+      {
+        body: comment.body,
+        filePath: comment.filePath,
+        lineNumber: comment.lineNumber,
+        side: comment.side,
+      },
+    ],
+    event: 'COMMENT',
+    source: pullRequestState.source,
+  });
+  expect(getState().reviewComments).toEqual([]);
+  expect(getState().pullRequestReviewSubmitting).toBeNull();
 });

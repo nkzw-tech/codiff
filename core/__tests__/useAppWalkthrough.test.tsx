@@ -92,13 +92,12 @@ const renderWalkthroughController = async ({
     />,
   );
 
-  return {
+  return Object.assign(view, {
     getController,
     preferencesRef,
     stateGenerationRef,
     stateRef,
-    view,
-  };
+  });
 };
 
 test('walkthrough controller lazily generates, refreshes, and transitions modes', async () => {
@@ -106,57 +105,50 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
     status: 'ready' as const,
     walkthrough,
   }));
-  const { getController, stateGenerationRef, stateRef, view } = await renderWalkthroughController({
+  await using view = await renderWalkthroughController({
     codiff: {
       getNarrativeWalkthrough,
       onWalkthroughProgress: vi.fn(() => () => {}),
     },
   });
+  const { getController, stateGenerationRef, stateRef } = view;
 
-  try {
-    expect(getController().sidebarMode).toBe('tree');
-
-    await act(async () => {
-      getController().changeSidebarMode('walkthrough');
-    });
-    await waitFor(() => {
-      expect(getController().narrativeWalkthrough).toEqual(walkthrough);
-      expect(getController().walkthroughLoading).toBe(false);
-    });
-    expect(getNarrativeWalkthrough).toHaveBeenCalledWith(walkthrough.source, undefined);
-    expect(getController().sidebarMode).toBe('walkthrough');
-    expect(getController().walkthroughProgress.responseLabelIndex).toBe(0);
-
-    const refreshedState = {
-      ...stateRef.current,
-      files: [...stateRef.current.files, createChangedFile('src/added.ts')],
-    };
-    await act(async () => {
-      stateGenerationRef.current += 1;
-      stateRef.current = refreshedState;
-      getController().refreshWalkthroughForState(refreshedState);
-    });
-    await waitFor(() => {
-      expect(getNarrativeWalkthrough).toHaveBeenCalledTimes(2);
-    });
-    expect(getNarrativeWalkthrough).toHaveBeenLastCalledWith(walkthrough.source, {
-      force: true,
-      previousWalkthrough: walkthrough,
-    });
-
-    await act(async () => {
-      getController().openCommitView();
-    });
-    expect(getController().showPlainCommitView).toBe(true);
-    expect(getController().sidebarMode).toBe('tree');
-
-    await act(async () => {
-      getController().closeCommitView();
-    });
-    expect(getController().showPlainCommitView).toBe(false);
-  } finally {
-    await view.cleanup();
-  }
+  expect(getController().sidebarMode).toBe('tree');
+  await act(async () => {
+    getController().changeSidebarMode('walkthrough');
+  });
+  await waitFor(() => {
+    expect(getController().narrativeWalkthrough).toEqual(walkthrough);
+    expect(getController().walkthroughLoading).toBe(false);
+  });
+  expect(getNarrativeWalkthrough).toHaveBeenCalledWith(walkthrough.source, undefined);
+  expect(getController().sidebarMode).toBe('walkthrough');
+  expect(getController().walkthroughProgress.responseLabelIndex).toBe(0);
+  const refreshedState = {
+    ...stateRef.current,
+    files: [...stateRef.current.files, createChangedFile('src/added.ts')],
+  };
+  await act(async () => {
+    stateGenerationRef.current += 1;
+    stateRef.current = refreshedState;
+    getController().refreshWalkthroughForState(refreshedState);
+  });
+  await waitFor(() => {
+    expect(getNarrativeWalkthrough).toHaveBeenCalledTimes(2);
+  });
+  expect(getNarrativeWalkthrough).toHaveBeenLastCalledWith(walkthrough.source, {
+    force: true,
+    previousWalkthrough: walkthrough,
+  });
+  await act(async () => {
+    getController().openCommitView();
+  });
+  expect(getController().showPlainCommitView).toBe(true);
+  expect(getController().sidebarMode).toBe('tree');
+  await act(async () => {
+    getController().closeCommitView();
+  });
+  expect(getController().showPlainCommitView).toBe(false);
 });
 
 test('walkthrough controller routes progress, commit APIs, and sharing through current state', async () => {
@@ -175,7 +167,7 @@ test('walkthrough controller routes progress, commit APIs, and sharing through c
     url: 'https://codiff.dev/w/test',
   }));
   const state = createRepositoryState();
-  const { getController, preferencesRef, view } = await renderWalkthroughController({
+  await using view = await renderWalkthroughController({
     codiff: {
       createWalkthroughCommit,
       onWalkthroughProgress: vi.fn((callback) => {
@@ -189,72 +181,67 @@ test('walkthrough controller routes progress, commit APIs, and sharing through c
     },
     state,
   });
+  const { getController, preferencesRef } = view;
 
-  try {
-    await act(async () => {
-      onProgress?.({ phase: 'agent-generation' });
-    });
-    expect(getController().walkthroughProgress.phase).toBe('agent-generation');
-    expect(getController().walkthroughProgress.stageRevision).toBe(1);
-
-    await act(async () => {
-      await getController().commitWalkthrough({
-        body: 'Body',
-        paths: ['src/app.ts'],
-        source: { ref: 'old', type: 'commit' },
-        subject: 'Subject',
-      });
-      await getController().updateWalkthroughCommitMessage({
-        body: 'Body',
-        paths: ['src/app.ts'],
-        source: { ref: 'old', type: 'commit' },
-        subject: 'Subject',
-      });
-    });
-    expect(createWalkthroughCommit).toHaveBeenCalledWith({
+  await act(async () => {
+    onProgress?.({ phase: 'agent-generation' });
+  });
+  expect(getController().walkthroughProgress.phase).toBe('agent-generation');
+  expect(getController().walkthroughProgress.stageRevision).toBe(1);
+  await act(async () => {
+    await getController().commitWalkthrough({
       body: 'Body',
       paths: ['src/app.ts'],
-      source: state.source,
+      source: { ref: 'old', type: 'commit' },
       subject: 'Subject',
     });
-    expect(updateWalkthroughCommitMessage).toHaveBeenCalledWith({
+    await getController().updateWalkthroughCommitMessage({
       body: 'Body',
       paths: ['src/app.ts'],
-      source: state.source,
+      source: { ref: 'old', type: 'commit' },
       subject: 'Subject',
     });
-
-    await act(async () => {
-      getController().setNarrativeWalkthrough(walkthrough);
-      getController().setShareWalkthroughEnabled(true);
-    });
-    await act(async () => {
-      getController().enabledShareWalkthrough?.();
-    });
-    await waitFor(() => {
-      expect(shareWalkthrough).toHaveBeenCalledOnce();
-      expect(getController().walkthroughSharing).toBe(false);
-    });
-    expect(shareWalkthrough).toHaveBeenCalledWith(
-      expect.objectContaining({
-        files: state.files,
-        preferences: {
-          codeFontFamily: preferencesRef.current.codeFontFamily,
-          codeFontSize: preferencesRef.current.codeFontSize,
-          diffStyle: preferencesRef.current.diffStyle,
-          showWhitespace: preferencesRef.current.showWhitespace,
-          theme: preferencesRef.current.theme,
-          wordWrap: preferencesRef.current.wordWrap,
-        },
-        repository: {
-          root: state.root,
-          source: state.source,
-          title: undefined,
-        },
-        walkthrough,
-      }),
-    );
-  } finally {
-    await view.cleanup();
-  }
+  });
+  expect(createWalkthroughCommit).toHaveBeenCalledWith({
+    body: 'Body',
+    paths: ['src/app.ts'],
+    source: state.source,
+    subject: 'Subject',
+  });
+  expect(updateWalkthroughCommitMessage).toHaveBeenCalledWith({
+    body: 'Body',
+    paths: ['src/app.ts'],
+    source: state.source,
+    subject: 'Subject',
+  });
+  await act(async () => {
+    getController().setNarrativeWalkthrough(walkthrough);
+    getController().setShareWalkthroughEnabled(true);
+  });
+  await act(async () => {
+    getController().enabledShareWalkthrough?.();
+  });
+  await waitFor(() => {
+    expect(shareWalkthrough).toHaveBeenCalledOnce();
+    expect(getController().walkthroughSharing).toBe(false);
+  });
+  expect(shareWalkthrough).toHaveBeenCalledWith(
+    expect.objectContaining({
+      files: state.files,
+      preferences: {
+        codeFontFamily: preferencesRef.current.codeFontFamily,
+        codeFontSize: preferencesRef.current.codeFontSize,
+        diffStyle: preferencesRef.current.diffStyle,
+        showWhitespace: preferencesRef.current.showWhitespace,
+        theme: preferencesRef.current.theme,
+        wordWrap: preferencesRef.current.wordWrap,
+      },
+      repository: {
+        root: state.root,
+        source: state.source,
+        title: undefined,
+      },
+      walkthrough,
+    }),
+  );
 });

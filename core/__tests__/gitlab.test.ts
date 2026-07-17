@@ -1,11 +1,10 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, test } from 'vite-plus/test';
-import { removeGitTestDirectory } from './helpers/git.ts';
+import { createTemporaryDirectory, createTemporaryEnvironment } from './helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 type GitLabPosition = Record<string, unknown> & {
@@ -64,26 +63,23 @@ type GlabCall = {
 const withFakeGitLab = async (
   callback: (repo: string, readCalls: () => Promise<ReadonlyArray<GlabCall>>) => Promise<void>,
 ) => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-gitlab-'));
-  const repo = join(directory, 'repo');
-  const fakeGlabPath = join(directory, 'glab');
-  const callsPath = join(directory, 'calls.jsonl');
-  const previousGlabPath = process.env.CODIFF_GLAB_PATH;
-  const previousCallsPath = process.env.CODIFF_GLAB_TEST_CALLS;
+  await using directory = await createTemporaryDirectory('codiff-gitlab-');
+  const repo = join(directory.path, 'repo');
+  const fakeGlabPath = join(directory.path, 'glab');
+  const callsPath = join(directory.path, 'calls.jsonl');
 
-  try {
-    await execFileAsync('git', ['init', repo]);
-    await execFileAsync('git', [
-      '-C',
-      repo,
-      'remote',
-      'add',
-      'origin',
-      'ssh://git@gitlab.example.com/group/project.git',
-    ]);
-    await writeFile(
-      fakeGlabPath,
-      `#!/usr/bin/env node
+  await execFileAsync('git', ['init', repo]);
+  await execFileAsync('git', [
+    '-C',
+    repo,
+    'remote',
+    'add',
+    'origin',
+    'ssh://git@gitlab.example.com/group/project.git',
+  ]);
+  await writeFile(
+    fakeGlabPath,
+    `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 const endpoint = args.at(-1) || '';
@@ -117,31 +113,20 @@ process.stdin.on('end', () => {
   process.stdout.write('{}');
 });
 `,
-    );
-    await chmod(fakeGlabPath, 0o755);
-    process.env.CODIFF_GLAB_PATH = fakeGlabPath;
-    process.env.CODIFF_GLAB_TEST_CALLS = callsPath;
+  );
+  await chmod(fakeGlabPath, 0o755);
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_GLAB_PATH: fakeGlabPath,
+    CODIFF_GLAB_TEST_CALLS: callsPath,
+  });
 
-    await callback(repo, async () =>
-      (await readFile(callsPath, 'utf8'))
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as GlabCall),
-    );
-  } finally {
-    if (previousGlabPath == null) {
-      delete process.env.CODIFF_GLAB_PATH;
-    } else {
-      process.env.CODIFF_GLAB_PATH = previousGlabPath;
-    }
-    if (previousCallsPath == null) {
-      delete process.env.CODIFF_GLAB_TEST_CALLS;
-    } else {
-      process.env.CODIFF_GLAB_TEST_CALLS = previousCallsPath;
-    }
-    await removeGitTestDirectory(directory);
-  }
+  await callback(repo, async () =>
+    (await readFile(callsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as GlabCall),
+  );
 };
 
 describe('GitLab merge requests', () => {

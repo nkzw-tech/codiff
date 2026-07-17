@@ -1,8 +1,8 @@
-import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vite-plus/test';
+import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { buildInstallSkillMenuItem, listAgentSkills } = require('../agent-skills.cjs') as {
@@ -126,9 +126,9 @@ test('keeps skill instructions identical outside agent integration details', asy
 });
 
 test('installs the OpenCode skill into its global skills directory', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-opencode-skill-'));
-  const home = join(directory, 'home');
-  const root = join(directory, 'app');
+  await using directory = await createTemporaryDirectory('codiff-opencode-skill-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
   const source = join(root, 'opencode/skills/codiff');
   const target = join(home, '.config/opencode/skills/codiff');
   const commandSource = join(root, 'opencode/commands/codiff.md');
@@ -136,81 +136,73 @@ test('installs the OpenCode skill into its global skills directory', async () =>
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
   let model = 'anthropic/claude-sonnet-4-6';
 
-  try {
-    await mkdir(source, { recursive: true });
-    await mkdir(join(root, 'opencode/commands'), { recursive: true });
-    await writeFile(
-      commandSource,
-      '---\n{{MODEL}}\n---\n<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n',
-    );
-    expect(skill).toBeDefined();
-    const installer = createSkillInstaller({
-      app: {
-        getPath: () => home,
-        isPackaged: false,
-      },
-      dialog: {
-        showMessageBox: async () => {},
-      },
-      renderManagedFile: (_file, template) => template.replace('{{MODEL}}', `model: ${model}`),
-      root,
-      skill: skill!,
-    });
+  await mkdir(source, { recursive: true });
+  await mkdir(join(root, 'opencode/commands'), { recursive: true });
+  await writeFile(
+    commandSource,
+    '---\n{{MODEL}}\n---\n<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n',
+  );
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: {
+      getPath: () => home,
+      isPackaged: false,
+    },
+    dialog: {
+      showMessageBox: async () => {},
+    },
+    renderManagedFile: (_file, template) => template.replace('{{MODEL}}', `model: ${model}`),
+    root,
+    skill: skill!,
+  });
 
-    await expect(installer.install()).resolves.toBe(true);
-    expect(installer.getStatus()).toEqual({ installed: true, path: target });
-    await expect(realpath(target)).resolves.toBe(await realpath(source));
-    await expect(readFile(commandTarget, 'utf8')).resolves.toContain(
-      'model: anthropic/claude-sonnet-4-6',
-    );
+  await expect(installer.install()).resolves.toBe(true);
+  expect(installer.getStatus()).toEqual({ installed: true, path: target });
+  await expect(realpath(target)).resolves.toBe(await realpath(source));
+  await expect(readFile(commandTarget, 'utf8')).resolves.toContain(
+    'model: anthropic/claude-sonnet-4-6',
+  );
 
-    await rm(commandTarget);
-    model = 'openai/gpt-5.5';
-    installer.refreshManagedFiles();
-    await expect(readFile(commandTarget, 'utf8')).resolves.toContain('model: openai/gpt-5.5');
-    expect(installer.getStatus()).toEqual({ installed: true, path: target });
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+  await rm(commandTarget);
+  model = 'openai/gpt-5.5';
+  installer.refreshManagedFiles();
+  await expect(readFile(commandTarget, 'utf8')).resolves.toContain('model: openai/gpt-5.5');
+  expect(installer.getStatus()).toEqual({ installed: true, path: target });
 });
 
 test('does not replace a user-authored OpenCode command', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-opencode-command-conflict-'));
-  const home = join(directory, 'home');
-  const root = join(directory, 'app');
+  await using directory = await createTemporaryDirectory('codiff-opencode-command-conflict-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
   const source = join(root, 'opencode/skills/codiff');
   const commandSource = join(root, 'opencode/commands/codiff.md');
   const commandTarget = join(home, '.config/opencode/commands/codiff.md');
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
 
-  try {
-    await mkdir(source, { recursive: true });
-    await mkdir(join(root, 'opencode/commands'), { recursive: true });
-    await mkdir(join(home, '.config/opencode/commands'), { recursive: true });
-    await writeFile(commandSource, '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n');
-    await writeFile(
-      commandTarget,
-      '<!-- This user-authored file mentions Managed by Codiff. -->\nMy custom Codiff command.\n',
-    );
-    expect(skill).toBeDefined();
-    const installer = createSkillInstaller({
-      app: {
-        getPath: () => home,
-        isPackaged: false,
-      },
-      dialog: {
-        showMessageBox: async () => {},
-      },
-      root,
-      skill: skill!,
-    });
+  await mkdir(source, { recursive: true });
+  await mkdir(join(root, 'opencode/commands'), { recursive: true });
+  await mkdir(join(home, '.config/opencode/commands'), { recursive: true });
+  await writeFile(commandSource, '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n');
+  await writeFile(
+    commandTarget,
+    '<!-- This user-authored file mentions Managed by Codiff. -->\nMy custom Codiff command.\n',
+  );
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: {
+      getPath: () => home,
+      isPackaged: false,
+    },
+    dialog: {
+      showMessageBox: async () => {},
+    },
+    root,
+    skill: skill!,
+  });
 
-    await expect(installer.install()).resolves.toBe(false);
-    await expect(readFile(commandTarget, 'utf8')).resolves.toContain('My custom Codiff command.');
-    await expect(lstat(join(home, '.config/opencode/skills/codiff'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+  await expect(installer.install()).resolves.toBe(false);
+  await expect(readFile(commandTarget, 'utf8')).resolves.toContain('My custom Codiff command.');
+  await expect(lstat(join(home, '.config/opencode/skills/codiff'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
 });

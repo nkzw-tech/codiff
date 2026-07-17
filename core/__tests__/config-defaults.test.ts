@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { expect, test } from 'vite-plus/test';
 import packageJson from '../../package.json' with { type: 'json' };
 import schema from '../config/codiff-config.schema.json' with { type: 'json' };
 import { createDefaultConfig } from '../config/defaults.ts';
+import { createTemporaryDirectory, createTemporaryEnvironment } from './helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { createDefaultConfig: createElectronDefaultConfig, readConfig } =
@@ -14,24 +15,13 @@ const { createDefaultConfig: createElectronDefaultConfig, readConfig } =
     readConfig: () => ReturnType<typeof createDefaultConfig>;
   };
 
-const readElectronConfig = (raw: unknown) => {
-  const home = mkdtempSync(join(tmpdir(), 'codiff-config-home.'));
-  const configDirectory = join(home, '.codiff');
-  const previousHome = process.env.HOME;
+const readElectronConfig = async (raw: unknown) => {
+  await using home = await createTemporaryDirectory('codiff-config-home.');
+  await using _environment = createTemporaryEnvironment({ HOME: home.path });
+  const configDirectory = join(home.path, '.codiff');
   mkdirSync(configDirectory);
   writeFileSync(join(configDirectory, 'codiff.jsonc'), `${JSON.stringify(raw)}\n`);
-  process.env.HOME = home;
-
-  try {
-    return readConfig();
-  } finally {
-    if (previousHome == null) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = previousHome;
-    }
-    rmSync(home, { force: true, recursive: true });
-  }
+  return readConfig();
 };
 
 const getSchemaDefaults = (section: 'keymap' | 'settings') =>
@@ -53,47 +43,58 @@ test('electron and renderer defaults match', () => {
   expect(createElectronDefaultConfig()).toEqual(createDefaultConfig());
 });
 
-test('electron config normalizes code font settings', () => {
-  expect(readElectronConfig({}).settings.codeFontFamily).toBe('');
-  expect(readElectronConfig({}).settings.codeFontSize).toBe(13);
+test('electron config normalizes code font settings', async () => {
+  expect((await readElectronConfig({})).settings.codeFontFamily).toBe('');
+  expect((await readElectronConfig({})).settings.codeFontSize).toBe(13);
 
   expect(
-    readElectronConfig({
-      settings: {
-        codeFontFamily: '  JetBrains Mono  ',
-        codeFontSize: 14.6,
-      },
-    }).settings,
+    (
+      await readElectronConfig({
+        settings: {
+          codeFontFamily: '  JetBrains Mono  ',
+          codeFontSize: 14.6,
+        },
+      })
+    ).settings,
   ).toMatchObject({
     codeFontFamily: 'JetBrains Mono',
     codeFontSize: 15,
   });
 
   expect(
-    readElectronConfig({ settings: { codeFontFamily: 42, codeFontSize: 'large' } }).settings,
+    (await readElectronConfig({ settings: { codeFontFamily: 42, codeFontSize: 'large' } }))
+      .settings,
   ).toMatchObject({
     codeFontFamily: '',
     codeFontSize: 13,
   });
-  expect(readElectronConfig({ settings: { codeFontSize: 8 } }).settings.codeFontSize).toBe(10);
-  expect(readElectronConfig({ settings: { codeFontSize: 99 } }).settings.codeFontSize).toBe(32);
+  expect((await readElectronConfig({ settings: { codeFontSize: 8 } })).settings.codeFontSize).toBe(
+    10,
+  );
+  expect((await readElectronConfig({ settings: { codeFontSize: 99 } })).settings.codeFontSize).toBe(
+    32,
+  );
 });
 
-test('electron config keeps custom walkthrough prompt text only when it is a string', () => {
+test('electron config keeps custom walkthrough prompt text only when it is a string', async () => {
   expect(
-    readElectronConfig({
-      settings: {
-        walkthroughPrompt: 'Respond in German with product-review terminology.',
-      },
-    }).settings.walkthroughPrompt,
+    (
+      await readElectronConfig({
+        settings: {
+          walkthroughPrompt: 'Respond in German with product-review terminology.',
+        },
+      })
+    ).settings.walkthroughPrompt,
   ).toBe('Respond in German with product-review terminology.');
 
   expect(
-    readElectronConfig({
-      settings: {
-        walkthroughPrompt: ['Respond in German'],
-      },
-    }).settings.walkthroughPrompt,
+    (
+      await readElectronConfig({
+        settings: {
+          walkthroughPrompt: ['Respond in German'],
+        },
+      })
+    ).settings.walkthroughPrompt,
   ).toBe('');
 });
 

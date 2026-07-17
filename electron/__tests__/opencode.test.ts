@@ -1,8 +1,11 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 import { createCommandTransport } from './helpers/command-transport.ts';
 
 type CommandTransport = ReturnType<typeof createCommandTransport>['transport'];
@@ -87,22 +90,15 @@ test('renders the selected model into the managed OpenCode command', () => {
   ).toThrow('exactly one');
 });
 
-test('detects OpenCode-not-found errors and invalid overrides', () => {
+test('detects OpenCode-not-found errors and invalid overrides', async () => {
   expect(isOpenCodeNotFoundError({ code: OPENCODE_NOT_FOUND_CODE })).toBe(true);
   expect(isOpenCodeNotFoundError({ code: 'ENOENT' })).toBe(true);
   expect(isOpenCodeNotFoundError(new Error('other'))).toBe(false);
 
-  const previousOpenCodePath = process.env.CODIFF_OPENCODE_PATH;
-  process.env.CODIFF_OPENCODE_PATH = '/tmp/codiff-missing-opencode';
-  try {
-    expect(() => getOpenCodeCommand()).toThrow('CODIFF_OPENCODE_PATH');
-  } finally {
-    if (previousOpenCodePath == null) {
-      delete process.env.CODIFF_OPENCODE_PATH;
-    } else {
-      process.env.CODIFF_OPENCODE_PATH = previousOpenCodePath;
-    }
-  }
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_OPENCODE_PATH: '/tmp/codiff-missing-opencode',
+  });
+  expect(() => getOpenCodeCommand()).toThrow('CODIFF_OPENCODE_PATH');
 });
 
 test('runs OpenCode as an external read-only call', async () => {
@@ -152,16 +148,15 @@ test('runs OpenCode as an external read-only call', async () => {
 });
 
 test('streams semantic progress from the OpenCode event server', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-opencode-progress-'));
-  const fakeOpenCodePath = join(directory, 'opencode');
-  const argsPath = join(directory, 'args.txt');
-  const requestPath = join(directory, 'request.json');
-  const previousOpenCodePath = process.env.CODIFF_OPENCODE_PATH;
+  await using directory = await createTemporaryDirectory('codiff-opencode-progress-');
+  const fakeOpenCodePath = join(directory.path, 'opencode');
+  const argsPath = join(directory.path, 'args.txt');
+  const requestPath = join(directory.path, 'request.json');
+  await using _environment = createTemporaryEnvironment({ CODIFF_OPENCODE_PATH: fakeOpenCodePath });
 
-  try {
-    await writeFile(
-      fakeOpenCodePath,
-      `#!/usr/bin/env node
+  await writeFile(
+    fakeOpenCodePath,
+    `#!/usr/bin/env node
 const { appendFileSync, writeFileSync } = require('node:fs');
 const http = require('node:http');
 const args = process.argv.slice(2);
@@ -252,42 +247,33 @@ server.listen(port, '127.0.0.1', () => {
 });
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 `,
-    );
-    await chmod(fakeOpenCodePath, 0o755);
-    process.env.CODIFF_OPENCODE_PATH = fakeOpenCodePath;
-    const phases: Array<string> = [];
+  );
+  await chmod(fakeOpenCodePath, 0o755);
+  const phases: Array<string> = [];
 
-    await expect(
-      runOpenCode(
-        directory,
-        'prompt',
-        { required: ['version'], type: 'object' },
-        undefined,
-        undefined,
-        {
-          onProgress: (phase) => phases.push(phase),
-        },
-      ),
-    ).resolves.toBe('{"version":1}');
+  await expect(
+    runOpenCode(
+      directory.path,
+      'prompt',
+      { required: ['version'], type: 'object' },
+      undefined,
+      undefined,
+      {
+        onProgress: (phase) => phases.push(phase),
+      },
+    ),
+  ).resolves.toBe('{"version":1}');
 
-    expect(phases).toEqual(['agent-generation', 'response-received']);
-    const calls = (await readFile(argsPath, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(calls).toEqual([expect.arrayContaining(['serve', '--pure', '--hostname=127.0.0.1'])]);
-    const request = JSON.parse(await readFile(requestPath, 'utf8'));
-    expect(request.session.permission).toEqual([{ action: 'deny', pattern: '*', permission: '*' }]);
-    expect(request.prompt.parts[0].text).toContain('Follow this JSON Schema exactly');
-    expect(request.prompt.tools).toEqual({});
-  } finally {
-    if (previousOpenCodePath == null) {
-      delete process.env.CODIFF_OPENCODE_PATH;
-    } else {
-      process.env.CODIFF_OPENCODE_PATH = previousOpenCodePath;
-    }
-    await rm(directory, { force: true, recursive: true });
-  }
+  expect(phases).toEqual(['agent-generation', 'response-received']);
+  const calls = (await readFile(argsPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  expect(calls).toEqual([expect.arrayContaining(['serve', '--pure', '--hostname=127.0.0.1'])]);
+  const request = JSON.parse(await readFile(requestPath, 'utf8'));
+  expect(request.session.permission).toEqual([{ action: 'deny', pattern: '*', permission: '*' }]);
+  expect(request.prompt.parts[0].text).toContain('Follow this JSON Schema exactly');
+  expect(request.prompt.tools).toEqual({});
 });
 
 test('falls back to OpenCode CLI JSON mode when event streaming is unavailable', async () => {

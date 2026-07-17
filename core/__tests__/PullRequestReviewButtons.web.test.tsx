@@ -62,11 +62,13 @@ const renderReviewButtons = async (disabled = false) => {
     );
   });
 
+  const cleanup = async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  };
+
   return {
-    cleanup: async () => {
-      await act(async () => root.unmount());
-      container.remove();
-    },
+    cleanup,
     container,
     onSubmitReview,
     rerender: async (nextDisabled: boolean) => {
@@ -79,6 +81,9 @@ const renderReviewButtons = async (disabled = false) => {
           />,
         );
       });
+    },
+    async [Symbol.asyncDispose]() {
+      await cleanup();
     },
   };
 };
@@ -95,103 +100,78 @@ const setEditorValue = (editor: HTMLElement, value: string) => {
 };
 
 test('keeps approve and request changes as direct split-button actions', async () => {
-  const view = await renderReviewButtons();
+  await using view = await renderReviewButtons();
 
-  try {
-    const approve = view.container.querySelector<HTMLButtonElement>(
-      '[aria-label="Approve review"]',
-    );
-    const requestChanges = view.container.querySelector<HTMLButtonElement>(
-      '[aria-label="Request changes"]',
-    );
-    const approveControl = approve?.closest('.review-submit-button');
-
-    expect(approveControl?.tagName).toBe('DIV');
-    expect(approveControl?.classList.contains('codiff-button')).toBe(true);
-    expect(approve?.classList.contains('codiff-button')).toBe(false);
-    expect(approveControl?.querySelector('.review-submit-divider')?.textContent?.trim()).toBe('|');
-
-    await act(async () => approve?.click());
-    expect(view.onSubmitReview).toHaveBeenCalledWith('APPROVE');
-
-    await act(async () => requestChanges?.click());
-    expect(view.onSubmitReview).toHaveBeenLastCalledWith('REQUEST_CHANGES');
-  } finally {
-    await view.cleanup();
-  }
+  const approve = view.container.querySelector<HTMLButtonElement>('[aria-label="Approve review"]');
+  const requestChanges = view.container.querySelector<HTMLButtonElement>(
+    '[aria-label="Request changes"]',
+  );
+  const approveControl = approve?.closest('.review-submit-button');
+  expect(approveControl?.tagName).toBe('DIV');
+  expect(approveControl?.classList.contains('codiff-button')).toBe(true);
+  expect(approve?.classList.contains('codiff-button')).toBe(false);
+  expect(approveControl?.querySelector('.review-submit-divider')?.textContent?.trim()).toBe('|');
+  await act(async () => approve?.click());
+  expect(view.onSubmitReview).toHaveBeenCalledWith('APPROVE');
+  await act(async () => requestChanges?.click());
+  expect(view.onSubmitReview).toHaveBeenLastCalledWith('REQUEST_CHANGES');
 });
 
 test('submits MDX review comments with either review outcome', async () => {
-  const view = await renderReviewButtons();
+  await using view = await renderReviewButtons();
 
-  try {
-    for (const review of [
-      {
-        body: 'Looks good to me.',
-        commentLabel: 'Add approval comment',
-        event: 'APPROVE',
-        groupLabel: 'Approve with comment',
-        label: 'Approve',
-      },
-      {
-        body: 'Please address the remaining concern.',
-        commentLabel: 'Add request changes comment',
-        event: 'REQUEST_CHANGES',
-        groupLabel: 'Request Changes with comment',
-        label: 'Request Changes',
-      },
-    ] as const) {
-      const toggle = view.container.querySelector<HTMLButtonElement>(
-        `[aria-label="${review.commentLabel}"]`,
-      );
-      await act(async () => toggle?.click());
-
-      const popover = view.container.querySelector<HTMLElement>(
-        `[aria-label="${review.groupLabel}"]`,
-      );
-      const editor = popover?.querySelector<HTMLElement>(
-        `[contenteditable="true"][aria-label="${review.commentLabel}"]`,
-      );
-      expect(popover).not.toBeNull();
-      expect(editor).not.toBeNull();
-
-      await act(async () => {
-        if (editor) {
-          setEditorValue(editor, review.body);
-        }
-      });
-
-      const submit = [...(popover?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
-        (button) => button.textContent?.trim() === review.label,
-      );
-      expect(submit?.disabled).toBe(false);
-      await act(async () => submit?.click());
-
-      expect(view.onSubmitReview).toHaveBeenLastCalledWith(review.event, review.body);
-      expect(view.container.querySelector(`[aria-label="${review.groupLabel}"]`)).toBeNull();
-    }
-  } finally {
-    await view.cleanup();
+  for (const review of [
+    {
+      body: 'Looks good to me.',
+      commentLabel: 'Add approval comment',
+      event: 'APPROVE',
+      groupLabel: 'Approve with comment',
+      label: 'Approve',
+    },
+    {
+      body: 'Please address the remaining concern.',
+      commentLabel: 'Add request changes comment',
+      event: 'REQUEST_CHANGES',
+      groupLabel: 'Request Changes with comment',
+      label: 'Request Changes',
+    },
+  ] as const) {
+    const toggle = view.container.querySelector<HTMLButtonElement>(
+      `[aria-label="${review.commentLabel}"]`,
+    );
+    await act(async () => toggle?.click());
+    const popover = view.container.querySelector<HTMLElement>(
+      `[aria-label="${review.groupLabel}"]`,
+    );
+    const editor = popover?.querySelector<HTMLElement>(
+      `[contenteditable="true"][aria-label="${review.commentLabel}"]`,
+    );
+    expect(popover).not.toBeNull();
+    expect(editor).not.toBeNull();
+    await act(async () => {
+      if (editor) {
+        setEditorValue(editor, review.body);
+      }
+    });
+    const submit = [...(popover?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+      (button) => button.textContent?.trim() === review.label,
+    );
+    expect(submit?.disabled).toBe(false);
+    await act(async () => submit?.click());
+    expect(view.onSubmitReview).toHaveBeenLastCalledWith(review.event, review.body);
+    expect(view.container.querySelector(`[aria-label="${review.groupLabel}"]`)).toBeNull();
   }
 });
 
 test('closes review comment popovers when the actions become disabled', async () => {
-  const view = await renderReviewButtons();
+  await using view = await renderReviewButtons();
 
-  try {
-    await act(async () => {
-      view.container
-        .querySelector<HTMLButtonElement>('[aria-label="Add approval comment"]')
-        ?.click();
-    });
-    expect(view.container.querySelector('[aria-label="Approve with comment"]')).not.toBeNull();
-
-    await view.rerender(true);
-    expect(view.container.querySelector('[aria-label="Approve with comment"]')).toBeNull();
-
-    await view.rerender(false);
-    expect(view.container.querySelector('[aria-label="Approve with comment"]')).toBeNull();
-  } finally {
-    await view.cleanup();
-  }
+  await act(async () => {
+    view.container.querySelector<HTMLButtonElement>('[aria-label="Add approval comment"]')?.click();
+  });
+  expect(view.container.querySelector('[aria-label="Approve with comment"]')).not.toBeNull();
+  await view.rerender(true);
+  expect(view.container.querySelector('[aria-label="Approve with comment"]')).toBeNull();
+  await view.rerender(false);
+  expect(view.container.querySelector('[aria-label="Approve with comment"]')).toBeNull();
 });

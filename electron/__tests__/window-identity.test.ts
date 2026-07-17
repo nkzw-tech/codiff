@@ -1,11 +1,14 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import { getGitTestEnvironment, removeGitTestDirectory } from '../../core/__tests__/helpers/git.ts';
+import { getGitTestEnvironment } from '../../core/__tests__/helpers/git.ts';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepositoryState } =
@@ -54,214 +57,187 @@ const git = async (repo: string, args: ReadonlyArray<string>) => {
   return result.stdout.trim();
 };
 
-const createRepository = async () => {
-  const repositoryPath = await mkdtemp(join(tmpdir(), 'codiff-window-identity-'));
-  await git(repositoryPath, ['init']);
-  await git(repositoryPath, ['commit', '--allow-empty', '-m', 'initial']);
-  return repositoryPath;
+const initRepository = async (path: string) => {
+  await git(path, ['init']);
+  await git(path, ['commit', '--allow-empty', '-m', 'initial']);
 };
 
 test.sequential('plan window identities do not invoke Git outside repositories', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-plan-window-identity-'));
-  const fakeBin = join(directory, 'bin');
-  const gitMarker = join(directory, 'git-invoked');
-  const planFile = join(directory, 'plan.md');
-  const previousPath = process.env.PATH;
+  await using directory = await createTemporaryDirectory('codiff-plan-window-identity-');
+  const fakeBin = join(directory.path, 'bin');
+  const gitMarker = join(directory.path, 'git-invoked');
+  const planFile = join(directory.path, 'plan.md');
+  await using _environment = createTemporaryEnvironment({
+    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+  });
 
-  try {
-    await mkdir(fakeBin);
-    await writeFile(join(fakeBin, 'git'), `#!/bin/sh\nprintf invoked > "${gitMarker}"\nexit 99\n`);
-    await chmod(join(fakeBin, 'git'), 0o755);
-    await writeFile(planFile, '# Plan\n');
-    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
-    const realDirectory = await realpath(directory);
-    const realPlanFile = await realpath(planFile);
+  await mkdir(fakeBin);
+  await writeFile(join(fakeBin, 'git'), `#!/bin/sh\nprintf invoked > "${gitMarker}"\nexit 99\n`);
+  await chmod(join(fakeBin, 'git'), 0o755);
+  await writeFile(planFile, '# Plan\n');
+  const realDirectory = await realpath(directory.path);
+  const realPlanFile = await realpath(planFile);
 
-    expect(
-      getWindowIdentity(directory, {
-        planFile,
-        planResultFile: join(directory, 'result.json'),
-      }),
-    ).toMatchObject({
-      repositoryRoot: realDirectory,
-      sourceKey: `plan:${realPlanFile}`,
-    });
-    expect(await readFile(gitMarker, 'utf8').catch(() => null)).toBeNull();
-  } finally {
-    process.env.PATH = previousPath;
-    await removeGitTestDirectory(directory);
-  }
+  expect(
+    getWindowIdentity(directory.path, {
+      planFile,
+      planResultFile: join(directory.path, 'result.json'),
+    }),
+  ).toMatchObject({
+    repositoryRoot: realDirectory,
+    sourceKey: `plan:${realPlanFile}`,
+  });
+  expect(await readFile(gitMarker, 'utf8').catch(() => null)).toBeNull();
 });
 
 test('window identities match working-tree launches inside the same repository', async () => {
-  const repositoryPath = await createRepository();
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
 
-  try {
-    const nestedPath = join(repositoryPath, 'src');
-    await mkdir(nestedPath);
+  const nestedPath = join(directory.path, 'src');
+  await mkdir(nestedPath);
 
-    expect(getWindowIdentity(nestedPath)?.key).toBe(getWindowIdentity(repositoryPath)?.key);
-  } finally {
-    await removeGitTestDirectory(repositoryPath);
-  }
+  expect(getWindowIdentity(nestedPath)?.key).toBe(getWindowIdentity(directory.path)?.key);
 });
 
 test('window identities resolve commit refs to the same commit sha', async () => {
-  const repositoryPath = await createRepository();
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
 
-  try {
-    const head = await git(repositoryPath, ['rev-parse', 'HEAD']);
+  const head = await git(directory.path, ['rev-parse', 'HEAD']);
 
-    expect(
-      getWindowIdentity(repositoryPath, {
-        source: { ref: 'HEAD', type: 'commit' },
-      })?.sourceKey,
-    ).toBe(`commit:${head}`);
-    expect(
-      getWindowIdentity(repositoryPath, {
-        source: { ref: head.slice(0, 8), type: 'commit' },
-      })?.key,
-    ).toBe(
-      getWindowIdentity(repositoryPath, {
-        source: { ref: 'HEAD', type: 'commit' },
-      })?.key,
-    );
-  } finally {
-    await removeGitTestDirectory(repositoryPath);
-  }
+  expect(
+    getWindowIdentity(directory.path, {
+      source: { ref: 'HEAD', type: 'commit' },
+    })?.sourceKey,
+  ).toBe(`commit:${head}`);
+  expect(
+    getWindowIdentity(directory.path, {
+      source: { ref: head.slice(0, 8), type: 'commit' },
+    })?.key,
+  ).toBe(
+    getWindowIdentity(directory.path, {
+      source: { ref: 'HEAD', type: 'commit' },
+    })?.key,
+  );
 });
 
 test.sequential('resolved repository states build identities without invoking Git', async () => {
-  const repositoryPath = await createRepository();
-  const fakeBin = await mkdtemp(join(tmpdir(), 'codiff-resolved-window-identity-'));
-  const gitMarker = join(fakeBin, 'git-invoked');
-  const previousPath = process.env.PATH;
+  await using repository = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(repository.path);
+  await using fakeBin = await createTemporaryDirectory('codiff-resolved-window-identity-');
+  const gitMarker = join(fakeBin.path, 'git-invoked');
+  await using _environment = createTemporaryEnvironment({
+    PATH: `${fakeBin.path}:${process.env.PATH ?? ''}`,
+  });
 
-  try {
-    const head = await git(repositoryPath, ['rev-parse', 'HEAD']);
-    await writeFile(join(fakeBin, 'git'), `#!/bin/sh\nprintf invoked > "${gitMarker}"\nexit 99\n`);
-    await chmod(join(fakeBin, 'git'), 0o755);
-    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+  const head = await git(repository.path, ['rev-parse', 'HEAD']);
+  await writeFile(
+    join(fakeBin.path, 'git'),
+    `#!/bin/sh\nprintf invoked > "${gitMarker}"\nexit 99\n`,
+  );
+  await chmod(join(fakeBin.path, 'git'), 0o755);
 
-    expect(
-      getWindowIdentityForRepositoryState({
-        root: repositoryPath,
-        source: { ref: head, type: 'commit' },
-      }),
-    ).toMatchObject({
-      repositoryRoot: await realpath(repositoryPath),
-      sourceKey: `commit:${head}`,
-    });
-    expect(await readFile(gitMarker, 'utf8').catch(() => null)).toBeNull();
-  } finally {
-    process.env.PATH = previousPath;
-    await removeGitTestDirectory(fakeBin);
-    await removeGitTestDirectory(repositoryPath);
-  }
+  expect(
+    getWindowIdentityForRepositoryState({
+      root: repository.path,
+      source: { ref: head, type: 'commit' },
+    }),
+  ).toMatchObject({
+    repositoryRoot: await realpath(repository.path),
+    sourceKey: `commit:${head}`,
+  });
+  expect(await readFile(gitMarker, 'utf8').catch(() => null)).toBeNull();
 });
 
 test('implicit walkthrough identities use HEAD only when the working tree is clean', async () => {
-  const repositoryPath = await createRepository();
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
 
-  try {
-    const headIdentity = getWindowIdentity(repositoryPath, {
-      source: { ref: 'HEAD', type: 'commit' },
-    });
-    expect(getWindowIdentity(repositoryPath, { walkthrough: true })?.key).toBe(headIdentity?.key);
+  const headIdentity = getWindowIdentity(directory.path, {
+    source: { ref: 'HEAD', type: 'commit' },
+  });
+  expect(getWindowIdentity(directory.path, { walkthrough: true })?.key).toBe(headIdentity?.key);
 
-    await writeFile(join(repositoryPath, 'local.txt'), 'change\n');
-    expect(getWindowIdentity(repositoryPath, { walkthrough: true })?.sourceKey).toBe(
-      'working-tree',
-    );
+  await writeFile(join(directory.path, 'local.txt'), 'change\n');
+  expect(getWindowIdentity(directory.path, { walkthrough: true })?.sourceKey).toBe('working-tree');
 
-    await rm(join(repositoryPath, 'local.txt'));
-    expect(
-      getWindowIdentity(repositoryPath, {
-        walkthrough: true,
-        walkthroughFile: '/tmp/walkthrough.json',
-      })?.sourceKey,
-    ).toBe('working-tree');
-  } finally {
-    await removeGitTestDirectory(repositoryPath);
-  }
+  await rm(join(directory.path, 'local.txt'));
+  expect(
+    getWindowIdentity(directory.path, {
+      walkthrough: true,
+      walkthroughFile: '/tmp/walkthrough.json',
+    })?.sourceKey,
+  ).toBe('working-tree');
 });
 
 test('window identities distinguish branch history launches', async () => {
-  const repositoryPath = await createRepository();
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
 
-  try {
-    await git(repositoryPath, ['checkout', '-b', 'feature']);
-    const head = (await git(repositoryPath, ['rev-parse', 'HEAD'])).trim().toLowerCase();
+  await git(directory.path, ['checkout', '-b', 'feature']);
+  const head = (await git(directory.path, ['rev-parse', 'HEAD'])).trim().toLowerCase();
 
-    expect(
-      getWindowIdentity(repositoryPath, {
-        source: { ref: 'feature', type: 'branch' },
-      })?.sourceKey,
-    ).toBe(`branch-diff:feature:${head}:${head}`);
+  expect(
+    getWindowIdentity(directory.path, {
+      source: { ref: 'feature', type: 'branch' },
+    })?.sourceKey,
+  ).toBe(`branch-diff:feature:${head}:${head}`);
 
-    await git(repositoryPath, ['commit', '--allow-empty', '-m', 'feature update']);
-    const nextHead = (await git(repositoryPath, ['rev-parse', 'HEAD'])).trim().toLowerCase();
+  await git(directory.path, ['commit', '--allow-empty', '-m', 'feature update']);
+  const nextHead = (await git(directory.path, ['rev-parse', 'HEAD'])).trim().toLowerCase();
 
-    expect(
-      getWindowIdentity(repositoryPath, {
-        source: { baseRef: head, headRef: nextHead, ref: 'feature', type: 'branch-diff' },
-      })?.sourceKey,
-    ).toBe(`branch-diff:feature:${head}:${nextHead}`);
-  } finally {
-    await removeGitTestDirectory(repositoryPath);
-  }
+  expect(
+    getWindowIdentity(directory.path, {
+      source: { baseRef: head, headRef: nextHead, ref: 'feature', type: 'branch-diff' },
+    })?.sourceKey,
+  ).toBe(`branch-diff:feature:${head}:${nextHead}`);
 });
 
 test('window identities normalize GitHub pull request sources', async () => {
-  const repositoryPath = await createRepository();
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
 
-  try {
-    expect(
-      getWindowIdentity(repositoryPath, {
-        source: {
-          type: 'pull-request',
-          url: 'https://github.com/NKZW-Tech/Codiff/pull/8',
-        },
-      })?.sourceKey,
-    ).toBe('pull-request:nkzw-tech/codiff#8');
-    expect(
-      getWindowIdentity(repositoryPath, {
-        source: {
-          number: 8,
-          owner: 'nkzw-tech',
-          repo: 'codiff',
-          type: 'pull-request',
-          url: 'https://github.com/nkzw-tech/codiff/pull/8',
-        },
-      })?.key,
-    ).toBe(
-      getWindowIdentity(repositoryPath, {
-        source: {
-          type: 'pull-request',
-          url: 'https://github.com/NKZW-Tech/Codiff/pull/8',
-        },
-      })?.key,
-    );
-  } finally {
-    await removeGitTestDirectory(repositoryPath);
-  }
+  expect(
+    getWindowIdentity(directory.path, {
+      source: {
+        type: 'pull-request',
+        url: 'https://github.com/NKZW-Tech/Codiff/pull/8',
+      },
+    })?.sourceKey,
+  ).toBe('pull-request:nkzw-tech/codiff#8');
+  expect(
+    getWindowIdentity(directory.path, {
+      source: {
+        number: 8,
+        owner: 'nkzw-tech',
+        repo: 'codiff',
+        type: 'pull-request',
+        url: 'https://github.com/nkzw-tech/codiff/pull/8',
+      },
+    })?.key,
+  ).toBe(
+    getWindowIdentity(directory.path, {
+      source: {
+        type: 'pull-request',
+        url: 'https://github.com/NKZW-Tech/Codiff/pull/8',
+      },
+    })?.key,
+  );
 });
 
 test('window identities normalize GitLab merge request sources', async () => {
-  const repositoryPath = await createRepository();
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
 
-  try {
-    expect(
-      getWindowIdentity(repositoryPath, {
-        source: {
-          type: 'pull-request',
-          url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/8',
-        },
-      })?.sourceKey,
-    ).toBe('pull-request:gitlab:gitlab.example.com/group/subgroup/project#8');
-  } finally {
-    await removeGitTestDirectory(repositoryPath);
-  }
+  expect(
+    getWindowIdentity(directory.path, {
+      source: {
+        type: 'pull-request',
+        url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/8',
+      },
+    })?.sourceKey,
+  ).toBe('pull-request:gitlab:gitlab.example.com/group/subgroup/project#8');
 });
 
 test('window identity matching requires exact identity matches', () => {

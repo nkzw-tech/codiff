@@ -74,7 +74,7 @@ test('app commands register the complete command set and delegate dynamic action
   const onToggleViewed = vi.fn();
   const onToggleWordWrap = vi.fn();
   let commands: ReturnType<typeof useAppCommands> = [];
-  const view = await renderReact(
+  await using _view = await renderReact(
     <AppCommandsHarness
       onCommands={(nextCommands) => (commands = nextCommands)}
       options={{
@@ -95,61 +95,53 @@ test('app commands register the complete command set and delegate dynamic action
     />,
   );
 
-  try {
-    expect(commands.map((command) => command.id)).toEqual([
-      'file-filter',
-      'diff-search',
-      'sidebar-tree',
-      'sidebar-history',
-      'sidebar-walkthrough',
-      'copy-comments',
-      'copy-comments-and-close',
-      'toggle-viewed',
-      'open-file',
-      'toggle-sidebar',
-      'toggle-outdated-comments',
-      'toggle-diff-layout',
-      'toggle-word-wrap',
-      'increase-code-font-size',
-      'decrease-code-font-size',
-      'reset-code-font-size',
-      'open-config-file',
-      'reload',
-    ]);
-
-    const command = (id: string) => {
-      const match = commands.find((candidate) => candidate.id === id);
-      if (!match) {
-        throw new Error(`Missing command: ${id}`);
-      }
-      return match;
-    };
-
-    command('file-filter').execute();
-    command('diff-search').execute();
-    command('sidebar-history').execute();
-    command('open-file').execute();
-    command('toggle-sidebar').execute();
-    command('toggle-word-wrap').execute();
-    command('reload').execute();
-    command('toggle-viewed').execute();
-
-    expect(focusFileFilter).toHaveBeenCalledOnce();
-    expect(onOpenDiffSearch).toHaveBeenCalledOnce();
-    expect(changeSidebarMode).toHaveBeenCalledWith('history');
-    expect(onOpenSelectedFile).toHaveBeenCalledOnce();
-    expect(onToggleSidebar).toHaveBeenCalledOnce();
-    expect(onToggleWordWrap).toHaveBeenCalledOnce();
-    expect(onRefreshRepository).toHaveBeenCalledOnce();
-    expect(command('open-file').description?.()).toBe(file.path);
-    expect(onToggleViewed).toHaveBeenCalledWith(file, true, target.reviewIdentity);
-
-    expect(command('toggle-word-wrap').description?.()).toBe('Enable Word Wrap');
-    preferencesRef.current.wordWrap = true;
-    expect(command('toggle-word-wrap').description?.()).toBe('Disable Word Wrap');
-  } finally {
-    await view.cleanup();
-  }
+  expect(commands.map((command) => command.id)).toEqual([
+    'file-filter',
+    'diff-search',
+    'sidebar-tree',
+    'sidebar-history',
+    'sidebar-walkthrough',
+    'copy-comments',
+    'copy-comments-and-close',
+    'toggle-viewed',
+    'open-file',
+    'toggle-sidebar',
+    'toggle-outdated-comments',
+    'toggle-diff-layout',
+    'toggle-word-wrap',
+    'increase-code-font-size',
+    'decrease-code-font-size',
+    'reset-code-font-size',
+    'open-config-file',
+    'reload',
+  ]);
+  const command = (id: string) => {
+    const match = commands.find((candidate) => candidate.id === id);
+    if (!match) {
+      throw new Error(`Missing command: ${id}`);
+    }
+    return match;
+  };
+  command('file-filter').execute();
+  command('diff-search').execute();
+  command('sidebar-history').execute();
+  command('open-file').execute();
+  command('toggle-sidebar').execute();
+  command('toggle-word-wrap').execute();
+  command('reload').execute();
+  command('toggle-viewed').execute();
+  expect(focusFileFilter).toHaveBeenCalledOnce();
+  expect(onOpenDiffSearch).toHaveBeenCalledOnce();
+  expect(changeSidebarMode).toHaveBeenCalledWith('history');
+  expect(onOpenSelectedFile).toHaveBeenCalledOnce();
+  expect(onToggleSidebar).toHaveBeenCalledOnce();
+  expect(onToggleWordWrap).toHaveBeenCalledOnce();
+  expect(onRefreshRepository).toHaveBeenCalledOnce();
+  expect(command('open-file').description?.()).toBe(file.path);
+  expect(onToggleViewed).toHaveBeenCalledWith(file, true, target.reviewIdentity);
+  expect(command('toggle-word-wrap').description?.()).toBe('Enable Word Wrap');
+  preferencesRef.current.wordWrap = true;
+  expect(command('toggle-word-wrap').description?.()).toBe('Disable Word Wrap');
 });
 
 const keyboardKeymap = {
@@ -192,7 +184,7 @@ test('app keyboard shortcuts route commands and respect native input and walkthr
     }
     return state;
   };
-  const view = await renderReact(
+  await using _view = await renderReact(
     <AppKeyboardShortcutsHarness
       onState={(nextState) => (state = nextState)}
       options={{
@@ -209,49 +201,41 @@ test('app keyboard shortcuts route commands and respect native input and walkthr
     />,
   );
 
-  try {
-    await act(async () => {
-      expect(dispatchKey('keydown', 'c').defaultPrevented).toBe(true);
-    });
-    expect(getState().commandBarVisible).toBe(true);
-
-    await act(async () => {
-      getState().closeCommandBar();
-      dispatchKey('keydown', 'b');
-      dispatchKey('keydown', 'f');
-      dispatchKey('keydown', 'o');
-      dispatchKey('keydown', 'l');
-      dispatchKey('keydown', 'n');
-    });
-    expect(getState().commandBarVisible).toBe(false);
-    expect(onToggleSidebar).toHaveBeenCalledOnce();
-    expect(onOpenDiffSearch).toHaveBeenCalledOnce();
-    expect(onOpenSelectedFile).toHaveBeenCalledOnce();
-    expect(onFocusFileFilter).toHaveBeenCalledOnce();
-    expect(navigateHunks).not.toHaveBeenCalled();
-
-    deferHunkNavigation = false;
-    await act(async () => {
-      dispatchKey('keydown', 'n');
-      dispatchKey('keydown', 'p');
-    });
-    expect(navigateHunks.mock.calls).toEqual([[1], [-1]]);
-
-    const input = document.createElement('input');
-    document.body.append(input);
-    await act(async () => {
-      dispatchKey('keydown', 'z', input);
-    });
-    expect(onToggleWordWrap).not.toHaveBeenCalled();
-
-    await act(async () => {
-      dispatchKey('keydown', 'z');
-    });
-    expect(onToggleWordWrap).toHaveBeenCalledOnce();
-    input.remove();
-  } finally {
-    await view.cleanup();
-  }
+  await act(async () => {
+    expect(dispatchKey('keydown', 'c').defaultPrevented).toBe(true);
+  });
+  expect(getState().commandBarVisible).toBe(true);
+  await act(async () => {
+    getState().closeCommandBar();
+    dispatchKey('keydown', 'b');
+    dispatchKey('keydown', 'f');
+    dispatchKey('keydown', 'o');
+    dispatchKey('keydown', 'l');
+    dispatchKey('keydown', 'n');
+  });
+  expect(getState().commandBarVisible).toBe(false);
+  expect(onToggleSidebar).toHaveBeenCalledOnce();
+  expect(onOpenDiffSearch).toHaveBeenCalledOnce();
+  expect(onOpenSelectedFile).toHaveBeenCalledOnce();
+  expect(onFocusFileFilter).toHaveBeenCalledOnce();
+  expect(navigateHunks).not.toHaveBeenCalled();
+  deferHunkNavigation = false;
+  await act(async () => {
+    dispatchKey('keydown', 'n');
+    dispatchKey('keydown', 'p');
+  });
+  expect(navigateHunks.mock.calls).toEqual([[1], [-1]]);
+  const input = document.createElement('input');
+  document.body.append(input);
+  await act(async () => {
+    dispatchKey('keydown', 'z', input);
+  });
+  expect(onToggleWordWrap).not.toHaveBeenCalled();
+  await act(async () => {
+    dispatchKey('keydown', 'z');
+  });
+  expect(onToggleWordWrap).toHaveBeenCalledOnce();
+  input.remove();
 });
 
 test('shortcut help remains visible only while its key chord is held', async () => {
@@ -262,7 +246,7 @@ test('shortcut help remains visible only while its key chord is held', async () 
     }
     return state;
   };
-  const view = await renderReact(
+  await using _view = await renderReact(
     <AppKeyboardShortcutsHarness
       onState={(nextState) => (state = nextState)}
       options={{
@@ -279,23 +263,17 @@ test('shortcut help remains visible only while its key chord is held', async () 
     />,
   );
 
-  try {
-    await act(async () => {
-      dispatchKey('keydown', '?');
-    });
-    expect(getState().shortcutsHelpVisible).toBe(true);
-
-    await act(async () => {
-      dispatchKey('keyup', '?');
-    });
-    expect(getState().shortcutsHelpVisible).toBe(false);
-
-    await act(async () => {
-      dispatchKey('keydown', '?');
-      window.dispatchEvent(new Event('blur'));
-    });
-    expect(getState().shortcutsHelpVisible).toBe(false);
-  } finally {
-    await view.cleanup();
-  }
+  await act(async () => {
+    dispatchKey('keydown', '?');
+  });
+  expect(getState().shortcutsHelpVisible).toBe(true);
+  await act(async () => {
+    dispatchKey('keyup', '?');
+  });
+  expect(getState().shortcutsHelpVisible).toBe(false);
+  await act(async () => {
+    dispatchKey('keydown', '?');
+    window.dispatchEvent(new Event('blur'));
+  });
+  expect(getState().shortcutsHelpVisible).toBe(false);
 });

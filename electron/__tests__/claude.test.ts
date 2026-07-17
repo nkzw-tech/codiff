@@ -1,8 +1,11 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vite-plus/test';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 import { createCommandTransport } from './helpers/command-transport.ts';
 
 type CommandTransport = ReturnType<typeof createCommandTransport>['transport'];
@@ -39,36 +42,28 @@ test('normalizes Claude Code model preferences to known models', () => {
   expect(normalizeClaudeModel('gpt-4o')).toBe(DEFAULT_CLAUDE_MODEL);
 });
 
-test('rejects invalid explicit Claude CLI overrides', () => {
-  const previousClaudePath = process.env.CODIFF_CLAUDE_PATH;
-  process.env.CODIFF_CLAUDE_PATH = '/tmp/codiff-missing-claude';
+test('rejects invalid explicit Claude CLI overrides', async () => {
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_CLAUDE_PATH: '/tmp/codiff-missing-claude',
+  });
 
+  expect(() => getClaudeCommand()).toThrow('CODIFF_CLAUDE_PATH');
   try {
-    expect(() => getClaudeCommand()).toThrow('CODIFF_CLAUDE_PATH');
-    try {
-      getClaudeCommand();
-    } catch (error) {
-      expect(error).toMatchObject({ code: CLAUDE_NOT_FOUND_CODE });
-    }
-  } finally {
-    if (previousClaudePath == null) {
-      delete process.env.CODIFF_CLAUDE_PATH;
-    } else {
-      process.env.CODIFF_CLAUDE_PATH = previousClaudePath;
-    }
+    getClaudeCommand();
+  } catch (error) {
+    expect(error).toMatchObject({ code: CLAUDE_NOT_FOUND_CODE });
   }
 });
 
 test('runs Claude Code headless as a read-only structured-output call', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-claude-'));
-  const fakeClaudePath = join(directory, 'claude');
-  const argsPath = join(directory, 'args.txt');
-  const previousClaudePath = process.env.CODIFF_CLAUDE_PATH;
+  await using directory = await createTemporaryDirectory('codiff-claude-');
+  const fakeClaudePath = join(directory.path, 'claude');
+  const argsPath = join(directory.path, 'args.txt');
+  await using _environment = createTemporaryEnvironment({ CODIFF_CLAUDE_PATH: fakeClaudePath });
 
-  try {
-    await writeFile(
-      fakeClaudePath,
-      `#!/usr/bin/env node
+  await writeFile(
+    fakeClaudePath,
+    `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs');
 const argsPath = ${JSON.stringify(argsPath)};
 for (const arg of process.argv.slice(2)) {
@@ -81,31 +76,22 @@ process.stdin.on('end', () => {
   )});
 });
 `,
-    );
-    await chmod(fakeClaudePath, 0o755);
-    process.env.CODIFF_CLAUDE_PATH = fakeClaudePath;
+  );
+  await chmod(fakeClaudePath, 0o755);
 
-    await expect(
-      runClaude(directory, 'prompt', { type: 'object' }, 'walkthrough.json', 'Timed out.'),
-    ).resolves.toBe('{"version":1}');
+  await expect(
+    runClaude(directory.path, 'prompt', { type: 'object' }, 'walkthrough.json', 'Timed out.'),
+  ).resolves.toBe('{"version":1}');
 
-    const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
-    expect(args).toContain('-p');
-    expect(args).toContain('json');
-    expect(args).not.toContain('stream-json');
-    expect(args).not.toContain('--include-partial-messages');
-    expect(args).toContain('--json-schema');
-    expect(args).toContain('--add-dir');
-    expect(args).toContain(directory);
-    expect(args).toContain('--no-session-persistence');
-  } finally {
-    if (previousClaudePath == null) {
-      delete process.env.CODIFF_CLAUDE_PATH;
-    } else {
-      process.env.CODIFF_CLAUDE_PATH = previousClaudePath;
-    }
-    await rm(directory, { force: true, recursive: true });
-  }
+  const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
+  expect(args).toContain('-p');
+  expect(args).toContain('json');
+  expect(args).not.toContain('stream-json');
+  expect(args).not.toContain('--include-partial-messages');
+  expect(args).toContain('--json-schema');
+  expect(args).toContain('--add-dir');
+  expect(args).toContain(directory.path);
+  expect(args).toContain('--no-session-persistence');
 });
 
 test('maps Claude thinking and text deltas to semantic walkthrough progress', async () => {
@@ -220,17 +206,19 @@ test('maps Claude structured output deltas to response progress', async () => {
 test('supports per-call Claude Code timeouts', async () => {
   const { transport } = createCommandTransport(() => {});
   vi.useFakeTimers();
-  try {
-    const result = runClaude('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.', {
-      commandTransport: transport,
-      timeoutMs: 10,
-    });
-    const rejection = expect(result).rejects.toThrow('Timed out.');
-    await vi.advanceTimersByTimeAsync(10);
-    await rejection;
-  } finally {
-    vi.useRealTimers();
-  }
+  using _timers = {
+    [Symbol.dispose]() {
+      vi.useRealTimers();
+    },
+  };
+
+  const result = runClaude('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.', {
+    commandTransport: transport,
+    timeoutMs: 10,
+  });
+  const rejection = expect(result).rejects.toThrow('Timed out.');
+  await vi.advanceTimersByTimeAsync(10);
+  await rejection;
 });
 
 test('surfaces a helpful message when Claude Code is not logged in', async () => {

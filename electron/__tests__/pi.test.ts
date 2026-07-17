@@ -1,8 +1,11 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const {
@@ -56,37 +59,29 @@ test('detects Pi-not-found errors by code', () => {
   expect(isPiNotFoundError(null)).toBe(false);
 });
 
-test('rejects invalid explicit Pi CLI overrides', () => {
-  const previousPiPath = process.env.CODIFF_PI_PATH;
-  process.env.CODIFF_PI_PATH = '/tmp/codiff-missing-pi';
+test('rejects invalid explicit Pi CLI overrides', async () => {
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_PI_PATH: '/tmp/codiff-missing-pi',
+  });
 
+  expect(() => getPiCommand()).toThrow('CODIFF_PI_PATH');
   try {
-    expect(() => getPiCommand()).toThrow('CODIFF_PI_PATH');
-    try {
-      getPiCommand();
-    } catch (error) {
-      expect(error).toMatchObject({ code: PI_NOT_FOUND_CODE });
-    }
-  } finally {
-    if (previousPiPath == null) {
-      delete process.env.CODIFF_PI_PATH;
-    } else {
-      process.env.CODIFF_PI_PATH = previousPiPath;
-    }
+    getPiCommand();
+  } catch (error) {
+    expect(error).toMatchObject({ code: PI_NOT_FOUND_CODE });
   }
 });
 
 test('runs Pi as an external read-only ephemeral CLI call', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-pi-'));
-  const fakePiPath = join(directory, 'pi');
-  const argsPath = join(directory, 'args.txt');
-  const stdinPath = join(directory, 'stdin.txt');
-  const previousPiPath = process.env.CODIFF_PI_PATH;
+  await using directory = await createTemporaryDirectory('codiff-pi-');
+  const fakePiPath = join(directory.path, 'pi');
+  const argsPath = join(directory.path, 'args.txt');
+  const stdinPath = join(directory.path, 'stdin.txt');
+  await using _environment = createTemporaryEnvironment({ CODIFF_PI_PATH: fakePiPath });
 
-  try {
-    await writeFile(
-      fakePiPath,
-      `#!/usr/bin/env node
+  await writeFile(
+    fakePiPath,
+    `#!/usr/bin/env node
 const { appendFileSync, writeFileSync } = require('node:fs');
 const argsPath = ${JSON.stringify(argsPath)};
 const stdinPath = ${JSON.stringify(stdinPath)};
@@ -102,32 +97,23 @@ process.stdin.on('end', () => {
   process.stdout.write('{"version":1}');
 });
 `,
-    );
-    await chmod(fakePiPath, 0o755);
-    process.env.CODIFF_PI_PATH = fakePiPath;
+  );
+  await chmod(fakePiPath, 0o755);
 
-    await expect(
-      runPi(directory, 'prompt', { required: ['version'], type: 'object' }, 'walkthrough.json'),
-    ).resolves.toBe('{"version":1}');
+  await expect(
+    runPi(directory.path, 'prompt', { required: ['version'], type: 'object' }, 'walkthrough.json'),
+  ).resolves.toBe('{"version":1}');
 
-    const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
-    expect(args).toContain('--print');
-    expect(args).toContain('--no-session');
-    expect(args).toContain('--no-skills');
-    expect(args).toContain('--no-prompt-templates');
-    expect(args).toContain('--no-context-files');
-    expect(args).toContain('--tools');
-    expect(args).toContain('read,grep,find,ls');
-    expect(args).not.toContain('--model');
-    const stdin = await readFile(stdinPath, 'utf8');
-    expect(stdin).toContain('prompt');
-    expect(stdin).toContain('Follow this JSON Schema exactly');
-  } finally {
-    if (previousPiPath == null) {
-      delete process.env.CODIFF_PI_PATH;
-    } else {
-      process.env.CODIFF_PI_PATH = previousPiPath;
-    }
-    await rm(directory, { force: true, recursive: true });
-  }
+  const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
+  expect(args).toContain('--print');
+  expect(args).toContain('--no-session');
+  expect(args).toContain('--no-skills');
+  expect(args).toContain('--no-prompt-templates');
+  expect(args).toContain('--no-context-files');
+  expect(args).toContain('--tools');
+  expect(args).toContain('read,grep,find,ls');
+  expect(args).not.toContain('--model');
+  const stdin = await readFile(stdinPath, 'utf8');
+  expect(stdin).toContain('prompt');
+  expect(stdin).toContain('Follow this JSON Schema exactly');
 });

@@ -28,28 +28,27 @@ test('unsupported Markdown is never left in a partially editable editor', async 
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<MarkdownDocumentEditor document={markdownDocument} />);
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector('[role="alert"]')).not.toBeNull();
-    });
-    expect(container.querySelector('[contenteditable="true"]')).toBeNull();
-    expect(container.querySelector('.codiff-markdown-editor-source')?.textContent).toBe(
-      markdownDocument.content,
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(saveMarkdownDocument).not.toHaveBeenCalled();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<MarkdownDocumentEditor document={markdownDocument} />);
+  });
+  await waitFor(() => {
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  });
+  expect(container.querySelector('[contenteditable="true"]')).toBeNull();
+  expect(container.querySelector('.codiff-markdown-editor-source')?.textContent).toBe(
+    markdownDocument.content,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(saveMarkdownDocument).not.toHaveBeenCalled();
 });
 
 test('standard Markdown images remain editable', async () => {
@@ -66,20 +65,20 @@ test('standard Markdown images remain editable', async () => {
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<MarkdownDocumentEditor document={imageDocument} />);
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector('[contenteditable="true"]')).not.toBeNull();
-    });
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<MarkdownDocumentEditor document={imageDocument} />);
+  });
+  await waitFor(() => {
+    expect(container.querySelector('[contenteditable="true"]')).not.toBeNull();
+  });
+  expect(container.querySelector('[role="alert"]')).toBeNull();
 });

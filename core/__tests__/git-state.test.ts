@@ -1,8 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
@@ -13,7 +12,8 @@ import type {
   RepositoryState,
   ReviewSource,
 } from '../types.ts';
-import { getGitTestEnvironment, removeGitTestDirectory } from './helpers/git.ts';
+import { getGitTestEnvironment, withGitTestEnvironment } from './helpers/git.ts';
+import { createTemporaryDirectory, createTemporaryEnvironment } from './helpers/resources.ts';
 
 type StatusEntry = {
   oldPath?: string;
@@ -175,12 +175,6 @@ const git = async (repo: string, args: ReadonlyArray<string>) => {
   return stdout;
 };
 
-const createRepo = async () => {
-  const repo = await mkdtemp(join(tmpdir(), 'codiff-git-state-'));
-  await git(repo, ['init']);
-  return realpath(repo);
-};
-
 const writeRepoFile = async (repo: string, path: string, contents: string | Uint8Array) => {
   const absolutePath = join(repo, path);
   await mkdir(dirname(absolutePath), { recursive: true });
@@ -196,13 +190,12 @@ const withFakeGitHub = async (
   mode: 'diagnosis-fails' | 'no-pending-review' | 'pending-review' | 'success',
   callback: (repo: string, readCalls: () => ReadonlyArray<ReadonlyArray<string>>) => Promise<void>,
 ) => {
-  const repo = await createRepo();
-  const fakeBin = await mkdtemp(join(tmpdir(), 'codiff-github-'));
-  const fakeGh = join(fakeBin, 'gh');
-  const callsPath = join(fakeBin, 'calls.jsonl');
-  const originalPath = process.env.PATH;
-  const originalMode = process.env.CODIFF_GITHUB_TEST_MODE;
-  const originalCallsPath = process.env.CODIFF_GITHUB_TEST_CALLS;
+  await using repoDirectory = await createTemporaryDirectory('codiff-git-state-');
+  const repo = await realpath(repoDirectory.path);
+  await git(repo, ['init']);
+  await using fakeBinDirectory = await createTemporaryDirectory('codiff-github-');
+  const fakeGh = join(fakeBinDirectory.path, 'gh');
+  const callsPath = join(fakeBinDirectory.path, 'calls.jsonl');
 
   await git(repo, ['remote', 'add', 'origin', 'https://github.com/octo/example.git']);
   await writeFile(
@@ -252,36 +245,19 @@ process.stdin.on('end', () => {
 `,
   );
   await chmod(fakeGh, 0o755);
-  process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
-  process.env.CODIFF_GITHUB_TEST_MODE = mode;
-  process.env.CODIFF_GITHUB_TEST_CALLS = callsPath;
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_GITHUB_TEST_CALLS: callsPath,
+    CODIFF_GITHUB_TEST_MODE: mode,
+    PATH: `${fakeBinDirectory.path}:${process.env.PATH ?? ''}`,
+  });
 
-  try {
-    await callback(repo, () =>
-      readFileSync(callsPath, 'utf8')
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => (JSON.parse(line) as { args: ReadonlyArray<string> }).args),
-    );
-  } finally {
-    if (originalPath == null) {
-      delete process.env.PATH;
-    } else {
-      process.env.PATH = originalPath;
-    }
-    if (originalMode == null) {
-      delete process.env.CODIFF_GITHUB_TEST_MODE;
-    } else {
-      process.env.CODIFF_GITHUB_TEST_MODE = originalMode;
-    }
-    if (originalCallsPath == null) {
-      delete process.env.CODIFF_GITHUB_TEST_CALLS;
-    } else {
-      process.env.CODIFF_GITHUB_TEST_CALLS = originalCallsPath;
-    }
-    await Promise.all([removeGitTestDirectory(repo), removeGitTestDirectory(fakeBin)]);
-  }
+  await callback(repo, () =>
+    readFileSync(callsPath, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => (JSON.parse(line) as { args: ReadonlyArray<string> }).args),
+  );
 };
 
 const pullRequestCommentRequest = {
@@ -299,12 +275,12 @@ const pullRequestCommentRequest = {
 };
 
 const withRepo = async (run: (repo: string) => Promise<void>) => {
-  const repo = await createRepo();
-  try {
+  await withGitTestEnvironment(async () => {
+    await using directory = await createTemporaryDirectory('codiff-git-state-');
+    const repo = await realpath(directory.path);
+    await git(repo, ['init']);
     await run(repo);
-  } finally {
-    await removeGitTestDirectory(repo);
-  }
+  });
 };
 
 test('readRepositoryState marks generated files from gitattributes and path heuristics', async () => {
@@ -362,8 +338,8 @@ test('historical generated attributes fall back to a temporary index without --s
       '.gitattributes',
       '*.api.ts -linguist-generated\npnpm-lock.yaml linguist-generated\n',
     );
-    const wrapperDirectory = await mkdtemp(join(tmpdir(), 'codiff-old-git-'));
-    const wrapperPath = join(wrapperDirectory, 'git');
+    await using wrapperDirectory = await createTemporaryDirectory('codiff-old-git-');
+    const wrapperPath = join(wrapperDirectory.path, 'git');
     await writeFile(
       wrapperPath,
       `#!/bin/sh
@@ -380,35 +356,21 @@ exec git "$@"
     );
     await chmod(wrapperPath, 0o755);
 
-    const originalPath = process.env.PATH;
-    const originalGitPath = process.env.CODIFF_TEST_ORIGINAL_PATH;
-    process.env.CODIFF_TEST_ORIGINAL_PATH = originalPath ?? '';
-    process.env.PATH = `${wrapperDirectory}:${originalPath ?? ''}`;
-    try {
-      const generatedStates = await readGeneratedAttributeStates(
-        repo,
-        ['client.api.ts', 'pnpm-lock.yaml'],
-        commit,
-      );
-      expect(generatedStates).toEqual(
-        new Map([
-          ['client.api.ts', true],
-          ['pnpm-lock.yaml', false],
-        ]),
-      );
-    } finally {
-      if (originalPath == null) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = originalPath;
-      }
-      if (originalGitPath == null) {
-        delete process.env.CODIFF_TEST_ORIGINAL_PATH;
-      } else {
-        process.env.CODIFF_TEST_ORIGINAL_PATH = originalGitPath;
-      }
-      await removeGitTestDirectory(wrapperDirectory);
-    }
+    await using _environment = createTemporaryEnvironment({
+      CODIFF_TEST_ORIGINAL_PATH: process.env.PATH ?? '',
+      PATH: `${wrapperDirectory.path}:${process.env.PATH ?? ''}`,
+    });
+    const generatedStates = await readGeneratedAttributeStates(
+      repo,
+      ['client.api.ts', 'pnpm-lock.yaml'],
+      commit,
+    );
+    expect(generatedStates).toEqual(
+      new Map([
+        ['client.api.ts', true],
+        ['pnpm-lock.yaml', false],
+      ]),
+    );
   });
 });
 
@@ -1088,17 +1050,8 @@ test.sequential('clean implicit walkthrough reads use a bounded number of Git pr
     await commitAll(repo, 'initial commit');
 
     const tracePath = join(repo, '.git', 'walkthrough-trace.jsonl');
-    const previousTrace = process.env.GIT_TRACE2_EVENT;
-    process.env.GIT_TRACE2_EVENT = tracePath;
-    try {
-      await readWalkthroughRepositoryState(repo);
-    } finally {
-      if (previousTrace == null) {
-        delete process.env.GIT_TRACE2_EVENT;
-      } else {
-        process.env.GIT_TRACE2_EVENT = previousTrace;
-      }
-    }
+    await using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
+    await readWalkthroughRepositoryState(repo);
     const processCount = readFileSync(tracePath, 'utf8')
       .trim()
       .split('\n')
@@ -1790,12 +1743,8 @@ test('readRepositoryState defers medium committed files and loads them on demand
 });
 
 test('readRepositoryState rejects non-repository launch paths', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-not-a-repo-'));
-  try {
-    await expect(readRepositoryState(directory)).rejects.toThrow(/not a git repository/i);
-  } finally {
-    await removeGitTestDirectory(directory);
-  }
+  await using directory = await createTemporaryDirectory('codiff-not-a-repo-');
+  await expect(readRepositoryState(directory.path)).rejects.toThrow(/not a git repository/i);
 });
 
 test('readRepositoryState builds a diff for a base...head range', () =>

@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import { removeGitTestDirectory } from '../../core/__tests__/helpers/git.ts';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { submitPullRequestReview } = require('../git-state/pull-request.cjs') as {
@@ -26,29 +28,7 @@ const { submitPullRequestReview } = require('../git-state/pull-request.cjs') as 
 
 const execFileAsync = promisify(execFile);
 
-test('submits normalized GitHub review payloads through the GitHub CLI', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-pull-request-review-'));
-  const repo = join(directory, 'repo');
-  const fakeBin = join(directory, 'bin');
-  const fakeGh = join(fakeBin, 'gh');
-  const callsPath = join(directory, 'calls.jsonl');
-  const previousPath = process.env.PATH;
-  const previousCallsPath = process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS;
-
-  try {
-    await Promise.all([mkdir(repo), mkdir(fakeBin)]);
-    await execFileAsync('git', ['-C', repo, 'init']);
-    await execFileAsync('git', [
-      '-C',
-      repo,
-      'remote',
-      'add',
-      'origin',
-      'git@github.com:nkzw-tech/codiff.git',
-    ]);
-    await writeFile(
-      fakeGh,
-      `#!/usr/bin/env node
+const FAKE_GH_SCRIPT = `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 let input = '';
@@ -65,97 +45,105 @@ process.stdin.on('end', () => {
       : '{}',
   );
 });
-`,
-    );
-    await chmod(fakeGh, 0o755);
-    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
-    process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS = callsPath;
+`;
 
-    const source = {
-      provider: 'github' as const,
-      type: 'pull-request' as const,
-      url: 'https://github.com/nkzw-tech/codiff/pull/12',
-    };
+test('submits normalized GitHub review payloads through the GitHub CLI', async () => {
+  await using directory = await createTemporaryDirectory('codiff-pull-request-review-');
+  const repo = join(directory.path, 'repo');
+  const fakeBin = join(directory.path, 'bin');
+  const fakeGh = join(fakeBin, 'gh');
+  const callsPath = join(directory.path, 'calls.jsonl');
 
-    await submitPullRequestReview(repo, {
-      comments: [
-        {
-          body: 'Please keep this explicit.',
-          filePath: 'src/app.ts',
-          lineNumber: 7,
-          side: 'additions',
+  await Promise.all([mkdir(repo), mkdir(fakeBin)]);
+  await execFileAsync('git', ['-C', repo, 'init']);
+  await execFileAsync('git', [
+    '-C',
+    repo,
+    'remote',
+    'add',
+    'origin',
+    'git@github.com:nkzw-tech/codiff.git',
+  ]);
+  await writeFile(fakeGh, FAKE_GH_SCRIPT);
+  await chmod(fakeGh, 0o755);
+
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_GITHUB_REVIEW_TEST_CALLS: callsPath,
+    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+  });
+
+  const source = {
+    provider: 'github' as const,
+    type: 'pull-request' as const,
+    url: 'https://github.com/nkzw-tech/codiff/pull/12',
+  };
+
+  await submitPullRequestReview(repo, {
+    comments: [
+      {
+        body: 'Please keep this explicit.',
+        filePath: 'src/app.ts',
+        lineNumber: 7,
+        side: 'additions',
+      },
+    ],
+    event: 'COMMENT',
+    source,
+  });
+  await submitPullRequestReview(repo, {
+    body: '  General feedback.  ',
+    comments: [],
+    event: 'COMMENT',
+    source,
+  });
+  await expect(
+    submitPullRequestReview(repo, {
+      body: '   ',
+      comments: [],
+      event: 'COMMENT',
+      source,
+    }),
+  ).rejects.toThrow('A comment review requires an inline comment or a review comment.');
+  await submitPullRequestReview(repo, {
+    comments: [],
+    event: 'REQUEST_CHANGES',
+    source,
+  });
+
+  const calls = (await readFile(callsPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map(
+      (line) =>
+        JSON.parse(line) as {
+          args: ReadonlyArray<string>;
+          input: string;
         },
-      ],
-      event: 'COMMENT',
-      source,
-    });
-    await submitPullRequestReview(repo, {
-      body: '  General feedback.  ',
-      comments: [],
-      event: 'COMMENT',
-      source,
-    });
-    await expect(
-      submitPullRequestReview(repo, {
-        body: '   ',
-        comments: [],
-        event: 'COMMENT',
-        source,
-      }),
-    ).rejects.toThrow('A comment review requires an inline comment or a review comment.');
-    await submitPullRequestReview(repo, {
-      comments: [],
-      event: 'REQUEST_CHANGES',
-      source,
-    });
-
-    const calls = (await readFile(callsPath, 'utf8'))
-      .trim()
-      .split('\n')
-      .map(
-        (line) =>
-          JSON.parse(line) as {
-            args: ReadonlyArray<string>;
-            input: string;
-          },
-      );
-    const reviewCalls = calls.filter((call) =>
-      call.args.includes('repos/nkzw-tech/codiff/pulls/12/reviews'),
     );
-    expect(reviewCalls).toHaveLength(3);
-    expect(JSON.parse(reviewCalls[0].input)).toEqual({
-      body: '',
-      comments: [
-        {
-          body: 'Please keep this explicit.',
-          line: 7,
-          path: 'src/app.ts',
-          side: 'RIGHT',
-        },
-      ],
-      event: 'COMMENT',
-    });
-    expect(JSON.parse(reviewCalls[1].input)).toEqual({
-      body: 'General feedback.',
-      comments: [],
-      event: 'COMMENT',
-    });
-    expect(JSON.parse(reviewCalls[2].input)).toEqual({
-      body: 'Requesting changes.',
-      comments: [],
-      event: 'REQUEST_CHANGES',
-    });
-  } finally {
-    if (previousPath == null) {
-      delete process.env.PATH;
-    } else {
-      process.env.PATH = previousPath;
-    }
-    if (previousCallsPath == null) {
-      delete process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS;
-    } else {
-      process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS = previousCallsPath;
-    }
-    await removeGitTestDirectory(directory);
-  }
+  const reviewCalls = calls.filter((call) =>
+    call.args.includes('repos/nkzw-tech/codiff/pulls/12/reviews'),
+  );
+  expect(reviewCalls).toHaveLength(3);
+  expect(JSON.parse(reviewCalls[0].input)).toEqual({
+    body: '',
+    comments: [
+      {
+        body: 'Please keep this explicit.',
+        line: 7,
+        path: 'src/app.ts',
+        side: 'RIGHT',
+      },
+    ],
+    event: 'COMMENT',
+  });
+  expect(JSON.parse(reviewCalls[1].input)).toEqual({
+    body: 'General feedback.',
+    comments: [],
+    event: 'COMMENT',
+  });
+  expect(JSON.parse(reviewCalls[2].input)).toEqual({
+    body: 'Requesting changes.',
+    comments: [],
+    event: 'REQUEST_CHANGES',
+  });
 });

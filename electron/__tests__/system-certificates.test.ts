@@ -45,20 +45,21 @@ test.sequential('merges default, extra, and system certificates once', () => {
     },
     setDefaultCACertificates,
   });
+  using _cleanup = {
+    [Symbol.dispose]() {
+      restore();
+    },
+  };
 
-  try {
-    expect(trustSystemCertificates()).toEqual({ status: 'applied' });
-    expect(trustSystemCertificates()).toEqual({ status: 'applied' });
-    expect(setDefaultCACertificates).toHaveBeenCalledOnce();
-    expect(setDefaultCACertificates).toHaveBeenCalledWith([
-      'default-ca',
-      'shared-ca',
-      'extra-ca',
-      'system-ca',
-    ]);
-  } finally {
-    restore();
-  }
+  expect(trustSystemCertificates()).toEqual({ status: 'applied' });
+  expect(trustSystemCertificates()).toEqual({ status: 'applied' });
+  expect(setDefaultCACertificates).toHaveBeenCalledOnce();
+  expect(setDefaultCACertificates).toHaveBeenCalledWith([
+    'default-ca',
+    'shared-ca',
+    'extra-ca',
+    'system-ca',
+  ]);
 });
 
 test.sequential('does not mark certificate trust as initialized after a failed apply', () => {
@@ -72,37 +73,40 @@ test.sequential('does not mark certificate trust as initialized after a failed a
     getCACertificates: (source) => (source === 'system' ? ['system-ca'] : []),
     setDefaultCACertificates,
   });
+  using _cleanup = {
+    [Symbol.dispose]() {
+      restore();
+    },
+  };
 
-  try {
-    expect(trustSystemCertificates()).toEqual({ reason: 'keychain busy', status: 'failed' });
-    expect(trustSystemCertificates()).toEqual({ status: 'applied' });
-    expect(setDefaultCACertificates).toHaveBeenCalledTimes(2);
-  } finally {
-    restore();
-  }
+  expect(trustSystemCertificates()).toEqual({ reason: 'keychain busy', status: 'failed' });
+  expect(trustSystemCertificates()).toEqual({ status: 'applied' });
+  expect(setDefaultCACertificates).toHaveBeenCalledTimes(2);
 });
 
 test.sequential('reports unavailable and empty system certificate stores', () => {
   const unavailable = loadTrustSystemCertificates({});
-  try {
-    expect(unavailable.trustSystemCertificates()).toEqual({
-      reason: 'this Node/Electron runtime does not expose system certificate APIs',
-      status: 'unavailable',
-    });
-  } finally {
-    unavailable.restore();
-  }
+  using _unavailableCleanup = {
+    [Symbol.dispose]() {
+      unavailable.restore();
+    },
+  };
+  expect(unavailable.trustSystemCertificates()).toEqual({
+    reason: 'this Node/Electron runtime does not expose system certificate APIs',
+    status: 'unavailable',
+  });
 
   const empty = loadTrustSystemCertificates({
     getCACertificates: () => [],
     setDefaultCACertificates: vi.fn(),
   });
-  try {
-    expect(empty.trustSystemCertificates()).toEqual({
-      reason: 'the system certificate store was empty',
-      status: 'empty-system',
-    });
-  } finally {
-    empty.restore();
-  }
+  using _emptyCleanup = {
+    [Symbol.dispose]() {
+      empty.restore();
+    },
+  };
+  expect(empty.trustSystemCertificates()).toEqual({
+    reason: 'the system certificate store was empty',
+    status: 'empty-system',
+  });
 });

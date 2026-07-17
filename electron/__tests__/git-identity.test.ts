@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import { removeGitTestDirectory } from '../../core/__tests__/helpers/git.ts';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { readGitIdentity } = require('../git-state/working-tree.cjs') as {
@@ -18,57 +20,43 @@ const git = async (repo: string, args: ReadonlyArray<string>) => {
 };
 
 test('uses configured git identity without inferring it from the current commit author', async () => {
-  const repo = await mkdtemp(join(tmpdir(), 'codiff-git-identity-'));
-  try {
-    await git(repo, ['init']);
-    await writeFile(join(repo, 'README.md'), '# Test\n');
-    await git(repo, ['add', 'README.md']);
-    await git(repo, [
-      '-c',
-      'user.name=Commit Author',
-      '-c',
-      'user.email=commit@example.com',
-      'commit',
-      '-m',
-      'Initial commit',
-    ]);
+  await using directory = await createTemporaryDirectory('codiff-git-identity-');
+  await git(directory.path, ['init']);
+  await writeFile(join(directory.path, 'README.md'), '# Test\n');
+  await git(directory.path, ['add', 'README.md']);
+  await git(directory.path, [
+    '-c',
+    'user.name=Commit Author',
+    '-c',
+    'user.email=commit@example.com',
+    'commit',
+    '-m',
+    'Initial commit',
+  ]);
 
-    await git(repo, ['config', 'user.name', 'Configured User']);
-    await git(repo, ['config', 'user.email', 'configured@example.com']);
-    await expect(readGitIdentity(repo)).resolves.toMatchObject({
-      email: 'configured@example.com',
-      name: 'Configured User',
-    });
+  await git(directory.path, ['config', 'user.name', 'Configured User']);
+  await git(directory.path, ['config', 'user.email', 'configured@example.com']);
+  await expect(readGitIdentity(directory.path)).resolves.toMatchObject({
+    email: 'configured@example.com',
+    name: 'Configured User',
+  });
 
-    await git(repo, ['config', 'user.name', '']);
-    await git(repo, ['config', 'user.email', '']);
-    await expect(readGitIdentity(repo)).resolves.toMatchObject({
-      email: '',
-      name: '',
-    });
-  } finally {
-    await removeGitTestDirectory(repo);
-  }
+  await git(directory.path, ['config', 'user.name', '']);
+  await git(directory.path, ['config', 'user.email', '']);
+  await expect(readGitIdentity(directory.path)).resolves.toMatchObject({
+    email: '',
+    name: '',
+  });
 });
 
 test('reads the global git identity outside a repository', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-global-git-identity-'));
-  const globalConfig = join(directory, '.gitconfig');
-  const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
-  try {
-    await writeFile(globalConfig, '[user]\n\tname = Global User\n\temail = global@example.com\n');
-    process.env.GIT_CONFIG_GLOBAL = globalConfig;
+  await using directory = await createTemporaryDirectory('codiff-global-git-identity-');
+  const globalConfig = join(directory.path, '.gitconfig');
+  await writeFile(globalConfig, '[user]\n\tname = Global User\n\temail = global@example.com\n');
+  await using _environment = createTemporaryEnvironment({ GIT_CONFIG_GLOBAL: globalConfig });
 
-    await expect(readGitIdentity(directory)).resolves.toMatchObject({
-      email: 'global@example.com',
-      name: 'Global User',
-    });
-  } finally {
-    if (previousGlobalConfig == null) {
-      delete process.env.GIT_CONFIG_GLOBAL;
-    } else {
-      process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
-    }
-    await removeGitTestDirectory(directory);
-  }
+  await expect(readGitIdentity(directory.path)).resolves.toMatchObject({
+    email: 'global@example.com',
+    name: 'Global User',
+  });
 });

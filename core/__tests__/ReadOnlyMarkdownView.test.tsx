@@ -23,7 +23,7 @@ test('normalizeReadOnlyMarkdownValue collapses repeated blank lines outside fenc
 });
 
 test('ReadOnlyMarkdownView does not render empty paragraph break blocks', async () => {
-  const view = await renderReact(
+  await using view = await renderReact(
     <ReadOnlyMarkdownView
       ariaLabel="Markdown preview"
       className="markdown-preview"
@@ -32,21 +32,14 @@ test('ReadOnlyMarkdownView does not render empty paragraph break blocks', async 
     />,
   );
 
-  try {
-    await waitFor(() => {
-      expect(view.container.textContent).toContain('First paragraph.');
-      expect(view.container.textContent).toContain('Second paragraph.');
-      expect(view.container.textContent).toContain('Third paragraph.');
-    });
-
-    expect(
-      [
-        ...view.container.querySelectorAll<HTMLElement>(
-          '[data-mdx-comment-block-type="paragraph"]',
-        ),
-      ].some((paragraph) => !paragraph.textContent?.trim() && paragraph.querySelector('br')),
-    ).toBe(false);
-  } finally {
-    await view.cleanup();
-  }
+  await waitFor(() => {
+    expect(view.container.textContent).toContain('First paragraph.');
+    expect(view.container.textContent).toContain('Second paragraph.');
+    expect(view.container.textContent).toContain('Third paragraph.');
+  });
+  expect(
+    [
+      ...view.container.querySelectorAll<HTMLElement>('[data-mdx-comment-block-type="paragraph"]'),
+    ].some((paragraph) => !paragraph.textContent?.trim() && paragraph.querySelector('br')),
+  ).toBe(false);
 });

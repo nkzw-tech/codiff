@@ -53,33 +53,33 @@ test('read-only comments can reveal attached targets', async () => {
   document.body.append(container);
   const root = createRoot(container);
 
-  try {
-    await act(async () => {
-      root.render(
-        <PlanCommentCard
-          active={false}
-          detached={false}
-          onActivate={() => {}}
-          onBodyChange={() => {}}
-          onDelete={() => {}}
-          onEmptyBlur={() => {}}
-          onHeightChange={() => {}}
-          onReveal={onReveal}
-          readOnly
-          showDelete={false}
-          thread={thread}
-        />,
-      );
-    });
-
-    const target = container.querySelector<HTMLButtonElement>('.plan-comment-target');
-    expect(target?.disabled).toBe(false);
-    await act(async () => target?.click());
-    expect(onReveal).toHaveBeenCalledOnce();
-  } finally {
-    await act(async () => root.unmount());
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root.render(
+      <PlanCommentCard
+        active={false}
+        detached={false}
+        onActivate={() => {}}
+        onBodyChange={() => {}}
+        onDelete={() => {}}
+        onEmptyBlur={() => {}}
+        onHeightChange={() => {}}
+        onReveal={onReveal}
+        readOnly
+        showDelete={false}
+        thread={thread}
+      />,
+    );
+  });
+  const target = container.querySelector<HTMLButtonElement>('.plan-comment-target');
+  expect(target?.disabled).toBe(false);
+  await act(async () => target?.click());
+  expect(onReveal).toHaveBeenCalledOnce();
 });
 
 test('shared plans render Markdown and comments read-only', async () => {
@@ -161,55 +161,54 @@ test('shared plans render Markdown and comments read-only', async () => {
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<PlanReviewSurface onDeleteShare={onDeleteShare} snapshot={snapshot} />);
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector('.mdx-editor-content h1')?.textContent).toBe(
-        'Ship plan sharing',
-      );
-      expect(container.querySelector('.plan-comment-thread')?.textContent).toContain(
-        'Do not regress walkthrough sharing.',
-      );
-    });
-
-    expect(container.querySelector('.plan-title')?.textContent).toBe('Ship plan sharing');
-    expect(container.querySelector('.plan-header.workspace-top-bar')).not.toBeNull();
-    expect(container.querySelector('.codiff-file-path')?.textContent).toBe('plan.md');
-    expect(
-      container.querySelector('.codiff-header-toggle-static .codiff-file-path')?.textContent,
-    ).toBe('plan.md');
-    expect(container.querySelector('button[aria-label="Download plan"] svg')).not.toBeNull();
-    const deleteShare = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Delete shared plan"]',
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<PlanReviewSurface onDeleteShare={onDeleteShare} snapshot={snapshot} />);
+  });
+  await waitFor(() => {
+    expect(container.querySelector('.mdx-editor-content h1')?.textContent).toBe(
+      'Ship plan sharing',
     );
-    expect(deleteShare?.closest('.plan-file-actions')).not.toBeNull();
-    await act(async () => deleteShare?.click());
-    expect(confirmDelete).toHaveBeenCalledWith('Delete this shared plan? This cannot be undone.');
-    expect(onDeleteShare).not.toHaveBeenCalled();
-    confirmDelete.mockReturnValue(true);
-    await act(async () => deleteShare?.click());
-    await waitFor(() => expect(onDeleteShare).toHaveBeenCalledOnce());
-    expect(
-      [...container.querySelectorAll<HTMLElement>('[contenteditable]')].every(
-        (element) => element.getAttribute('contenteditable') === 'false',
-      ),
-    ).toBe(true);
-    expect(container.querySelector('.review-comment-delete')).toBeNull();
-    expect(container.querySelector('.plan-comment-affordance')).toBeNull();
-    const target = container.querySelector('.plan-comment-target');
-    expect(target?.closest('.plan-comment-heading')).not.toBeNull();
-    expect(target?.closest('.review-comment-header')).not.toBeNull();
-    expect(container.querySelector('.plan-comment-thread-title')).toBeNull();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+    expect(container.querySelector('.plan-comment-thread')?.textContent).toContain(
+      'Do not regress walkthrough sharing.',
+    );
+  });
+  expect(container.querySelector('.plan-title')?.textContent).toBe('Ship plan sharing');
+  expect(container.querySelector('.plan-header.workspace-top-bar')).not.toBeNull();
+  expect(container.querySelector('.codiff-file-path')?.textContent).toBe('plan.md');
+  expect(
+    container.querySelector('.codiff-header-toggle-static .codiff-file-path')?.textContent,
+  ).toBe('plan.md');
+  expect(container.querySelector('button[aria-label="Download plan"] svg')).not.toBeNull();
+  const deleteShare = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Delete shared plan"]',
+  );
+  expect(deleteShare?.closest('.plan-file-actions')).not.toBeNull();
+  await act(async () => deleteShare?.click());
+  expect(confirmDelete).toHaveBeenCalledWith('Delete this shared plan? This cannot be undone.');
+  expect(onDeleteShare).not.toHaveBeenCalled();
+  confirmDelete.mockReturnValue(true);
+  await act(async () => deleteShare?.click());
+  await waitFor(() => expect(onDeleteShare).toHaveBeenCalledOnce());
+  expect(
+    [...container.querySelectorAll<HTMLElement>('[contenteditable]')].every(
+      (element) => element.getAttribute('contenteditable') === 'false',
+    ),
+  ).toBe(true);
+  expect(container.querySelector('.review-comment-delete')).toBeNull();
+  expect(container.querySelector('.plan-comment-affordance')).toBeNull();
+  const target = container.querySelector('.plan-comment-target');
+  expect(target?.closest('.plan-comment-heading')).not.toBeNull();
+  expect(target?.closest('.review-comment-header')).not.toBeNull();
+  expect(container.querySelector('.plan-comment-thread-title')).toBeNull();
 });
 
 test('shared plans collapse resolved comments without rendering their annotations', async () => {
@@ -264,25 +263,25 @@ test('shared plans collapse resolved comments without rendering their annotation
   document.body.append(container);
   const root = createRoot(container);
 
-  try {
-    await act(async () => {
-      root.render(<PlanReviewSurface snapshot={snapshot} />);
-    });
-    await waitFor(() => {
-      expect(container.querySelector('.plan-resolved-comments')).not.toBeNull();
-    });
-
-    const resolvedSection = container.querySelector<HTMLDetailsElement>('.plan-resolved-comments');
-    expect(resolvedSection?.open).toBe(false);
-    expect(resolvedSection?.querySelector('summary')?.textContent).toBe('Resolved comments (1)');
-    expect(resolvedSection?.querySelector('.plan-comment-thread.resolved')?.textContent).toContain(
-      'Resolved after target removal',
-    );
-    expect(container.querySelector('[data-mdx-annotation-block~="resolved-thread"]')).toBeNull();
-  } finally {
-    await act(async () => root.unmount());
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      await act(async () => root.unmount());
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root.render(<PlanReviewSurface snapshot={snapshot} />);
+  });
+  await waitFor(() => {
+    expect(container.querySelector('.plan-resolved-comments')).not.toBeNull();
+  });
+  const resolvedSection = container.querySelector<HTMLDetailsElement>('.plan-resolved-comments');
+  expect(resolvedSection?.open).toBe(false);
+  expect(resolvedSection?.querySelector('summary')?.textContent).toBe('Resolved comments (1)');
+  expect(resolvedSection?.querySelector('.plan-comment-thread.resolved')?.textContent).toContain(
+    'Resolved after target removal',
+  );
+  expect(container.querySelector('[data-mdx-annotation-block~="resolved-thread"]')).toBeNull();
 });
 
 test('shared plans do not render active HTML from documents or comments', async () => {
@@ -335,22 +334,22 @@ test('shared plans do not render active HTML from documents or comments', async 
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<PlanReviewSurface snapshot={snapshot} />);
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector('.mdx-editor-content h1')?.textContent).toBe('Safe plan');
-    });
-    expect(container.querySelector('button[onclick]')).toBeNull();
-    expect(container.querySelector('iframe')).toBeNull();
-    expect(container.querySelector('img[onerror]')).toBeNull();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<PlanReviewSurface snapshot={snapshot} />);
+  });
+  await waitFor(() => {
+    expect(container.querySelector('.mdx-editor-content h1')?.textContent).toBe('Safe plan');
+  });
+  expect(container.querySelector('button[onclick]')).toBeNull();
+  expect(container.querySelector('iframe')).toBeNull();
+  expect(container.querySelector('img[onerror]')).toBeNull();
 });

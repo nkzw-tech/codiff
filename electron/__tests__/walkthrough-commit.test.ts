@@ -1,15 +1,14 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
+import { getGitTestEnvironment, withGitTestEnvironment } from '../../core/__tests__/helpers/git.ts';
 import {
-  getGitTestEnvironment,
-  removeGitTestDirectory,
-  withGitTestEnvironment,
-} from '../../core/__tests__/helpers/git.ts';
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { createWalkthroughCommit } = require('../walkthrough-commit.cjs') as {
@@ -32,13 +31,9 @@ const git = async (repoPath: string, args: ReadonlyArray<string>) => {
 
 const withRepo = async (testBody: (repoPath: string) => Promise<void>) => {
   await withGitTestEnvironment(async () => {
-    const repoPath = await mkdtemp(join(tmpdir(), 'codiff-walkthrough-commit-'));
-    try {
-      await git(repoPath, ['init']);
-      await testBody(repoPath);
-    } finally {
-      await removeGitTestDirectory(repoPath);
-    }
+    await using directory = await createTemporaryDirectory('codiff-walkthrough-commit-');
+    await git(directory.path, ['init']);
+    await testBody(directory.path);
   });
 };
 
@@ -108,6 +103,9 @@ test('streams hook output and returns stripped failure text', async () => {
     );
     await chmod(join(repoPath, '.git/hooks/pre-commit'), 0o755);
     await writeFile(join(repoPath, 'example.txt'), 'after\n');
+    await using _localHooks = createTemporaryEnvironment({
+      GIT_CONFIG_VALUE_3: join(repoPath, '.git/hooks'),
+    });
 
     const output: Array<string> = [];
     const result = await createWalkthroughCommit(

@@ -1,8 +1,11 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 import { createCommandTransport, type FakeCommandProcess } from './helpers/command-transport.ts';
 
 type CommandTransport = ReturnType<typeof createCommandTransport>['transport'];
@@ -78,23 +81,16 @@ test('normalizes OpenAI model preferences to known models', () => {
   expect(normalizeOpenAIModel('gpt-4o')).toBe(DEFAULT_OPENAI_MODEL);
 });
 
-test('rejects invalid explicit Codex CLI overrides', () => {
-  const previousCodexPath = process.env.CODIFF_CODEX_PATH;
-  process.env.CODIFF_CODEX_PATH = '/tmp/codiff-missing-codex';
+test('rejects invalid explicit Codex CLI overrides', async () => {
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_CODEX_PATH: '/tmp/codiff-missing-codex',
+  });
 
+  expect(() => getCodexCommand()).toThrow('CODIFF_CODEX_PATH');
   try {
-    expect(() => getCodexCommand()).toThrow('CODIFF_CODEX_PATH');
-    try {
-      getCodexCommand();
-    } catch (error) {
-      expect(error).toMatchObject({ code: CODEX_NOT_FOUND_CODE });
-    }
-  } finally {
-    if (previousCodexPath == null) {
-      delete process.env.CODIFF_CODEX_PATH;
-    } else {
-      process.env.CODIFF_CODEX_PATH = previousCodexPath;
-    }
+    getCodexCommand();
+  } catch (error) {
+    expect(error).toMatchObject({ code: CODEX_NOT_FOUND_CODE });
   }
 });
 
@@ -171,15 +167,14 @@ test('retries unavailable GPT-5.6 models with model-specific reasoning', async (
 });
 
 test('streams Codex app-server reasoning and message deltas as semantic progress', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-codex-progress-'));
-  const fakeCodexPath = join(directory, 'codex');
-  const requestsPath = join(directory, 'requests.txt');
-  const previousCodexPath = process.env.CODIFF_CODEX_PATH;
+  await using directory = await createTemporaryDirectory('codiff-codex-progress-');
+  const fakeCodexPath = join(directory.path, 'codex');
+  const requestsPath = join(directory.path, 'requests.txt');
+  await using _environment = createTemporaryEnvironment({ CODIFF_CODEX_PATH: fakeCodexPath });
 
-  try {
-    await writeFile(
-      fakeCodexPath,
-      `#!/usr/bin/env node
+  await writeFile(
+    fakeCodexPath,
+    `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs');
 const readline = require('node:readline');
 const requestsPath = ${JSON.stringify(requestsPath)};
@@ -239,75 +234,66 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
 });
 `,
-    );
-    await chmod(fakeCodexPath, 0o755);
-    process.env.CODIFF_CODEX_PATH = fakeCodexPath;
-    const phases: Array<string> = [];
-    const metrics: Array<any> = [];
+  );
+  await chmod(fakeCodexPath, 0o755);
+  const phases: Array<string> = [];
+  const metrics: Array<any> = [];
 
-    await expect(
-      runCodex(directory, 'prompt', {}, 'walkthrough.json', 'Timed out.', {
-        onProgress: (phase) => phases.push(phase),
-        onMetrics: (value) => metrics.push(value),
-      }),
-    ).resolves.toBe('{"version":1}');
+  await expect(
+    runCodex(directory.path, 'prompt', {}, 'walkthrough.json', 'Timed out.', {
+      onProgress: (phase) => phases.push(phase),
+      onMetrics: (value) => metrics.push(value),
+    }),
+  ).resolves.toBe('{"version":1}');
 
-    expect(phases).toEqual([
-      'agent-generation',
-      'agent-generation',
-      'agent-generation',
-      'agent-generation',
-      'response-received',
-      'response-received',
-      'response-received',
-    ]);
-    expect(metrics).toEqual([
-      {
-        transport: 'app-server',
-        usage: {
-          cachedInputTokens: 80,
-          inputTokens: 100,
-          outputTokens: 25,
-          reasoningOutputTokens: 10,
-          totalTokens: 125,
-        },
+  expect(phases).toEqual([
+    'agent-generation',
+    'agent-generation',
+    'agent-generation',
+    'agent-generation',
+    'response-received',
+    'response-received',
+    'response-received',
+  ]);
+  expect(metrics).toEqual([
+    {
+      transport: 'app-server',
+      usage: {
+        cachedInputTokens: 80,
+        inputTokens: 100,
+        outputTokens: 25,
+        reasoningOutputTokens: 10,
+        totalTokens: 125,
       },
-    ]);
+    },
+  ]);
 
-    const records = (await readFile(requestsPath, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(records.filter((record) => record.arg).map((record) => record.arg)).toContain(
-      'app-server',
-    );
-    const threadStart = records.find((record) => record.message?.method === 'thread/start').message;
-    expect(threadStart.params).toMatchObject({
-      approvalPolicy: 'never',
-      cwd: directory,
-      ephemeral: true,
-      sandbox: 'read-only',
-    });
-    const turnStart = records.find((record) => record.message?.method === 'turn/start').message;
-    expect(turnStart.params).toMatchObject({
-      approvalPolicy: 'never',
-      cwd: directory,
-      effort: 'low',
-      outputSchema: {},
-      sandboxPolicy: {
-        networkAccess: false,
-        type: 'readOnly',
-      },
-      threadId: 'thread-1',
-    });
-  } finally {
-    if (previousCodexPath == null) {
-      delete process.env.CODIFF_CODEX_PATH;
-    } else {
-      process.env.CODIFF_CODEX_PATH = previousCodexPath;
-    }
-    await rm(directory, { force: true, recursive: true });
-  }
+  const records = (await readFile(requestsPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  expect(records.filter((record) => record.arg).map((record) => record.arg)).toContain(
+    'app-server',
+  );
+  const threadStart = records.find((record) => record.message?.method === 'thread/start').message;
+  expect(threadStart.params).toMatchObject({
+    approvalPolicy: 'never',
+    cwd: directory.path,
+    ephemeral: true,
+    sandbox: 'read-only',
+  });
+  const turnStart = records.find((record) => record.message?.method === 'turn/start').message;
+  expect(turnStart.params).toMatchObject({
+    approvalPolicy: 'never',
+    cwd: directory.path,
+    effort: 'low',
+    outputSchema: {},
+    sandboxPolicy: {
+      networkAccess: false,
+      type: 'readOnly',
+    },
+    threadId: 'thread-1',
+  });
 });
 
 test('reports Codex exec token usage for eval instrumentation', async () => {

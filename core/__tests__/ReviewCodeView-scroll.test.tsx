@@ -150,38 +150,28 @@ test('generated files are collapsed by default and can be explicitly expanded pe
       },
     },
   ];
-  const view = await renderReact(<ReviewCodeViewHarness blocks={blocks} files={[]} />);
+  await using view = await renderReact(<ReviewCodeViewHarness blocks={blocks} files={[]} />);
 
-  try {
-    await waitFor(() => {
-      expect(
-        view.container.querySelector('[aria-label="Expand file"]')?.getAttribute('aria-expanded'),
-      ).toBe('false');
-      expect(view.container.querySelector('.codiff-generated-badge')?.textContent).toBe(
-        'Generated',
-      );
-    });
-
-    await view.rerender(
-      <ReviewCodeViewHarness
-        blocks={blocks}
-        expandedGenerated={new Set([reviewKey])}
-        files={[]}
-        itemVersionByKey={{ [reviewKey]: 1 }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(
-        view.container.querySelector('[aria-label="Collapse file"]')?.getAttribute('aria-expanded'),
-      ).toBe('true');
-      expect(view.container.querySelector('.codiff-generated-badge')?.textContent).toBe(
-        'Generated',
-      );
-    });
-  } finally {
-    await view.cleanup();
-  }
+  await waitFor(() => {
+    expect(
+      view.container.querySelector('[aria-label="Expand file"]')?.getAttribute('aria-expanded'),
+    ).toBe('false');
+    expect(view.container.querySelector('.codiff-generated-badge')?.textContent).toBe('Generated');
+  });
+  await view.rerender(
+    <ReviewCodeViewHarness
+      blocks={blocks}
+      expandedGenerated={new Set([reviewKey])}
+      files={[]}
+      itemVersionByKey={{ [reviewKey]: 1 }}
+    />,
+  );
+  await waitFor(() => {
+    expect(
+      view.container.querySelector('[aria-label="Collapse file"]')?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    expect(view.container.querySelector('.codiff-generated-badge')?.textContent).toBe('Generated');
+  });
 });
 
 test('explicit generated metadata can keep generated-looking paths expanded', async () => {
@@ -189,18 +179,14 @@ test('explicit generated metadata can keep generated-looking paths expanded', as
     ...createChangedFile('src/__generated__/api.ts'),
     generated: false,
   };
-  const view = await renderReact(<ReviewCodeViewHarness files={[file]} />);
+  await using view = await renderReact(<ReviewCodeViewHarness files={[file]} />);
 
-  try {
-    await waitFor(() => {
-      expect(
-        view.container.querySelector('[aria-label="Collapse file"]')?.getAttribute('aria-expanded'),
-      ).toBe('true');
-      expect(view.container.querySelector('.codiff-generated-badge')).toBeNull();
-    });
-  } finally {
-    await view.cleanup();
-  }
+  await waitFor(() => {
+    expect(
+      view.container.querySelector('[aria-label="Collapse file"]')?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    expect(view.container.querySelector('.codiff-generated-badge')).toBeNull();
+  });
 });
 
 test('switching edited Markdown back to a diff flushes and refreshes it first', async () => {
@@ -233,35 +219,33 @@ test('switching edited Markdown back to a diff flushes and refreshes it first', 
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<Harness />);
-    });
-
-    expect(container.querySelector('[aria-label="Edit plan.md"]')).not.toBeNull();
-    const diffButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      ({ textContent }) => textContent === 'View as Diff',
-    );
-    expect(diffButton).not.toBeUndefined();
-    expect(diffButton?.classList.contains('codiff-button')).toBe(true);
-
-    await act(async () => {
-      diffButton?.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
-    });
-    expect(order).toEqual(['flush', 'refresh']);
-    expect(JSON.stringify(codeViewMock.lastItems)).toContain('# Saved');
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<Harness />);
+  });
+  expect(container.querySelector('[aria-label="Edit plan.md"]')).not.toBeNull();
+  const diffButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    ({ textContent }) => textContent === 'View as Diff',
+  );
+  expect(diffButton).not.toBeUndefined();
+  expect(diffButton?.classList.contains('codiff-button')).toBe(true);
+  await act(async () => {
+    diffButton?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await waitFor(() => {
+    expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
+  });
+  expect(order).toEqual(['flush', 'refresh']);
+  expect(JSON.stringify(codeViewMock.lastItems)).toContain('# Saved');
 });
 
 test('combined branch Markdown edits only the final working-tree section', async () => {
@@ -327,34 +311,32 @@ test('combined branch Markdown edits only the final working-tree section', async
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<Harness />);
-    });
-
-    expect(container.querySelector('[aria-label="Edit plan.md"]')).not.toBeNull();
-    const diffButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      ({ textContent }) => textContent === 'View as Diff',
-    );
-    expect(diffButton).not.toBeUndefined();
-
-    await act(async () => {
-      diffButton?.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
-    });
-    expect(order).toEqual(['flush', 'refresh']);
-    expect(JSON.stringify(codeViewMock.lastItems)).toContain('# Saved');
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<Harness />);
+  });
+  expect(container.querySelector('[aria-label="Edit plan.md"]')).not.toBeNull();
+  const diffButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    ({ textContent }) => textContent === 'View as Diff',
+  );
+  expect(diffButton).not.toBeUndefined();
+  await act(async () => {
+    diffButton?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await waitFor(() => {
+    expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
+  });
+  expect(order).toEqual(['flush', 'refresh']);
+  expect(JSON.stringify(codeViewMock.lastItems)).toContain('# Saved');
 });
 
 test('combined branch-only Markdown sections remain read-only', async () => {
@@ -371,42 +353,40 @@ test('combined branch-only Markdown sections remain read-only', async () => {
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          files={[file]}
-          source={{
-            baseRef: 'base123',
-            headRef: 'head123',
-            ref: 'main',
-            type: 'branch-working-tree',
-          }}
-        />,
-      );
-    });
-
-    expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
-    const markdownButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      ({ textContent }) => textContent === 'View as Markdown',
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        files={[file]}
+        source={{
+          baseRef: 'base123',
+          headRef: 'head123',
+          ref: 'main',
+          type: 'branch-working-tree',
+        }}
+      />,
     );
-    expect(markdownButton).not.toBeUndefined();
-
-    await act(async () => {
-      markdownButton?.click();
-    });
-
-    await waitFor(() => {
-      expect(container.querySelector('[aria-label="Preview plan.md"]')).not.toBeNull();
-    });
-    expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  });
+  expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
+  const markdownButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    ({ textContent }) => textContent === 'View as Markdown',
+  );
+  expect(markdownButton).not.toBeUndefined();
+  await act(async () => {
+    markdownButton?.click();
+  });
+  await waitFor(() => {
+    expect(container.querySelector('[aria-label="Preview plan.md"]')).not.toBeNull();
+  });
+  expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
 });
 
 test('read-only Markdown previews render with the shared Markdown editor', async () => {
@@ -438,32 +418,32 @@ test('read-only Markdown previews render with the shared Markdown editor', async
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          files={[file]}
-          initialMarkdownPreviewSectionIds={new Set([sectionId])}
-          isReadOnly
-        />,
-      );
-    });
-
-    await waitFor(() => {
-      const preview = container.querySelector<HTMLTextAreaElement>(
-        '[aria-label="Preview README.md"]',
-      );
-      expect(preview).not.toBeNull();
-      expect(preview?.readOnly).toBe(true);
-      expect(preview?.value).toBe('# Title\n\nNew paragraph.\n');
-    });
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        files={[file]}
+        initialMarkdownPreviewSectionIds={new Set([sectionId])}
+        isReadOnly
+      />,
+    );
+  });
+  await waitFor(() => {
+    const preview = container.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Preview README.md"]',
+    );
+    expect(preview).not.toBeNull();
+    expect(preview?.readOnly).toBe(true);
+    expect(preview?.value).toBe('# Title\n\nNew paragraph.\n');
+  });
 });
 
 test('scroll selection updates do not publish new item versions', async () => {
@@ -473,33 +453,31 @@ test('scroll selection updates do not publish new item versions', async () => {
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness files={[firstFile, secondFile]} selectedPath={firstFile.path} />,
-      );
-    });
-
-    const firstVersions = codeViewMock.lastItems.map((item) => item.version);
-    expect(codeViewMock.postRenderNodes[0]?.classList.contains('codiff-selected-item')).toBe(true);
-    expect(codeViewMock.postRenderNodes[1]?.classList.contains('codiff-selected-item')).toBe(false);
-
-    await act(async () => {
-      root?.render(
-        <ReviewCodeViewHarness files={[firstFile, secondFile]} selectedPath={secondFile.path} />,
-      );
-    });
-
-    expect(codeViewMock.lastItems.map((item) => item.version)).toEqual(firstVersions);
-    expect(codeViewMock.postRenderNodes[0]?.classList.contains('codiff-selected-item')).toBe(false);
-    expect(codeViewMock.postRenderNodes[1]?.classList.contains('codiff-selected-item')).toBe(true);
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness files={[firstFile, secondFile]} selectedPath={firstFile.path} />,
+    );
+  });
+  const firstVersions = codeViewMock.lastItems.map((item) => item.version);
+  expect(codeViewMock.postRenderNodes[0]?.classList.contains('codiff-selected-item')).toBe(true);
+  expect(codeViewMock.postRenderNodes[1]?.classList.contains('codiff-selected-item')).toBe(false);
+  await act(async () => {
+    root?.render(
+      <ReviewCodeViewHarness files={[firstFile, secondFile]} selectedPath={secondFile.path} />,
+    );
+  });
+  expect(codeViewMock.lastItems.map((item) => item.version)).toEqual(firstVersions);
+  expect(codeViewMock.postRenderNodes[0]?.classList.contains('codiff-selected-item')).toBe(false);
+  expect(codeViewMock.postRenderNodes[1]?.classList.contains('codiff-selected-item')).toBe(true);
 });
 
 test('walkthrough header chrome does not leak inline styles onto reused diff nodes', async () => {
@@ -514,30 +492,28 @@ test('walkthrough header chrome does not leak inline styles onto reused diff nod
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<ReviewCodeViewHarness blocks={[headerBlock]} files={[file]} />);
-    });
-
-    expect(
-      codeViewMock.postRenderNodes[0]?.classList.contains('codiff-walkthrough-header-item'),
-    ).toBe(true);
-
-    await act(async () => {
-      root?.render(<ReviewCodeViewHarness files={[file]} />);
-    });
-
-    const reusedNode = codeViewMock.postRenderNodes[0];
-    expect(reusedNode?.classList.contains('codiff-walkthrough-header-item')).toBe(false);
-    expect(container.textContent).not.toContain('Header');
-    expect(container.querySelector('.codiff-file-header')).not.toBeNull();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<ReviewCodeViewHarness blocks={[headerBlock]} files={[file]} />);
+  });
+  expect(
+    codeViewMock.postRenderNodes[0]?.classList.contains('codiff-walkthrough-header-item'),
+  ).toBe(true);
+  await act(async () => {
+    root?.render(<ReviewCodeViewHarness files={[file]} />);
+  });
+  const reusedNode = codeViewMock.postRenderNodes[0];
+  expect(reusedNode?.classList.contains('codiff-walkthrough-header-item')).toBe(false);
+  expect(container.textContent).not.toContain('Header');
+  expect(container.querySelector('.codiff-file-header')).not.toBeNull();
 });
 
 test('header-only walkthrough blocks render and can be scroll targets', async () => {
@@ -545,39 +521,39 @@ test('header-only walkthrough blocks render and can be scroll targets', async ()
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          blocks={[
-            {
-              header: <div>Missing stop</div>,
-              id: 'walkthrough:s1:missing',
-              selected: true,
-            },
-          ]}
-          files={[]}
-          scrollTarget={{ blockId: 'walkthrough:s1:missing', request: 1 }}
-        />,
-      );
-    });
-
-    expect(container.textContent).toContain('Missing stop');
-    await waitFor(() => {
-      expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'walkthrough:s1:missing:walkthrough-header',
-          type: 'item',
-        }),
-      );
-    });
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        blocks={[
+          {
+            header: <div>Missing stop</div>,
+            id: 'walkthrough:s1:missing',
+            selected: true,
+          },
+        ]}
+        files={[]}
+        scrollTarget={{ blockId: 'walkthrough:s1:missing', request: 1 }}
+      />,
+    );
+  });
+  expect(container.textContent).toContain('Missing stop');
+  await waitFor(() => {
+    expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'walkthrough:s1:missing:walkthrough-header',
+        type: 'item',
+      }),
+    );
+  });
 });
 
 test('focused walkthrough blocks render only global comments visible in the focused patch', async () => {
@@ -604,26 +580,26 @@ test('focused walkthrough blocks render only global comments visible in the focu
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
-          comments={[visibleComment, offHunkComment]}
-          files={[file]}
-        />,
-      );
-    });
-
-    const textareas = [...container.querySelectorAll<HTMLTextAreaElement>('textarea')];
-    expect(textareas.map((textarea) => textarea.value)).toEqual([visibleComment.body]);
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
+        comments={[visibleComment, offHunkComment]}
+        files={[file]}
+      />,
+    );
+  });
+  const textareas = [...container.querySelectorAll<HTMLTextAreaElement>('textarea')];
+  expect(textareas.map((textarea) => textarea.value)).toEqual([visibleComment.body]);
 });
 
 test('focused walkthrough blocks keep cross-side comments when their rendered anchor is visible', async () => {
@@ -646,26 +622,26 @@ test('focused walkthrough blocks keep cross-side comments when their rendered an
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
-          comments={[rangedComment]}
-          files={[file]}
-        />,
-      );
-    });
-
-    const textarea = container.querySelector<HTMLTextAreaElement>('textarea');
-    expect(textarea?.value).toBe(rangedComment.body);
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
+        comments={[rangedComment]}
+        files={[file]}
+      />,
+    );
+  });
+  const textarea = container.querySelector<HTMLTextAreaElement>('textarea');
+  expect(textarea?.value).toBe(rangedComment.body);
 });
 
 test('focused walkthrough blocks resolve active search matches to rendered item ids', async () => {
@@ -678,39 +654,39 @@ test('focused walkthrough blocks resolve active search matches to rendered item 
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          activeSearchMatch={{
-            filePath: file.path,
-            itemId: `diff:${file.sections[0].id}`,
-            lineNumber: 1,
-            side: 'additions',
-          }}
-          blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
-          files={[file]}
-        />,
-      );
-    });
-
-    await waitFor(() => {
-      expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: `walkthrough:s1:0:diff:${file.sections[0].id}`,
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        activeSearchMatch={{
+          filePath: file.path,
+          itemId: `diff:${file.sections[0].id}`,
           lineNumber: 1,
           side: 'additions',
-          type: 'line',
-        }),
-      );
-    });
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+        }}
+        blocks={[{ file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' }]}
+        files={[file]}
+      />,
+    );
+  });
+  await waitFor(() => {
+    expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: `walkthrough:s1:0:diff:${file.sections[0].id}`,
+        lineNumber: 1,
+        side: 'additions',
+        type: 'line',
+      }),
+    );
+  });
 });
 
 test('review comment drafts resync clean external updates and reset on comment switch', async () => {
@@ -738,38 +714,38 @@ test('review comment drafts resync clean external updates and reset on comment s
       />,
     );
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      renderComment(baseComment);
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    renderComment(baseComment);
+  });
+  const textarea = () => container.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(textarea().value).toBe('Original body');
+  await act(async () => {
+    renderComment({ ...baseComment, body: 'Clean external body' });
+  });
+  expect(textarea().value).toBe('Clean external body');
+  await setInputValue(textarea(), 'Unsaved local draft');
+  expect(textarea().value).toBe('Unsaved local draft');
+  await act(async () => {
+    renderComment({ ...baseComment, body: 'Ignored while dirty' });
+  });
+  expect(textarea().value).toBe('Unsaved local draft');
+  await act(async () => {
+    renderComment({
+      ...baseComment,
+      body: 'Second comment body',
+      id: 'comment-2',
     });
-
-    const textarea = () => container.querySelector<HTMLTextAreaElement>('textarea')!;
-    expect(textarea().value).toBe('Original body');
-
-    await act(async () => {
-      renderComment({ ...baseComment, body: 'Clean external body' });
-    });
-    expect(textarea().value).toBe('Clean external body');
-
-    await setInputValue(textarea(), 'Unsaved local draft');
-    expect(textarea().value).toBe('Unsaved local draft');
-
-    await act(async () => {
-      renderComment({ ...baseComment, body: 'Ignored while dirty' });
-    });
-    expect(textarea().value).toBe('Unsaved local draft');
-
-    await act(async () => {
-      renderComment({ ...baseComment, body: 'Second comment body', id: 'comment-2' });
-    });
-    expect(textarea().value).toBe('Second comment body');
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  });
+  expect(textarea().value).toBe('Second comment body');
 });
 
 test('read-only review comments render safe details blocks', async () => {
@@ -785,37 +761,44 @@ test('read-only review comments render safe details blocks', async () => {
     side: 'additions',
   } satisfies ReviewComment;
 
-  const view = await renderReact(
+  await using view = await renderReact(
     <ReviewCodeViewHarness comments={[comment]} files={[file]} supportsReviewCommentActions />,
   );
 
-  try {
-    await waitFor(() => {
-      expect(view.container.querySelector('.review-comment-thread details')).not.toBeNull();
-    });
-    const details = view.container.querySelector<HTMLDetailsElement>(
-      '.review-comment-thread details',
-    );
-    expect(details?.open).toBe(false);
-    expect(details?.querySelector('summary')?.textContent).toBe('Review rationale');
-    expect(view.container.textContent).toContain('AI Code Reviewer');
-  } finally {
-    await view.cleanup();
-  }
+  await waitFor(() => {
+    expect(view.container.querySelector('.review-comment-thread details')).not.toBeNull();
+  });
+  const details = view.container.querySelector<HTMLDetailsElement>(
+    '.review-comment-thread details',
+  );
+  expect(details?.open).toBe(false);
+  expect(details?.querySelector('summary')?.textContent).toBe('Review rationale');
+  expect(view.container.textContent).toContain('AI Code Reviewer');
 });
 
 test('walkthrough hunk viewed state is keyed independently from file path', async () => {
   const filePath = 'src/shared.ts';
-  const firstFile = { ...createChangedFile(filePath), fingerprint: 'first-hunk' };
-  const secondFile = { ...createChangedFile(filePath), fingerprint: 'second-hunk' };
-  const firstIdentity = { fingerprint: firstFile.fingerprint, key: 'walkthrough:s1:h1' };
-  const secondIdentity = { fingerprint: secondFile.fingerprint, key: 'walkthrough:s2:h2' };
+  const firstFile = {
+    ...createChangedFile(filePath),
+    fingerprint: 'first-hunk',
+  };
+  const secondFile = {
+    ...createChangedFile(filePath),
+    fingerprint: 'second-hunk',
+  };
+  const firstIdentity = {
+    fingerprint: firstFile.fingerprint,
+    key: 'walkthrough:s1:h1',
+  };
+  const secondIdentity = {
+    fingerprint: secondFile.fingerprint,
+    key: 'walkthrough:s2:h2',
+  };
 
   function Harness() {
     const [viewed, setViewed] = useState<Record<string, string>>({});
     const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
     const [itemVersionByKey, setItemVersionByKey] = useState<Record<string, number>>({});
-
     const toggleViewed = (
       _file: ChangedFile,
       isViewed: boolean,
@@ -828,7 +811,6 @@ test('walkthrough hunk viewed state is keyed independently from file path', asyn
         [reviewIdentity.key]: (current[reviewIdentity.key] ?? 0) + 1,
       }));
     };
-
     return (
       <>
         <ReviewCodeViewHarness
@@ -855,31 +837,29 @@ test('walkthrough hunk viewed state is keyed independently from file path', asyn
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<Harness />);
-    });
-
-    const viewedButtons = () => [
-      ...container.querySelectorAll<HTMLButtonElement>('.codiff-viewed-button'),
-    ];
-    expect(viewedButtons()).toHaveLength(2);
-
-    await act(async () => {
-      viewedButtons()[0].click();
-    });
-
-    await waitFor(() => {
-      expect(viewedButtons()[0].getAttribute('aria-pressed')).toBe('true');
-      expect(viewedButtons()[1].getAttribute('aria-pressed')).toBe('false');
-    });
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<Harness />);
+  });
+  const viewedButtons = () => [
+    ...container.querySelectorAll<HTMLButtonElement>('.codiff-viewed-button'),
+  ];
+  expect(viewedButtons()).toHaveLength(2);
+  await act(async () => {
+    viewedButtons()[0].click();
+  });
+  await waitFor(() => {
+    expect(viewedButtons()[0].getAttribute('aria-pressed')).toBe('true');
+    expect(viewedButtons()[1].getAttribute('aria-pressed')).toBe('false');
+  });
 });
 
 test('read-only walkthroughs can opt into the viewed control', async () => {
@@ -889,34 +869,32 @@ test('read-only walkthroughs can opt into the viewed control', async () => {
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          allowViewedToggle
-          files={[file]}
-          isReadOnly
-          onToggleViewed={onToggleViewed}
-        />,
-      );
-    });
-
-    const viewedButton = container.querySelector<HTMLButtonElement>('.codiff-viewed-button');
-    expect(viewedButton).not.toBeNull();
-    expect(container.querySelector('.codiff-button')).toBeNull();
-
-    await act(async () => {
-      viewedButton?.click();
-    });
-
-    expect(onToggleViewed).toHaveBeenCalledOnce();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        allowViewedToggle
+        files={[file]}
+        isReadOnly
+        onToggleViewed={onToggleViewed}
+      />,
+    );
+  });
+  const viewedButton = container.querySelector<HTMLButtonElement>('.codiff-viewed-button');
+  expect(viewedButton).not.toBeNull();
+  expect(container.querySelector('.codiff-button')).toBeNull();
+  await act(async () => {
+    viewedButton?.click();
+  });
+  expect(onToggleViewed).toHaveBeenCalledOnce();
 });
 
 test('reload scroll target is retried until the selected item renders', async () => {
@@ -924,41 +902,45 @@ test('reload scroll target is retried until the selected item renders', async ()
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
-          scrollTarget={{ path: 'src/second.ts', request: 1 }}
-          selectedPath="src/second.ts"
-        />,
-      );
-    });
-
-    await waitFor(() => {
-      expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
-    });
-    expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        behavior: 'instant',
-        id: 'diff:src/second.ts:unstaged',
-        type: 'item',
-      }),
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        files={[createChangedFile('src/first.ts'), createChangedFile('src/second.ts')]}
+        scrollTarget={{ path: 'src/second.ts', request: 1 }}
+        selectedPath="src/second.ts"
+      />,
     );
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  });
+  await waitFor(() => {
+    expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
+  });
+  expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      behavior: 'instant',
+      id: 'diff:src/second.ts:unstaged',
+      type: 'item',
+    }),
+  );
 });
 
 test('scroll targets issue one command per request even before render visibility catches up', async () => {
   const container = document.createElement('div');
   document.body.append(container);
   let root: Root | null = null;
-  const scrollTarget = { behavior: 'smooth' as const, path: 'src/second.ts', request: 1 };
+  const scrollTarget = {
+    behavior: 'smooth' as const,
+    path: 'src/second.ts',
+    request: 1,
+  };
 
   const renderView = () => (
     <ReviewCodeViewHarness
@@ -967,31 +949,28 @@ test('scroll targets issue one command per request even before render visibility
     />
   );
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(renderView());
-    });
-
-    await waitFor(() => {
-      expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
-    });
-
-    await act(async () => {
-      root?.render(renderView());
-    });
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(renderView());
+  });
+  await waitFor(() => {
     expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  });
+  await act(async () => {
+    root?.render(renderView());
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1);
 });
 
 test('hunk navigation skips stale requests when the review view remounts', async () => {
@@ -999,48 +978,45 @@ test('hunk navigation skips stale requests when the review view remounts', async
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          diffStyle="unified"
-          files={[createChangedFile('src/first.ts')]}
-          hunkNavigation={{ direction: 1, request: 1 }}
-        />,
-      );
-    });
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(codeViewMock.scrollTo).not.toHaveBeenCalled();
-
-    await act(async () => {
-      root?.render(
-        <ReviewCodeViewHarness
-          diffStyle="unified"
-          files={[createChangedFile('src/first.ts')]}
-          hunkNavigation={{ direction: 1, request: 2 }}
-        />,
-      );
-    });
-
-    expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'diff:src/first.ts:unstaged',
-        lineNumber: 1,
-        side: 'additions',
-        type: 'line',
-      }),
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        diffStyle="unified"
+        files={[createChangedFile('src/first.ts')]}
+        hunkNavigation={{ direction: 1, request: 1 }}
+      />,
     );
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(codeViewMock.scrollTo).not.toHaveBeenCalled();
+  await act(async () => {
+    root?.render(
+      <ReviewCodeViewHarness
+        diffStyle="unified"
+        files={[createChangedFile('src/first.ts')]}
+        hunkNavigation={{ direction: 1, request: 2 }}
+      />,
+    );
+  });
+  expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: 'diff:src/first.ts:unstaged',
+      lineNumber: 1,
+      side: 'additions',
+      type: 'line',
+    }),
+  );
 });
 
 test('hunk navigation skips pull request description source context', async () => {
@@ -1053,7 +1029,7 @@ test('hunk navigation skips pull request description source context', async () =
     url: 'https://github.com/nkzw-tech/codiff/pull/12',
   } satisfies ReviewSource;
   const file = createChangedFile('src/first.ts');
-  const app = await renderReact(
+  await using app = await renderReact(
     <ReviewCodeViewHarness
       diffStyle="unified"
       files={[file]}
@@ -1062,30 +1038,24 @@ test('hunk navigation skips pull request description source context', async () =
     />,
   );
 
-  try {
-    codeViewMock.scrollTo.mockClear();
-
-    await app.rerender(
-      <ReviewCodeViewHarness
-        diffStyle="unified"
-        files={[file]}
-        hunkNavigation={{ direction: 1, request: 2 }}
-        source={source}
-      />,
-    );
-
-    const target = codeViewMock.scrollTo.mock.lastCall?.[0];
-    expect(target?.id).toBe('diff:src/first.ts:unstaged');
-    expect(target).toEqual(
-      expect.objectContaining({
-        lineNumber: 1,
-        side: 'additions',
-        type: 'line',
-      }),
-    );
-  } finally {
-    await app.cleanup();
-  }
+  codeViewMock.scrollTo.mockClear();
+  await app.rerender(
+    <ReviewCodeViewHarness
+      diffStyle="unified"
+      files={[file]}
+      hunkNavigation={{ direction: 1, request: 2 }}
+      source={source}
+    />,
+  );
+  const target = codeViewMock.scrollTo.mock.lastCall?.[0];
+  expect(target?.id).toBe('diff:src/first.ts:unstaged');
+  expect(target).toEqual(
+    expect.objectContaining({
+      lineNumber: 1,
+      side: 'additions',
+      type: 'line',
+    }),
+  );
 });
 
 test('read-only markdown previews trigger CodeView layout remeasurement after height change', async () => {
@@ -1102,7 +1072,7 @@ test('read-only markdown previews trigger CodeView layout remeasurement after he
     type: 'pull-request',
     url: 'https://github.com/nkzw-tech/codiff/pull/12',
   } satisfies ReviewSource;
-  const app = await renderReact(
+  await using app = await renderReact(
     <ReviewCodeViewHarness
       files={[markdownFile]}
       initialMarkdownPreviewSectionIds={new Set([markdownSectionId])}
@@ -1111,37 +1081,27 @@ test('read-only markdown previews trigger CodeView layout remeasurement after he
     />,
   );
 
-  try {
-    const markdownItemId = `diff:${markdownSectionId}`;
-    const initialMarkdownVersion = getCodeViewItemVersion(markdownItemId);
-
-    const markdownPreview = app.container.querySelector<HTMLElement>(
-      '[aria-label="Preview plan.md"]',
-    );
-    // The source description renders in CodeView's header region, where height
-    // changes are observed by the viewer directly instead of item versions.
-    const sourceDescription = app.container.querySelector<HTMLElement>(
-      '[data-diffs-code-view-header] [aria-label="Preview source description"]',
-    );
-
-    expect(markdownPreview).not.toBeNull();
-    expect(sourceDescription).not.toBeNull();
-    expect(
-      sourceDescription
-        ?.closest('[data-diffs-code-view-header]')
-        ?.closest('[slot="header-custom"]'),
-    ).toBeNull();
-
-    await act(async () => {
-      markdownPreview?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-    });
-
-    await waitFor(() => {
-      expect(getCodeViewItemVersion(markdownItemId)).not.toBe(initialMarkdownVersion);
-    });
-  } finally {
-    await app.cleanup();
-  }
+  const markdownItemId = `diff:${markdownSectionId}`;
+  const initialMarkdownVersion = getCodeViewItemVersion(markdownItemId);
+  const markdownPreview = app.container.querySelector<HTMLElement>(
+    '[aria-label="Preview plan.md"]',
+  );
+  // The source description renders in CodeView's header region, where height
+  // changes are observed by the viewer directly instead of item versions.
+  const sourceDescription = app.container.querySelector<HTMLElement>(
+    '[data-diffs-code-view-header] [aria-label="Preview source description"]',
+  );
+  expect(markdownPreview).not.toBeNull();
+  expect(sourceDescription).not.toBeNull();
+  expect(
+    sourceDescription?.closest('[data-diffs-code-view-header]')?.closest('[slot="header-custom"]'),
+  ).toBeNull();
+  await act(async () => {
+    markdownPreview?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  });
+  await waitFor(() => {
+    expect(getCodeViewItemVersion(markdownItemId)).not.toBe(initialMarkdownVersion);
+  });
 });
 
 test('source description remains visible when a review has no diff items', async () => {
@@ -1153,21 +1113,17 @@ test('source description remains visible when a review has no diff items', async
     type: 'pull-request',
     url: 'https://github.com/nkzw-tech/codiff/pull/13',
   } satisfies ReviewSource;
-  const app = await renderReact(<ReviewCodeViewHarness files={[]} isReadOnly source={source} />);
+  await using app = await renderReact(
+    <ReviewCodeViewHarness files={[]} isReadOnly source={source} />,
+  );
 
-  try {
-    const sourceDescription = app.container.querySelector(
-      '[data-diffs-code-view-header] [aria-label="Preview source description"]',
-    );
-    expect(sourceDescription).not.toBeNull();
-    expect(
-      sourceDescription
-        ?.closest('[data-diffs-code-view-header]')
-        ?.closest('[slot="header-custom"]'),
-    ).toBeNull();
-  } finally {
-    await app.cleanup();
-  }
+  const sourceDescription = app.container.querySelector(
+    '[data-diffs-code-view-header] [aria-label="Preview source description"]',
+  );
+  expect(sourceDescription).not.toBeNull();
+  expect(
+    sourceDescription?.closest('[data-diffs-code-view-header]')?.closest('[slot="header-custom"]'),
+  ).toBeNull();
 });
 
 test('hunk navigation orders deletion comments before added rows in unified changes', async () => {
@@ -1198,42 +1154,39 @@ test('hunk navigation orders deletion comments before added rows in unified chan
       />,
     );
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      render(0);
-    });
-    codeViewMock.scrollTo.mockClear();
-
-    await act(async () => {
-      render(1);
-    });
-
-    expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        lineNumber: 1,
-        side: 'deletions',
-        type: 'line',
-      }),
-    );
-
-    await act(async () => {
-      render(2);
-    });
-
-    expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        lineNumber: 1,
-        side: 'additions',
-        type: 'line',
-      }),
-    );
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    render(0);
+  });
+  codeViewMock.scrollTo.mockClear();
+  await act(async () => {
+    render(1);
+  });
+  expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      lineNumber: 1,
+      side: 'deletions',
+      type: 'line',
+    }),
+  );
+  await act(async () => {
+    render(2);
+  });
+  expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      lineNumber: 1,
+      side: 'additions',
+      type: 'line',
+    }),
+  );
 });
 
 test('review comment typing stays local until a comment action commits it', async () => {
@@ -1253,52 +1206,47 @@ test('review comment typing stays local until a comment action commits it', asyn
   document.body.append(container);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(
-        <ReviewCodeViewHarness
-          comments={[comment]}
-          diffStyle="unified"
-          files={[file]}
-          onAskCodex={onAskCodex}
-          onCommentDraftChange={onCommentDraftChange}
-          onUpdateComment={onUpdateComment}
-        />,
-      );
-    });
-
-    const textarea = container.querySelector<HTMLTextAreaElement>('.review-comment-input');
-    if (!textarea) {
-      throw new Error('Expected review comment textarea.');
-    }
-
-    await setInputValue(textarea, 'Please check this.');
-
-    expect(onUpdateComment).not.toHaveBeenCalled();
-    expect(onCommentDraftChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ body: 'Please check this.', id: 'comment-1' }),
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        comments={[comment]}
+        diffStyle="unified"
+        files={[file]}
+        onAskCodex={onAskCodex}
+        onCommentDraftChange={onCommentDraftChange}
+        onUpdateComment={onUpdateComment}
+      />,
     );
-
-    const askButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent === 'Ask',
-    );
-    if (!askButton) {
-      throw new Error('Expected Ask button.');
-    }
-
-    await act(async () => {
-      askButton.click();
-    });
-
-    expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Please check this.');
-    expect(onAskCodex).toHaveBeenCalledWith('comment-1');
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
+  });
+  const textarea = container.querySelector<HTMLTextAreaElement>('.review-comment-input');
+  if (!textarea) {
+    throw new Error('Expected review comment textarea.');
   }
+  await setInputValue(textarea, 'Please check this.');
+  expect(onUpdateComment).not.toHaveBeenCalled();
+  expect(onCommentDraftChange).toHaveBeenLastCalledWith(
+    expect.objectContaining({ body: 'Please check this.', id: 'comment-1' }),
+  );
+  const askButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Ask',
+  );
+  if (!askButton) {
+    throw new Error('Expected Ask button.');
+  }
+  await act(async () => {
+    askButton.click();
+  });
+  expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Please check this.');
+  expect(onAskCodex).toHaveBeenCalledWith('comment-1');
 });
 
 test('a Codex reply does not repeatedly invalidate the diff item layout', async () => {
@@ -1314,31 +1262,27 @@ test('a Codex reply does not repeatedly invalidate the diff item layout', async 
   markdownEditorMock.heightByAriaLabel.set('Comment on src/comment.ts New line 1', 100);
   markdownEditorMock.heightByAriaLabel.set('Codex reply', 320);
   markdownEditorMock.heightReportLimit = 6;
-  const view = await renderReact(<ReviewCodeViewHarness comments={[comment]} files={[file]} />);
+  await using view = await renderReact(
+    <ReviewCodeViewHarness comments={[comment]} files={[file]} />,
+  );
 
-  try {
-    const renderCountBeforeReply = codeViewMock.renderCount;
-
-    await view.rerender(
-      <ReviewCodeViewHarness
-        comments={[
-          {
-            ...comment,
-            codexReply: {
-              body: 'This reply is tall enough to use a different markdown measurement.',
-              status: 'ready',
-            },
+  const renderCountBeforeReply = codeViewMock.renderCount;
+  await view.rerender(
+    <ReviewCodeViewHarness
+      comments={[
+        {
+          ...comment,
+          codexReply: {
+            body: 'This reply is tall enough to use a different markdown measurement.',
+            status: 'ready',
           },
-        ]}
-        files={[file]}
-      />,
-    );
-
-    expect(view.container.querySelector('[aria-label="Codex reply"]')).not.toBeNull();
-    expect(codeViewMock.renderCount).toBe(renderCountBeforeReply + 1);
-  } finally {
-    await view.cleanup();
-  }
+        },
+      ]}
+      files={[file]}
+    />,
+  );
+  expect(view.container.querySelector('[aria-label="Codex reply"]')).not.toBeNull();
+  expect(codeViewMock.renderCount).toBe(renderCountBeforeReply + 1);
 });
 
 test('failed pull request comments keep their draft and can be retried', async () => {
@@ -1358,7 +1302,7 @@ test('failed pull request comments keep their draft and can be retried', async (
   } satisfies ReviewComment;
   const onSubmitComment = vi.fn();
   const onUpdateComment = vi.fn();
-  const view = await renderReact(
+  await using view = await renderReact(
     <ReviewCodeViewHarness
       comments={[comment]}
       files={[file]}
@@ -1368,30 +1312,23 @@ test('failed pull request comments keep their draft and can be retried', async (
     />,
   );
 
-  try {
-    const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
-    expect(textarea?.value).toBe('Keep this comment.');
-    expect(view.container.querySelector('.review-comment-error')?.textContent).toBe(
-      comment.remoteSubmit.error,
-    );
-
-    const commentButton = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent === 'Comment',
-    );
-    if (!commentButton) {
-      throw new Error('Expected Comment button.');
-    }
-
-    await act(async () => {
-      commentButton.click();
-    });
-
-    expect(onUpdateComment).not.toHaveBeenCalled();
-    expect(onSubmitComment).toHaveBeenCalledWith(comment.id);
-    expect(textarea?.value).toBe(comment.body);
-  } finally {
-    await view.cleanup();
+  const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
+  expect(textarea?.value).toBe('Keep this comment.');
+  expect(view.container.querySelector('.review-comment-error')?.textContent).toBe(
+    comment.remoteSubmit.error,
+  );
+  const commentButton = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Comment',
+  );
+  if (!commentButton) {
+    throw new Error('Expected Comment button.');
   }
+  await act(async () => {
+    commentButton.click();
+  });
+  expect(onUpdateComment).not.toHaveBeenCalled();
+  expect(onSubmitComment).toHaveBeenCalledWith(comment.id);
+  expect(textarea?.value).toBe(comment.body);
 });
 
 test('working-tree share comments support the Comment button and Mod+Enter', async () => {
@@ -1406,7 +1343,7 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
     side: 'additions',
   } satisfies ReviewComment;
   const onSubmitComment = vi.fn();
-  const view = await renderReact(
+  await using view = await renderReact(
     <ReviewCodeViewHarness
       comments={[comment]}
       files={[file]}
@@ -1415,33 +1352,32 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
     />,
   );
 
-  try {
-    const commentButton = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent === 'Comment',
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      platform.mockRestore();
+      await view.cleanup();
+    },
+  };
+  const commentButton = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Comment',
+  );
+  expect(commentButton).not.toBeNull();
+  await act(async () => commentButton?.click());
+  expect(onSubmitComment).toHaveBeenLastCalledWith(comment.id);
+  onSubmitComment.mockClear();
+  const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
+  expect(textarea).not.toBeNull();
+  await act(async () => {
+    textarea?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        key: 'Enter',
+        metaKey: true,
+      }),
     );
-    expect(commentButton).not.toBeNull();
-
-    await act(async () => commentButton?.click());
-    expect(onSubmitComment).toHaveBeenLastCalledWith(comment.id);
-
-    onSubmitComment.mockClear();
-    const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
-    expect(textarea).not.toBeNull();
-    await act(async () => {
-      textarea?.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          bubbles: true,
-          cancelable: true,
-          key: 'Enter',
-          metaKey: true,
-        }),
-      );
-    });
-    expect(onSubmitComment).toHaveBeenCalledWith(comment.id);
-  } finally {
-    platform.mockRestore();
-    await view.cleanup();
-  }
+  });
+  expect(onSubmitComment).toHaveBeenCalledWith(comment.id);
 });
 
 test('file comments can be created for GitLab merge requests but not GitHub pull requests', async () => {
@@ -1457,7 +1393,7 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
     type: 'pull-request',
     url: 'https://github.com/example/project/pull/1',
   } satisfies ReviewSource;
-  const view = await renderReact(
+  await using view = await renderReact(
     <ReviewCodeViewHarness
       files={[file]}
       onCreateComment={onCreateComment}
@@ -1466,37 +1402,31 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
     />,
   );
 
-  try {
-    const fileCommentButton = view.container.querySelector<HTMLButtonElement>(
-      '.codiff-file-comment-button',
-    );
-    expect(fileCommentButton).not.toBeNull();
-    expect(fileCommentButton?.classList.contains('codiff-button')).toBe(true);
-
-    await act(async () => fileCommentButton?.click());
-    expect(onCreateComment).toHaveBeenCalledWith({
-      anchor: 'file',
-      filePath: 'src/comment.ts',
-      sectionId: 'src/comment.ts:unstaged',
-    });
-
-    await view.rerender(
-      <ReviewCodeViewHarness
-        files={[file]}
-        onCreateComment={onCreateComment}
-        source={gitHubSource}
-        supportsReviewCommentActions
-      />,
-    );
-    expect(view.container.querySelector('.codiff-file-comment-button')).toBeNull();
-  } finally {
-    await view.cleanup();
-  }
+  const fileCommentButton = view.container.querySelector<HTMLButtonElement>(
+    '.codiff-file-comment-button',
+  );
+  expect(fileCommentButton).not.toBeNull();
+  expect(fileCommentButton?.classList.contains('codiff-button')).toBe(true);
+  await act(async () => fileCommentButton?.click());
+  expect(onCreateComment).toHaveBeenCalledWith({
+    anchor: 'file',
+    filePath: 'src/comment.ts',
+    sectionId: 'src/comment.ts:unstaged',
+  });
+  await view.rerender(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onCreateComment={onCreateComment}
+      source={gitHubSource}
+      supportsReviewCommentActions
+    />,
+  );
+  expect(view.container.querySelector('.codiff-file-comment-button')).toBeNull();
 });
 
 test('file-level review comments render as measured file annotations', async () => {
   const file = createChangedFile('src/comment.ts');
-  const view = await renderReact(
+  await using view = await renderReact(
     <ReviewCodeViewHarness
       comments={[
         {
@@ -1519,31 +1449,27 @@ test('file-level review comments render as measured file annotations', async () 
     />,
   );
 
-  try {
-    const fileComments = view.container.querySelector('.review-comment-thread');
-    expect(fileComments?.textContent).toContain('Review this file as a whole.');
-    expect(fileComments?.closest('.codiff-file-header')).toBeNull();
-    const item = codeViewMock.lastItems.find(
-      (candidate) => candidate.id === 'diff:src/comment.ts:unstaged',
-    ) as
-      | {
-          annotations?: ReadonlyArray<{
-            lineNumber: number;
-            metadata: { commentIds?: ReadonlyArray<string>; type: string };
-          }>;
-        }
-      | undefined;
-    expect(item?.annotations).toContainEqual({
-      lineNumber: 0,
-      metadata: {
-        commentIds: ['gitlab:file'],
-        type: 'review-comment',
-      },
-      side: 'additions',
-    });
-  } finally {
-    await view.cleanup();
-  }
+  const fileComments = view.container.querySelector('.review-comment-thread');
+  expect(fileComments?.textContent).toContain('Review this file as a whole.');
+  expect(fileComments?.closest('.codiff-file-header')).toBeNull();
+  const item = codeViewMock.lastItems.find(
+    (candidate) => candidate.id === 'diff:src/comment.ts:unstaged',
+  ) as
+    | {
+        annotations?: ReadonlyArray<{
+          lineNumber: number;
+          metadata: { commentIds?: ReadonlyArray<string>; type: string };
+        }>;
+      }
+    | undefined;
+  expect(item?.annotations).toContainEqual({
+    lineNumber: 0,
+    metadata: {
+      commentIds: ['gitlab:file'],
+      type: 'review-comment',
+    },
+    side: 'additions',
+  });
 });
 
 test('code quality findings render as additions annotations', async () => {
@@ -1557,7 +1483,7 @@ test('code quality findings render as additions annotations', async () => {
     severity: 'major',
     status: 'new',
   } satisfies PullRequestCodeQualityFinding;
-  const view = await renderReact(
+  await using view = await renderReact(
     <ReviewCodeViewHarness
       codeQualityFindings={[
         finding,
@@ -1569,40 +1495,35 @@ test('code quality findings render as additions annotations', async () => {
     />,
   );
 
-  try {
-    const renderedFinding = view.container.querySelector<HTMLElement>('.code-quality-finding');
-    expect(renderedFinding?.dataset.severity).toBe('major');
-    expect(renderedFinding?.dataset.status).toBe('new');
-    expect(renderedFinding?.textContent).toContain('Code Quality');
-    expect(renderedFinding?.textContent).toContain('Major');
-    expect(renderedFinding?.textContent).toContain('New');
-    expect(renderedFinding?.textContent).toContain(finding.description);
-    expect(renderedFinding?.textContent).toContain('eslint');
-
-    const item = codeViewMock.lastItems.find(
-      (candidate) => candidate.id === 'diff:src/app.ts:unstaged',
-    ) as
-      | {
-          annotations?: ReadonlyArray<{
-            lineNumber: number;
-            metadata: { finding?: PullRequestCodeQualityFinding; type: string };
-            side: string;
-          }>;
-        }
-      | undefined;
-    expect(item?.annotations?.filter(({ metadata }) => metadata.type === 'code-quality')).toEqual([
-      {
-        lineNumber: 1,
-        metadata: {
-          finding,
-          type: 'code-quality',
-        },
-        side: 'additions',
+  const renderedFinding = view.container.querySelector<HTMLElement>('.code-quality-finding');
+  expect(renderedFinding?.dataset.severity).toBe('major');
+  expect(renderedFinding?.dataset.status).toBe('new');
+  expect(renderedFinding?.textContent).toContain('Code Quality');
+  expect(renderedFinding?.textContent).toContain('Major');
+  expect(renderedFinding?.textContent).toContain('New');
+  expect(renderedFinding?.textContent).toContain(finding.description);
+  expect(renderedFinding?.textContent).toContain('eslint');
+  const item = codeViewMock.lastItems.find(
+    (candidate) => candidate.id === 'diff:src/app.ts:unstaged',
+  ) as
+    | {
+        annotations?: ReadonlyArray<{
+          lineNumber: number;
+          metadata: { finding?: PullRequestCodeQualityFinding; type: string };
+          side: string;
+        }>;
+      }
+    | undefined;
+  expect(item?.annotations?.filter(({ metadata }) => metadata.type === 'code-quality')).toEqual([
+    {
+      lineNumber: 1,
+      metadata: {
+        finding,
+        type: 'code-quality',
       },
-    ]);
-  } finally {
-    await view.cleanup();
-  }
+      side: 'additions',
+    },
+  ]);
 });
 
 test('Enter on a focused review control is not converted into a hunk comment', async () => {
@@ -1623,40 +1544,42 @@ test('Enter on a focused review control is not converted into a hunk comment', a
       />,
     );
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      render(0);
-    });
-    await act(async () => {
-      render(1);
-    });
-
-    const openButton = container.querySelector<HTMLButtonElement>('.codiff-button');
-    if (!openButton) {
-      throw new Error('Expected the open file button.');
-    }
-
-    openButton.focus();
-    const event = new KeyboardEvent('keydown', {
-      bubbles: true,
-      cancelable: true,
-      key: 'Enter',
-    });
-    openButton.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(false);
-    expect(onCreateComment).not.toHaveBeenCalled();
-  } finally {
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    render(0);
+  });
+  await act(async () => {
+    render(1);
+  });
+  const openButton = container.querySelector<HTMLButtonElement>('.codiff-button');
+  if (!openButton) {
+    throw new Error('Expected the open file button.');
   }
+  openButton.focus();
+  const event = new KeyboardEvent('keydown', {
+    bubbles: true,
+    cancelable: true,
+    key: 'Enter',
+  });
+  openButton.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  expect(onCreateComment).not.toHaveBeenCalled();
 });
 
 type ReviewLineClickHandler = (
-  line: { annotationSide: 'additions' | 'deletions'; event: unknown; lineNumber: number },
+  line: {
+    annotationSide: 'additions' | 'deletions';
+    event: unknown;
+    lineNumber: number;
+  },
   context: { item: unknown },
 ) => void;
 
@@ -1695,75 +1618,74 @@ test('line content clicks create review comments unless text is selected', async
   document.body.append(selectionHost);
   let root: Root | null = null;
 
-  try {
-    await act(async () => {
-      root = createRoot(container);
-      root.render(<ReviewCodeViewHarness files={[file]} onCreateComment={onCreateComment} />);
-    });
-
-    const { item, onGutterUtilityClick, onLineClick, onLineSelectionEnd } =
-      getReviewCodeViewHandlers();
-    const range = { end: 1, side: 'additions' as const, start: 1 };
-
-    await act(async () => {
-      onLineClick(
-        { annotationSide: 'additions', event: nonInteractivePointerEvent, lineNumber: 1 },
-        { item },
-      );
-    });
-
-    expect(onCreateComment).toHaveBeenCalledTimes(1);
-    expect(onCreateComment).toHaveBeenLastCalledWith({
-      filePath: 'src/click.ts',
-      lineNumber: 1,
-      sectionId: 'src/click.ts:unstaged',
-      side: 'additions',
-    });
-
-    const selection = window.getSelection();
-    const textSelection = document.createRange();
-    textSelection.selectNodeContents(selectionHost);
-    selection?.removeAllRanges();
-    selection?.addRange(textSelection);
-
-    await act(async () => {
-      onLineClick(
-        { annotationSide: 'additions', event: nonInteractivePointerEvent, lineNumber: 1 },
-        { item },
-      );
-    });
-
-    expect(onCreateComment).toHaveBeenCalledTimes(1);
-    selection?.removeAllRanges();
-
-    await act(async () => {
-      onLineSelectionEnd(range, { item });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(onCreateComment).toHaveBeenCalledTimes(2);
-    expect(onCreateComment).toHaveBeenLastCalledWith({
-      filePath: 'src/click.ts',
-      lineNumber: 1,
-      sectionId: 'src/click.ts:unstaged',
-      side: 'additions',
-    });
-
-    await act(async () => {
-      onGutterUtilityClick(range, { item });
-      // The pointer-up after a gutter drag also ends a line selection; only
-      // the gutter callback may create the comment.
-      onLineSelectionEnd(range, { item });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(onCreateComment).toHaveBeenCalledTimes(3);
-  } finally {
-    window.getSelection()?.removeAllRanges();
-    if (root) {
-      await act(async () => root?.unmount());
-    }
-    container.remove();
-    selectionHost.remove();
-  }
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      window.getSelection()?.removeAllRanges();
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+      selectionHost.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<ReviewCodeViewHarness files={[file]} onCreateComment={onCreateComment} />);
+  });
+  const { item, onGutterUtilityClick, onLineClick, onLineSelectionEnd } =
+    getReviewCodeViewHandlers();
+  const range = { end: 1, side: 'additions' as const, start: 1 };
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: nonInteractivePointerEvent,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+  expect(onCreateComment).toHaveBeenCalledTimes(1);
+  expect(onCreateComment).toHaveBeenLastCalledWith({
+    filePath: 'src/click.ts',
+    lineNumber: 1,
+    sectionId: 'src/click.ts:unstaged',
+    side: 'additions',
+  });
+  const selection = window.getSelection();
+  const textSelection = document.createRange();
+  textSelection.selectNodeContents(selectionHost);
+  selection?.removeAllRanges();
+  selection?.addRange(textSelection);
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: nonInteractivePointerEvent,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+  expect(onCreateComment).toHaveBeenCalledTimes(1);
+  selection?.removeAllRanges();
+  await act(async () => {
+    onLineSelectionEnd(range, { item });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(onCreateComment).toHaveBeenCalledTimes(2);
+  expect(onCreateComment).toHaveBeenLastCalledWith({
+    filePath: 'src/click.ts',
+    lineNumber: 1,
+    sectionId: 'src/click.ts:unstaged',
+    side: 'additions',
+  });
+  await act(async () => {
+    onGutterUtilityClick(range, { item });
+    // The pointer-up after a gutter drag also ends a line selection; only
+    // the gutter callback may create the comment.
+    onLineSelectionEnd(range, { item });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(onCreateComment).toHaveBeenCalledTimes(3);
 });

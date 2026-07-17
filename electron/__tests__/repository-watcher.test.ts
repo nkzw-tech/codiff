@@ -1,11 +1,14 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, realpath, stat, utimes, writeFile } from 'node:fs/promises';
+import { readFile, realpath, stat, utimes, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import { getGitTestEnvironment, removeGitTestDirectory } from '../../core/__tests__/helpers/git.ts';
+import { getGitTestEnvironment } from '../../core/__tests__/helpers/git.ts';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 
 type Snapshot = {
   head: string;
@@ -373,21 +376,13 @@ test('uses focused, background, and hidden polling intervals', () => {
 });
 
 test('clean and large dirty repository watcher polls use one Git process', async () => {
-  const repository = await realpath(await mkdtemp(join(tmpdir(), 'codiff-repository-watcher-')));
+  await using directory = await createTemporaryDirectory('codiff-repository-watcher-');
+  const repository = await realpath(directory.path);
   const largePath = join(repository, 'large.bin');
   const countGitProcesses = async (label: string, knownDirtyPaths: ReadonlyArray<string>) => {
     const tracePath = join(repository, '.git', `trace-${label}.jsonl`);
-    const previousTrace = process.env.GIT_TRACE2_EVENT;
-    process.env.GIT_TRACE2_EVENT = tracePath;
-    try {
-      await readRepositoryWatcherSnapshot(repository, [], knownDirtyPaths);
-    } finally {
-      if (previousTrace == null) {
-        delete process.env.GIT_TRACE2_EVENT;
-      } else {
-        process.env.GIT_TRACE2_EVENT = previousTrace;
-      }
-    }
+    await using _traceEnvironment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
+    await readRepositoryWatcherSnapshot(repository, [], knownDirtyPaths);
     return (await readFile(tracePath, 'utf8'))
       .trim()
       .split('\n')
@@ -396,63 +391,55 @@ test('clean and large dirty repository watcher polls use one Git process', async
       .filter(({ event }) => event === 'version').length;
   };
 
-  try {
-    await git(repository, ['init']);
-    await writeFile(largePath, Buffer.alloc(largeTestFileSize, 1));
-    await git(repository, ['add', 'large.bin']);
-    await git(repository, ['commit', '-m', 'initial']);
+  await git(repository, ['init']);
+  await writeFile(largePath, Buffer.alloc(largeTestFileSize, 1));
+  await git(repository, ['add', 'large.bin']);
+  await git(repository, ['commit', '-m', 'initial']);
 
-    const cleanProcessCount = await countGitProcesses('clean', []);
-    await writeFile(largePath, Buffer.alloc(largeTestFileSize, 2));
-    const initialDirtySnapshot = await readRepositoryWatcherSnapshot(repository);
-    const dirtyProcessCount = await countGitProcesses(
-      'dirty',
-      Object.keys(initialDirtySnapshot.pathSignatures),
-    );
-    await writeFile(join(repository, 'new.txt'), 'new\n');
-    const combinedSnapshot = await readRepositoryWatcherSnapshot(repository, [], ['large.bin']);
-    const snapshot = await readRepositoryWatcherSnapshot(repository, ['large.bin'], ['large.bin']);
+  const cleanProcessCount = await countGitProcesses('clean', []);
+  await writeFile(largePath, Buffer.alloc(largeTestFileSize, 2));
+  const initialDirtySnapshot = await readRepositoryWatcherSnapshot(repository);
+  const dirtyProcessCount = await countGitProcesses(
+    'dirty',
+    Object.keys(initialDirtySnapshot.pathSignatures),
+  );
+  await writeFile(join(repository, 'new.txt'), 'new\n');
+  const combinedSnapshot = await readRepositoryWatcherSnapshot(repository, [], ['large.bin']);
+  const snapshot = await readRepositoryWatcherSnapshot(repository, ['large.bin'], ['large.bin']);
 
-    expect(cleanProcessCount).toBe(1);
-    expect(dirtyProcessCount).toBe(1);
-    expect(initialDirtySnapshot.pathVersions).toEqual({});
-    expect(Object.keys(combinedSnapshot.pathSignatures).sort()).toEqual(['large.bin', 'new.txt']);
-    expect(snapshot.pathSignatures['large.bin'].split('\0')).toHaveLength(7);
-    expect(snapshot.pathVersions?.['large.bin']).toHaveLength(16);
-  } finally {
-    delete process.env.GIT_TRACE2_EVENT;
-    await removeGitTestDirectory(repository);
-  }
+  expect(cleanProcessCount).toBe(1);
+  expect(dirtyProcessCount).toBe(1);
+  expect(initialDirtySnapshot.pathVersions).toEqual({});
+  expect(Object.keys(combinedSnapshot.pathSignatures).sort()).toEqual(['large.bin', 'new.txt']);
+  expect(snapshot.pathSignatures['large.bin'].split('\0')).toHaveLength(7);
+  expect(snapshot.pathVersions?.['large.bin']).toHaveLength(16);
 }, 15_000);
 
 test('detects same-size edits when the modification time is preserved', async () => {
-  const repository = await realpath(await mkdtemp(join(tmpdir(), 'codiff-preserved-mtime-')));
+  await using directory = await createTemporaryDirectory('codiff-preserved-mtime-');
+  const repository = await realpath(directory.path);
   const path = join(repository, 'same-size.txt');
   const fixedTime = 1_700_000_000;
 
-  try {
-    await git(repository, ['init']);
-    await writeFile(path, 'first\n');
-    await utimes(path, fixedTime, fixedTime);
-    const before = await readRepositoryWatcherSnapshot(repository);
-    const beforeStat = await stat(path);
+  await git(repository, ['init']);
+  await writeFile(path, 'first\n');
+  await utimes(path, fixedTime, fixedTime);
+  const before = await readRepositoryWatcherSnapshot(repository);
+  const beforeStat = await stat(path);
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await writeFile(path, 'other\n');
-    await utimes(path, fixedTime, fixedTime);
-    const afterStat = await stat(path);
-    const after = await readRepositoryWatcherSnapshot(
-      repository,
-      [],
-      Object.keys(before.pathSignatures),
-    );
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await writeFile(path, 'other\n');
+  await utimes(path, fixedTime, fixedTime);
+  const afterStat = await stat(path);
+  const after = await readRepositoryWatcherSnapshot(
+    repository,
+    [],
+    Object.keys(before.pathSignatures),
+  );
 
-    expect(afterStat.size).toBe(beforeStat.size);
-    expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs);
-    expect(after.signature).not.toBe(before.signature);
-  } finally {
-    await removeGitTestDirectory(repository);
-  }
+  expect(afterStat.size).toBe(beforeStat.size);
+  expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs);
+  expect(after.signature).not.toBe(before.signature);
 });
 
 test('preserves literal backslashes in POSIX repository paths', async () => {
@@ -460,23 +447,20 @@ test('preserves literal backslashes in POSIX repository paths', async () => {
     return;
   }
 
-  const repository = await realpath(await mkdtemp(join(tmpdir(), 'codiff-backslash-path-')));
+  await using directory = await createTemporaryDirectory('codiff-backslash-path-');
+  const repository = await realpath(directory.path);
   const path = 'foo\\bar.txt';
 
-  try {
-    await git(repository, ['init']);
-    await writeFile(join(repository, path), 'dirty\n');
-    const before = await readRepositoryWatcherSnapshot(repository);
-    const after = await readRepositoryWatcherSnapshot(
-      repository,
-      [],
-      Object.keys(before.pathSignatures),
-    );
+  await git(repository, ['init']);
+  await writeFile(join(repository, path), 'dirty\n');
+  const before = await readRepositoryWatcherSnapshot(repository);
+  const after = await readRepositoryWatcherSnapshot(
+    repository,
+    [],
+    Object.keys(before.pathSignatures),
+  );
 
-    expect(Object.keys(before.pathSignatures)).toEqual([path]);
-    expect(Object.keys(after.pathSignatures)).toEqual([path]);
-    expect(after.signature).toBe(before.signature);
-  } finally {
-    await removeGitTestDirectory(repository);
-  }
+  expect(Object.keys(before.pathSignatures)).toEqual([path]);
+  expect(Object.keys(after.pathSignatures)).toEqual([path]);
+  expect(after.signature).toBe(before.signature);
 });

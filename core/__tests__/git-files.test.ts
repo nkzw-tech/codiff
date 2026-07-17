@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, test } from 'vite-plus/test';
 import { removeGitTestDirectory } from './helpers/git.ts';
+import { createTemporaryEnvironment } from './helpers/resources.ts';
 
 type FileContentResult = {
   binary: boolean;
@@ -228,36 +229,27 @@ test('batched Git file reads preserve text, binary, rename, missing, and size be
 test.each(batchCases)(
   'batches pull request content reads for $fileCount files',
   async ({ fileCount, maximumProcesses }) => {
-    const previousTrace = process.env.GIT_TRACE2_EVENT;
     const tracePath = join(repo, `trace-${fileCount}.jsonl`);
-    process.env.GIT_TRACE2_EVENT = tracePath;
+    await using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
 
-    try {
-      const paths = Array.from(
-        { length: fileCount },
-        (_, index) => `src/file-${index.toString().padStart(3, '0')}.ts`,
-      );
-      const [oldFiles, newFiles] = await Promise.all([
-        readGitFiles(repo, base, paths, { refScopedEmptyCacheKey: true }),
-        readGitFiles(repo, head, paths, { refScopedEmptyCacheKey: true }),
-      ]);
+    const paths = Array.from(
+      { length: fileCount },
+      (_, index) => `src/file-${index.toString().padStart(3, '0')}.ts`,
+    );
+    const [oldFiles, newFiles] = await Promise.all([
+      readGitFiles(repo, base, paths, { refScopedEmptyCacheKey: true }),
+      readGitFiles(repo, head, paths, { refScopedEmptyCacheKey: true }),
+    ]);
 
-      expect(oldFiles).toHaveLength(fileCount);
-      expect(newFiles).toHaveLength(fileCount);
+    expect(oldFiles).toHaveLength(fileCount);
+    expect(newFiles).toHaveLength(fileCount);
 
-      const processCount = (await readFile(tracePath, 'utf8'))
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as { event?: string })
-        .filter(({ event }) => event === 'version').length;
-      expect(processCount).toBeLessThanOrEqual(maximumProcesses);
-    } finally {
-      if (previousTrace == null) {
-        delete process.env.GIT_TRACE2_EVENT;
-      } else {
-        process.env.GIT_TRACE2_EVENT = previousTrace;
-      }
-    }
+    const processCount = (await readFile(tracePath, 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { event?: string })
+      .filter(({ event }) => event === 'version').length;
+    expect(processCount).toBeLessThanOrEqual(maximumProcesses);
   },
 );

@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdir, realpath, symlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vite-plus/test';
+import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { createCodexSkillInstaller } = require('../main/codex-skill.cjs') as {
@@ -22,72 +22,64 @@ const { createCodexSkillInstaller } = require('../main/codex-skill.cjs') as {
 };
 
 test('installs every Codiff Codex skill as a symlink', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-skill-'));
-  const home = join(directory, 'home');
-  const root = join(directory, 'app');
+  await using directory = await createTemporaryDirectory('codiff-skill-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
   const codiffSource = join(root, 'codex/skills/codiff');
 
-  try {
-    await mkdir(codiffSource, { recursive: true });
+  await mkdir(codiffSource, { recursive: true });
 
-    const installer = createCodexSkillInstaller({
-      app: {
-        getPath: () => home,
-        isPackaged: false,
-      },
-      dialog: {
-        showMessageBox: vi.fn(async () => {}),
-      },
-      root,
-    });
+  const installer = createCodexSkillInstaller({
+    app: {
+      getPath: () => home,
+      isPackaged: false,
+    },
+    dialog: {
+      showMessageBox: vi.fn(async () => {}),
+    },
+    root,
+  });
 
-    expect(installer.getCodexSkillStatus()).toEqual({
-      installed: false,
-      path: join(home, '.codex/skills/codiff'),
-    });
+  expect(installer.getCodexSkillStatus()).toEqual({
+    installed: false,
+    path: join(home, '.codex/skills/codiff'),
+  });
 
-    await expect(installer.installCodexSkill()).resolves.toBe(true);
-    expect(installer.getCodexSkillStatus()).toEqual({
-      installed: true,
-      path: join(home, '.codex/skills/codiff'),
-    });
-    await expect(realpath(join(home, '.codex/skills/codiff'))).resolves.toBe(
-      await realpath(codiffSource),
-    );
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+  await expect(installer.installCodexSkill()).resolves.toBe(true);
+  expect(installer.getCodexSkillStatus()).toEqual({
+    installed: true,
+    path: join(home, '.codex/skills/codiff'),
+  });
+  await expect(realpath(join(home, '.codex/skills/codiff'))).resolves.toBe(
+    await realpath(codiffSource),
+  );
 });
 
 test('updates stale Codiff Codex skill symlinks', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'codiff-skill-'));
-  const home = join(directory, 'home');
-  const root = join(directory, 'app');
+  await using directory = await createTemporaryDirectory('codiff-skill-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
   const codiffSource = join(root, 'codex/skills/codiff');
-  const staleSource = join(directory, 'stale/codiff');
+  const staleSource = join(directory.path, 'stale/codiff');
   const target = join(home, '.codex/skills/codiff');
 
-  try {
-    await mkdir(codiffSource, { recursive: true });
-    await mkdir(staleSource, { recursive: true });
-    await mkdir(join(home, '.codex/skills'), { recursive: true });
-    await symlink(staleSource, target, 'dir');
+  await mkdir(codiffSource, { recursive: true });
+  await mkdir(staleSource, { recursive: true });
+  await mkdir(join(home, '.codex/skills'), { recursive: true });
+  await symlink(staleSource, target, 'dir');
 
-    const installer = createCodexSkillInstaller({
-      app: {
-        getPath: () => home,
-        isPackaged: false,
-      },
-      dialog: {
-        showMessageBox: vi.fn(async () => {}),
-      },
-      root,
-    });
+  const installer = createCodexSkillInstaller({
+    app: {
+      getPath: () => home,
+      isPackaged: false,
+    },
+    dialog: {
+      showMessageBox: vi.fn(async () => {}),
+    },
+    root,
+  });
 
-    expect(installer.getCodexSkillStatus().installed).toBe(false);
-    await expect(installer.installCodexSkill()).resolves.toBe(true);
-    await expect(realpath(target)).resolves.toBe(await realpath(codiffSource));
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
+  expect(installer.getCodexSkillStatus().installed).toBe(false);
+  await expect(installer.installCodexSkill()).resolves.toBe(true);
+  await expect(realpath(target)).resolves.toBe(await realpath(codiffSource));
 });

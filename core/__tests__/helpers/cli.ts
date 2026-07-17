@@ -5,7 +5,14 @@ import { join } from 'node:path';
 const loggerScript =
   '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$OPEN_ARGS_FILE"\ndone\n';
 
-export const createFakeOpenLogger = async () => {
+export type FakeOpenLogger = AsyncDisposable & {
+  directory: string;
+  env: NodeJS.ProcessEnv;
+  readArgs: () => Promise<Array<string>>;
+  reset: () => Promise<void>;
+};
+
+export const createFakeOpenLogger = async (): Promise<FakeOpenLogger> => {
   const directory = await mkdtemp(join(tmpdir(), 'codiff-app-helper-'));
   const fakeBin = join(directory, 'bin');
   const logPath = join(directory, 'open-args.txt');
@@ -16,7 +23,6 @@ export const createFakeOpenLogger = async () => {
   await chmod(openPath, 0o755);
 
   return {
-    cleanup: () => rm(directory, { force: true, recursive: true }),
     directory,
     env: {
       ...process.env,
@@ -25,10 +31,23 @@ export const createFakeOpenLogger = async () => {
     },
     readArgs: async () => (await readFile(logPath, 'utf8')).trim().split('\n'),
     reset: () => writeFile(logPath, ''),
+    async [Symbol.asyncDispose]() {
+      await rm(directory, { force: true, recursive: true });
+    },
   };
 };
 
-export const createFakeCommandLogger = async (prefix: string, commandName: string) => {
+export type FakeCommandLogger = AsyncDisposable & {
+  commandPath: string;
+  directory: string;
+  env: NodeJS.ProcessEnv;
+  readArgs: () => Promise<Array<string>>;
+};
+
+export const createFakeCommandLogger = async (
+  prefix: string,
+  commandName: string,
+): Promise<FakeCommandLogger> => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   const commandPath = join(directory, commandName);
   const logPath = join(directory, 'args.txt');
@@ -37,7 +56,6 @@ export const createFakeCommandLogger = async (prefix: string, commandName: strin
   await chmod(commandPath, 0o755);
 
   return {
-    cleanup: () => rm(directory, { force: true, recursive: true }),
     commandPath,
     directory,
     env: {
@@ -45,5 +63,8 @@ export const createFakeCommandLogger = async (prefix: string, commandName: strin
       OPEN_ARGS_FILE: logPath,
     },
     readArgs: async () => (await readFile(logPath, 'utf8')).trim().split('\n'),
+    async [Symbol.asyncDispose]() {
+      await rm(directory, { force: true, recursive: true });
+    },
   };
 };

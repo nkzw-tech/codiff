@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
+import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { readWindowState, validateWindowStateOnScreen, writeWindowState } =
@@ -46,96 +46,67 @@ const validState = {
 const primaryDisplay = { workArea: { height: 900, width: 1440, x: 0, y: 0 } };
 
 test('readWindowState returns null when file does not exist', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    expect(readWindowState(dir)).toBeNull();
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  expect(readWindowState(directory.path)).toBeNull();
 });
 
 test('readWindowState returns null for corrupt JSON', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    await writeFile(join(dir, 'window-state.json'), '{not valid json');
-    expect(readWindowState(dir)).toBeNull();
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  await writeFile(join(directory.path, 'window-state.json'), '{not valid json');
+  expect(readWindowState(directory.path)).toBeNull();
 });
 
 test('readWindowState returns null for invalid fields', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    await writeFile(join(dir, 'window-state.json'), JSON.stringify({ x: 'not a number' }));
-    expect(readWindowState(dir)).toBeNull();
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  await writeFile(join(directory.path, 'window-state.json'), JSON.stringify({ x: 'not a number' }));
+  expect(readWindowState(directory.path)).toBeNull();
 });
 
 test('readWindowState returns null when width is below minimum', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    await writeFile(join(dir, 'window-state.json'), JSON.stringify({ ...validState, width: 500 }));
-    expect(readWindowState(dir)).toBeNull();
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  await writeFile(
+    join(directory.path, 'window-state.json'),
+    JSON.stringify({ ...validState, width: 500 }),
+  );
+  expect(readWindowState(directory.path)).toBeNull();
 });
 
 test('readWindowState returns null when height is below minimum', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    await writeFile(join(dir, 'window-state.json'), JSON.stringify({ ...validState, height: 400 }));
-    expect(readWindowState(dir)).toBeNull();
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  await writeFile(
+    join(directory.path, 'window-state.json'),
+    JSON.stringify({ ...validState, height: 400 }),
+  );
+  expect(readWindowState(directory.path)).toBeNull();
 });
 
 test('readWindowState returns valid state', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    await writeFile(join(dir, 'window-state.json'), JSON.stringify(validState));
-    expect(readWindowState(dir)).toEqual(validState);
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  await writeFile(join(directory.path, 'window-state.json'), JSON.stringify(validState));
+  expect(readWindowState(directory.path)).toEqual(validState);
 });
 
 test('readWindowState defaults isMaximized and isFullScreen to false when missing', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    const { isMaximized: _, isFullScreen: __, ...partial } = validState;
-    await writeFile(join(dir, 'window-state.json'), JSON.stringify(partial));
-    const result = readWindowState(dir);
-    expect(result?.isMaximized).toBe(false);
-    expect(result?.isFullScreen).toBe(false);
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  const { isMaximized: _, isFullScreen: __, ...partial } = validState;
+  await writeFile(join(directory.path, 'window-state.json'), JSON.stringify(partial));
+  const result = readWindowState(directory.path);
+  expect(result?.isMaximized).toBe(false);
+  expect(result?.isFullScreen).toBe(false);
 });
 
 test('writeWindowState creates directory and file', async () => {
-  const dir = join(await mkdtemp(join(tmpdir(), 'codiff-ws-')), 'nested');
-  try {
-    writeWindowState(validState, dir);
-    expect(readWindowState(dir)).toEqual(validState);
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  const nested = join(directory.path, 'nested');
+  writeWindowState(validState, nested);
+  expect(readWindowState(nested)).toEqual(validState);
 });
 
 test('write then read round-trips correctly', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'codiff-ws-'));
-  try {
-    const state = { ...validState, isFullScreen: true, isMaximized: true };
-    writeWindowState(state, dir);
-    expect(readWindowState(dir)).toEqual(state);
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
+  await using directory = await createTemporaryDirectory('codiff-ws-');
+  const state = { ...validState, isFullScreen: true, isMaximized: true };
+  writeWindowState(state, directory.path);
+  expect(readWindowState(directory.path)).toEqual(state);
 });
 
 test('validateWindowStateOnScreen returns state when visible on primary display', () => {
