@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
 import { getGitTestEnvironment, withGitTestEnvironment } from '../../core/__tests__/helpers/git.ts';
-import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources.ts';
+import {
+  createTemporaryDirectory,
+  createTemporaryEnvironment,
+} from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
 const { createWalkthroughCommit } = require('../walkthrough-commit.cjs') as {
@@ -100,6 +103,9 @@ test('streams hook output and returns stripped failure text', async () => {
     );
     await chmod(join(repoPath, '.git/hooks/pre-commit'), 0o755);
     await writeFile(join(repoPath, 'example.txt'), 'after\n');
+    await using _localHooks = createTemporaryEnvironment({
+      GIT_CONFIG_VALUE_3: join(repoPath, '.git/hooks'),
+    });
 
     const output: Array<string> = [];
     const result = await createWalkthroughCommit(
