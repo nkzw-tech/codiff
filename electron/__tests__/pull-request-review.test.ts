@@ -28,25 +28,6 @@ const { submitPullRequestReview } = require('../git-state/pull-request.cjs') as 
 
 const execFileAsync = promisify(execFile);
 
-const FAKE_GH_SCRIPT = `#!/usr/bin/env node
-const { appendFileSync } = require('node:fs');
-const args = process.argv.slice(2);
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => { input += chunk; });
-process.stdin.on('end', () => {
-  appendFileSync(
-    process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS,
-    JSON.stringify({ args, input }) + '\\n',
-  );
-  process.stdout.write(
-    args.includes('repos/nkzw-tech/codiff/pulls/12')
-      ? '{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}'
-      : '{}',
-  );
-});
-`;
-
 test('submits normalized GitHub review payloads through the GitHub CLI', async () => {
   await using directory = await createTemporaryDirectory('codiff-pull-request-review-');
   const repo = join(directory.path, 'repo');
@@ -64,7 +45,27 @@ test('submits normalized GitHub review payloads through the GitHub CLI', async (
     'origin',
     'git@github.com:nkzw-tech/codiff.git',
   ]);
-  await writeFile(fakeGh, FAKE_GH_SCRIPT);
+  await writeFile(
+    fakeGh,
+    `#!/usr/bin/env node
+const { appendFileSync } = require('node:fs');
+const args = process.argv.slice(2);
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => { input += chunk; });
+process.stdin.on('end', () => {
+  appendFileSync(
+    process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS,
+    JSON.stringify({ args, input }) + '\\n',
+  );
+  process.stdout.write(
+    args.includes('repos/nkzw-tech/codiff/pulls/12')
+      ? '{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}'
+      : '{}',
+  );
+});
+`,
+  );
   await chmod(fakeGh, 0o755);
 
   await using _environment = createTemporaryEnvironment({

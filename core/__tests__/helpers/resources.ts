@@ -1,11 +1,4 @@
 import { mkdtemp } from 'node:fs/promises';
-/**
- * Test helpers that return `AsyncDisposable` values for `await using`.
- *
- * Factory names stay verb-based (`createTemporaryDirectory`, not `*Using` /
- * `*Disposable`); callers must bind with `await using`. Prefer
- * `withGitTestEnvironment` when a callback scope is enough.
- */
 import { createServer, type RequestListener, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
