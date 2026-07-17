@@ -12,7 +12,7 @@ import type {
   RepositoryState,
   ReviewSource,
 } from '../types.ts';
-import { getGitTestEnvironment, withGitTestEnvironment } from './helpers/git.ts';
+import { getGitTestEnvironment } from './helpers/git.ts';
 import { createTemporaryDirectory, createTemporaryEnvironment } from './helpers/resources.ts';
 
 type StatusEntry = {
@@ -275,12 +275,10 @@ const pullRequestCommentRequest = {
 };
 
 const withRepo = async (run: (repo: string) => Promise<void>) => {
-  await withGitTestEnvironment(async () => {
-    await using directory = await createTemporaryDirectory('codiff-git-state-');
-    const repo = await realpath(directory.path);
-    await git(repo, ['init']);
-    await run(repo);
-  });
+  await using directory = await createTemporaryDirectory('codiff-git-state-');
+  const repo = await realpath(directory.path);
+  await git(repo, ['init']);
+  await run(repo);
 };
 
 test('readRepositoryState marks generated files from gitattributes and path heuristics', async () => {
