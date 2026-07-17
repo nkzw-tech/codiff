@@ -64,7 +64,7 @@ afterAll(async () => {
 });
 
 const withCwd = async <T>(cwd: string, callback: () => T | Promise<T>) => {
-  await using _workingDirectory = createTemporaryWorkingDirectory(cwd);
+  using _workingDirectory = createTemporaryWorkingDirectory(cwd);
   return await callback();
 };
 
