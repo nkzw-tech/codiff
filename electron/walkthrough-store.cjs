@@ -45,6 +45,16 @@ const isHunkGroup = (value) => {
 /** @param {unknown} value */
 const isNarrativeWalkthrough = (value) => {
   const walkthrough = /** @type {any} */ (value);
+  if (walkthrough && typeof walkthrough === 'object' && walkthrough.version === 5) {
+    return Boolean(
+      walkthrough.capturedContext &&
+      typeof walkthrough.capturedContext === 'object' &&
+      walkthrough.generationRequest &&
+      typeof walkthrough.generationRequest === 'object' &&
+      walkthrough.narrative &&
+      typeof walkthrough.narrative === 'object',
+    );
+  }
   return (
     walkthrough &&
     typeof walkthrough === 'object' &&
@@ -79,7 +89,7 @@ const isNarrativeWalkthrough = (value) => {
 
 /**
  * @param {string} cacheKey
- * @returns {import('../core/types.ts').NarrativeWalkthrough | null}
+ * @returns {import('../core/types.ts').PersistedWalkthrough | null}
  */
 const readStoredWalkthrough = (cacheKey) => {
   const path = getWalkthroughStorePath(cacheKey);
@@ -110,7 +120,7 @@ const readStoredWalkthrough = (cacheKey) => {
 
 /**
  * @param {string} cacheKey
- * @param {import('../core/types.ts').NarrativeWalkthrough} walkthrough
+ * @param {import('../core/types.ts').PersistedWalkthrough} walkthrough
  */
 const writeStoredWalkthrough = (cacheKey, walkthrough) => {
   const directory = getWalkthroughStoreDir();

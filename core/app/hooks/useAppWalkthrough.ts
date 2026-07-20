@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { SidebarMode, WalkthroughError } from '../../lib/app-types.ts';
-import { walkthroughModelFromV4 } from '../../lib/narrative-walkthrough-schema.ts';
+import { parseWalkthroughModel } from '../../lib/narrative-walkthrough-schema.ts';
 import { buildCommitModel, buildGenericCommitModel } from '../../lib/narrative-walkthrough.ts';
 import type { ReloadMainMode } from '../../lib/reload-selection.ts';
 import {
@@ -11,9 +11,9 @@ import { getSourceRevisionKey } from '../../lib/source.ts';
 import type {
   ChangedFile,
   CodiffPreferences,
-  NarrativeWalkthrough,
   NarrativeWalkthroughResult,
   NarrativeWalkthroughRequestOptions,
+  PersistedWalkthrough,
   RepositoryState,
   SharedWalkthroughSnapshot,
   WalkthroughCommitMessageRequest,
@@ -55,7 +55,7 @@ export function useAppWalkthrough({
   const initialPersistedWalkthrough =
     initialWalkthroughResult?.status === 'ready' ? initialWalkthroughResult.walkthrough : null;
   const [narrativeWalkthrough, setNarrativeWalkthrough] = useState<WalkthroughModel | null>(() =>
-    initialPersistedWalkthrough ? walkthroughModelFromV4(initialPersistedWalkthrough) : null,
+    initialPersistedWalkthrough ? parseWalkthroughModel(initialPersistedWalkthrough) : null,
   );
   const [shareWalkthroughEnabled, setShareWalkthroughEnabled] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(initialSidebarMode);
@@ -77,7 +77,7 @@ export function useAppWalkthrough({
   const activeReviewCommandTargetRef = useRef<ReviewCommandTarget | null>(null);
   const mainModeRef = useRef<ReloadMainMode>(initialMainMode);
   const narrativeWalkthroughRef = useRef<WalkthroughModel | null>(narrativeWalkthrough);
-  const persistedNarrativeWalkthroughRef = useRef<NarrativeWalkthrough | null>(
+  const persistedNarrativeWalkthroughRef = useRef<PersistedWalkthrough | null>(
     initialPersistedWalkthrough,
   );
   const sidebarModeRef = useRef<SidebarMode>(initialSidebarMode);
@@ -138,7 +138,7 @@ export function useAppWalkthrough({
       setWalkthroughLoading(false);
       if (initialWalkthroughResult.status === 'ready') {
         persistedNarrativeWalkthroughRef.current = initialWalkthroughResult.walkthrough;
-        setNarrativeWalkthrough(walkthroughModelFromV4(initialWalkthroughResult.walkthrough));
+        setNarrativeWalkthrough(parseWalkthroughModel(initialWalkthroughResult.walkthrough));
         setWalkthroughError(null);
       } else {
         setWalkthroughError(initialWalkthroughResult);
@@ -244,7 +244,7 @@ export function useAppWalkthrough({
 
           if (result.status === 'ready') {
             persistedNarrativeWalkthroughRef.current = result.walkthrough;
-            setNarrativeWalkthrough(walkthroughModelFromV4(result.walkthrough));
+            setNarrativeWalkthrough(parseWalkthroughModel(result.walkthrough));
             if (sidebarModeRef.current === 'walkthrough') {
               setWalkthroughUnread(false);
             } else {
@@ -276,7 +276,7 @@ export function useAppWalkthrough({
   const refreshWalkthroughForState = useCallback(
     (
       nextState: RepositoryState,
-      previousWalkthrough: NarrativeWalkthrough | null = persistedNarrativeWalkthroughRef.current,
+      previousWalkthrough: PersistedWalkthrough | null = persistedNarrativeWalkthroughRef.current,
     ) => {
       if (
         sidebarModeRef.current !== 'walkthrough' &&
@@ -432,9 +432,9 @@ export function useAppWalkthrough({
   const showPlainCommitView =
     mainMode === 'commit' && state?.source.type === 'working-tree' && state.files.length > 0;
   const setPersistedNarrativeWalkthrough = useCallback(
-    (walkthrough: NarrativeWalkthrough | null) => {
+    (walkthrough: PersistedWalkthrough | null) => {
       persistedNarrativeWalkthroughRef.current = walkthrough;
-      setNarrativeWalkthrough(walkthrough ? walkthroughModelFromV4(walkthrough) : null);
+      setNarrativeWalkthrough(walkthrough ? parseWalkthroughModel(walkthrough) : null);
     },
     [],
   );

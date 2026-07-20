@@ -84,7 +84,7 @@ const uploadSnapshot = async ({
  *   serviceUrlOverride?: string;
  *   state: import('../core/types.ts').RepositoryState;
  *   uploader: {email?: string; name?: string};
- *   walkthrough: import('../core/types.ts').NarrativeWalkthrough;
+ *   walkthrough: import('../core/types.ts').PersistedWalkthrough;
  * }} options
  */
 const uploadWalkthrough = async ({
@@ -185,10 +185,11 @@ const shareWalkthroughFile = async ({
     throw new Error(`Could not read walkthrough file: ${detail}`);
   }
 
-  const walkthrough = normalizeNarrativeWalkthrough(input, state.files, {
+  const walkthrough = await normalizeNarrativeWalkthrough(input, state.files, {
     agent,
     branch: state.branch,
     generatedAt: state.generatedAt,
+    model: 'imported',
     root: state.root,
     source: state.source,
   });

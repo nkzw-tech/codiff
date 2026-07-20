@@ -57,6 +57,19 @@ vi.mock('./ShareComments.tsx', () => ({
 
 import WalkthroughPage from './WalkthroughPage.tsx';
 
+const walkthrough = {
+  agent: 'codex',
+  chapters: [],
+  focus: 'Review the shared change.',
+  generatedAt: '2026-07-22T00:00:00.000Z',
+  kind: 'narrative',
+  repo: { branch: null, root: '' },
+  source: { type: 'working-tree' },
+  support: [],
+  title: 'Walkthrough',
+  version: 4,
+};
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -102,7 +115,7 @@ beforeEach(() => {
       kind: 'codiff-walkthrough-share',
       repository: {},
       version: 1,
-      walkthrough: { chapters: [], title: 'Walkthrough' },
+      walkthrough,
     }),
   );
 });

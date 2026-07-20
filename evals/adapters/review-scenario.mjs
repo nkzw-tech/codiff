@@ -166,7 +166,7 @@ Walkthrough evaluation expectation: use ${definition.walkthroughExpectations.rev
     };
     const stateMs = roundMs(nowMs() - stateStarted);
     const promptStarted = nowMs();
-    const expectedPrompt = buildNarrativeWalkthroughPrompt(state, null, 'Codex');
+    const expectedPrompt = await buildNarrativeWalkthroughPrompt(state, null, 'Codex');
     const promptBuildMs = roundMs(nowMs() - promptStarted);
     const fixtureDigest = computeFixtureDigest(
       semanticFixture(evalCase, definition, providerTranscripts, materialized.revisions, state),

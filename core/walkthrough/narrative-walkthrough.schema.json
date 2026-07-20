@@ -183,12 +183,8 @@
     },
     "title": {
       "type": "string"
-    },
-    "version": {
-      "const": 4,
-      "type": "number"
     }
   },
-  "required": ["version", "kind", "title", "focus", "chapters"],
+  "required": ["kind", "title", "focus", "chapters"],
   "type": "object"
 }

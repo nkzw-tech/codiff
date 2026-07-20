@@ -6,7 +6,9 @@ diff. The diff content itself is not embedded. Codiff computes the diff from the
 resolves hunk ids on load, and renders the real current diff.
 
 Write the JSON document to a **temporary file outside the repository** and pass it to
-Codiff with `--walkthrough-file`.
+Codiff with `--walkthrough-file`. This file is an authoring draft, not Codiff's persisted
+walkthrough format. Codiff validates and anchors the draft, then stores it inside a composite V5
+artifact with sanitized diff context, the resolved generation request, and generation metadata.
 
 Default to the **staged** diff (`git diff --staged`). If the user named a target, use that:
 a commit, branch, pull request, ref range, or repository path. If nothing is staged, fall back
@@ -15,8 +17,9 @@ choose.
 
 ## Shape
 
-- **`version` / `kind` / `title` / `focus`** — use `version: 4`, `kind: "narrative"`,
-  a short walkthrough title, and a one- or two-sentence string describing the review focus.
+- **`kind` / `title` / `focus`** — use `kind: "narrative"`, a short walkthrough title, and a
+  one- or two-sentence string describing the review focus. Codiff supplies persisted document
+  metadata when it stores the normalized draft as a V5 artifact.
 - **`chapters[]`** — 1-6 compact sections in display order. A chapter is a conceptual group,
   not a file. Every chapter requires a unique string `id`, plus `title`, `icon`, `blurb`, and
   `stops`. For one- or two-file diffs, prefer one chapter unless there are clearly separate review

@@ -53,7 +53,7 @@ export const runAttempt = async ({
   });
   const stateMs = roundMs(nowMs() - stateStarted);
   const promptStarted = nowMs();
-  const expectedPrompt = buildNarrativeWalkthroughPrompt(state, null, 'Codex');
+  const expectedPrompt = await buildNarrativeWalkthroughPrompt(state, null, 'Codex');
   const promptBuildMs = roundMs(nowMs() - promptStarted);
   const fixtureDigest = computeFixtureDigest({
     commit: evalCase.commit,

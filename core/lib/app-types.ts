@@ -3,8 +3,8 @@ import type { ReactNode } from 'react';
 import type {
   ChangedFile,
   DiffSection,
-  NarrativeWalkthrough,
   NarrativeWalkthroughResult,
+  PersistedWalkthrough,
   PullRequestCodeQualityFinding,
   ProviderReviewCommentPosition,
   ReviewCommentPosition,
@@ -183,7 +183,7 @@ export type SourceSession = {
   collapsed: Set<string>;
   expandedGenerated: Set<string>;
   /** Populated by a generated or pre-authored narrative walkthrough document. */
-  narrativeWalkthrough?: NarrativeWalkthrough | null;
+  narrativeWalkthrough?: PersistedWalkthrough | null;
   reviewComments: ReadonlyArray<ReviewComment>;
   selectedPath: string | null;
   viewed: Record<string, string>;

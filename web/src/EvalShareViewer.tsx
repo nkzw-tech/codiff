@@ -1,6 +1,6 @@
 import '@nkzw/codiff-core/styles.css';
 import './styles.css';
-import type { SharedWalkthroughSnapshot } from '@nkzw/codiff-core';
+import { parseWalkthroughModel, type SharedWalkthroughSnapshot } from '@nkzw/codiff-core';
 import { SharedWalkthroughApp } from '@nkzw/codiff-service/react';
 import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -24,7 +24,7 @@ export const EvalShareViewer = () => {
       );
   }, []);
 
-  usePageTitle(snapshot ? snapshot.walkthrough.title : 'Codiff Eval Share');
+  usePageTitle(snapshot ? parseWalkthroughModel(snapshot.walkthrough).title : 'Codiff Eval Share');
 
   if (error) {
     return <ViewerError detail={error} title="Local eval walkthrough unavailable" />;

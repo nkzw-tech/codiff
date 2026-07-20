@@ -107,9 +107,8 @@ const narrativeWalkthroughSchema = {
       type: 'array',
     },
     title: { type: 'string' },
-    version: { const: 4, type: 'number' },
   },
-  required: ['version', 'kind', 'title', 'focus', 'chapters'],
+  required: ['kind', 'title', 'focus', 'chapters'],
   type: 'object',
 };
 
@@ -146,9 +145,8 @@ const narrativeWalkthroughGenerationSchema = {
     focus: narrativeWalkthroughSchema.properties.focus,
     kind: narrativeWalkthroughSchema.properties.kind,
     title: narrativeWalkthroughSchema.properties.title,
-    version: narrativeWalkthroughSchema.properties.version,
   },
-  required: ['version', 'kind', 'title', 'focus', 'chapters'],
+  required: ['kind', 'title', 'focus', 'chapters'],
   type: 'object',
 };
 

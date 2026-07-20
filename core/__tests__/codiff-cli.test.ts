@@ -1449,7 +1449,7 @@ test('codiff --walkthrough-guide prints the guide and embedded schema, then exit
   expect(stdout).toContain('```json');
   expect(stdout).toContain('"chapters"');
   expect(stdout).toContain('"hunkId"');
-  expect(stdout).toContain('"const": 4');
+  expect(stdout).not.toContain('"version"');
 });
 
 test('parseArguments reads base...target and base..target as a range', async () => {
