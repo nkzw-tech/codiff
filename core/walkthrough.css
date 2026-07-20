@@ -774,6 +774,19 @@
   gap: 4px;
   padding: 4px 8px;
 }
+.wt-commit-bar-identity {
+  align-items: center;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 18%, transparent);
+  border-radius: 24px;
+  color: var(--muted);
+  corner-shape: squircle;
+  display: inline-flex;
+  flex: none;
+  font: 600 11px/1 var(--font-mono);
+  gap: 4px;
+  padding: 3px 8px;
+}
 .wt-commit-bar-meta {
   color: var(--muted);
   display: inline-flex;

@@ -8,7 +8,7 @@ import { expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
 const { readGitIdentity } = require('../git-state/working-tree.cjs') as {
-  readGitIdentity: (path: string) => Promise<{ email: string; name: string }>;
+  readGitIdentity: (path: string) => Promise<{ email: string; name: string; username?: string }>;
 };
 
 const execFileAsync = promisify(execFile);
@@ -69,5 +69,22 @@ test('reads the global git identity outside a repository', async () => {
       process.env.GIT_CONFIG_GLOBAL = previousGlobalConfig;
     }
     await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('derives a GitHub username from a noreply commit email', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'codiff-github-identity-'));
+  try {
+    await git(repo, ['init']);
+    await git(repo, ['config', 'user.name', 'Mona Lisa']);
+    await git(repo, ['config', 'user.email', '12345+octocat@users.noreply.github.com']);
+
+    await expect(readGitIdentity(repo)).resolves.toMatchObject({
+      email: '12345+octocat@users.noreply.github.com',
+      name: 'Mona Lisa',
+      username: 'octocat',
+    });
+  } finally {
+    await rm(repo, { force: true, recursive: true });
   }
 });

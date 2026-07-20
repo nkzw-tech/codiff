@@ -2910,6 +2910,7 @@ export default function App() {
           <CommitView
             branch={state.branch}
             draft={narrativeNavigation}
+            gitIdentity={gitIdentity}
             model={plainCommitModel}
             onCommit={commitWalkthrough}
             onCommitOutput={subscribeToCommitOutput}
@@ -2919,6 +2920,7 @@ export default function App() {
           <NarrativeWalkthroughView
             changedPaths={walkthroughOutdatedPaths}
             files={state.files}
+            gitIdentity={gitIdentity}
             navigation={narrativeNavigation}
             onActiveReviewTargetChange={updateActiveWalkthroughReviewTarget}
             onCommit={commitWalkthrough}

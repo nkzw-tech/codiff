@@ -7,12 +7,13 @@ import {
   type CommitModel,
 } from '../../../lib/narrative-walkthrough.ts';
 import type {
+  GitIdentity,
   WalkthroughCommitMessageRequest,
   WalkthroughCommitMessageResult,
   WalkthroughCommitRequest,
   WalkthroughCommitResult,
 } from '../../../types.ts';
-import { ArrowsClockwise, Check, GitBranch, X } from './icons.tsx';
+import { ArrowsClockwise, Check, GitBranch, User, X } from './icons.tsx';
 import { ChapterIcon, WalkthroughLineCount } from './parts.tsx';
 
 export type CommitHandler = (request: WalkthroughCommitRequest) => Promise<WalkthroughCommitResult>;
@@ -326,6 +327,7 @@ function MessageDraft({
 export function CommitView({
   branch,
   draft,
+  gitIdentity,
   model,
   onCommit,
   onCommitOutput,
@@ -333,6 +335,7 @@ export function CommitView({
 }: {
   branch: string | null;
   draft: CommitDraftState;
+  gitIdentity?: GitIdentity | null;
   model: CommitModel;
   onCommit: CommitHandler;
   onCommitOutput?: CommitOutputSubscriber;
@@ -346,6 +349,14 @@ export function CommitView({
   );
   const subject = draft.commitSubject;
   const allSelected = selectedFiles.length === model.files.length;
+  const identityLabel = gitIdentity?.username
+    ? `@${gitIdentity.username}`
+    : gitIdentity?.name || gitIdentity?.email;
+  const identityTitle = gitIdentity
+    ? `Commit author: ${gitIdentity.name || gitIdentity.email}${
+        gitIdentity.name && gitIdentity.email ? ` <${gitIdentity.email}>` : ''
+      }`
+    : undefined;
 
   const [status, setStatus] = useState<'idle' | 'submitting'>('idle');
   const [result, setResult] = useState<WalkthroughCommitResult | null>(null);
@@ -439,6 +450,11 @@ export function CommitView({
         {branch ? (
           <span className="wt-commit-bar-branch">
             <GitBranch size={13} /> {branch}
+          </span>
+        ) : null}
+        {identityLabel ? (
+          <span className="wt-commit-bar-identity" title={identityTitle}>
+            <User size={13} /> {identityLabel}
           </span>
         ) : null}
         <span className="wt-commit-bar-meta">

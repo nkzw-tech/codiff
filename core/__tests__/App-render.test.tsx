@@ -493,6 +493,11 @@ test('showWhitespace config changes reload the current repository state', async 
 
 test('sidebar commit button toggles back to tree when commit view is open', async () => {
   window.codiff = createCodiffMock({
+    getGitIdentity: vi.fn(async () => ({
+      email: '182032677+salmonumbrella@users.noreply.github.com',
+      name: 'salmonumbrella',
+      username: 'salmonumbrella',
+    })),
     getRepositoryState: vi.fn(async () => ({
       ...repositoryState,
       files: [createChangedFile('src/change.ts')],
@@ -518,6 +523,9 @@ test('sidebar commit button toggles back to tree when commit view is open', asyn
   await waitFor(() => {
     expect(container.querySelector('.wt-commit')).not.toBeNull();
     expect(container.querySelector('.sidebar-commit-button')?.textContent).toBe('Tree');
+    expect(container.querySelector('.wt-commit-bar-identity')?.textContent).toContain(
+      '@salmonumbrella',
+    );
   });
 
   await act(async () => {

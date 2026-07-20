@@ -15,7 +15,12 @@ import {
   type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, NarrativeWalkthrough, WalkthroughHunkGroup } from '../../../types.ts';
+import type {
+  ChangedFile,
+  GitIdentity,
+  NarrativeWalkthrough,
+  WalkthroughHunkGroup,
+} from '../../../types.ts';
 import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import {
   CommitView,
@@ -564,6 +569,7 @@ export function NarrativeWalkthroughView({
   allowCommit = true,
   changedPaths,
   files,
+  gitIdentity,
   navigation,
   onActiveReviewTargetChange,
   onCommit,
@@ -580,6 +586,7 @@ export function NarrativeWalkthroughView({
   allowCommit?: boolean;
   changedPaths?: ReadonlySet<string>;
   files: ReadonlyArray<ChangedFile>;
+  gitIdentity?: GitIdentity | null;
   navigation: NarrativeNavigation;
   onActiveReviewTargetChange: (target: WalkthroughReviewTarget | null) => void;
   onCommit: CommitHandler;
@@ -770,6 +777,7 @@ export function NarrativeWalkthroughView({
         <CommitView
           branch={walkthrough.repo.branch}
           draft={navigation}
+          gitIdentity={gitIdentity}
           model={buildCommitModel(walkthroughView, files)}
           onCommit={onCommit}
           onCommitOutput={onCommitOutput}

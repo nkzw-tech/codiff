@@ -446,6 +446,7 @@ const readGitIdentity = async (launchPath) => {
   ]);
   const email = configuredEmail.trim();
   const name = configuredName.trim();
+  const username = email.match(/^(?:\d+\+)?([^@]+)@users\.noreply\.github\.com$/i)?.[1];
 
   return {
     email,
@@ -453,6 +454,7 @@ const readGitIdentity = async (launchPath) => {
       ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
       : undefined,
     name,
+    ...(username ? { username } : {}),
   };
 };
 
