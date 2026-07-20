@@ -1,15 +1,10 @@
-import { mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { createTemporaryEnvironment } from './resources.ts';
-
-const emptyGitHooksPath = mkdtempSync(join(tmpdir(), 'codiff-empty-git-hooks-'));
 
 const gitHookIsolation = {
   GIT_CONFIG_COUNT: '4',
   GIT_CONFIG_KEY_3: 'core.hooksPath',
-  GIT_CONFIG_VALUE_3: emptyGitHooksPath,
+  GIT_CONFIG_VALUE_3: '/dev/null',
 } as const;
 
 export const getGitTestEnvironment = (
