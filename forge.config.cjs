@@ -1,7 +1,7 @@
 // @ts-check
 
 /* eslint-disable @typescript-eslint/no-require-imports, no-undef */
-const { cp, mkdir } = require('node:fs/promises');
+const { cp, mkdir, stat } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 
@@ -33,6 +33,20 @@ const osxNotarize =
       }
     : undefined;
 
+/** @param {string} source @param {string} destination */
+const copyRequiredRuntime = async (source, destination) => {
+  try {
+    await stat(source);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Required packaged runtime is missing at ${source}: ${detail}`);
+  }
+  await mkdir(dirname(destination), { recursive: true });
+  await cp(source, destination, { force: true, recursive: true });
+};
+
+/** @param {string} buildPath */
+
 /**
  * @typedef {import('@electron-forge/shared-types').ForgeArch} ForgeArch
  * @typedef {import('@electron-forge/shared-types').ForgeConfig} ForgeConfig
@@ -59,10 +73,7 @@ module.exports = {
   hooks: {
     packageAfterCopy: async (_forgeConfig, buildPath) => {
       for (const [sourcePath, destinationPath] of runtimeCopies) {
-        const source = join(__dirname, sourcePath);
-        const destination = join(buildPath, destinationPath);
-        await mkdir(dirname(destination), { recursive: true });
-        await cp(source, destination, { recursive: true });
+        await copyRequiredRuntime(join(__dirname, sourcePath), join(buildPath, destinationPath));
       }
     },
     prePackage: async (forgeConfig, platform) => {

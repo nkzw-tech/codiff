@@ -2,12 +2,14 @@ import {
   array,
   boolean,
   literal,
+  minLength,
   null_,
   number,
   optional,
   parse,
   picklist,
   pipe,
+  record,
   regex,
   safeParse,
   strictObject,
@@ -199,6 +201,107 @@ const contextSchema = strictObject({
   version: literal(1),
 });
 
+const revisionLabelSchema = strictObject({
+  kind: picklist(['bookmark', 'branch', 'commit', 'review-marker', 'tag', 'version']),
+  text: string(),
+  url: optional(string()),
+});
+const revisionCommonFields = {
+  aliases: optional(array(revisionLabelSchema)),
+  label: revisionLabelSchema,
+};
+const revisionSchema = union([
+  strictObject({ ...revisionCommonFields, kind: optional(literal('commit')), sha: gitShaSchema }),
+  strictObject({ ...revisionCommonFields, kind: literal('index') }),
+  strictObject({ ...revisionCommonFields, kind: literal('working-copy') }),
+]);
+const diffRangeSchema = strictObject({ base: revisionSchema, head: revisionSchema });
+
+const capturedSectionSchema = strictObject({
+  binary: boolean(),
+  id: string(),
+  kind: picklist(['commit', 'pull-request', 'staged', 'unstaged']),
+  loadState: optional(picklist(['binary', 'deferred', 'directory', 'error', 'ready', 'too-large'])),
+  newFile: optional(strictObject({ contents: string(), name: string() })),
+  oldFile: optional(strictObject({ contents: string(), name: string() })),
+  patch: string(),
+  range: optional(diffRangeSchema),
+  summary: optional(
+    strictObject({
+      canLoad: optional(boolean()),
+      fileCount: optional(number()),
+      fingerprint: optional(string()),
+      limit: optional(number()),
+      reason: string(),
+      size: optional(number()),
+    }),
+  ),
+});
+const capturedSourceSchema = union([
+  strictObject({ type: literal('working-tree') }),
+  strictObject({ sha: gitShaSchema, type: literal('commit') }),
+  strictObject({
+    baseSha: gitShaSchema,
+    headSha: gitShaSchema,
+    ref: string(),
+    type: literal('branch-diff'),
+  }),
+  strictObject({
+    baseSha: gitShaSchema,
+    headSha: gitShaSchema,
+    ref: string(),
+    type: literal('branch-working-tree'),
+  }),
+  strictObject({
+    base: string(),
+    head: string(),
+    symmetric: boolean(),
+    type: literal('range'),
+  }),
+  strictObject({
+    description: optional(string()),
+    headSha: optional(gitShaSchema),
+    number: optional(number()),
+    projectPath: optional(string()),
+    provider: optional(picklist(['github', 'gitlab'])),
+    targetBranch: optional(string()),
+    title: optional(string()),
+    type: literal('pull-request'),
+    url: string(),
+  }),
+]);
+const capturedContextSchema = strictObject({
+  branch: union([string(), null_()]),
+  files: array(
+    strictObject({
+      fingerprint: string(),
+      generated: optional(boolean()),
+      oldPath: optional(string()),
+      path: string(),
+      sections: array(capturedSectionSchema),
+      status: picklist(['added', 'deleted', 'modified', 'renamed', 'untracked']),
+    }),
+  ),
+  source: capturedSourceSchema,
+});
+
+const generationProfileSchema = strictObject({
+  agent: picklist(['codex', 'claude', 'opencode', 'pi']),
+  authoringVersion: string(),
+  modelCandidates: pipe(array(string()), minLength(1)),
+  settings: optional(record(string(), union([boolean(), number(), string()]))),
+});
+const generationMetadataSchema = strictObject({
+  agent: picklist(['codex', 'claude', 'opencode', 'pi']),
+  generatedAt: string(),
+  model: string(),
+  profile: generationProfileSchema,
+});
+const generationRequestSchema = strictObject({
+  customInstructions: optional(string()),
+  review: strictObject({ relation: literal('single-diff'), structure: literal('single-diff') }),
+});
+
 /** Exact released V4 persisted fields. Keep this object and its schema frozen. */
 const narrativeFields = {
   agent: picklist(['codex', 'claude', 'opencode', 'pi']),
@@ -221,15 +324,17 @@ export const narrativeWalkthroughV4Schema = strictObject({
   version: literal(4),
 });
 
-/**
- * Strict initial V5 envelope. Later revisions populate the two empty input
- * capability positions while keeping narrative and independently replaceable
- * artifact state separate.
- */
+/** Strict single-call V5 envelope with captured inputs and generation provenance. */
 export const walkthroughArtifactV5Schema = strictObject({
-  capturedContext: strictObject({}),
-  generationRequest: strictObject({}),
-  narrative: strictObject(narrativeFields),
+  capturedContext: capturedContextSchema,
+  generationRequest: generationRequestSchema,
+  narrative: strictObject({
+    ...narrativeFields,
+    generationMetadata: generationMetadataSchema,
+    repo: strictObject({ branch: union([string(), null_()]) }),
+    source: capturedSourceSchema,
+    structure: literal('single-diff'),
+  }),
   version: literal(5),
 });
 
@@ -275,6 +380,7 @@ export const parseWalkthroughModel = (value: unknown): WalkthroughModel => {
     ...artifact.narrative,
     capturedContext: artifact.capturedContext,
     generationRequest: artifact.generationRequest,
+    repo: { branch: artifact.narrative.repo.branch, root: '' },
     sourceVersion: 5,
   };
 };

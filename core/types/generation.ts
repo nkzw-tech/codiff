@@ -1,5 +1,5 @@
 import type { GitSha, ResolvedReviewSource } from './review-identity.ts';
-import type { NarrativeWalkthrough } from './walkthrough.ts';
+import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
 export type GenerationSettings = Readonly<Record<string, boolean | number | string>>;
 
@@ -42,7 +42,7 @@ export type WalkthroughProgressEvent = {
 };
 
 export type NarrativeWalkthroughResult =
-  | { status: 'ready'; walkthrough: NarrativeWalkthrough }
+  | { status: 'ready'; walkthrough: PersistedWalkthrough }
   | {
       code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'OPENCODE_NOT_FOUND' | 'PI_NOT_FOUND';
       reason: string;
@@ -50,7 +50,7 @@ export type NarrativeWalkthroughResult =
     };
 export type NarrativeWalkthroughRequestOptions = {
   force?: boolean;
-  previousWalkthrough?: NarrativeWalkthrough;
+  previousWalkthrough?: PersistedWalkthrough;
 };
 
 export type WalkthroughCommitRequest = {

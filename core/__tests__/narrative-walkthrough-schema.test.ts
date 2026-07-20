@@ -9,11 +9,23 @@ import {
   hasCapturedContextCapability,
   hasGenerationRequestCapability,
   type GitSha,
+  type GenerationMetadata,
   type NarrativeWalkthroughV4,
   type WalkthroughArtifactV5,
 } from '../types.ts';
 
 const gitSha = (value: string) => value as GitSha;
+
+const generationMetadata = (): GenerationMetadata => ({
+  agent: 'codex',
+  generatedAt: '2026-07-28T12:00:00.000Z',
+  model: 'example-model',
+  profile: {
+    agent: 'codex',
+    authoringVersion: 'walkthrough-v5-single-diff-1',
+    modelCandidates: ['example-model'],
+  },
+});
 
 const v4 = (): NarrativeWalkthroughV4 => ({
   agent: 'codex',
@@ -91,11 +103,21 @@ const v4 = (): NarrativeWalkthroughV4 => ({
 });
 
 const v5 = (): WalkthroughArtifactV5 => {
-  const { version: _version, ...narrative } = v4();
+  const { repo, version: _version, ...narrative } = v4();
   return {
-    capturedContext: {},
-    generationRequest: {},
-    narrative,
+    capturedContext: {
+      branch: 'main',
+      files: [],
+      source: { sha: gitSha('0123456789abcdef0123456789abcdef01234567'), type: 'commit' },
+    },
+    generationRequest: { review: { relation: 'single-diff', structure: 'single-diff' } },
+    narrative: {
+      ...narrative,
+      generationMetadata: generationMetadata(),
+      repo: { branch: repo.branch },
+      source: { sha: gitSha('0123456789abcdef0123456789abcdef01234567'), type: 'commit' },
+      structure: 'single-diff',
+    },
     version: 5,
   };
 };
@@ -105,13 +127,15 @@ test('normalizes equivalent V4 and V5 narratives to equivalent rendering models'
   const v5Model = parseWalkthroughModel(v5());
   const {
     capturedContext: _capturedContext,
+    generationMetadata: _generationMetadata,
     generationRequest: _generationRequest,
     sourceVersion: _v5SourceVersion,
+    structure: _structure,
     ...v5Narrative
   } = v5Model;
   const { sourceVersion: _v4SourceVersion, ...v4Narrative } = v4Model;
 
-  expect(v5Narrative).toEqual(v4Narrative);
+  expect({ ...v5Narrative, repo: v4Narrative.repo }).toEqual(v4Narrative);
   expect(buildWalkthroughView(v5Model)).toEqual(buildWalkthroughView(v4Model));
   expect('version' in v4Model).toBe(false);
   expect('version' in v5Model).toBe(false);

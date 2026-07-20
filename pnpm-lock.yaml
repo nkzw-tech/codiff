@@ -22,6 +22,9 @@ importers:
 
   .:
     dependencies:
+      '@nkzw/codiff-core':
+        specifier: workspace:*
+        version: link:core
       electron-squirrel-startup:
         specifier: ^1.0.1
         version: 1.0.1

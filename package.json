@@ -56,6 +56,7 @@
     "test:integration": "vp run build && vp test -c vitest.cloudflare.config.ts"
   },
   "dependencies": {
+    "@nkzw/codiff-core": "workspace:*",
     "electron-squirrel-startup": "^1.0.1",
     "native-keymap": "^3.3.9",
     "node-pty": "^1.1.0",

@@ -95,7 +95,7 @@ import {
 import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
-import { walkthroughModelFromV4 } from './lib/narrative-walkthrough-schema.ts';
+import { parseWalkthroughModel } from './lib/narrative-walkthrough-schema.ts';
 import {
   resolveProviderCommentTarget,
   resolveShareCommentTarget,
@@ -136,7 +136,7 @@ import type {
   DiffSection,
   GitIdentity,
   HistoryEntry,
-  NarrativeWalkthrough,
+  PersistedWalkthrough,
   PullRequestMergeOptions,
   PullRequestGeneralComment,
   PullRequestGeneralCommentThread,
@@ -370,7 +370,7 @@ export const buildSharedReviewSnapshot = ({
   preferences: SharedWalkthroughSnapshot['preferences'];
   state: RepositoryState;
   title: string;
-  walkthrough: NarrativeWalkthrough;
+  walkthrough: PersistedWalkthrough;
 }): SharedWalkthroughSnapshot => ({
   branch: state.branch,
   codeQualityFindings: state.codeQualityFindings,
@@ -543,7 +543,7 @@ export function ReviewSurface({
   const updateGeneralDiscussion = comments?.general?.onUpdate;
   const resolveDiscussion = comments?.inline.onResolve;
   const sharedWalkthrough = useMemo(() => {
-    const model = walkthroughModelFromV4(snapshot.walkthrough);
+    const model = parseWalkthroughModel(snapshot.walkthrough);
     return walkthrough?.commit
       ? model
       : {
@@ -1596,8 +1596,8 @@ export function ReviewSurface({
   );
   const commonReviewProps = {
     activeSearchMatch: activeDiffSearchMatch,
-    agentId: snapshot.walkthrough.agent,
-    agentLabel: getAgentLabel(snapshot.walkthrough.agent),
+    agentId: sharedWalkthrough.agent,
+    agentLabel: getAgentLabel(sharedWalkthrough.agent),
     codeQualityFindings: snapshot.codeQualityFindings,
     collapsed,
     comments: renderableReviewComments,
