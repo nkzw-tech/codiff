@@ -21,7 +21,11 @@ import {
   resolvePullRequestUrl,
 } from '../../bin/arguments.js';
 import type { PlanReview } from '../types.ts';
-import { createFakeCommandLogger, createFakeOpenLogger } from './helpers/cli.ts';
+import {
+  createFakeAppCommandLogger,
+  createFakeCommandLogger,
+  createFakeOpenLogger,
+} from './helpers/cli.ts';
 import { removeGitTestDirectory } from './helpers/git.ts';
 import { getGitTestEnvironment } from './helpers/git.ts';
 import {
@@ -487,6 +491,52 @@ test('packaged terminal helper forwards --commit HEAD to Electron', async () => 
     'HEAD',
     repositoryPath,
   ]);
+});
+
+test('packaged terminal helper executes the Electron binary directly off macOS', async () => {
+  await using logger = await createFakeAppCommandLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+
+  await mkdir(repositoryPath);
+
+  await execFileAsync(resolve('bin/codiff-app'), ['--commit', 'HEAD', repositoryPath], {
+    env: logger.env,
+  });
+
+  // No `-n`, bundle path, or `--args`: xdg-open cannot launch a new instance
+  // with arguments, so the arguments reach the binary unwrapped.
+  expect(await logger.readArgs()).toEqual(['--commit', 'HEAD', repositoryPath]);
+});
+
+test('packaged terminal helper forwards walkthrough options to the Electron binary', async () => {
+  await using logger = await createFakeAppCommandLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+
+  await mkdir(repositoryPath);
+
+  await execFileAsync(resolve('bin/codiff-app'), ['-w', '--branch', 'main', repositoryPath], {
+    env: logger.env,
+  });
+
+  expect(await logger.readArgs()).toEqual([
+    '--walkthrough',
+    '--branch',
+    'main',
+    repositoryPath,
+  ]);
+});
+
+test('packaged terminal helper reports a missing Electron binary', async () => {
+  const repositoryPath = await realpath(await mkdtemp(join(tmpdir(), 'codiff-app-missing-')));
+
+  await expect(
+    execFileAsync(resolve('bin/codiff-app'), [repositoryPath], {
+      env: {
+        ...process.env,
+        CODIFF_APP_COMMAND: join(repositoryPath, 'does-not-exist'),
+      },
+    }),
+  ).rejects.toThrow('could not find the Codiff executable');
 });
 
 test('packaged terminal helper resolves GitHub PR branches to canonical URLs', async () => {

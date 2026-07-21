@@ -14,7 +14,46 @@ while [ -L "$source_path" ]; do
 done
 
 script_dir="$(CDPATH= cd -P "$(dirname "$source_path")" >/dev/null 2>&1 && pwd)"
+# On macOS the helper ships inside <app>.app/Contents/Resources/app/bin, so four
+# levels up is the bundle that `open` expects. On Linux the layout is
+# <root>/resources/app/bin and the Electron binary sits directly in <root>.
 app_path="$(CDPATH= cd -P "$script_dir/../../../.." >/dev/null 2>&1 && pwd)"
+package_root="$(CDPATH= cd -P "$script_dir/../../.." >/dev/null 2>&1 && pwd)"
+
+is_macos() {
+  [ "$(uname -s 2>/dev/null)" = "Darwin" ]
+}
+
+# Print the Electron executable, or nothing when it cannot be found. It doubles
+# as the Node runtime when invoked with ELECTRON_RUN_AS_NODE=1.
+codiff_runtime() {
+  if [ -n "${CODIFF_NODE_COMMAND:-}" ]; then
+    printf '%s' "$CODIFF_NODE_COMMAND"
+    return 0
+  fi
+
+  if [ -n "${CODIFF_APP_COMMAND:-}" ]; then
+    printf '%s' "$CODIFF_APP_COMMAND"
+    return 0
+  fi
+
+  if is_macos; then
+    macos_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
+    if [ -n "$macos_exec" ] && [ -x "$app_path/Contents/MacOS/$macos_exec" ]; then
+      printf '%s' "$app_path/Contents/MacOS/$macos_exec"
+    fi
+    return 0
+  fi
+
+  # `codiff` is the executable name produced by electron-forge on Linux; the
+  # capitalized variant covers installs that keep the product name.
+  for candidate in "$package_root/codiff" "$package_root/Codiff"; do
+    if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+}
 
 codiff_version() {
   sed -n 's/^  "version": "\([^"]*\)".*/\1/p' "$script_dir/../package.json"
@@ -66,13 +105,7 @@ show_help() {
 
 for arg in "$@"; do
   if [ "$arg" = "--share" ] || [ "$arg" = "--public" ]; then
-    runtime="${CODIFF_NODE_COMMAND:-}"
-    if [ -z "$runtime" ]; then
-      electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
-      if [ -n "$electron_exec" ]; then
-        runtime="$app_path/Contents/MacOS/$electron_exec"
-      fi
-    fi
+    runtime="$(codiff_runtime)"
     if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
       printf '%s\n' "codiff: could not find the bundled runtime for --share." >&2
       exit 1
@@ -248,9 +281,9 @@ for arg in "$@"; do
     --walkthrough-guide)
       # The guide is pure text assembled by the Node entry; run it with the
       # bundled Electron as Node so no separate node install is required.
-      electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
-      if [ -n "$electron_exec" ] && [ -f "$script_dir/codiff.js" ]; then
-        ELECTRON_RUN_AS_NODE=1 "$app_path/Contents/MacOS/$electron_exec" \
+      runtime="$(codiff_runtime)"
+      if [ -n "$runtime" ] && [ -x "$runtime" ] && [ -f "$script_dir/codiff.js" ]; then
+        ELECTRON_RUN_AS_NODE=1 "$runtime" \
           "$script_dir/codiff.js" --walkthrough-guide
       else
         cat "$script_dir/walkthrough-guide.md"
@@ -468,7 +501,23 @@ open_codiff() {
     set -- --pi-session "$pi_session_id" "$@"
   fi
 
-  open -n "$app_path" --args "$@"
+  # macOS launches a fresh instance of the .app bundle; `open` returns
+  # immediately and the app keeps running detached.
+  if is_macos && [ -z "${CODIFF_APP_COMMAND:-}" ]; then
+    open -n "$app_path" --args "$@"
+    return 0
+  fi
+
+  # Elsewhere the Electron binary is executed directly: xdg-open has no
+  # equivalent of `-n`/`--args`, so it cannot launch a new instance with
+  # arguments. Detach so the shell prompt returns like it does on macOS.
+  runtime="$(codiff_runtime)"
+  if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
+    printf '%s\n' "codiff: could not find the Codiff executable next to $package_root." >&2
+    exit 1
+  fi
+
+  "$runtime" "$@" >/dev/null 2>&1 &
 }
 
 if [ -n "$plan_file_path" ]; then
