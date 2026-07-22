@@ -54,6 +54,7 @@ const {
   writeConfig,
 } = require('./config.cjs');
 const { readReviewAssistantReply } = require('./review-assist.cjs');
+const { getRepositoryWindowTitle } = require('./window-title.cjs');
 const {
   findMatchingWindowIdentity,
   getWindowIdentity,
@@ -228,6 +229,12 @@ const getMarkdownDocumentContext = (webContentsId) => ({
 /** @param {number} webContentsId @param {RepositoryState} state */
 const storeResolvedRepositoryState = (webContentsId, state) => {
   windowRepositories.set(webContentsId, state.root);
+  const browserWindow = BrowserWindow.getAllWindows().find(
+    (window) => window.webContents.id === webContentsId,
+  );
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    browserWindow.setTitle(getRepositoryWindowTitle(state));
+  }
   const launchOptions = windowLaunchOptions.get(webContentsId);
   if (launchOptions) {
     windowLaunchOptions.set(webContentsId, {
@@ -839,9 +846,6 @@ const createWindow = (
     minHeight: 520,
     minWidth: 880,
     show: false,
-    title: launchOptions.planFile
-      ? `Codiff Plan - ${basename(launchOptions.planFile)}`
-      : `Codiff - ${repositoryPath}`,
     titleBarStyle: useMacVibrancy ? 'hiddenInset' : 'default',
     ...(useMacVibrancy
       ? {
@@ -993,6 +997,9 @@ const createWindow = (
     if (!currentLaunchOptions?.planFile) {
       return;
     }
+    // The renderer's static HTML title replaces constructor titles during navigation.
+    // Set this after every plan load so native window lists keep the plan filename.
+    window.setTitle(`Codiff Plan – ${basename(currentLaunchOptions.planFile)}`);
     void readMarkdownDocument(
       { kind: 'plan', path: currentLaunchOptions.planFile },
       getMarkdownDocumentContext(webContentsId),
