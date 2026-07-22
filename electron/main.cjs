@@ -54,6 +54,7 @@ const {
   writeConfig,
 } = require('./config.cjs');
 const { readReviewAssistantReply } = require('./review-assist.cjs');
+const { parseReviewUrl, resolveReviewUrl } = require('./review-source.cjs');
 const {
   findMatchingWindowIdentity,
   getWindowIdentity,
@@ -545,6 +546,17 @@ const getInstallSkillMenuItem = () =>
     (skill, browserWindow) => void skillInstallers.get(skill.id)?.install(browserWindow),
   );
 
+/**
+ * Native menus live in the main process, so this event lets the renderer own
+ * the actual source dialog and reuse it with the command palette.
+ * @param {import('electron').BrowserWindow | undefined} browserWindow
+ * @param {import('../core/types.ts').OpenReviewSourceKind} kind
+ */
+const requestOpenReviewSource = (browserWindow, kind) => {
+  if (browserWindow instanceof BrowserWindow && !browserWindow.isDestroyed()) {
+    browserWindow.webContents.send('codiff:openReviewSource', kind);
+  }
+};
 /** @returns {import('electron').Menu} */
 const buildApplicationMenu = () =>
   Menu.buildFromTemplate(
@@ -555,6 +567,22 @@ const buildApplicationMenu = () =>
               label: 'Codiff',
               submenu: [
                 { role: 'about' },
+                { type: 'separator' },
+                {
+                  click: (_menuItem, browserWindow) =>
+                    requestOpenReviewSource(browserWindow, 'pull-request'),
+                  label: 'Open PR',
+                },
+                {
+                  click: (_menuItem, browserWindow) =>
+                    requestOpenReviewSource(browserWindow, 'commit'),
+                  label: 'Open Commit',
+                },
+                {
+                  click: (_menuItem, browserWindow) =>
+                    requestOpenReviewSource(browserWindow, 'branch'),
+                  label: 'Open Branch',
+                },
                 { type: 'separator' },
                 {
                   label: 'Agent',
@@ -1274,6 +1302,23 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   rememberLastRepositoryPath(state.root);
   void resetRepositoryWatcher(event.sender.id, state.root);
   return state;
+});
+
+ipcMain.handle('codiff:resolvePullRequestUrl', (event, value) => {
+  const input = typeof value === 'string' ? value.trim() : '';
+  const parsedUrl = parseReviewUrl(input);
+  if (parsedUrl) {
+    return parsedUrl.url;
+  }
+
+  const number = input.match(/^#?([1-9]\d*)$/);
+  if (!number) {
+    throw new Error('Enter a pull request number or a GitHub or GitLab pull request link.');
+  }
+
+  // Reuse the CLI resolver so a bare number follows the repository's preferred remote.
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return resolveReviewUrl(repositoryPath, Number(number[1]));
 });
 
 ipcMain.handle('codiff:getMarkdownDocument', async (event, request) => {

@@ -6,6 +6,7 @@ import type { FileDiffLoadedFiles } from '@pierre/diffs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandBar } from './app/components/CommandBar.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
+import { OpenReviewSourceDialog } from './app/components/OpenReviewSourceDialog.tsx';
 import {
   AgentUnavailablePanel,
   CopyCommentsButton,
@@ -111,6 +112,7 @@ import type {
   CodiffPreferences,
   GitIdentity,
   HistoryEntry,
+  OpenReviewSourceKind,
   RepositoryState,
   ReviewSource,
   TerminalHelperStatus,
@@ -193,6 +195,9 @@ export default function App() {
   const [planDocument, setPlanDocument] = useState<CodiffMarkdownDocument | null>(null);
   const [planLoadError, setPlanLoadError] = useState<string | null>(null);
   const [loadingSectionIds, setLoadingSectionIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [openReviewSourceKind, setOpenReviewSourceKind] = useState<OpenReviewSourceKind | null>(
+    null,
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [state, setState] = useState<RepositoryState | null>(null);
   const [terminalHelperInstalling, setTerminalHelperInstalling] = useState(false);
@@ -1460,11 +1465,38 @@ export default function App() {
     ],
   );
 
+  const openReviewSource = useCallback(
+    async (kind: OpenReviewSourceKind, value: string) => {
+      if (kind === 'pull-request') {
+        const url = await window.codiff.resolvePullRequestUrl(value);
+        selectSource({ type: 'pull-request', url });
+        return;
+      }
+
+      selectSource(
+        kind === 'branch'
+          ? { ref: value, type: 'branch-working-tree' }
+          : { ref: value, type: 'commit' },
+      );
+    },
+    [selectSource],
+  );
+
+  const showOpenReviewSourceDialog = useCallback((kind: OpenReviewSourceKind) => {
+    setOpenReviewSourceKind(kind);
+  }, []);
+
+  useEffect(
+    () => window.codiff.onOpenReviewSource(showOpenReviewSourceDialog),
+    [showOpenReviewSourceDialog],
+  );
+
   const commandBarCommands = useAppCommands({
     changeSidebarMode,
     focusFileFilter,
     getReviewCommandTarget,
     onOpenDiffSearch: openDiffSearch,
+    onOpenReviewSource: showOpenReviewSourceDialog,
     onOpenSelectedFile: openSelectedFile,
     onRefreshRepository: refreshRepository,
     onToggleSidebar: toggleSidebar,
@@ -1813,6 +1845,13 @@ export default function App() {
         onClose={closeCommandBar}
         visible={commandBarVisible}
       />
+      {openReviewSourceKind ? (
+        <OpenReviewSourceDialog
+          kind={openReviewSourceKind}
+          onClose={() => setOpenReviewSourceKind(null)}
+          onOpen={(value) => openReviewSource(openReviewSourceKind, value)}
+        />
+      ) : null}
       <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
       {!isSwitchingSource ? (
         <div className="review-action-bar">

@@ -68,6 +68,7 @@ test('app commands register the complete command set and delegate dynamic action
   const focusFileFilter = vi.fn();
   const getReviewCommandTarget = vi.fn(() => target);
   const onOpenDiffSearch = vi.fn();
+  const onOpenReviewSource = vi.fn();
   const onOpenSelectedFile = vi.fn();
   const onRefreshRepository = vi.fn();
   const onToggleSidebar = vi.fn();
@@ -82,6 +83,7 @@ test('app commands register the complete command set and delegate dynamic action
         focusFileFilter,
         getReviewCommandTarget,
         onOpenDiffSearch,
+        onOpenReviewSource,
         onOpenSelectedFile,
         onRefreshRepository,
         onToggleSidebar,
@@ -98,6 +100,9 @@ test('app commands register the complete command set and delegate dynamic action
   expect(commands.map((command) => command.id)).toEqual([
     'file-filter',
     'diff-search',
+    'open-pull-request',
+    'open-commit',
+    'open-branch',
     'sidebar-tree',
     'sidebar-history',
     'sidebar-walkthrough',
@@ -124,6 +129,9 @@ test('app commands register the complete command set and delegate dynamic action
   };
   command('file-filter').execute();
   command('diff-search').execute();
+  command('open-pull-request').execute();
+  command('open-commit').execute();
+  command('open-branch').execute();
   command('sidebar-history').execute();
   command('open-file').execute();
   command('toggle-sidebar').execute();
@@ -132,6 +140,7 @@ test('app commands register the complete command set and delegate dynamic action
   command('toggle-viewed').execute();
   expect(focusFileFilter).toHaveBeenCalledOnce();
   expect(onOpenDiffSearch).toHaveBeenCalledOnce();
+  expect(onOpenReviewSource.mock.calls).toEqual([['pull-request'], ['commit'], ['branch']]);
   expect(changeSidebarMode).toHaveBeenCalledWith('history');
   expect(onOpenSelectedFile).toHaveBeenCalledOnce();
   expect(onToggleSidebar).toHaveBeenCalledOnce();

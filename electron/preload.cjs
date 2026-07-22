@@ -72,6 +72,12 @@ const codiff = {
     ipcRenderer.on('codiff:findInDiffs', listener);
     return () => ipcRenderer.removeListener('codiff:findInDiffs', listener);
   },
+  onOpenReviewSource: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {import('../core/types.ts').OpenReviewSourceKind} kind */
+    const listener = (_event, kind) => callback(kind);
+    ipcRenderer.on('codiff:openReviewSource', listener);
+    return () => ipcRenderer.removeListener('codiff:openReviewSource', listener);
+  },
   onMarkdownDocumentChanged: (callback) => {
     const listener = (_event, change) => callback(change);
     ipcRenderer.on('codiff:markdownDocumentChanged', listener);
@@ -113,6 +119,7 @@ const codiff = {
   },
   openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
+  resolvePullRequestUrl: (value) => ipcRenderer.invoke('codiff:resolvePullRequestUrl', value),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),
   setWordWrap: (value) => ipcRenderer.invoke('codiff:setWordWrap', value),

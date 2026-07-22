@@ -4,13 +4,19 @@ import { createCommandRegistry, type Command } from '../../lib/command-registry.
 import type { ReviewCommandTarget } from '../../lib/review-command-target.ts';
 import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
 import { isReviewIdentityViewed } from '../../lib/review-identity.ts';
-import type { ChangedFile, CodiffPreferences, RepositoryState } from '../../types.ts';
+import type {
+  ChangedFile,
+  CodiffPreferences,
+  OpenReviewSourceKind,
+  RepositoryState,
+} from '../../types.ts';
 
 type UseAppCommandsOptions = {
   changeSidebarMode: (mode: SidebarMode) => void;
   focusFileFilter: () => void;
   getReviewCommandTarget: () => ReviewCommandTarget | null;
   onOpenDiffSearch: () => void;
+  onOpenReviewSource: (kind: OpenReviewSourceKind) => void;
   onOpenSelectedFile: () => void;
   onRefreshRepository: () => void;
   onToggleSidebar: () => void;
@@ -27,6 +33,7 @@ export function useAppCommands({
   focusFileFilter,
   getReviewCommandTarget,
   onOpenDiffSearch,
+  onOpenReviewSource,
   onOpenSelectedFile,
   onRefreshRepository,
   onToggleSidebar,
@@ -54,6 +61,21 @@ export function useAppCommands({
         id: 'diff-search',
         keymapAction: 'diffSearch',
         title: 'Find in Diffs',
+      }),
+      registry.register({
+        execute: () => onOpenReviewSource('pull-request'),
+        id: 'open-pull-request',
+        title: 'Open PR',
+      }),
+      registry.register({
+        execute: () => onOpenReviewSource('commit'),
+        id: 'open-commit',
+        title: 'Open Commit',
+      }),
+      registry.register({
+        execute: () => onOpenReviewSource('branch'),
+        id: 'open-branch',
+        title: 'Open Branch',
       }),
       registry.register({
         execute: () => changeSidebarMode('tree'),
@@ -212,6 +234,7 @@ export function useAppCommands({
     focusFileFilter,
     getReviewCommandTarget,
     onOpenDiffSearch,
+    onOpenReviewSource,
     onOpenSelectedFile,
     onRefreshRepository,
     onToggleSidebar,

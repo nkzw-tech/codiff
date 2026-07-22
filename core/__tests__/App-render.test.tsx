@@ -227,6 +227,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   onCopyPendingCommentsRequest: vi.fn(() => () => {}),
   onFindInDiffs: vi.fn(() => () => {}),
   onMarkdownDocumentChanged: vi.fn(() => () => {}),
+  onOpenReviewSource: vi.fn(() => () => {}),
   onPlanCloseRequested: vi.fn(() => () => {}),
   onRefreshRequest: vi.fn(() => () => {}),
   onRepositoryChanged: vi.fn(() => () => {}),
@@ -236,6 +237,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   openConfigFile: vi.fn(async () => {}),
   openFile: vi.fn(async () => {}),
   resetCodeFontSize: vi.fn(async () => {}),
+  resolvePullRequestUrl: vi.fn(async () => 'https://github.com/owner/repo/pull/1'),
   saveMarkdownDocument: vi.fn(async (request) => ({
     document: {
       content: request.content,

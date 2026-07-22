@@ -12,6 +12,7 @@ import type {
   GitIdentity,
   NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
+  OpenReviewSourceKind,
   PlanHandoffStatus,
   PlanReview,
   RepositoryHistory,
@@ -81,6 +82,7 @@ declare global {
             | { deleted: false; document: CodiffMarkdownDocument; id: string },
         ) => void,
       ) => () => void;
+      onOpenReviewSource: (callback: (kind: OpenReviewSourceKind) => void) => () => void;
       onPlanCloseRequested: (callback: () => void) => () => void;
       onRefreshRequest: (callback: () => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
@@ -90,6 +92,7 @@ declare global {
       openConfigFile: () => Promise<void>;
       openFile: (path: string) => Promise<void>;
       resetCodeFontSize: () => Promise<void>;
+      resolvePullRequestUrl: (value: string) => Promise<string>;
       saveMarkdownDocument: (
         request: SaveMarkdownDocumentRequest,
       ) => Promise<SaveMarkdownDocumentResult>;

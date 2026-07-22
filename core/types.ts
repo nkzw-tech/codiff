@@ -168,6 +168,9 @@ export type ReviewSource =
       url: string;
     };
 
+/** Sources that can be entered from the palette or native application menu. */
+export type OpenReviewSourceKind = 'branch' | 'commit' | 'pull-request';
+
 export type HistoryEntry = {
   author: string;
   committedAt: number;
