@@ -134,6 +134,7 @@ export type DiffSectionContentRequest = {
   force?: boolean;
   kind: DiffSection['kind'];
   path: string;
+  requestId?: string;
   showWhitespace?: boolean;
   source?: ResolvedReviewSource;
 };
@@ -149,6 +150,7 @@ export type DiffSectionsContentResult = {
 export type DiffImageContentRequest = {
   kind: DiffSection['kind'];
   path: string;
+  requestId?: string;
   source?: ResolvedReviewSource;
 };
 

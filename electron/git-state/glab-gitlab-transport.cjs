@@ -10,6 +10,7 @@ const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
 const { getCommandEnvironment } = require('../login-shell-environment.cjs');
+const { getCurrentCommandSignal } = require('./common.cjs');
 
 const DEFAULT_PROVIDER_OUTPUT_BYTES = 8 * 1024 * 1024;
 const GLAB_NOT_FOUND_CODE = 'GLAB_NOT_FOUND';
@@ -212,7 +213,7 @@ const runGlabApiBuffer = async (repoRoot, hostname, args, input, options = {}) =
     const child = spawn(command, args, {
       cwd: repoRoot,
       env: environment,
-      signal: options.signal,
+      signal: options.signal ?? getCurrentCommandSignal(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const stdout = [];
@@ -284,17 +285,18 @@ const createGlabGitLabTransport = ({ hostname, repoRoot, signal: defaultSignal }
    */
   const readApiBuffer = async (args, input, options) => {
     const maxBytes = normalizeMaxBytes(options.maxBytes);
+    const signal = options.signal ?? getCurrentCommandSignal();
     const bytes = options.sharedKey
       ? await readSharedGet(options.sharedKey, maxBytes, ({ getMaxBytes, onOutputLimit }) =>
           runGlabApiBuffer(repoRoot, hostname, args, input, {
             getMaxBytes,
             onOutputLimit,
-            signal: options.signal,
+            signal,
           }),
         )
       : await runGlabApiBuffer(repoRoot, hostname, args, input, {
           maxBytes,
-          signal: options.signal,
+          signal,
         });
     return enforceOutputLimit(bytes, maxBytes);
   };
@@ -317,7 +319,7 @@ const createGlabGitLabTransport = ({ hostname, repoRoot, signal: defaultSignal }
       request.method,
       request.body,
     );
-    const signal = request.signal || defaultSignal;
+    const signal = request.signal || defaultSignal || getCurrentCommandSignal();
     const sharedKey =
       request.body == null && (!request.method || request.method === 'GET') && !signal
         ? `${repoRoot}\0${hostname}\0text\0${args.join('\0')}`
@@ -411,7 +413,7 @@ const createGlabGitLabTransport = ({ hostname, repoRoot, signal: defaultSignal }
     },
     async requestBuffer(request) {
       const args = createGlabApiArgs(hostname, request.path, request.query, undefined, undefined);
-      const signal = request.signal || defaultSignal;
+      const signal = request.signal || defaultSignal || getCurrentCommandSignal();
       return readApiBuffer(args, undefined, {
         maxBytes: request.maxBytes,
         sharedKey: !signal ? `${repoRoot}\0${hostname}\0buffer\0${args.join('\0')}` : undefined,
@@ -421,7 +423,7 @@ const createGlabGitLabTransport = ({ hostname, repoRoot, signal: defaultSignal }
     async requestPages(request) {
       const args = createGlabApiArgs(hostname, request.path, request.query, undefined, undefined);
       args.splice(-1, 0, '--paginate');
-      const signal = request.signal || defaultSignal;
+      const signal = request.signal || defaultSignal || getCurrentCommandSignal();
       const pages = parseJsonPages(
         (
           await readApiBuffer(args, undefined, {

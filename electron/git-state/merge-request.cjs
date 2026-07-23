@@ -1,7 +1,13 @@
 // @ts-check
 
 const { createHash } = require('node:crypto');
-const { git, gitOrEmpty, readGitImageFile, validateRepositoryPath } = require('./common.cjs');
+const {
+  getCurrentCommandSignal,
+  git,
+  gitOrEmpty,
+  readGitImageFile,
+  validateRepositoryPath,
+} = require('./common.cjs');
 const { readGitFiles } = require('./git-files.cjs');
 const { createGlabGitLabTransport } = require('./glab-gitlab-transport.cjs');
 const { loadGitLabHistory } = require('../gitlab-history-bridge.cjs');
@@ -124,7 +130,7 @@ const rememberMergeRequestHydrationSnapshot = (repoRoot, mergeRequest, snapshot)
 /**
  * @param {string} repoRoot
  * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
- * @param {{expectedHeadSha?: string, forceRefresh?: boolean}} [options]
+ * @param {{expectedHeadSha?: string, forceRefresh?: boolean, signal?: AbortSignal}} [options]
  */
 const readMergeRequestHydrationSnapshot = async (repoRoot, mergeRequest, options = {}) => {
   const key = mergeRequestHydrationSnapshotKey(repoRoot, mergeRequest);
@@ -161,7 +167,7 @@ const readMergeRequestHydrationSnapshot = async (repoRoot, mergeRequest, options
   });
   const { range } = await artifactSource.readStackAndRange(
     { requestedBaseSha: baseSha, headSha },
-    new AbortController().signal,
+    options.signal ?? getCurrentCommandSignal() ?? new AbortController().signal,
   );
   const snapshot = { headSha, metadata, range };
   rememberMergeRequestHydrationSnapshot(repoRoot, mergeRequest, snapshot);

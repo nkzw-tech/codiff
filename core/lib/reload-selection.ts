@@ -16,7 +16,7 @@ type ReloadSelectionFile = {
 
 export type ReloadMainMode = 'commit' | 'review';
 
-type ReloadSelection = {
+export type ReloadSelection = {
   files: ReadonlyArray<ReloadSelectionFile>;
   historySource?: ReviewSource | null;
   mainMode?: ReloadMainMode;

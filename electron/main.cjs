@@ -25,6 +25,7 @@ const {
   readRepositoryState,
   readReviewComments,
   readWalkthroughRepositoryState,
+  runWithCommandSignal,
   submitPullRequestComment,
   submitPullRequestReview,
   validateRepositoryPath,
@@ -70,7 +71,7 @@ const {
 const {
   findMatchingWindowIdentity,
   getWindowIdentity,
-  getWindowIdentityForRepositoryState,
+  storeResolvedWindowState,
 } = require('./window-identity.cjs');
 const { createPendingCommentsClipboardController } = require('./pending-comments.cjs');
 const {
@@ -134,6 +135,8 @@ const root = dirname(__dirname);
 const windowIdentities = new Map();
 /** @type {Map<number, string>} */
 const windowRepositories = new Map();
+/** @type {Map<number, Map<string, AbortController>>} */
+const diffContentRequests = new Map();
 /** @type {Map<number, CodiffLaunchOptions>} */
 const windowLaunchOptions = new Map();
 /** @type {Map<number, Promise<RepositoryState>>} */
@@ -184,6 +187,41 @@ const refreshInstalledAgentFiles = () => {
 };
 
 const getActiveAgent = () => getAgent(config.settings.agentBackend);
+const abortDiffContentRequests = (webContentsId) => {
+  const requests = diffContentRequests.get(webContentsId);
+  if (!requests) {
+    return;
+  }
+  diffContentRequests.delete(webContentsId);
+  for (const controller of requests.values()) {
+    controller.abort(new DOMException('Diff content request canceled.', 'AbortError'));
+  }
+};
+
+const runDiffContentRequest = async (event, request, read) => {
+  const requestId =
+    typeof request?.requestId === 'string' && request.requestId
+      ? request.requestId
+      : `legacy:${Date.now()}:${Math.random()}`;
+  const webContentsId = event.sender.id;
+  const requests = diffContentRequests.get(webContentsId) ?? new Map();
+  diffContentRequests.set(webContentsId, requests);
+  requests
+    .get(requestId)
+    ?.abort(new DOMException('Diff content request superseded.', 'AbortError'));
+  const controller = new AbortController();
+  requests.set(requestId, controller);
+  try {
+    return await runWithCommandSignal(controller.signal, read);
+  } finally {
+    if (requests.get(requestId) === controller) {
+      requests.delete(requestId);
+    }
+    if (requests.size === 0) {
+      diffContentRequests.delete(webContentsId);
+    }
+  }
+};
 
 /** @param {string} repositoryPath @param {ReviewSource} [source] */
 const readRepositoryStateWithConfig = (repositoryPath, source) =>
@@ -240,23 +278,16 @@ const getMarkdownDocumentContext = (webContentsId) => ({
 
 /** @param {number} webContentsId @param {RepositoryState} state */
 const storeResolvedRepositoryState = (webContentsId, state) => {
-  windowRepositories.set(webContentsId, state.root);
+  storeResolvedWindowState(webContentsId, state, {
+    identities: windowIdentities,
+    launchOptions: windowLaunchOptions,
+    repositories: windowRepositories,
+  });
   const browserWindow = BrowserWindow.getAllWindows().find(
     (window) => window.webContents.id === webContentsId,
   );
   if (browserWindow && !browserWindow.isDestroyed()) {
     browserWindow.setTitle(getRepositoryWindowTitle(state));
-  }
-  const launchOptions = windowLaunchOptions.get(webContentsId);
-  if (launchOptions) {
-    windowLaunchOptions.set(webContentsId, {
-      ...launchOptions,
-      source: state.source,
-    });
-  }
-  const identity = getWindowIdentityForRepositoryState(state);
-  if (identity) {
-    windowIdentities.set(webContentsId, identity);
   }
 };
 
@@ -1022,6 +1053,7 @@ const createWindow = (
     completedPlanWindows.delete(webContentsId);
     planInitialVersions.delete(webContentsId);
     readyPlanWindows.delete(webContentsId);
+    abortDiffContentRequests(webContentsId);
     windowIdentities.delete(webContentsId);
     windowInitialRepositoryStates.delete(webContentsId);
     walkthroughProgressGenerations.delete(webContentsId);
@@ -1029,6 +1061,7 @@ const createWindow = (
     windowLaunchOptions.delete(webContentsId);
   });
   window.webContents.on('render-process-gone', () => {
+    abortDiffContentRequests(webContentsId);
     writePlanResult(webContentsId, 'canceled');
   });
   window.webContents.on(
@@ -1795,10 +1828,12 @@ ipcMain.handle('codiff:submitPullRequestReview', async (event, request) => {
 
 ipcMain.handle('codiff:getDiffSectionContent', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return readDiffSectionContent(repositoryPath, {
-    ...request,
-    showWhitespace: request?.showWhitespace ?? config.settings.showWhitespace,
-  });
+  return runDiffContentRequest(event, request, () =>
+    readDiffSectionContent(repositoryPath, {
+      ...request,
+      showWhitespace: request?.showWhitespace ?? config.settings.showWhitespace,
+    }),
+  );
 });
 
 ipcMain.handle('codiff:getDiffSectionsContent', async (event, request) => {
@@ -1808,7 +1843,16 @@ ipcMain.handle('codiff:getDiffSectionsContent', async (event, request) => {
 
 ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return readDiffImageContent(repositoryPath, request);
+  return runDiffContentRequest(event, request, () => readDiffImageContent(repositoryPath, request));
+});
+
+ipcMain.on('codiff:cancelDiffContentRequest', (event, requestId) => {
+  if (typeof requestId !== 'string') {
+    return;
+  }
+  const requests = diffContentRequests.get(event.sender.id);
+  const controller = requests?.get(requestId);
+  controller?.abort(new DOMException('Diff content request canceled.', 'AbortError'));
 });
 
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
