@@ -402,6 +402,33 @@ test('copies provider drafts with the provider label and Markdown heading', asyn
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdown));
 });
 
+test('hides the persistent copy action while a desktop source switch is pending', async () => {
+  const file = snapshot.files[0]!;
+  await using view = await renderSurface({
+    capabilities: {
+      desktop: { isSwitchingSource: true },
+      localReviewNotes: {
+        drafts: {
+          onChange: vi.fn(),
+          value: [
+            {
+              body: 'Keep this note through the source switch.',
+              filePath: file.path,
+              id: 'switching-note',
+              lineNumber: 1,
+              sectionId: file.sections[0]!.id,
+              side: 'additions',
+            },
+          ],
+        },
+      },
+    },
+    initialMode: 'tree',
+  });
+
+  expect(view.container.querySelector('.copy-comments-button')).toBeNull();
+});
+
 test('shows the configured sidebar shortcut in the collapse tooltip', async () => {
   const keymap = { ...createDefaultConfig().keymap, toggleSidebar: 'Alt+b' };
   await using view = await renderSurface({ initialMode: 'tree', keymap });
@@ -472,6 +499,20 @@ test('preserves structured walkthrough failure metadata', async () => {
     initialMode: 'walkthrough',
   });
   expect(view.container.textContent).toContain('Pi CLI was not found.');
+});
+
+test('renders the walkthrough unread indicator from host capability state', async () => {
+  await using view = await renderSurface({
+    capabilities: { walkthrough: { unread: true } },
+    initialMode: 'tree',
+  });
+  expect(view.container.querySelector('.review-mode-dot')).not.toBeNull();
+
+  await view.render({
+    capabilities: { walkthrough: { unread: false } },
+    initialMode: 'tree',
+  });
+  expect(view.container.querySelector('.review-mode-dot')).toBeNull();
 });
 
 test('composes host commands while keeping controlled preferences authoritative', async () => {

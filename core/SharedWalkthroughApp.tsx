@@ -11,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type Dispatch,
   type ReactNode,
   type SetStateAction,
@@ -40,10 +41,11 @@ import {
 import type { ReviewModeItem } from './app/components/ReviewModeControl.tsx';
 import { ReviewTopBar } from './app/components/ReviewTopBar.tsx';
 import { DiffLineCountBadge, HistorySidebar } from './app/components/Sidebar.tsx';
-import type {
-  CommitHandler,
-  CommitMessageHandler,
-  CommitOutputSubscriber,
+import {
+  CommitView,
+  type CommitHandler,
+  type CommitMessageHandler,
+  type CommitOutputSubscriber,
 } from './app/components/walkthrough/CommitView.tsx';
 import { NarrativeSidebar } from './app/components/walkthrough/NarrativeSidebar.tsx';
 import {
@@ -224,6 +226,7 @@ export type ReviewCommentCapabilities =
 
 export type ReviewContentCapabilities = {
   forceExpandedPaths?: ReadonlySet<string>;
+  initialScrollTarget?: ReviewScrollTarget | null;
   itemVersionByKey?: Readonly<Record<string, number>>;
   loadingSectionIds?: ReadonlySet<string>;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
@@ -237,7 +240,12 @@ export type ReviewDesktopCapabilities = {
   beforeContent?: ReactNode;
   collapsed?: ReadonlySet<string>;
   commands?: ReadonlyArray<Command>;
+  commit?: ComponentProps<typeof CommitView> & {
+    onToggle: () => void;
+    open: boolean;
+  };
   disableCodeViewWorkerPool?: boolean;
+  isSwitchingSource?: boolean;
   isWindowFullscreen?: boolean;
   onActiveWalkthroughReviewTargetChange?: (target: WalkthroughReviewTarget | null) => void;
   onCollapsedChange?: (collapsed: Set<string>) => void;
@@ -245,6 +253,8 @@ export type ReviewDesktopCapabilities = {
   onOpenSelectedFile?: () => void;
   onViewedChange?: (viewed: Record<string, string>) => void;
   reloadDeltaPaths?: ReadonlySet<string>;
+  sidebarFooter?: ReactNode;
+  sourceMenu?: ReactNode;
   viewed?: Readonly<Record<string, string>>;
 };
 
@@ -286,6 +296,7 @@ export type ReviewWalkthroughCapabilities = {
   onShare?: () => Promise<void> | void;
   progress?: ReactNode;
   status?: ReviewWalkthroughStatus;
+  unread?: boolean;
   updateCommitMessage?: CommitMessageHandler;
 };
 
@@ -519,7 +530,9 @@ export function ReviewSurface({
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarMode = activeMode?.value ?? uncontrolledSidebarMode;
-  const [treeScrollTarget, setTreeScrollTarget] = useState<ReviewScrollTarget | null>(null);
+  const [treeScrollTarget, setTreeScrollTarget] = useState<ReviewScrollTarget | null>(
+    () => content?.initialScrollTarget ?? null,
+  );
   const {
     bumpItemVersion,
     collapsed,
@@ -1311,6 +1324,11 @@ export function ReviewSurface({
     wordWrap,
   };
   const source = snapshot.repository.source;
+  const showDesktopCommitButton =
+    sidebarMode === 'tree' &&
+    source.type === 'working-tree' &&
+    snapshot.files.length > 0 &&
+    desktop?.commit != null;
   const emptySourceDetail = getEmptySourceDetail(source, snapshot.repository.root);
   const hasDiffSearchQuery = diffSearchQuery.trim().length > 0;
   const sourceMergeState = source.type === 'pull-request' ? source.mergeState : undefined;
@@ -1437,6 +1455,7 @@ export function ReviewSurface({
   const reviewModes = [
     {
       icon: <Path aria-hidden size={14} weight="bold" />,
+      indicator: walkthrough?.unread ? <span aria-hidden className="review-mode-dot" /> : undefined,
       label: 'Walkthrough',
       value: 'walkthrough',
     },
@@ -1562,13 +1581,14 @@ export function ReviewSurface({
           }
           repositoryTooltip={snapshot.repository.root}
           sidebarCollapsed={sidebarCollapsed}
+          sourceMenu={desktop?.sourceMenu}
           toggleTitle={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (${getShortcutLabel(
             keymap,
             'toggleSidebar',
           )})`}
         />
         {desktop?.beforeContent}
-        {reviewDrafts ? (
+        {reviewDrafts && !desktop?.isSwitchingSource ? (
           <div className="review-action-bar">
             <CopyCommentsButton
               actionLabel={copyPendingCommentsLabel}
@@ -1624,6 +1644,7 @@ export function ReviewSurface({
               files={visibleFiles}
               onActivatePath={activateTreePath}
               reloadDeltaPaths={desktop?.reloadDeltaPaths}
+              scrollSelectedPathIntoView={content?.initialScrollTarget != null}
               selectedPath={visibleSelectedPath}
               showWhitespace={snapshot.preferences.showWhitespace}
               viewed={viewed}
@@ -1664,19 +1685,41 @@ export function ReviewSurface({
               </div>
             </div>
           )}
-          {showTotalLineCount ? (
+          {showTotalLineCount || showDesktopCommitButton ? (
             <div className="sidebar-settings-bar">
-              <DiffLineCountBadge
-                ariaLabelPrefix="Total change"
-                className="sidebar-total-line-count sidebar-settings-line-count"
-                lineCount={totalLineCount}
-              />
+              {showTotalLineCount ? (
+                <DiffLineCountBadge
+                  ariaLabelPrefix="Total change"
+                  className="sidebar-total-line-count sidebar-settings-line-count"
+                  lineCount={totalLineCount}
+                />
+              ) : null}
+              {showDesktopCommitButton && desktop.commit ? (
+                <Button
+                  aria-label={desktop.commit.open ? 'Show file tree' : 'Open commit view'}
+                  className="sidebar-commit-button"
+                  onClick={desktop.commit.onToggle}
+                  type="button"
+                >
+                  {desktop.commit.open ? 'Tree' : 'Commit'}
+                </Button>
+              ) : null}
             </div>
           ) : null}
+          {desktop?.sidebarFooter}
         </aside>
         <div aria-hidden className="sidebar-resizer" onPointerDown={resizeSidebar} />
         <main className="review codiff-web-review">
-          {sidebarMode === 'comments' ? (
+          {desktop?.commit?.open ? (
+            <CommitView
+              branch={desktop.commit.branch}
+              draft={desktop.commit.draft}
+              model={desktop.commit.model}
+              onCommit={desktop.commit.onCommit}
+              onCommitOutput={desktop.commit.onCommitOutput}
+              onUpdateMessage={desktop.commit.onUpdateMessage}
+            />
+          ) : sidebarMode === 'comments' ? (
             <MergeRequestCommentsView
               canComment={comments?.general?.onCreate != null}
               commenting={commenting}
