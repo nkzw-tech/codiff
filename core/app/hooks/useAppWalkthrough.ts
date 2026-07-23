@@ -6,7 +6,7 @@ import {
   createReviewCommandTarget,
   type ReviewCommandTarget,
 } from '../../lib/review-command-target.ts';
-import { getSourceKey } from '../../lib/source.ts';
+import { getSourceRevisionKey } from '../../lib/source.ts';
 import type {
   ChangedFile,
   CodiffPreferences,
@@ -78,12 +78,25 @@ export function useAppWalkthrough({
   const walkthroughErrorRef = useRef<WalkthroughError | null>(walkthroughError);
   const walkthroughLoadingRef = useRef(initialWalkthroughLoading);
   const walkthroughRequestRef = useRef(0);
-  const navigationResetKey = state ? `${state.root}:${getSourceKey(state.source)}` : '';
+  const initialSourceKeyRef = useRef(state ? getSourceRevisionKey(state.source) : null);
+  const initialStateGenerationRef = useRef(0);
+  const navigationResetKey = state ? `${state.root}:${getSourceRevisionKey(state.source)}` : '';
   const narrativeNavigation = useNarrativeNavigation(
     narrativeWalkthrough,
     state?.files ?? emptyFiles,
     navigationResetKey,
   );
+  const setWalkthroughLoading = useCallback((loading: boolean) => {
+    walkthroughLoadingRef.current = loading;
+    setWalkthroughLoadingState(loading);
+    if (!loading) {
+      setWalkthroughProgress((current) =>
+        current.phase == null
+          ? current
+          : { ...current, phase: null, stageRevision: current.stageRevision + 1 },
+      );
+    }
+  }, []);
 
   useEffect(() => {
     mainModeRef.current = mainMode;
@@ -100,6 +113,45 @@ export function useAppWalkthrough({
   useEffect(() => {
     walkthroughErrorRef.current = walkthroughError;
   }, [walkthroughError]);
+
+  useEffect(() => {
+    const currentSource = stateRef.current?.source ?? state?.source;
+    if (
+      !initialWalkthroughResult ||
+      !initialSourceKeyRef.current ||
+      !currentSource ||
+      stateGenerationRef.current !== initialStateGenerationRef.current ||
+      getSourceRevisionKey(currentSource) !== initialSourceKeyRef.current
+    ) {
+      return;
+    }
+    const sourceKey = initialSourceKeyRef.current;
+    queueMicrotask(() => {
+      const latestSource = stateRef.current?.source;
+      if (
+        stateGenerationRef.current !== initialStateGenerationRef.current ||
+        !latestSource ||
+        getSourceRevisionKey(latestSource) !== sourceKey
+      ) {
+        return;
+      }
+      setWalkthroughLoading(false);
+      if (initialWalkthroughResult.status === 'ready') {
+        setNarrativeWalkthrough(initialWalkthroughResult.walkthrough);
+        setWalkthroughError(null);
+      } else {
+        setWalkthroughError(initialWalkthroughResult);
+      }
+      setWalkthroughFileError(initialWalkthroughFileError);
+    });
+  }, [
+    initialWalkthroughFileError,
+    initialWalkthroughResult,
+    setWalkthroughLoading,
+    state?.source,
+    stateGenerationRef,
+    stateRef,
+  ]);
 
   useEffect(() => {
     activeReviewCommandTargetRef.current = null;
@@ -129,18 +181,6 @@ export function useAppWalkthrough({
     }));
     walkthroughLoadingRef.current = true;
     setWalkthroughLoadingState(true);
-  }, []);
-
-  const setWalkthroughLoading = useCallback((loading: boolean) => {
-    walkthroughLoadingRef.current = loading;
-    setWalkthroughLoadingState(loading);
-    if (!loading) {
-      setWalkthroughProgress((current) =>
-        current.phase == null
-          ? current
-          : { ...current, phase: null, stageRevision: current.stageRevision + 1 },
-      );
-    }
   }, []);
 
   const cancelWalkthroughRequest = useCallback(() => {
@@ -175,12 +215,12 @@ export function useAppWalkthrough({
     (source: RepositoryState['source'], options?: NarrativeWalkthroughRequestOptions) => {
       const request = walkthroughRequestRef.current + 1;
       walkthroughRequestRef.current = request;
-      const sourceKey = getSourceKey(source);
+      const sourceKey = getSourceRevisionKey(source);
       const stateGeneration = stateGenerationRef.current;
       const isCurrentState = () =>
         walkthroughRequestRef.current === request &&
         stateGenerationRef.current === stateGeneration &&
-        getSourceKey(stateRef.current?.source ?? source) === sourceKey;
+        getSourceRevisionKey(stateRef.current?.source ?? source) === sourceKey;
       startWalkthroughLoading();
       setWalkthroughError(null);
       return window.codiff

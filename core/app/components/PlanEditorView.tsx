@@ -456,43 +456,52 @@ export function PlanEditorView({
 
   useEffect(() => {
     let canceled = false;
-    void Promise.all([
-      window.codiff
-        .getPlanReview()
-        .then((storedReview) => ({ storedReview }))
-        .catch((error: unknown) => ({
-          loadError: error instanceof Error ? error.message : String(error),
-          storedReview: null,
-        })),
-      window.codiff.getGitIdentity().catch(() => null),
-    ]).then(([reviewResult, nextIdentity]) => {
-      if (canceled) {
-        return;
-      }
-      const { storedReview } = reviewResult;
-      const nextReview = storedReview
-        ? {
-            ...storedReview,
-            document: {
-              id: initialDocument.id,
-              path: initialDocument.path,
-              version: initialDocument.version,
-            },
-          }
-        : createEmptyReview(initialDocument);
-      initialOpenThreadIdsRef.current = new Set(
-        storedReview?.threads
-          .filter((thread) => thread.status === 'open')
-          .map((thread) => thread.id) ?? [],
-      );
-      reviewRef.current = nextReview;
-      setReview(nextReview);
-      setIdentity(nextIdentity);
-      if ('loadError' in reviewResult) {
-        setSaveError(reviewResult.loadError);
-      }
-      void window.codiff.markPlanReady();
-    });
+    void window.codiff
+      .getPlanReview()
+      .then((storedReview) => ({ storedReview }))
+      .catch((error: unknown) => ({
+        loadError: error instanceof Error ? error.message : String(error),
+        storedReview: null,
+      }))
+      .then((reviewResult) => {
+        if (canceled) {
+          return;
+        }
+        const { storedReview } = reviewResult;
+        const nextReview = storedReview
+          ? {
+              ...storedReview,
+              document: {
+                id: initialDocument.id,
+                path: initialDocument.path,
+                version: initialDocument.version,
+              },
+            }
+          : createEmptyReview(initialDocument);
+        initialOpenThreadIdsRef.current = new Set(
+          storedReview?.threads
+            .filter((thread) => thread.status === 'open')
+            .map((thread) => thread.id) ?? [],
+        );
+        reviewRef.current = nextReview;
+        setReview(nextReview);
+        if ('loadError' in reviewResult) {
+          setSaveError(reviewResult.loadError);
+        }
+        void window.codiff.markPlanReady();
+      });
+    void window.codiff.getGitIdentity().then(
+      (nextIdentity) => {
+        if (!canceled) {
+          setIdentity(nextIdentity);
+        }
+      },
+      () => {
+        if (!canceled) {
+          setIdentity(null);
+        }
+      },
+    );
     return () => {
       canceled = true;
       if (saveTimerRef.current) {

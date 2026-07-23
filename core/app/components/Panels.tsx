@@ -218,6 +218,30 @@ export function UpdatePill({
   );
 }
 
+export function ReviewCommentsLoadBanner({
+  onRetry,
+  reason,
+}: {
+  onRetry: () => void;
+  reason: string | null;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      className={`repository-change-banner${reason ? ' visible' : ''}`}
+      role="status"
+    >
+      <span className="repository-change-banner-content">
+        <strong>Review comments unavailable.</strong>
+        <span>{reason ?? ''}</span>
+      </span>
+      <button className="repository-change-reload" onClick={onRetry} type="button">
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export function WalkthroughOutdatedBanner({
   onDismiss,
   reason,

@@ -16,6 +16,7 @@ const {
   readDiffSectionContent: readWorkingTreeDiffSectionContent,
   readWorkingTreeState,
 } = require('./working-tree.cjs');
+const { transferRepositoryWatcherInitialSnapshot } = require('../repository-watcher.cjs');
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
@@ -621,7 +622,7 @@ const mergeBranchAndWorkingTreeState = (branchState, workingTreeState) => {
     .map((path) => mergeChangedFile(branchFilesByPath.get(path), workingTreeFilesByPath.get(path)))
     .sort(fileSort);
 
-  return {
+  return transferRepositoryWatcherInitialSnapshot(workingTreeState, {
     ...branchState,
     files,
     generatedAt: Date.now(),
@@ -631,7 +632,7 @@ const mergeBranchAndWorkingTreeState = (branchState, workingTreeState) => {
       ref: branchSource.ref,
       type: 'branch-working-tree',
     },
-  };
+  });
 };
 
 /**

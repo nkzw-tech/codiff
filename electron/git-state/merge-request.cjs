@@ -273,7 +273,7 @@ const createMergeRequestSource = (mergeRequest, metadata) => ({
   ...(typeof metadata.description === 'string' && metadata.description.trim()
     ? { description: metadata.description.trim() }
     : {}),
-  headSha: metadata.sha,
+  headSha: metadata.diff_refs?.head_sha || metadata.sha,
   host: mergeRequest.host,
   number: mergeRequest.number,
   projectPath: mergeRequest.projectPath,
@@ -495,7 +495,14 @@ const readMergeRequestReviewComments = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const mergeRequest = parseGitLabMergeRequestUrl(source.url);
   selectMergeRequestRemote(repoRoot, mergeRequest);
-  return readMergeRequestComments(repoRoot, mergeRequest);
+  const transport = createMergeRequestTransport(repoRoot, mergeRequest);
+  const comments = await readMergeRequestComments(repoRoot, mergeRequest, transport);
+  const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest, transport);
+  const headSha = metadata.diff_refs?.head_sha || metadata.sha;
+  if (source.headSha && headSha !== source.headSha) {
+    throw new Error('The merge request head changed. Refresh before loading review comments.');
+  }
+  return comments;
 };
 
 /**
