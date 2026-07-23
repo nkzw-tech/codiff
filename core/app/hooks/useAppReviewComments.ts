@@ -81,12 +81,10 @@ export function useAppReviewComments({
   );
 
   const askCodex = useCallback(
-    (commentId: string) => {
+    (comment: ReviewComment) => {
       const currentState = stateRef.current;
-      const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
       if (
         !currentState ||
-        !comment ||
         comment.body.trim().length === 0 ||
         comment.codexReply?.status === 'loading'
       ) {
@@ -130,7 +128,7 @@ export function useAppReviewComments({
           });
         });
     },
-    [reviewCommentsRef, stateRef, updateCodexReply],
+    [stateRef, updateCodexReply],
   );
 
   const submitPullRequestComment = useCallback(

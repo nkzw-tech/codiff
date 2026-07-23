@@ -892,7 +892,7 @@ test('read-only walkthroughs can opt into the viewed control', async () => {
   });
   const viewedButton = container.querySelector<HTMLButtonElement>('.codiff-viewed-button');
   expect(viewedButton).not.toBeNull();
-  expect(container.querySelector('.codiff-button')).toBeNull();
+  expect(container.querySelector('[title="Open file in editor"]')).not.toBeNull();
   await act(async () => {
     viewedButton?.click();
   });
@@ -1248,7 +1248,10 @@ test('review comment typing stays local until a comment action commits it', asyn
     askButton.click();
   });
   expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Please check this.');
-  expect(onAskCodex).toHaveBeenCalledWith('comment-1');
+  expect(onAskCodex).toHaveBeenCalledWith({
+    ...comment,
+    body: 'Please check this.',
+  });
 });
 
 const renderLocalReviewComment = async ({
@@ -1350,7 +1353,9 @@ test('local review comments ask the agent with Mod+Alt+Enter', async () => {
   };
   await setInputValue(textarea, 'Explain this change.');
   await pressCommentShortcut(textarea, true);
-  expect(onAskCodex).toHaveBeenCalledWith('comment-1');
+  expect(onAskCodex).toHaveBeenCalledWith(
+    expect.objectContaining({ body: 'Explain this change.', id: 'comment-1' }),
+  );
   expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Explain this change.');
   expect(document.activeElement).toBe(textarea);
 });

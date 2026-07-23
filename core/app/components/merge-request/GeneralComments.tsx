@@ -15,28 +15,14 @@ import { matchesShortcut } from '../../../config/keymap.ts';
 import type { CodiffKeymap } from '../../../config/types.ts';
 import type {
   GitIdentity,
-  PullRequestExistingReviewComment,
   PullRequestGeneralComment,
   PullRequestGeneralCommentThread,
-  PullRequestReviewComment,
   ReviewAuthor,
+  ReviewCommenting,
 } from '../../../types.ts';
 import { Avatar } from '../Avatar.tsx';
 import { Button } from '../Button.tsx';
 import { ReadOnlyMarkdownView } from '../ReadOnlyMarkdownView.tsx';
-
-export type ReviewCommenting = {
-  canComment: boolean;
-  onDeleteComment: (commentId: string) => Promise<void>;
-  onDeleteGeneralComment: (commentId: string) => Promise<void>;
-  onReplyGeneralComment: (threadId: string, body: string) => Promise<void>;
-  onResolveDiscussion: (discussionId: string, resolved: boolean) => Promise<void>;
-  onSignIn: () => Promise<void> | void;
-  onSubmitComment: (comment: PullRequestReviewComment) => Promise<PullRequestExistingReviewComment>;
-  onSubmitGeneralComment: (body: string) => Promise<void>;
-  onUpdateComment: (commentId: string, body: string) => Promise<void>;
-  onUpdateGeneralComment: (commentId: string, body: string) => Promise<void>;
-};
 
 const getAuthorDisplayName = (author: ReviewAuthor) => author.name || author.login;
 const getGeneralCommentElementId = (commentId: string) => `general-comment:${commentId}`;
@@ -139,6 +125,8 @@ export function ReadOnlyGeneralCommentCard({
 }
 
 function GeneralCommentCard({
+  canDelete,
+  canEdit,
   comment,
   editDraft,
   editError,
@@ -152,6 +140,8 @@ function GeneralCommentCard({
   onSaveEdit,
   onStartEdit,
 }: {
+  canDelete: boolean;
+  canEdit: boolean;
   comment: PullRequestGeneralComment;
   editDraft: string;
   editError: string | null;
@@ -211,7 +201,7 @@ function GeneralCommentCard({
       <div className="review-comment-body source-description-body">
         <div
           className={`review-comment-header read-only general-comment-header${
-            comment.canEdit || comment.canDelete || editing ? ' with-comment-action' : ''
+            canEdit || canDelete || editing ? ' with-comment-action' : ''
           }`}
         >
           <strong title={`@${comment.author.login}`}>{displayName}</strong>
@@ -237,7 +227,7 @@ function GeneralCommentCard({
             </span>
           ) : (
             <>
-              {comment.canEdit ? (
+              {canEdit ? (
                 <button
                   className="review-comment-action"
                   onClick={() => onStartEdit(comment)}
@@ -246,7 +236,7 @@ function GeneralCommentCard({
                   Edit
                 </button>
               ) : null}
-              {comment.canDelete ? (
+              {canDelete ? (
                 <button
                   aria-label="Delete comment"
                   className="review-comment-delete"
@@ -296,7 +286,10 @@ function GeneralCommentCard({
 }
 
 function GeneralCommentThreadCard({
-  canComment,
+  canDelete,
+  canEdit,
+  canReply,
+  canResolve,
   editDraft,
   editError,
   editingCommentId,
@@ -312,7 +305,10 @@ function GeneralCommentThreadCard({
   onStartEdit,
   thread,
 }: {
-  canComment: boolean;
+  canDelete: boolean;
+  canEdit: boolean;
+  canReply: boolean;
+  canResolve: boolean;
   editDraft: string;
   editError: string | null;
   editingCommentId: string | null;
@@ -367,6 +363,8 @@ function GeneralCommentThreadCard({
     <section className="general-comment-thread">
       {thread.comments.map((comment) => (
         <GeneralCommentCard
+          canDelete={canDelete && comment.canDelete === true}
+          canEdit={canEdit && comment.canEdit === true}
           comment={comment}
           editDraft={editDraft}
           editError={editingCommentId === comment.id ? editError : null}
@@ -382,7 +380,7 @@ function GeneralCommentThreadCard({
           onStartEdit={onStartEdit}
         />
       ))}
-      {thread.canReply && canComment && !resolved ? (
+      {thread.canReply && canReply && !resolved ? (
         showReply ? (
           <GeneralCommentComposer
             disabled={false}
@@ -406,7 +404,7 @@ function GeneralCommentThreadCard({
           </div>
         )
       ) : null}
-      {thread.canResolve ? (
+      {thread.canResolve && canResolve ? (
         <div className="review-comment-thread-footer">
           <button
             className="review-comment-action"
@@ -618,7 +616,10 @@ export function MergeRequestCommentsView({
         <div className="general-comment-list">
           {threads.map((thread) => (
             <GeneralCommentThreadCard
-              canComment={canComment}
+              canDelete={commenting?.onDeleteGeneralComment != null}
+              canEdit={commenting?.onUpdateGeneralComment != null}
+              canReply={commenting?.onReplyGeneralComment != null}
+              canResolve={commenting?.onResolveDiscussion != null}
               editDraft={editDraft}
               editError={editError}
               editingCommentId={editingCommentId}
@@ -629,17 +630,13 @@ export function MergeRequestCommentsView({
               onCancelEdit={onCancelEdit}
               onChangeEditDraft={onChangeEditDraft}
               onDelete={(commentId) => {
-                void commenting?.onDeleteGeneralComment(commentId).catch((error: unknown) => {
+                void commenting?.onDeleteGeneralComment?.(commentId).catch((error: unknown) => {
                   window.alert(error instanceof Error ? error.message : String(error));
                 });
               }}
-              onReply={(threadId, body) =>
-                commenting?.onReplyGeneralComment(threadId, body) ??
-                Promise.reject(new Error('Replying is unavailable.'))
-              }
+              onReply={(threadId, body) => commenting!.onReplyGeneralComment!(threadId, body)}
               onResolve={(threadId, resolved) =>
-                commenting?.onResolveDiscussion(threadId, resolved) ??
-                Promise.reject(new Error('Resolving is unavailable.'))
+                commenting!.onResolveDiscussion!(threadId, resolved)
               }
               onSaveEdit={onSaveEdit}
               onStartEdit={onStartEdit}
@@ -666,7 +663,7 @@ export function MergeRequestCommentsView({
           onSubmit={onSubmit}
           submitting={submitting}
         />
-      ) : commenting ? (
+      ) : commenting?.onSignIn ? (
         <div className="general-comment-sign-in">
           <Button action={commenting.onSignIn} pendingPlaceholder="Signing in…">
             {signInLabel}
