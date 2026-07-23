@@ -181,7 +181,6 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
     : null;
 };
 
-
 /** @param {{root: string; source: import('../core/types.ts').ResolvedReviewSource}} state */
 const getWindowIdentityForRepositoryState = (state) => {
   const repositoryRoot = getRealPath(state.root);
@@ -193,6 +192,31 @@ const getWindowIdentityForRepositoryState = (state) => {
         sourceKey,
       }
     : null;
+};
+
+/**
+ * Retarget one independent viewport after it resolves a new review source.
+ * Existing viewports are intentionally left untouched, even when this creates
+ * multiple viewports with the same working-tree identity.
+ *
+ * @param {number} webContentsId
+ * @param {{root: string; source: import('../core/types.ts').ResolvedReviewSource}} state
+ * @param {{identities: Map<number, WindowIdentity | null>, launchOptions: Map<number, CodiffLaunchOptions>, repositories: Map<number, string>}} stores
+ */
+const storeResolvedWindowState = (webContentsId, state, stores) => {
+  stores.repositories.set(webContentsId, state.root);
+  const launchOptions = stores.launchOptions.get(webContentsId);
+  if (launchOptions) {
+    stores.launchOptions.set(webContentsId, {
+      ...launchOptions,
+      source: state.source,
+    });
+  }
+  const identity = getWindowIdentityForRepositoryState(state);
+  if (identity) {
+    stores.identities.set(webContentsId, identity);
+  }
+  return identity;
 };
 
 /**
@@ -217,4 +241,5 @@ module.exports = {
   findMatchingWindowIdentity,
   getWindowIdentity,
   getWindowIdentityForRepositoryState,
+  storeResolvedWindowState,
 };

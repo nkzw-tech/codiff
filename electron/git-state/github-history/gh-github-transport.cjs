@@ -11,6 +11,7 @@ const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../../agent-shared.cjs');
 const { getCommandEnvironment } = require('../../login-shell-environment.cjs');
+const { getCurrentCommandSignal } = require('../common.cjs');
 
 const GH_NOT_FOUND_CODE = 'GH_NOT_FOUND';
 const GH_NOT_FOUND_MESSAGE =
@@ -185,7 +186,7 @@ const runGhApiBuffer = async (repoRoot, args, input, options = {}) => {
     const child = spawn(command, ['api', ...args], {
       cwd: repoRoot,
       env: environment,
-      signal: options.signal,
+      signal: options.signal ?? getCurrentCommandSignal(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     /** @type {Array<Buffer>} */
@@ -353,17 +354,18 @@ const createGhGitHubTransport = ({ repoRoot }) => {
    */
   const readApiBuffer = async (args, input, options) => {
     const maxBytes = normalizeMaxBytes(options.maxBytes);
+    const signal = options.signal ?? getCurrentCommandSignal();
     const bytes = options.sharedKey
       ? await readSharedGet(options.sharedKey, maxBytes, ({ getMaxBytes, onOutputLimit }) =>
           runGhApiBuffer(repoRoot, args, input, {
             getMaxBytes,
             onOutputLimit,
-            signal: options.signal,
+            signal,
           }),
         )
       : await runGhApiBuffer(repoRoot, args, input, {
           maxBytes,
-          signal: options.signal,
+          signal,
         });
     return enforceOutputLimit(bytes, maxBytes);
   };
@@ -402,6 +404,7 @@ const createGhGitHubTransport = ({ repoRoot }) => {
    * }} request
    */
   const requestText = async (request) => {
+    const signal = request.signal ?? getCurrentCommandSignal();
     /** @type {Array<string>} */
     const args = [];
     if (request.paginate) {
@@ -418,14 +421,14 @@ const createGhGitHubTransport = ({ repoRoot }) => {
       args.push('--input', '-');
     }
     const sharedKey =
-      request.body == null && (!request.method || request.method === 'GET') && !request.signal
+      request.body == null && (!request.method || request.method === 'GET') && !signal
         ? `${repositoryIdentity}\0text\0${request.paginate ? 'paginate' : 'single'}\0${request.accept || ''}\0${appendQuery(request.path, request.paginate ? withoutPageSize(request.query) : request.query)}`
         : undefined;
     return (
       await readApiBuffer(args, request.body, {
         maxBytes: request.maxBytes,
         sharedKey,
-        signal: request.signal,
+        signal,
       })
     ).toString('utf8');
   };
@@ -459,6 +462,7 @@ const createGhGitHubTransport = ({ repoRoot }) => {
       return /** @type {T} */ (JSON.parse(text));
     },
     async requestBuffer(request) {
+      const signal = request.signal ?? getCurrentCommandSignal();
       /** @type {Array<string>} */
       const args = [];
       if (request.accept) {
@@ -467,10 +471,10 @@ const createGhGitHubTransport = ({ repoRoot }) => {
       args.push(appendQuery(request.path, request.query));
       return readApiBuffer(args, undefined, {
         maxBytes: request.maxBytes,
-        sharedKey: !request.signal
+        sharedKey: !signal
           ? `${repositoryIdentity}\0buffer\0single\0${request.accept || ''}\0${appendQuery(request.path, request.query)}`
           : undefined,
-        signal: request.signal,
+        signal,
       });
     },
     requestText,

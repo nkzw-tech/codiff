@@ -7,6 +7,7 @@ const {
   getImageMimeType,
   git,
   gitOrEmpty,
+  getCurrentCommandSignal,
   validateRepositoryPath,
 } = require('./common.cjs');
 const { readGitFiles } = require('./git-files.cjs');
@@ -319,7 +320,7 @@ const rememberPullRequestHydrationSnapshot = (repoRoot, pullRequest, snapshot) =
  *
  * @param {string} repoRoot
  * @param {PullRequestReference} pullRequest
- * @param {{expectedHeadSha?: string, forceRefresh?: boolean}} [options]
+ * @param {{expectedHeadSha?: string, forceRefresh?: boolean, signal?: AbortSignal}} [options]
  */
 const readPullRequestHydrationSnapshot = async (repoRoot, pullRequest, options = {}) => {
   const key = pullRequestHydrationSnapshotKey(repoRoot, pullRequest);
@@ -359,7 +360,7 @@ const readPullRequestHydrationSnapshot = async (repoRoot, pullRequest, options =
       requestedBaseSha: /** @type {GitSha} */ (baseSha),
       headSha: /** @type {GitSha} */ (headSha),
     },
-    new AbortController().signal,
+    options.signal ?? getCurrentCommandSignal() ?? new AbortController().signal,
   );
   const snapshot = { headSha, metadata, range };
   rememberPullRequestHydrationSnapshot(repoRoot, pullRequest, snapshot);

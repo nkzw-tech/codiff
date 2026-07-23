@@ -35,6 +35,7 @@ export function ReviewFileTree({
   showWhitespace: boolean;
   viewed?: Readonly<Record<string, string>>;
 }) {
+  const initialScrollPendingRef = useRef(scrollSelectedPathIntoView);
   const treeHostRef = useRef<HTMLDivElement>(null);
   const paths = useMemo(() => files.map((file) => file.path), [files]);
   const filePathSet = useMemo(() => new Set(paths), [paths]);
@@ -152,6 +153,10 @@ export function ReviewFileTree({
 
     const selectedPaths = model.getSelectedPaths();
     if (selectedPaths.length === 1 && selectedPaths[0] === selectedPath) {
+      if (initialScrollPendingRef.current) {
+        initialScrollPendingRef.current = false;
+        scrollPathIntoView(selectedPath);
+      }
       return;
     }
 
@@ -159,10 +164,11 @@ export function ReviewFileTree({
       model.getItem(path)?.deselect();
     }
     model.getItem(selectedPath)?.select();
-    if (scrollSelectedPathIntoView) {
-      requestAnimationFrame(() => scrollPathIntoView(selectedPath));
+    if (initialScrollPendingRef.current) {
+      initialScrollPendingRef.current = false;
+      scrollPathIntoView(selectedPath);
     }
-  }, [model, scrollPathIntoView, scrollSelectedPathIntoView, selectedPath]);
+  }, [model, scrollPathIntoView, selectedPath]);
 
   const handleTreeClick = useCallback(
     (event: MouseEvent<HTMLElement>) => {

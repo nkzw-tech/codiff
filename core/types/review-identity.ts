@@ -142,6 +142,7 @@ export type DiffSectionContentRequest = {
   force?: boolean;
   kind: DiffSection['kind'];
   path: string;
+  requestId?: string;
   showWhitespace?: boolean;
   source?: ResolvedReviewSource;
 };
@@ -160,7 +161,7 @@ export type DefinitionSearchRequest = {
   lineNumber: number;
   path: string;
   side: 'additions' | 'deletions';
-  source: ReviewSource;
+  source: ResolvedReviewSource;
 };
 
 export type DefinitionCandidate = {
@@ -186,6 +187,7 @@ export type DefinitionSearchResult =
 export type DiffImageContentRequest = {
   kind: DiffSection['kind'];
   path: string;
+  requestId?: string;
   source?: ResolvedReviewSource;
 };
 

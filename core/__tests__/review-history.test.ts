@@ -16,7 +16,7 @@ test('keeps revision SHA identity separate from labels and non-commit markers', 
   const range = diffRange(base, head);
 
   expect(shaForRevision(base)).toBe(base.sha);
-  expect(range.head.label.text).toBe('head');
+  expect(range.head?.label.text).toBe('head');
   expect(() =>
     shaForRevision({ kind: 'index', label: { kind: 'review-marker', text: 'Index' } }),
   ).toThrow('Expected a commit revision');

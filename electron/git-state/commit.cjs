@@ -9,7 +9,7 @@ const {
 const { readCommitMetadataForCommit } = require('./commit-metadata.cjs');
 const {
   applyGeneratedAttributeStates,
-  readGeneratedAttributeStates,
+  readRevisionGeneratedAttributeStates,
 } = require('../generated-files.cjs');
 const {
   readDiffImageContent: readWorkingTreeDiffImageContent,
@@ -349,10 +349,13 @@ const readResolvedComparisonState = (launchPath, comparison) =>
 
 /** @param {ResolvedComparison} comparison */
 const readComparisonGeneratedAttributeStates = (comparison) =>
-  readGeneratedAttributeStates(
+  readRevisionGeneratedAttributeStates(
     comparison.repoRoot,
     comparison.status.map((file) => file.path),
-    comparison.newSha,
+    {
+      label: { kind: 'commit', text: comparison.newSha },
+      sha: comparison.newSha,
+    },
   );
 
 /** @param {string} launchPath @param {ComparisonSource} source @returns {Promise<RepositoryState>} */

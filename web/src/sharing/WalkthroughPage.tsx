@@ -152,7 +152,7 @@ const Viewer = ({ walkthrough: walkthroughRef }: { walkthrough: ViewRef<'Walkthr
   const fate = useFateClient();
   const walkthrough = useLiveView(WalkthroughPageView, walkthroughRef);
   const snapshot = use(getManifest(walkthrough.slug));
-  usePageTitle(snapshot.walkthrough.title);
+  usePageTitle(snapshot.repository.title);
   const [preferences, setPreferences] = useOnlineCodiffPreferences(snapshot.preferences ?? {});
   const { data: session } = auth.useSession();
   const username = sessionUsername(session?.user);

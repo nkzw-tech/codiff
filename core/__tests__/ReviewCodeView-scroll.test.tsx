@@ -298,8 +298,8 @@ test('combined branch Markdown edits only the final working-tree section', async
   const initialFile = createCombinedFile('# Edited\n', 'plan.md:combined-initial');
   const refreshedFile = createCombinedFile('# Saved\n', 'plan.md:combined-refreshed');
   const combinedSource = {
-    baseRef: 'base123',
-    headRef: 'head123',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-working-tree',
   } satisfies ReviewSource;
@@ -384,8 +384,8 @@ test('combined branch-only Markdown sections remain read-only', async () => {
       <ReviewCodeViewHarness
         files={[file]}
         source={{
-          baseRef: 'base123',
-          headRef: 'head123',
+          baseSha: gitSha('base123'),
+          headSha: gitSha('head123'),
           ref: 'main',
           type: 'branch-working-tree',
         }}
@@ -2389,7 +2389,7 @@ test('historical definitions outside the diff do not open the current checkout',
       files={[file]}
       onFindDefinitions={onFindDefinitions}
       onOpenDefinition={onOpenDefinition}
-      source={{ ref: 'abcdef0', type: 'commit' }}
+      source={{ sha: gitSha('abcdef0'), type: 'commit' }}
     />,
   );
   await using _platform = {
@@ -2545,7 +2545,7 @@ test('definition result is invalidated when the review source changes', async ()
       files={[createChangedFile('src/next.ts', { kind: 'commit' })]}
       onFindDefinitions={onFindDefinitions}
       onOpenDefinition={() => {}}
-      source={{ ref: 'abcdef0', type: 'commit' }}
+      source={{ sha: gitSha('abcdef0'), type: 'commit' }}
     />,
   );
   await act(async () => {

@@ -11,41 +11,57 @@ import {
 } from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
-const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepositoryState } =
-  require('../window-identity.cjs') as {
-    findMatchingWindowIdentity: (
-      identity: { key: string } | null,
-      existingIdentities: ReadonlyMap<number, { key: string } | null>,
-    ) => number | null;
-    getWindowIdentity: (
-      repositoryPath: string,
-      launchOptions?: {
-        source?:
-          | { type: 'working-tree' }
-          | { ref: string; type: 'branch' }
-          | { baseSha: string; headSha: string; ref: string; type: 'branch-diff' }
-          | { ref: string; type: 'commit' }
-          | {
-              number?: number;
-              owner?: string;
-              repo?: string;
-              type: 'pull-request';
-              url: string;
-            };
-        walkthrough?: boolean;
-        walkthroughFile?: string;
-        planFile?: string;
-        planResultFile?: string;
-      },
-    ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
-    getWindowIdentityForRepositoryState: (state: {
-      root: string;
-      source:
+const {
+  findMatchingWindowIdentity,
+  getWindowIdentity,
+  getWindowIdentityForRepositoryState,
+  storeResolvedWindowState,
+} = require('../window-identity.cjs') as {
+  findMatchingWindowIdentity: (
+    identity: { key: string } | null,
+    existingIdentities: ReadonlyMap<number, { key: string } | null>,
+  ) => number | null;
+  getWindowIdentity: (
+    repositoryPath: string,
+    launchOptions?: {
+      source?:
         | { type: 'working-tree' }
-        | { sha: string; type: 'commit' }
-        | { baseSha: string; headSha: string; ref: string; type: 'branch-diff' };
-    }) => { key: string; repositoryRoot: string; sourceKey: string } | null;
-  };
+        | { ref: string; type: 'branch' }
+        | { baseSha: string; headSha: string; ref: string; type: 'branch-diff' }
+        | { ref: string; type: 'commit' }
+        | {
+            number?: number;
+            owner?: string;
+            repo?: string;
+            type: 'pull-request';
+            url: string;
+          };
+      walkthrough?: boolean;
+      walkthroughFile?: string;
+      planFile?: string;
+      planResultFile?: string;
+    },
+  ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
+  getWindowIdentityForRepositoryState: (state: {
+    root: string;
+    source:
+      | { type: 'working-tree' }
+      | { sha: string; type: 'commit' }
+      | { baseSha: string; headSha: string; ref: string; type: 'branch-diff' };
+  }) => { key: string; repositoryRoot: string; sourceKey: string } | null;
+  storeResolvedWindowState: (
+    webContentsId: number,
+    state: { root: string; source: { type: 'working-tree' } },
+    stores: {
+      identities: Map<number, { key: string; repositoryRoot: string; sourceKey: string } | null>;
+      launchOptions: Map<
+        number,
+        { repositoryPathProvided: boolean; source?: { type: 'working-tree' }; walkthrough: boolean }
+      >;
+      repositories: Map<number, string>;
+    },
+  ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
+};
 
 const execFileAsync = promisify(execFile);
 
@@ -281,4 +297,50 @@ test('window identity matching requires exact identity matches', () => {
   expect(findMatchingWindowIdentity(null, new Map([[1, { key: 'repo-a\0working-tree' }]]))).toBe(
     null,
   );
+});
+
+test('retargeting one viewport allows duplicate working-tree identities', () => {
+  const existingWorkingTreeIdentity = {
+    key: '/repo\0working-tree',
+    repositoryRoot: '/repo',
+    sourceKey: 'working-tree',
+  };
+  const identities = new Map([
+    [
+      1,
+      {
+        key: '/repo\0pull-request:example/repo#12',
+        repositoryRoot: '/repo',
+        sourceKey: 'pull-request:example/repo#12',
+      },
+    ],
+    [2, existingWorkingTreeIdentity],
+  ]);
+  const launchOptions = new Map([
+    [1, { repositoryPathProvided: true, walkthrough: false }],
+    [
+      2,
+      {
+        repositoryPathProvided: true,
+        source: { type: 'working-tree' as const },
+        walkthrough: false,
+      },
+    ],
+  ]);
+  const repositories = new Map([
+    [1, '/repo'],
+    [2, '/repo'],
+  ]);
+
+  const identity = storeResolvedWindowState(
+    1,
+    { root: '/repo', source: { type: 'working-tree' } },
+    { identities, launchOptions, repositories },
+  );
+
+  expect(identity?.sourceKey).toBe('working-tree');
+  expect(identities.get(1)?.sourceKey).toBe('working-tree');
+  expect(identities.get(2)).toBe(existingWorkingTreeIdentity);
+  expect(launchOptions.get(1)?.source).toEqual({ type: 'working-tree' });
+  expect(findMatchingWindowIdentity(identity, identities)).toBe(1);
 });

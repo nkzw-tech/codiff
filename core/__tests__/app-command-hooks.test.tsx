@@ -8,7 +8,6 @@ import { useAppCommands } from '../app/hooks/useAppCommands.ts';
 import { useAppKeyboardShortcuts } from '../app/hooks/useAppKeyboardShortcuts.ts';
 import { createDefaultConfig, defaultKeymap } from '../config/defaults.ts';
 import { createReviewCommandTarget } from '../lib/review-command-target.ts';
-import type { RepositoryState } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact } from './helpers/react.tsx';
 
@@ -49,16 +48,6 @@ test('app commands register the complete command set and delegate dynamic action
       ...createDefaultConfig().settings,
     },
   };
-  const stateRef = {
-    current: {
-      branch: 'main',
-      files: [file],
-      generatedAt: 1,
-      launchPath: '/repo',
-      root: '/repo',
-      source,
-    } satisfies RepositoryState,
-  };
   const viewedRef = {
     current: {
       [target.reviewIdentity.key]: target.reviewIdentity.fingerprint,
@@ -67,6 +56,7 @@ test('app commands register the complete command set and delegate dynamic action
   const changeSidebarMode = vi.fn();
   const focusFileFilter = vi.fn();
   const getReviewCommandTarget = vi.fn(() => target);
+  const onCopyPendingComments = vi.fn(() => '# Address these Review Notes');
   const onOpenDiffSearch = vi.fn();
   const onOpenReviewSource = vi.fn();
   const onOpenSelectedFile = vi.fn();
@@ -74,14 +64,21 @@ test('app commands register the complete command set and delegate dynamic action
   const onToggleSidebar = vi.fn();
   const onToggleViewed = vi.fn();
   const onToggleWordWrap = vi.fn();
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
   let commands: ReturnType<typeof useAppCommands> = [];
   await using _view = await renderReact(
     <AppCommandsHarness
       onCommands={(nextCommands) => (commands = nextCommands)}
       options={{
         changeSidebarMode,
+        copyPendingCommentsLabel: 'Copy Review Notes',
         focusFileFilter,
         getReviewCommandTarget,
+        onCopyPendingComments,
         onOpenDiffSearch,
         onOpenReviewSource,
         onOpenSelectedFile,
@@ -90,8 +87,6 @@ test('app commands register the complete command set and delegate dynamic action
         onToggleViewed,
         onToggleWordWrap,
         preferencesRef,
-        reviewCommentsRef: { current: [] },
-        stateRef,
         viewedRef,
       }}
     />,
@@ -137,6 +132,7 @@ test('app commands register the complete command set and delegate dynamic action
   command('open-file').execute();
   command('toggle-sidebar').execute();
   command('toggle-word-wrap').execute();
+  command('copy-comments').execute();
   command('reload').execute();
   command('toggle-viewed').execute();
   expect(focusFileFilter).toHaveBeenCalledOnce();
@@ -147,9 +143,13 @@ test('app commands register the complete command set and delegate dynamic action
   expect(onToggleSidebar).toHaveBeenCalledOnce();
   expect(onToggleWordWrap).toHaveBeenCalledOnce();
   expect(onRefreshRepository).toHaveBeenCalledOnce();
+  expect(onCopyPendingComments).toHaveBeenCalledOnce();
+  expect(writeText).toHaveBeenCalledWith('# Address these Review Notes');
   expect(command('open-file').description?.()).toBe(file.path);
   expect(onToggleViewed).toHaveBeenCalledWith(file, true, target.reviewIdentity);
   expect(command('toggle-word-wrap').description?.()).toBe('Enable Word Wrap');
+  expect(command('copy-comments').title).toBe('Copy Review Notes');
+  expect(command('copy-comments-and-close').title).toBe('Copy Review Notes and Close');
   preferencesRef.current.wordWrap = true;
   expect(command('toggle-word-wrap').description?.()).toBe('Disable Word Wrap');
 });

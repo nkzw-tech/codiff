@@ -11,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type Dispatch,
   type ReactNode,
   type SetStateAction,
@@ -40,10 +41,11 @@ import {
 import type { ReviewModeItem } from './app/components/ReviewModeControl.tsx';
 import { ReviewTopBar } from './app/components/ReviewTopBar.tsx';
 import { DiffLineCountBadge, HistorySidebar } from './app/components/Sidebar.tsx';
-import type {
-  CommitHandler,
-  CommitMessageHandler,
-  CommitOutputSubscriber,
+import {
+  CommitView,
+  type CommitHandler,
+  type CommitMessageHandler,
+  type CommitOutputSubscriber,
 } from './app/components/walkthrough/CommitView.tsx';
 import { NarrativeSidebar } from './app/components/walkthrough/NarrativeSidebar.tsx';
 import {
@@ -108,6 +110,9 @@ import {
 } from './lib/source.ts';
 import type {
   ChangedFile,
+  DefinitionCandidate,
+  DefinitionSearchRequest,
+  DefinitionSearchResult,
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
@@ -138,6 +143,26 @@ const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
 const emptyGeneralCommentThreads: ReadonlyArray<PullRequestGeneralCommentThread> = [];
 const emptyPaths = new Set<string>();
 const emptyWalkthroughNotes = new Map();
+const reviewSurfacePreferencesKey = 'codiff:web-review-surface-preferences:v1';
+const mobileSidebarMediaQuery = '(max-width: 720px)';
+const getLocationHashTarget = () => {
+  const hash = window.location.hash.slice(1);
+  if (!hash) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(hash);
+  } catch {
+    return hash;
+  }
+};
+const commentMatchesHashTarget = (
+  comment: { id: string; threadId?: string; url?: string },
+  target: string,
+) =>
+  comment.id === target ||
+  comment.threadId === target ||
+  comment.url?.slice(comment.url.lastIndexOf('#') + 1) === target;
 const readSharedSidebarWidth = () =>
   typeof localStorage === 'undefined' ? SIDEBAR_DEFAULT_WIDTH : readSidebarWidth();
 
@@ -146,6 +171,43 @@ const writeSharedSidebarWidth = (width: number) => {
     writeSidebarWidth(width);
   }
 };
+
+const readStoredSidebarCollapsed = (): boolean | null => {
+  if (typeof localStorage === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = JSON.parse(localStorage.getItem(reviewSurfacePreferencesKey) ?? '{}') as unknown;
+    if (
+      stored &&
+      typeof stored === 'object' &&
+      'sidebarCollapsed' in stored &&
+      typeof stored.sidebarCollapsed === 'boolean'
+    ) {
+      return stored.sidebarCollapsed;
+    }
+  } catch {
+    // Ignore unavailable or invalid browser storage and use the viewport default.
+  }
+  return null;
+};
+
+const writeStoredSidebarCollapsed = (sidebarCollapsed: boolean) => {
+  if (typeof localStorage === 'undefined') {
+    return;
+  }
+  try {
+    localStorage.setItem(reviewSurfacePreferencesKey, JSON.stringify({ sidebarCollapsed }));
+  } catch {
+    // Ignore unavailable or full browser storage; the preference remains in memory.
+  }
+};
+
+const shouldCollapseSidebarInitially = () =>
+  readStoredSidebarCollapsed() ??
+  (typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia(mobileSidebarMediaQuery).matches);
 
 export type ReviewWalkthroughStatus = 'failed' | 'generating' | 'idle' | 'ready';
 export type ReviewMode = 'comments' | 'history' | 'tree' | 'walkthrough';
@@ -223,6 +285,7 @@ export type ReviewCommentCapabilities =
 
 export type ReviewContentCapabilities = {
   forceExpandedPaths?: ReadonlySet<string>;
+  initialScrollTarget?: ReviewScrollTarget | null;
   itemVersionByKey?: Readonly<Record<string, number>>;
   loadingSectionIds?: ReadonlySet<string>;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
@@ -238,14 +301,23 @@ export type ReviewDesktopCapabilities = {
   beforeContent?: ReactNode;
   collapsed?: ReadonlySet<string>;
   commands?: ReadonlyArray<Command>;
+  commit?: ComponentProps<typeof CommitView> & {
+    onToggle: () => void;
+    open: boolean;
+  };
   disableCodeViewWorkerPool?: boolean;
+  isSwitchingSource?: boolean;
   isWindowFullscreen?: boolean;
   onActiveWalkthroughReviewTargetChange?: (target: WalkthroughReviewTarget | null) => void;
   onCollapsedChange?: (collapsed: Set<string>) => void;
+  onFindDefinitions?: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
+  onOpenDefinition?: (candidate: DefinitionCandidate) => void;
   onOpenFile?: (file: ChangedFile) => void;
   onOpenSelectedFile?: () => void;
   onViewedChange?: (viewed: Record<string, string>) => void;
   reloadDeltaPaths?: ReadonlySet<string>;
+  sidebarFooter?: ReactNode;
+  sourceMenu?: ReactNode;
   viewed?: Readonly<Record<string, string>>;
 };
 
@@ -271,6 +343,7 @@ export type ControlledReviewPreferences = {
 export type ReviewSourceNavigation = {
   onCancelAutoMerge?: () => Promise<void> | void;
   onClosePullRequest?: () => Promise<void> | void;
+  onMarkPullRequestReady?: () => Promise<void> | void;
   onMergePullRequest?: (
     options: PullRequestMergeOptions & { autoMerge: boolean },
   ) => Promise<void> | void;
@@ -287,6 +360,7 @@ export type ReviewWalkthroughCapabilities = {
   onShare?: () => Promise<void> | void;
   progress?: ReactNode;
   status?: ReviewWalkthroughStatus;
+  unread?: boolean;
   updateCommitMessage?: CommitMessageHandler;
 };
 
@@ -394,6 +468,7 @@ type ReviewSurfaceBaseProps = {
   providerLabel?: string;
   repositoryUrl?: string;
   settingsBar?: ReactNode;
+  sidebarPosition?: 'left' | 'right';
   signInLabel?: string;
   snapshot: SharedWalkthroughSnapshot;
   sourceDescriptionFooterAside?: ReactNode;
@@ -424,6 +499,7 @@ export function ReviewSurface({
   providerLabel = 'provider',
   repositoryUrl,
   settingsBar,
+  sidebarPosition = 'left',
   signInLabel = 'Sign in to comment',
   snapshot,
   sourceDescriptionFooterAside,
@@ -517,9 +593,35 @@ export function ReviewSurface({
   const [uncontrolledSidebarMode, setUncontrolledSidebarMode] = useState<ReviewMode>(
     () => initialMode ?? (desktop ? 'tree' : 'walkthrough'),
   );
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean | null>(null);
+  const sidebarCollapsedRef = useRef<boolean | null>(null);
+  const sidebarInteractedRef = useRef(false);
+  const updateSidebarCollapsed = useCallback((value: boolean, persist: boolean) => {
+    sidebarCollapsedRef.current = value;
+    setSidebarCollapsed(value);
+    if (persist) {
+      writeStoredSidebarCollapsed(value);
+    }
+  }, []);
+  const toggleSidebar = useCallback(() => {
+    sidebarInteractedRef.current = true;
+    updateSidebarCollapsed(
+      !(sidebarCollapsedRef.current ?? shouldCollapseSidebarInitially()),
+      true,
+    );
+  }, [updateSidebarCollapsed]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      if (!sidebarInteractedRef.current) {
+        updateSidebarCollapsed(shouldCollapseSidebarInitially(), false);
+      }
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [updateSidebarCollapsed]);
   const sidebarMode = activeMode?.value ?? uncontrolledSidebarMode;
-  const [treeScrollTarget, setTreeScrollTarget] = useState<ReviewScrollTarget | null>(null);
+  const [treeScrollTarget, setTreeScrollTarget] = useState<ReviewScrollTarget | null>(
+    () => content?.initialScrollTarget ?? null,
+  );
   const {
     bumpItemVersion,
     collapsed,
@@ -542,8 +644,12 @@ export function ReviewSurface({
   const selectedPath = controlledPreferences?.selectedPath?.value ?? uncontrolledSelectedPath;
   const { resizeSidebar, sidebarWidth } = useResizableSidebar({
     collapseThreshold: SIDEBAR_COLLAPSE_THRESHOLD,
-    onCollapse: () => setSidebarCollapsed(true),
+    onCollapse: () => {
+      sidebarInteractedRef.current = true;
+      updateSidebarCollapsed(true, true);
+    },
     onWidthCommit: writeSharedSidebarWidth,
+    position: sidebarPosition,
     readWidth: readSharedSidebarWidth,
   });
   const snapshotReviewComments = useMemo(() => getSnapshotReviewComments(snapshot), [snapshot]);
@@ -597,6 +703,7 @@ export function ReviewSurface({
     clearCommentFocus,
     createComment,
     deleteComment: deleteLocalComment,
+    focusComment,
     focusCommentId,
     focusCommentRequest,
     reviewCommentsRef,
@@ -626,11 +733,13 @@ export function ReviewSurface({
   const [generalCommentEditSubmitting, setGeneralCommentEditSubmitting] = useState(false);
   const [generalCommentError, setGeneralCommentError] = useState<string | null>(null);
   const [focusedGeneralCommentId, setFocusedGeneralCommentId] = useState<string | null>(null);
+  const handledHashTargetRef = useRef<string | null>(null);
   const [generalCommentScrollRequest, setGeneralCommentScrollRequest] = useState(0);
   const [generalCommentSubmitting, setGeneralCommentSubmitting] = useState(false);
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
     useState<PullRequestReviewEvent | null>(null);
   const [pullRequestCloseSubmitting, setPullRequestCloseSubmitting] = useState(false);
+  const [pullRequestReadySubmitting, setPullRequestReadySubmitting] = useState(false);
   const [pullRequestMergeSubmitting, setPullRequestMergeSubmitting] = useState(false);
   const [walkthroughRequestPending, setWalkthroughRequestPending] = useState(false);
   const walkthroughRequestPendingRef = useRef(false);
@@ -750,6 +859,64 @@ export function ReviewSurface({
     },
     [changeSidebarMode],
   );
+  const activateReviewComment = useCallback(
+    (comment: ReviewComment) => {
+      changeSidebarMode('tree');
+      setUncontrolledSelectedPath(comment.filePath);
+      controlledPreferences?.selectedPath?.onChange(comment.filePath);
+      focusComment(comment.id);
+      setTreeScrollTarget((current) => ({
+        behavior: 'smooth',
+        commentId: comment.id,
+        path: comment.filePath,
+        request: (current?.request ?? 0) + 1,
+      }));
+    },
+    [
+      changeSidebarMode,
+      controlledPreferences?.selectedPath,
+      focusComment,
+      setUncontrolledSelectedPath,
+    ],
+  );
+  const activateHashTarget = useCallback(() => {
+    const target = getLocationHashTarget();
+    if (!target || handledHashTargetRef.current === target) {
+      return;
+    }
+
+    const reviewComment = reviewComments.find((comment) =>
+      commentMatchesHashTarget(comment, target),
+    );
+    if (reviewComment) {
+      handledHashTargetRef.current = target;
+      activateReviewComment(reviewComment);
+      return;
+    }
+
+    for (const thread of generalCommentThreads) {
+      const generalComment =
+        thread.comments.find((comment) => commentMatchesHashTarget(comment, target)) ??
+        (thread.id === target ? thread.comments[0] : undefined);
+      if (generalComment) {
+        handledHashTargetRef.current = target;
+        activateGeneralComment(generalComment.id);
+        return;
+      }
+    }
+  }, [activateGeneralComment, activateReviewComment, generalCommentThreads, reviewComments]);
+  useEffect(() => {
+    const timeout = window.setTimeout(activateHashTarget, 0);
+    return () => window.clearTimeout(timeout);
+  }, [activateHashTarget]);
+  useEffect(() => {
+    const handleHashChange = () => {
+      handledHashTargetRef.current = null;
+      activateHashTarget();
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [activateHashTarget]);
   const navigateGeneralComment = useCallback(
     (direction: 1 | -1) => {
       if (generalComments.length === 0) {
@@ -945,6 +1112,25 @@ export function ReviewSurface({
       })
       .finally(() => setPullRequestCloseSubmitting(false));
   }, [pullRequestCloseSubmitting, snapshot.repository.source, sourceNavigation]);
+  const markPullRequestReady = useCallback(() => {
+    const source = snapshot.repository.source;
+    if (
+      !sourceNavigation?.onMarkPullRequestReady ||
+      pullRequestReadySubmitting ||
+      source.type !== 'pull-request' ||
+      source.reviewStatus?.markReady?.disabled === true ||
+      !source.reviewStatus?.markReady
+    ) {
+      return;
+    }
+
+    setPullRequestReadySubmitting(true);
+    return Promise.resolve(sourceNavigation.onMarkPullRequestReady())
+      .catch((error: unknown) => {
+        window.alert(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => setPullRequestReadySubmitting(false));
+  }, [pullRequestReadySubmitting, snapshot.repository.source, sourceNavigation]);
   const mergePullRequest = useCallback(
     (options: PullRequestMergeOptions & { autoMerge: boolean }) => {
       if (!sourceNavigation?.onMergePullRequest || pullRequestMergeSubmitting) {
@@ -1144,14 +1330,15 @@ export function ReviewSurface({
     }));
   }, []);
   const focusFileFilter = useCallback(() => {
-    setSidebarCollapsed(false);
+    sidebarInteractedRef.current = true;
+    updateSidebarCollapsed(false, true);
     changeSidebarMode('tree');
     requestAnimationFrame(() => {
       const input = document.querySelector<HTMLInputElement>('.review-surface .sidebar-search');
       input?.focus();
       input?.select();
     });
-  }, [changeSidebarMode]);
+  }, [changeSidebarMode, updateSidebarCollapsed]);
   const toggleWordWrap = useCallback(() => {
     const nextWordWrap = !wordWrap;
     setUncontrolledWordWrap(nextWordWrap);
@@ -1163,10 +1350,10 @@ export function ReviewSurface({
     onFocusFileFilter: focusFileFilter,
     onOpenDiffSearch: openDiffSearch,
     onOpenSelectedFile: desktop?.onOpenSelectedFile,
-    onToggleSidebar: () => setSidebarCollapsed((current) => !current),
+    onToggleSidebar: toggleSidebar,
     onToggleWordWrap: toggleWordWrap,
     shouldDeferHunkNavigation: () => sidebarMode === 'walkthrough',
-    sidebarCollapsed,
+    sidebarCollapsed: sidebarCollapsed ?? false,
   });
   const commandBarCommands = useMemo(
     () =>
@@ -1208,7 +1395,7 @@ export function ReviewSurface({
             ]
           : []),
         {
-          execute: () => setSidebarCollapsed((current) => !current),
+          execute: toggleSidebar,
           id: 'toggle-sidebar',
           keymapAction: 'toggleSidebar',
           title: 'Toggle Sidebar',
@@ -1228,6 +1415,7 @@ export function ReviewSurface({
       history,
       openDiffSearch,
       showCommentsTab,
+      toggleSidebar,
       toggleWordWrap,
     ],
   );
@@ -1286,9 +1474,10 @@ export function ReviewSurface({
     onCommentDraftChange: updateActiveReviewCommentDraft,
     onCreateComment: createComment,
     onDeleteComment: deleteComment,
+    onFindDefinitions: desktop?.onFindDefinitions,
     onLoadImageContent: content?.onLoadImageContent,
     onLoadSection: content?.onLoadSection,
-    resolveSectionContents: content?.resolveSectionContents,
+    onOpenDefinition: desktop?.onOpenDefinition,
     onOpenFile: desktop?.onOpenFile,
     onRefreshMarkdown: content?.onRefreshMarkdown,
     onResolveThread: resolveDiscussion ?? noop,
@@ -1301,6 +1490,7 @@ export function ReviewSurface({
     onUpdateSourceDescription: sourceNavigation?.onUpdateDescription,
     onUpdateSourceTitle: sourceNavigation?.onUpdateTitle,
     onUploadSourceDescriptionAsset: sourceNavigation?.onUploadDescriptionAsset,
+    resolveSectionContents: content?.resolveSectionContents,
     searchQuery: diffSearchQuery,
     showWhitespace: snapshot.preferences.showWhitespace,
     source: snapshot.repository.source,
@@ -1310,6 +1500,11 @@ export function ReviewSurface({
     wordWrap,
   };
   const source = snapshot.repository.source;
+  const showDesktopCommitButton =
+    sidebarMode === 'tree' &&
+    source.type === 'working-tree' &&
+    snapshot.files.length > 0 &&
+    desktop?.commit != null;
   const emptySourceDetail = getEmptySourceDetail(source, snapshot.repository.root);
   const hasDiffSearchQuery = diffSearchQuery.trim().length > 0;
   const sourceMergeState = source.type === 'pull-request' ? source.mergeState : undefined;
@@ -1321,14 +1516,24 @@ export function ReviewSurface({
       <PullRequestMergeStatusBadge mergeState={sourceMergeState} />
     ) : null;
   const sourceDescriptionActions =
-    (reviewSession || sourceNavigation?.onClosePullRequest) && source.type === 'pull-request' ? (
+    (reviewSession ||
+      sourceNavigation?.onClosePullRequest ||
+      sourceNavigation?.onMarkPullRequestReady) &&
+    source.type === 'pull-request' ? (
       <PullRequestReviewButtons
-        disabled={pullRequestReviewSubmitting != null || pullRequestCloseSubmitting}
+        disabled={
+          pullRequestReviewSubmitting != null ||
+          pullRequestCloseSubmitting ||
+          pullRequestReadySubmitting
+        }
         hasPendingComments={
           getPendingPullRequestReviewComments(localReviewComments, activeReviewCommentDraftState)
             .length > 0
         }
         onClosePullRequest={sourceNavigation?.onClosePullRequest ? closePullRequest : undefined}
+        onMarkPullRequestReady={
+          sourceNavigation?.onMarkPullRequestReady ? markPullRequestReady : undefined
+        }
         onSubmitReview={reviewSession ? submitReview : undefined}
         reviewStatus={source.reviewStatus}
         showCommentReview={source.provider === 'github' || source.host === 'github.com'}
@@ -1436,6 +1641,7 @@ export function ReviewSurface({
   const reviewModes = [
     {
       icon: <Path aria-hidden size={14} weight="bold" />,
+      indicator: walkthrough?.unread ? <span aria-hidden className="review-mode-dot" /> : undefined,
       label: 'Walkthrough',
       value: 'walkthrough',
     },
@@ -1505,12 +1711,20 @@ export function ReviewSurface({
       <div
         className={`app-shell share-shell review-surface${desktop ? ' merge-request-shell' : ''}${
           desktop?.isWindowFullscreen ? ' window-fullscreen' : ''
-        }${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
+        }${
+          sidebarCollapsed === null ? ' sidebar-auto' : sidebarCollapsed ? ' sidebar-collapsed' : ''
+        }`}
+        data-sidebar-position={sidebarPosition}
         data-theme={shellTheme}
         style={
-          sidebarCollapsed
+          sidebarCollapsed !== false
             ? undefined
-            : { gridTemplateColumns: `${sidebarWidth}px 0 minmax(0, 1fr)` }
+            : {
+                gridTemplateColumns:
+                  sidebarPosition === 'right'
+                    ? `minmax(0, 1fr) 0 ${sidebarWidth}px`
+                    : `${sidebarWidth}px 0 minmax(0, 1fr)`,
+              }
         }
       >
         <ReviewTopBar
@@ -1544,7 +1758,7 @@ export function ReviewSurface({
           mode={sidebarMode}
           modes={reviewModes}
           onModeChange={changeSidebarMode}
-          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onToggleSidebar={toggleSidebar}
           repository={
             repositoryLinkUrl ? (
               <a
@@ -1560,14 +1774,16 @@ export function ReviewSurface({
             )
           }
           repositoryTooltip={snapshot.repository.root}
-          sidebarCollapsed={sidebarCollapsed}
+          sidebarCollapsed={sidebarCollapsed ?? false}
+          sidebarPosition={sidebarPosition}
+          sourceMenu={desktop?.sourceMenu}
           toggleTitle={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (${getShortcutLabel(
             keymap,
             'toggleSidebar',
           )})`}
         />
         {desktop?.beforeContent}
-        {reviewDrafts ? (
+        {reviewDrafts && !desktop?.isSwitchingSource ? (
           <div className="review-action-bar">
             <CopyCommentsButton
               actionLabel={copyPendingCommentsLabel}
@@ -1614,13 +1830,13 @@ export function ReviewSurface({
               onLoadMore={history.onLoadMore}
               onSelectSource={history.onSelectSource}
               pullRequestSource={history.pullRequestSource ?? null}
-              searchQuery=""
             />
           ) : sidebarMode === 'tree' ? (
             <ReviewFileTree
               files={visibleFiles}
               onActivatePath={activateTreePath}
               reloadDeltaPaths={desktop?.reloadDeltaPaths}
+              scrollSelectedPathIntoView={content?.initialScrollTarget != null}
               selectedPath={visibleSelectedPath}
               showWhitespace={snapshot.preferences.showWhitespace}
               viewed={viewed}
@@ -1661,19 +1877,41 @@ export function ReviewSurface({
               </div>
             </div>
           )}
-          {showTotalLineCount ? (
+          {showTotalLineCount || showDesktopCommitButton ? (
             <div className="sidebar-settings-bar">
-              <DiffLineCountBadge
-                ariaLabelPrefix="Total change"
-                className="sidebar-total-line-count sidebar-settings-line-count"
-                lineCount={totalLineCount}
-              />
+              {showTotalLineCount ? (
+                <DiffLineCountBadge
+                  ariaLabelPrefix="Total change"
+                  className="sidebar-total-line-count sidebar-settings-line-count"
+                  lineCount={totalLineCount}
+                />
+              ) : null}
+              {showDesktopCommitButton && desktop.commit ? (
+                <Button
+                  aria-label={desktop.commit.open ? 'Show file tree' : 'Open commit view'}
+                  className="sidebar-commit-button"
+                  onClick={desktop.commit.onToggle}
+                  type="button"
+                >
+                  {desktop.commit.open ? 'Tree' : 'Commit'}
+                </Button>
+              ) : null}
             </div>
           ) : null}
+          {desktop?.sidebarFooter}
         </aside>
         <div aria-hidden className="sidebar-resizer" onPointerDown={resizeSidebar} />
         <main className="review codiff-web-review">
-          {sidebarMode === 'comments' ? (
+          {desktop?.commit?.open ? (
+            <CommitView
+              branch={desktop.commit.branch}
+              draft={desktop.commit.draft}
+              model={desktop.commit.model}
+              onCommit={desktop.commit.onCommit}
+              onCommitOutput={desktop.commit.onCommitOutput}
+              onUpdateMessage={desktop.commit.onUpdateMessage}
+            />
+          ) : sidebarMode === 'comments' ? (
             <MergeRequestCommentsView
               canComment={comments?.general?.onCreate != null}
               commenting={commenting}

@@ -1953,7 +1953,7 @@ function ReviewCommentThreadGroup({
     onReplyToThread(threadId, lastComment);
   }, [lastComment, onReplyToThread, threadId]);
 
-  const handleResolve = useCallback(() => {
+  const handleResolve = () => {
     if (!threadId || resolving) {
       return;
     }
@@ -1970,7 +1970,7 @@ function ReviewCommentThreadGroup({
           threadId,
         });
       });
-  }, [effectiveThreadResolved, onResolveThread, resolving, threadId, threadResolved]);
+  };
 
   const threadContent = (
     <>
@@ -2525,7 +2525,6 @@ export function ReviewCodeView({
   onFindDefinitions,
   onLoadImageContent,
   onLoadSection,
-  onLoadSectionContents,
   onOpenDefinition,
   onOpenFile,
   onRefreshMarkdown,
@@ -2539,6 +2538,7 @@ export function ReviewCodeView({
   onUpdateSourceDescription,
   onUpdateSourceTitle,
   onUploadSourceDescriptionAsset,
+  resolveSectionContents,
   reviewIdentityByPath,
   scrollTarget,
   searchQuery,
@@ -2587,7 +2587,6 @@ export function ReviewCodeView({
   onFindDefinitions?: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
   onLoadSection?: (file: ChangedFile, section: DiffSection) => void;
-  onLoadSectionContents?: (file: ChangedFile, section: DiffSection) => Promise<FileDiffLoadedFiles>;
   onOpenDefinition?: (candidate: DefinitionCandidate) => void;
   onOpenFile?: (file: ChangedFile) => void;
   onRefreshMarkdown?: (file: ChangedFile, section: DiffSection) => Promise<boolean>;
@@ -2601,6 +2600,10 @@ export function ReviewCodeView({
   onUpdateSourceDescription?: (body: string) => Promise<void> | void;
   onUpdateSourceTitle?: (title: string) => Promise<void> | void;
   onUploadSourceDescriptionAsset?: (file: File) => Promise<string> | string;
+  resolveSectionContents?: (
+    file: ChangedFile,
+    section: DiffSection,
+  ) => Promise<FileDiffLoadedFiles>;
   reviewIdentityByPath?: ReadonlyMap<string, ReviewIdentity>;
   scrollTarget: ReviewScrollTarget | null;
   searchQuery: string;
@@ -2856,7 +2859,7 @@ export function ReviewCodeView({
         nextSearchTargetsByBaseItemId.set(baseItemId, searchTargets);
         const markdownPreview = getMarkdownPreviewContents(file, section, fileDiff);
         const canRenderImage =
-          !isReadOnly && onLoadImageContent != null && canRenderImagePreview(file.path, section);
+          onLoadImageContent != null && canRenderImagePreview(file.path, section);
         const canRenderMarkdown = markdownPreview != null;
         const canEditMarkdown =
           canRenderMarkdown &&
@@ -3348,7 +3351,7 @@ export function ReviewCodeView({
   // context on a patch-only diff; the partial FileDiffMetadata is hydrated in
   // place (see `parseSectionDiffWithOptions` for the identity contract).
   const loadDiffFiles = useMemo(() => {
-    if (!onLoadSectionContents || isReadOnly) {
+    if (!resolveSectionContents) {
       return undefined;
     }
 
@@ -3360,9 +3363,9 @@ export function ReviewCodeView({
         );
       }
 
-      return loadSectionContents(target.file, target.section, onLoadSectionContents);
+      return loadSectionContents(target.file, target.section, resolveSectionContents);
     };
-  }, [isReadOnly, onLoadSectionContents]);
+  }, [resolveSectionContents]);
 
   const codeViewOptions: CodeViewOptions<ReviewAnnotationMetadata> = useMemo(
     () =>

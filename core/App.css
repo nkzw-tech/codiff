@@ -1093,6 +1093,12 @@ a.review-top-bar-source:focus-visible {
   text-decoration: none;
 }
 
+.repository-refresh-banner.stale {
+  background: color-mix(in srgb, #d9822b 12%, var(--code-bg));
+  border-color: color-mix(in srgb, #d9822b 32%, transparent);
+  color: color-mix(in srgb, #d9822b 38%, var(--text));
+}
+
 .repository-change-dismiss {
   align-items: center;
   border-radius: 10px;

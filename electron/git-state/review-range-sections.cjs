@@ -90,6 +90,10 @@ const rangeArtifactToPullRequestFiles = (artifact, number, options = {}) => {
     const patchUnavailable = !patch && !canHydrateArtifactFile(file);
     const deferContents =
       options.deferContents === true && !patch && canHydrateArtifactFile(file) && !binary;
+    const contentFingerprint =
+      file.oldObjectId || file.newObjectId
+        ? getFingerprint(`${file.oldObjectId || ''}\0${file.newObjectId || ''}`)
+        : undefined;
     return {
       fingerprint: getFingerprint(
         `${artifact.baseSha}:${artifact.headSha}:${index}:${file.path}:${file.status}:${patch}`,
@@ -130,7 +134,10 @@ const rangeArtifactToPullRequestFiles = (artifact, number, options = {}) => {
                   : deferContents
                     ? 'Showing the provider patch while exact file contents load on demand.'
                     : 'Showing the provider patch for this file.',
-            { canLoad: !binary && canHydrateArtifactFile(file) },
+            {
+              canLoad: !binary && canHydrateArtifactFile(file),
+              ...(contentFingerprint ? { fingerprint: contentFingerprint } : {}),
+            },
           ),
         },
       ],

@@ -20,6 +20,7 @@ const { rangeArtifactToPullRequestFiles } = require('../git-state/review-range-s
   rangeArtifactToPullRequestFiles: (
     artifact: import('../../core/index.ts').RangeArtifact,
     number: number,
+    options?: { deferContents?: boolean },
   ) => ReadonlyArray<import('../../core/types.ts').ChangedFile>;
 };
 
@@ -124,6 +125,42 @@ test('keeps a complete empty Range Artifact empty', () => {
   );
 
   expect(files).toEqual([]);
+});
+
+test('carries immutable blob identity when a provider omits patch material', () => {
+  const artifact = {
+    baseSha: 'a'.repeat(40) as import('../../core/types.ts').GitSha,
+    coverage: 'complete' as const,
+    files: [
+      {
+        coverage: 'opaque' as const,
+        newObjectId: '2'.repeat(40),
+        oldObjectId: '1'.repeat(40),
+        path: 'src/deferred.ts',
+        status: 'modified' as const,
+      },
+    ],
+    headSha: 'b'.repeat(40) as import('../../core/types.ts').GitSha,
+    provenance: {
+      kind: 'github-api' as const,
+      project: {
+        host: 'github.com',
+        project: 'example/repo',
+        provider: 'github' as const,
+      },
+    },
+  };
+  const first = rangeArtifactToPullRequestFiles(artifact, 7, { deferContents: true });
+  const rebased = rangeArtifactToPullRequestFiles(
+    { ...artifact, baseSha: 'c'.repeat(40) as import('../../core/types.ts').GitSha },
+    7,
+    { deferContents: true },
+  );
+
+  expect(first[0].sections[0].summary?.fingerprint).toBeTruthy();
+  expect(rebased[0].sections[0].summary?.fingerprint).toBe(
+    first[0].sections[0].summary?.fingerprint,
+  );
 });
 
 test('renders a visible unavailable item for a wholly truncated Range Artifact', () => {

@@ -651,9 +651,7 @@ export function MergeRequestCommentsView({
               canDelete={commenting?.onDeleteGeneralComment != null}
               canEdit={commenting?.onUpdateGeneralComment != null}
               canReply={commenting?.onReplyGeneralComment != null}
-              canResolve={
-                onResolveDiscussion != null || commenting?.onResolveDiscussion != null
-              }
+              canResolve={onResolveDiscussion != null || commenting?.onResolveDiscussion != null}
               editDraft={editDraft}
               editError={editError}
               editingCommentId={editingCommentId}
@@ -670,12 +668,12 @@ export function MergeRequestCommentsView({
                 });
               }}
               onReply={(threadId, body) =>
-                commenting?.onReplyGeneralComment(threadId, body) ??
+                commenting?.onReplyGeneralComment?.(threadId, body) ??
                 Promise.reject(new Error('Replying is unavailable.'))
               }
               onResolve={(threadId, resolved) =>
                 onResolveDiscussion?.(threadId, resolved) ??
-                commenting?.onResolveDiscussion(threadId, resolved) ??
+                commenting?.onResolveDiscussion?.(threadId, resolved) ??
                 Promise.reject(new Error('Resolving is unavailable.'))
               }
               onSaveEdit={onSaveEdit}

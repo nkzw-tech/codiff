@@ -6,6 +6,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
+import { createDefaultConfig } from '../config/defaults.ts';
 import { ReviewSurface, type ReviewCommenting } from '../ReviewSurface.tsx';
 import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
@@ -73,7 +74,11 @@ test('review top bar renders its leading control at the far left', async () => {
   await act(async () => {
     root.render(
       <ReviewTopBar
-        leading={<button className="codiff-logo">Codiff</button>}
+        leading={
+          <button className="codiff-logo" type="button">
+            Codiff
+          </button>
+        }
         mode="tree"
         modes={[{ icon: null, label: 'Tree', value: 'tree' }]}
         onModeChange={() => {}}
@@ -114,43 +119,113 @@ test('share viewer shows the complete repository path when there is no repositor
       wordWrap: false,
     },
     repository: { root: '/Users/ada/dev/codiff-web', source },
+    reviewComments: [],
     version: 1,
     walkthrough: {
       agent: 'codex',
       chapters: [],
-      focus: 'Focus on the implementation.',
+      focus: 'Review the change.',
       generatedAt: '2026-06-19T00:00:00.000Z',
       kind: 'narrative',
       repo: { branch: 'main', root: '/Users/ada/dev/codiff-web' },
       source,
       support: [],
-      title: 'Shared walkthrough',
+      title: 'Review',
       version: 4,
     },
   } satisfies SharedWalkthroughSnapshot;
-
+  const originalHome = process.env.HOME;
+  process.env.HOME = '/Users/ada';
   const container = document.createElement('div');
   document.body.append(container);
-  let root: Root | null = null;
-  await using _resource = {
-    async [Symbol.asyncDispose]() {
-      if (root) {
-        await act(async () => root?.unmount());
-      }
-      container.remove();
-    },
-  };
-  await act(async () => {
-    root = createRoot(container);
-    root.render(<ReviewSurface snapshot={snapshot} title="Review shared walkthrough" />);
-  });
+  let root!: Root;
 
-  await waitFor(() => {
-    expect(container.querySelector('.review-top-bar-repository')).not.toBeNull();
-  });
-  expect(container.querySelector('.review-top-bar-repository')?.textContent).toBe(
-    '~/dev/codiff-web',
-  );
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<ReviewSurface snapshot={snapshot} title="Review shared walkthrough" />);
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.review-top-bar-repository')).not.toBeNull();
+    });
+    expect(container.querySelector('.review-top-bar-repository')?.textContent).toBe(
+      '~/dev/codiff-web',
+    );
+  } finally {
+    if (originalHome == null) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('shared review surface owns configured search and portable commands', async () => {
+  const file = createChangedFile('src/shared-command.ts');
+  const snapshot = {
+    branch: 'main',
+    codiffVersion: 'test',
+    exportedAt: '2026-07-29T00:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source: { type: 'working-tree' } },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the change.',
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'main', root: '/repo' },
+      source: { type: 'working-tree' },
+      support: [],
+      title: 'Review',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const keymap = {
+    ...createDefaultConfig().keymap,
+    commandBar: 'Ctrl+p',
+    diffSearch: 'Ctrl+g',
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(<ReviewSurface initialMode="tree" keymap={keymap} snapshot={snapshot} />);
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'g' }),
+      );
+    });
+    expect(container.querySelector('.diff-search-panel.visible')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'p' }),
+      );
+    });
+    const commandBar = container.querySelector('.command-bar');
+    expect(commandBar?.textContent).toContain('Find in Diffs');
+    expect(commandBar?.textContent).not.toContain('Open File in Editor');
+    expect(commandBar?.textContent).not.toContain('Open Config File');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });
 
 test('shared walkthroughs switch between walkthrough and tree review modes', async () => {
@@ -278,6 +353,12 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
   await waitFor(() => {
     expect(container.querySelector('.walkthrough-list')).not.toBeNull();
   });
+  const walkthroughArc = container.querySelector('.wt-arc');
+  const walkthroughBody = container.querySelector('.wt-hybrid');
+  expect(walkthroughArc).not.toBeNull();
+  expect(walkthroughBody).not.toBeNull();
+  expect(walkthroughBody?.contains(walkthroughArc)).toBe(false);
+  expect(walkthroughArc?.parentElement).toBe(walkthroughBody?.parentElement);
   expect(container.querySelector('.sidebar-search')).toBeNull();
   const deleteShare = container.querySelector<HTMLButtonElement>(
     'button[aria-label="Delete shared walkthrough"]',

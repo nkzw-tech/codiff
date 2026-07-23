@@ -106,12 +106,12 @@ test('one GitHub source populates stack, range, commit, and blob caches', async 
   const run = createReviewArtifactRun(createGitHubArtifactSource({ project, pull, transport }));
 
   const firstRange = await run.readStackAndRange(
-    { headSha: headSha, requestedBaseSha: baseSha },
+    { headSha, requestedBaseSha: baseSha },
     run.signal,
   );
-  expect(
-    await run.readStackAndRange({ headSha: headSha, requestedBaseSha: baseSha }, run.signal),
-  ).toBe(firstRange);
+  expect(await run.readStackAndRange({ headSha, requestedBaseSha: baseSha }, run.signal)).toBe(
+    firstRange,
+  );
   const artifacts = await run.readCommitArtifacts(
     [{ commitSha: headSha, parentSha: baseSha }],
     run.signal,
@@ -228,7 +228,7 @@ test('caps current GitHub commit stacks at forty', async () => {
   ]);
 
   const result = await createGitHubArtifactSource({ project, pull, transport }).readStackAndRange(
-    { headSha: headSha, requestedBaseSha: baseSha },
+    { headSha, requestedBaseSha: baseSha },
     new AbortController().signal,
   );
 
@@ -266,7 +266,7 @@ test('retains commits 81 through 120 from a paginated GitHub comparison', async 
   ]);
 
   const result = await createGitHubArtifactSource({ project, pull, transport }).readStackAndRange(
-    { headSha: headSha, requestedBaseSha: baseSha },
+    { headSha, requestedBaseSha: baseSha },
     new AbortController().signal,
   );
 

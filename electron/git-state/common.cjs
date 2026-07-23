@@ -1,5 +1,6 @@
 // @ts-check
 
+const { AsyncLocalStorage } = require('node:async_hooks');
 const { execFile, spawn } = require('node:child_process');
 const { promises: fs } = require('node:fs');
 const { createHash } = require('node:crypto');
@@ -7,6 +8,12 @@ const { isAbsolute, join, normalize, sep } = require('node:path');
 const { promisify } = require('node:util');
 
 const execFileAsync = promisify(execFile);
+const commandSignalStorage = new AsyncLocalStorage();
+
+const getCurrentCommandSignal = () => commandSignalStorage.getStore();
+
+/** @template Value @param {AbortSignal} signal @param {() => Value} callback */
+const runWithCommandSignal = (signal, callback) => commandSignalStorage.run(signal, callback);
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
@@ -52,22 +59,24 @@ const getGravatarHash = (email) =>
 /**
  * @param {string} repoPath
  * @param {ReadonlyArray<string>} args
- * @param {{encoding?: BufferEncoding}} [options]
+ * @param {{encoding?: BufferEncoding, signal?: AbortSignal}} [options]
  * @returns {Promise<string>}
  */
 const git = async (repoPath, args, options = {}) => {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
     encoding: options.encoding || 'utf8',
     maxBuffer: 1024 * 1024 * 64,
+    signal: options.signal ?? getCurrentCommandSignal(),
   });
   return stdout;
 };
 
-/** @param {string} repoPath @param {ReadonlyArray<string>} args @returns {Promise<Buffer>} */
-const gitBuffer = async (repoPath, args) => {
+/** @param {string} repoPath @param {ReadonlyArray<string>} args @param {{signal?: AbortSignal}} [options] @returns {Promise<Buffer>} */
+const gitBuffer = async (repoPath, args, options = {}) => {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
     encoding: 'buffer',
     maxBuffer: 1024 * 1024 * 64,
+    signal: options.signal ?? getCurrentCommandSignal(),
   });
   return stdout;
 };
@@ -76,13 +85,14 @@ const gitBuffer = async (repoPath, args) => {
  * @param {string} repoPath
  * @param {ReadonlyArray<string>} args
  * @param {string | Buffer} input
- * @param {{env?: NodeJS.ProcessEnv}} [options]
+ * @param {{env?: NodeJS.ProcessEnv, signal?: AbortSignal}} [options]
  * @returns {Promise<Buffer>}
  */
 const gitBufferWithInput = (repoPath, args, input, options = {}) =>
   new Promise((resolve, reject) => {
     const child = spawn('git', ['-C', repoPath, ...args], {
       env: options.env,
+      signal: options.signal ?? getCurrentCommandSignal(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     /** @type {Array<Buffer>} */
@@ -850,7 +860,13 @@ const normalizeStatus = (statusCode) =>
 const gitOrEmpty = async (repoRoot, args) => {
   try {
     return await git(repoRoot, args);
-  } catch {
+  } catch (error) {
+    if (
+      getCurrentCommandSignal()?.aborted ||
+      (error instanceof Error && error.name === 'AbortError')
+    ) {
+      throw error;
+    }
     return '';
   }
 };
@@ -868,6 +884,7 @@ module.exports = {
   formatBytes,
   generatedDirectoryPathspecExcludes,
   generatedDirectoryPathspecs,
+  getCurrentCommandSignal,
   getFingerprint,
   getGravatarHash,
   getImageMimeType,
@@ -882,6 +899,7 @@ module.exports = {
   readGitImageFile,
   readIndexImageFile,
   readWorkingTreeImageFile,
+  runWithCommandSignal,
   summarizeContent,
   validateRepositoryPath,
 };

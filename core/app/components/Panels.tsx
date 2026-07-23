@@ -85,6 +85,63 @@ export function RepositoryChangeBanner({
   );
 }
 
+export type RepositoryRefreshStatus =
+  | { phase: 'complete'; updated: boolean }
+  | { phase: 'failed'; reason: string }
+  | { phase: 'refreshing' };
+
+export function RepositoryRefreshBanner({
+  onRestartWalkthrough,
+  onRetry,
+  status,
+  walkthroughStale,
+}: {
+  onRestartWalkthrough: () => void;
+  onRetry: () => void;
+  status: RepositoryRefreshStatus | null;
+  walkthroughStale: boolean;
+}) {
+  const visible = walkthroughStale || status != null;
+  const failed = status?.phase === 'failed';
+
+  return (
+    <div
+      aria-live="polite"
+      className={`repository-change-banner repository-refresh-banner${
+        walkthroughStale ? ' stale' : ''
+      }${visible ? ' visible' : ''}`}
+      role="status"
+    >
+      <span className="repository-change-banner-content">
+        {walkthroughStale ? (
+          <>
+            <strong>Walkthrough out of date.</strong>
+            <span>The reviewed code changed.</span>
+          </>
+        ) : status?.phase === 'refreshing' ? (
+          <span>Refreshing review…</span>
+        ) : status?.phase === 'complete' ? (
+          <span>{status.updated ? 'Review updated.' : 'Review is up to date.'}</span>
+        ) : failed ? (
+          <>
+            <strong>Refresh failed.</strong>
+            <span>{status.reason}</span>
+          </>
+        ) : null}
+      </span>
+      {walkthroughStale ? (
+        <button className="repository-change-reload" onClick={onRestartWalkthrough} type="button">
+          Restart generation
+        </button>
+      ) : failed ? (
+        <button className="repository-change-reload" onClick={onRetry} type="button">
+          Retry
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export type { CodiffUpdateStatus as UpdateStatus } from '../../types.ts';
 
 export function UpdatePill({
@@ -382,11 +439,13 @@ export function DiffSearchPanel({
 }
 
 export function CopyCommentsButton({
+  actionLabel,
   comments,
   files,
   reviewCommentsPrefix,
   showWhitespace,
 }: {
+  actionLabel?: string;
   comments: ReadonlyArray<ReviewComment>;
   files: ReadonlyArray<ChangedFile>;
   reviewCommentsPrefix: string;
@@ -415,16 +474,19 @@ export function CopyCommentsButton({
   return (
     <button
       aria-label={
-        pendingCommentCount === 0
+        actionLabel ??
+        (pendingCommentCount === 0
           ? 'Copy review comments as markdown, no comments yet'
           : `Copy ${pendingCommentCount} review ${
               pendingCommentCount === 1 ? 'comment' : 'comments'
-            }`
+            }`)
       }
       className={`copy-comments-button${copied ? ' copied' : ''}`}
       disabled={pendingCommentCount === 0}
       onClick={() => void copyComments()}
-      title="Copy review comments as markdown"
+      title={
+        actionLabel ? `${actionLabel} (${pendingCommentCount})` : 'Copy review comments as markdown'
+      }
       type="button"
     >
       {copied ? (
@@ -538,7 +600,7 @@ function PullRequestReviewAction({
   }
 
   const submitWithComment = useCallback(() => {
-    if (disabled || !trimmedBody) {
+    if (disabled || !onSubmitReview || !trimmedBody) {
       return;
     }
     void Promise.resolve(onSubmitReview(event, trimmedBody))
@@ -550,7 +612,7 @@ function PullRequestReviewAction({
   }, [disabled, event, onSubmitReview, trimmedBody]);
 
   const submitWithoutComment = useCallback(() => {
-    if (primaryDisabled) {
+    if (primaryDisabled || !onSubmitReview) {
       return;
     }
     setOpen(false);
@@ -669,7 +731,7 @@ export function PullRequestReviewButtons({
   hasPendingComments: boolean;
   onClosePullRequest?: () => void;
   onMarkPullRequestReady?: () => void;
-  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
+  onSubmitReview?: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   reviewStatus?: PullRequestReviewStatus;
   showCommentReview?: boolean;
 }) {

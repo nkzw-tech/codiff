@@ -5,24 +5,32 @@ export const renderReact = async (element: ReactNode) => {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
+  let cleanedUp = false;
 
   await act(async () => {
     root.render(element);
   });
 
+  const cleanup = async () => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  };
+
   return {
+    cleanup,
     container,
     rerender: async (nextElement: ReactNode) => {
       await act(async () => {
         root.render(nextElement);
       });
     },
-    async [Symbol.asyncDispose]() {
-      await act(async () => {
-        root.unmount();
-      });
-      container.remove();
-    },
+    [Symbol.asyncDispose]: cleanup,
   };
 };
 
