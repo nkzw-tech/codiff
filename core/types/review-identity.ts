@@ -139,6 +139,7 @@ export type DiffSectionContentRequest = {
   source?: ResolvedReviewSource;
 };
 export type DiffSectionsContentRequest = {
+  requestId?: string;
   source: Extract<ResolvedReviewSource, { type: 'pull-request' }>;
 };
 

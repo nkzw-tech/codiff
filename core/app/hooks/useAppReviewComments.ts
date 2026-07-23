@@ -5,15 +5,18 @@ import type { RepositoryState, ReviewAssistantRequest } from '../../types.ts';
 import { useReviewCommentDrafts } from './useReviewCommentDrafts.ts';
 
 type UseAppReviewCommentsOptions = {
+  initialReviewComments?: ReadonlyArray<ReviewComment>;
   onCommentFileChange: (filePath: string) => void;
   stateRef: RefObject<RepositoryState | null>;
 };
 
 export function useAppReviewComments({
+  initialReviewComments = [],
   onCommentFileChange,
   stateRef,
 }: UseAppReviewCommentsOptions) {
-  const [reviewComments, setReviewComments] = useState<ReadonlyArray<ReviewComment>>([]);
+  const [reviewComments, setReviewComments] =
+    useState<ReadonlyArray<ReviewComment>>(initialReviewComments);
   const commentDrafts = useReviewCommentDrafts({
     comments: reviewComments,
     onCommentFileChange,

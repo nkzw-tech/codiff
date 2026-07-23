@@ -4,6 +4,7 @@ import type { CodiffConfig } from '../config/types.ts';
 import { HISTORY_PAGE_SIZE } from '../lib/app-constants.ts';
 import {
   type RepositoryLoadError,
+  type ReviewComment,
   type ReviewIdentity,
   type SourceSession,
 } from '../lib/app-types.ts';
@@ -25,6 +26,7 @@ import {
   getRepositoryLoadError,
   getSourceKey,
   getSourceLabel,
+  getSourceRevisionKey,
   supportsLazyDiffContent,
   usesViewedFileState,
 } from '../lib/source.ts';
@@ -60,6 +62,7 @@ import { OpenReviewSourceMenu } from './components/OpenReviewSourceMenu.tsx';
 import {
   RepositoryChangeBanner,
   RepositoryLoadErrorPanel,
+  ReviewCommentsLoadBanner,
   ReviewSourceLoading,
   UpdatePill,
   WalkthroughOutdatedBanner,
@@ -82,10 +85,6 @@ const portableSurfaceCommandIds = new Set([
   'toggle-word-wrap',
 ]);
 const defaultReviewCommentsPrefix = '# Address these Review Comments';
-const getReviewCommentsSourceKey = (state: RepositoryState) => {
-  const headSha = state.source.type === 'pull-request' ? (state.source.headSha ?? '') : '';
-  return `${state.root}:${getSourceKey(state.source)}:${headSha}`;
-};
 
 type ReviewAuthoringMode = 'local-notes' | 'provider-comments' | 'read-only';
 
@@ -161,6 +160,49 @@ const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
         },
       };
 
+const getBulkHydrationSourceKey = (state: RepositoryState) =>
+  `${state.root}:${getSourceRevisionKey(state.source)}`;
+
+const hasDeferredProviderContent = (state: RepositoryState) =>
+  state.source.type === 'pull-request' &&
+  state.files.some((file) =>
+    file.sections.some(
+      (section) => section.kind === 'pull-request' && section.loadState === 'deferred',
+    ),
+  );
+
+const mergeBulkHydratedSections = (
+  state: RepositoryState,
+  loaded: ReadonlyArray<{ path: string; section: DiffSection }>,
+): RepositoryState => {
+  const sections = new Map(loaded.map(({ path, section }) => [`${path}\0${section.id}`, section]));
+  return {
+    ...state,
+    files: state.files.map((file) => ({
+      ...file,
+      sections: file.sections.map(
+        (section) => sections.get(`${file.path}\0${section.id}`) ?? section,
+      ),
+    })),
+  };
+};
+
+const markBulkHydrationFailed = (state: RepositoryState, reason: string): RepositoryState => ({
+  ...state,
+  files: state.files.map((file) => ({
+    ...file,
+    sections: file.sections.map((section) =>
+      section.kind === 'pull-request' && section.loadState === 'deferred'
+        ? {
+            ...section,
+            loadState: 'error',
+            summary: { canLoad: true, reason },
+          }
+        : section,
+    ),
+  })),
+});
+
 const getPreferencesFromConfig = ({ settings }: CodiffConfig): CodiffPreferences => ({
   ...settings,
 });
@@ -173,12 +215,23 @@ const getCollapsedViewedPaths = (
     files.filter((file) => viewedFiles[file.path] === file.fingerprint).map((file) => file.path),
   );
 
+const mergeStateReviewComments = (
+  state: RepositoryState,
+  currentComments: ReadonlyArray<ReviewComment>,
+) =>
+  mergeReviewComments(
+    getReviewCommentsFromState(state),
+    currentComments.filter((comment) => !comment.isReadOnly),
+  );
+
 export type RepositoryReviewHostProps = {
   bootstrap: RepositoryReviewBootstrap;
   config: CodiffConfig;
   disableCodeViewWorkerPool?: boolean;
   gitIdentity: GitIdentity | null;
+  gitIdentityReady: boolean;
   initialHistory?: ReadonlyArray<HistoryEntry>;
+  initialHistoryLoading?: boolean;
   initialWalkthroughFileError?: WalkthroughFileError | null;
   initialWalkthroughLoading?: boolean;
   initialWalkthroughResult?: NarrativeWalkthroughResult;
@@ -191,7 +244,9 @@ export function RepositoryReviewHost({
   config,
   disableCodeViewWorkerPool = false,
   gitIdentity,
+  gitIdentityReady,
   initialHistory = [],
+  initialHistoryLoading = false,
   initialWalkthroughFileError,
   initialWalkthroughLoading = false,
   initialWalkthroughResult,
@@ -211,7 +266,8 @@ export function RepositoryReviewHost({
   const [historyEntries, setHistoryEntries] = useState<ReadonlyArray<HistoryEntry>>(initialHistory);
   const [historyHasMore, setHistoryHasMore] = useState(initialHistory.length >= HISTORY_PAGE_SIZE);
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(initialHistoryLoading);
+  const [initialHistoryComplete, setInitialHistoryComplete] = useState(!initialHistoryLoading);
   const [historySource, setHistorySource] = useState<ReviewSource | null>(() =>
     initialHistorySource === undefined
       ? (getHistorySource(initialState.source) ?? null)
@@ -234,17 +290,34 @@ export function RepositoryReviewHost({
     ...initialState,
     files: sortFiles(initialState.files),
   }));
+  const [bulkDiffHydrationStatus, setBulkDiffHydrationStatus] = useState(() => ({
+    sourceKey: getBulkHydrationSourceKey(initialState),
+    terminal: !hasDeferredProviderContent(initialState),
+  }));
   const [updateStatus, setUpdateStatus] = useState<CodiffUpdateStatus | null>(null);
   const historyRequestRef = useRef(0);
   const historySourceRef = useRef<ReviewSource | null>(null);
   const diffContentRequestCounterRef = useRef(0);
   const diffContentRequestIdsRef = useRef<Set<string>>(new Set());
   const loadingSectionKeysRef = useRef<Set<string>>(new Set());
-  const reviewCommentsInFlightRef = useRef<string | null>(null);
   const reviewCommentsRequestRef = useRef(0);
+  const reviewCommentsInFlightRef = useRef<{
+    generation: number;
+    request: number;
+    requestId: string;
+    sourceKey: string;
+  } | null>(null);
+  const bulkDiffHydrationInFlightRef = useRef<{
+    generation: number;
+    requestId: string;
+    sourceKey: string;
+  } | null>(null);
   const surfaceCommandBridgeRef = useRef<ReviewSurfaceCommandBridge | null>(null);
   const sourceSessionsRef = useRef<Map<string, SourceSession>>(new Map());
   const stateRef = useRef<RepositoryState | null>(state);
+  const firstUsableMilestoneReportedRef = useRef(false);
+  const deferredMilestoneReportedRef = useRef(false);
+  const walkthroughFileFallbackAppliedRef = useRef(false);
   const initialViewed = usesViewedFileState(initialState.source)
     ? readViewed(initialState.root)
     : {};
@@ -297,45 +370,76 @@ export function RepositoryReviewHost({
     [toggleReviewViewed],
   );
 
+  useEffect(() => {
+    if (!state || firstUsableMilestoneReportedRef.current) {
+      return;
+    }
+    firstUsableMilestoneReportedRef.current = true;
+    window.codiff.reportInitialLoadMilestone?.('first-usable-review-rendered');
+  }, [state]);
+
   const { askCodex, resetCommentFocus, reviewComments, reviewCommentsRef, setReviewComments } =
     useAppReviewComments({
+      initialReviewComments: getReviewCommentsFromState(initialState),
       onCommentFileChange: bumpItemVersion,
       stateRef,
     });
+
   const hydrateReviewComments = useCallback(
-    (requestedState: RepositoryState) => {
+    (requestedState: RepositoryState | null = stateRef.current) => {
       if (
-        requestedState.source.type !== 'pull-request' ||
-        requestedState.reviewCommentsLoadState !== 'not-loaded'
+        requestedState?.source.type !== 'pull-request' ||
+        requestedState.reviewCommentsLoadState === 'loaded'
       ) {
         return;
       }
-      const sourceKey = getReviewCommentsSourceKey(requestedState);
+
+      const sourceKey = `${requestedState.root}:${getSourceRevisionKey(requestedState.source)}`;
       const generation = stateGenerationRef.current;
-      const inFlightKey = `${generation}:${sourceKey}`;
-      if (reviewCommentsInFlightRef.current === inFlightKey) {
+      const inFlight = reviewCommentsInFlightRef.current;
+      if (inFlight?.sourceKey === sourceKey && inFlight.generation === generation) {
         return;
       }
-      reviewCommentsInFlightRef.current = inFlightKey;
+
+      if (inFlight) {
+        window.codiff.cancelDiffContentRequest(inFlight.requestId);
+        diffContentRequestIdsRef.current.delete(inFlight.requestId);
+      }
       const request = reviewCommentsRequestRef.current + 1;
+      const requestId = `review-comments:${request}`;
       reviewCommentsRequestRef.current = request;
-      const isCurrent = () => {
+      diffContentRequestIdsRef.current.add(requestId);
+      reviewCommentsInFlightRef.current = { generation, request, requestId, sourceKey };
+      const isCurrentState = () => {
         const current = stateRef.current;
         return (
           reviewCommentsRequestRef.current === request &&
           stateGenerationRef.current === generation &&
-          current?.source.type === 'pull-request' &&
-          getReviewCommentsSourceKey(current) === sourceKey
+          current != null &&
+          `${current.root}:${getSourceRevisionKey(current.source)}` === sourceKey
         );
       };
 
+      if (requestedState.reviewCommentsLoadState === 'failed') {
+        const retryingState = {
+          ...requestedState,
+          reviewCommentsError: undefined,
+          reviewCommentsLoadState: 'not-loaded' as const,
+        };
+        stateRef.current = retryingState;
+        setState(retryingState);
+      }
+
       void window.codiff
-        .getReviewComments(requestedState.source)
+        .getReviewComments(requestedState.source, requestId)
         .then((loadedComments) => {
-          if (!isCurrent()) {
+          if (!isCurrentState()) {
             return;
           }
-          const current = stateRef.current!;
+          const current = stateRef.current;
+          if (!current) {
+            return;
+          }
           const hydratedState = {
             ...current,
             reviewComments: loadedComments,
@@ -344,18 +448,16 @@ export function RepositoryReviewHost({
           };
           stateRef.current = hydratedState;
           setState(hydratedState);
-          setReviewComments((comments) =>
-            mergeReviewComments(
-              getReviewCommentsFromState(hydratedState),
-              comments.filter((comment) => !comment.isReadOnly),
-            ),
-          );
+          setReviewComments((comments) => mergeStateReviewComments(hydratedState, comments));
         })
         .catch((error: unknown) => {
-          if (!isCurrent()) {
+          if (!isCurrentState()) {
             return;
           }
-          const current = stateRef.current!;
+          const current = stateRef.current;
+          if (!current) {
+            return;
+          }
           const failedState = {
             ...current,
             reviewCommentsError: error instanceof Error ? error.message : String(error),
@@ -365,20 +467,14 @@ export function RepositoryReviewHost({
           setState(failedState);
         })
         .finally(() => {
-          if (reviewCommentsInFlightRef.current === inFlightKey) {
+          diffContentRequestIdsRef.current.delete(requestId);
+          if (reviewCommentsInFlightRef.current?.request === request) {
             reviewCommentsInFlightRef.current = null;
           }
         });
     },
     [setReviewComments],
   );
-
-  useEffect(() => {
-    if (state?.source.type === 'pull-request' && state.reviewCommentsLoadState === 'not-loaded') {
-      hydrateReviewComments(state);
-    }
-  }, [hydrateReviewComments, state]);
-
   const {
     activeReviewCommandTargetRef,
     cancelWalkthroughRequest,
@@ -424,6 +520,69 @@ export function RepositoryReviewHost({
     stateGenerationRef,
     stateRef,
   });
+
+  useEffect(() => {
+    if (
+      walkthroughFileFallbackAppliedRef.current ||
+      !initialWalkthroughFileError ||
+      initialWalkthroughResult?.status !== 'unavailable' ||
+      !state ||
+      getSourceRevisionKey(state.source) !== getSourceRevisionKey(bootstrap.source)
+    ) {
+      return;
+    }
+    walkthroughFileFallbackAppliedRef.current = true;
+    changeSidebarMode('history');
+  }, [
+    bootstrap.source,
+    changeSidebarMode,
+    initialWalkthroughFileError,
+    initialWalkthroughResult,
+    state,
+  ]);
+
+  useEffect(() => {
+    if (
+      !state ||
+      state.source.type !== 'pull-request' ||
+      state.reviewCommentsLoadState !== 'not-loaded'
+    ) {
+      return;
+    }
+    hydrateReviewComments(state);
+  }, [hydrateReviewComments, state]);
+
+  useEffect(() => {
+    const reviewCommentsComplete =
+      !state ||
+      state.source.type !== 'pull-request' ||
+      state.reviewCommentsLoadState !== 'not-loaded';
+    const bulkDiffHydrationComplete =
+      !state ||
+      state.source.type !== 'pull-request' ||
+      !hasDeferredProviderContent(state) ||
+      (bulkDiffHydrationStatus.sourceKey === getBulkHydrationSourceKey(state) &&
+        bulkDiffHydrationStatus.terminal);
+    if (
+      !firstUsableMilestoneReportedRef.current ||
+      !initialHistoryComplete ||
+      !gitIdentityReady ||
+      !reviewCommentsComplete ||
+      !bulkDiffHydrationComplete ||
+      walkthroughLoading ||
+      deferredMilestoneReportedRef.current
+    ) {
+      return;
+    }
+    deferredMilestoneReportedRef.current = true;
+    window.codiff.reportInitialLoadMilestone?.('deferred-review-data-complete');
+  }, [
+    bulkDiffHydrationStatus,
+    gitIdentityReady,
+    initialHistoryComplete,
+    state,
+    walkthroughLoading,
+  ]);
   const [commentsMode, setCommentsMode] = useState(false);
   const activeSurfaceMode: ReviewMode = commentsMode ? 'comments' : sidebarMode;
   const changeSurfaceMode = useCallback(
@@ -468,6 +627,80 @@ export function RepositoryReviewHost({
     [],
   );
 
+  useEffect(() => {
+    if (!state || state.source.type !== 'pull-request') {
+      return;
+    }
+    const source = state.source;
+    const sourceKey = getBulkHydrationSourceKey(state);
+    if (bulkDiffHydrationStatus.sourceKey === sourceKey && bulkDiffHydrationStatus.terminal) {
+      return;
+    }
+    if (!hasDeferredProviderContent(state)) {
+      return;
+    }
+    if (bulkDiffHydrationInFlightRef.current?.sourceKey === sourceKey) {
+      return;
+    }
+
+    const generation = stateGenerationRef.current;
+    const requestId = `bulk-sections:${diffContentRequestCounterRef.current + 1}`;
+    diffContentRequestCounterRef.current += 1;
+    diffContentRequestIdsRef.current.add(requestId);
+    bulkDiffHydrationInFlightRef.current = { generation, requestId, sourceKey };
+    setBulkDiffHydrationStatus({ sourceKey, terminal: false });
+
+    const isCurrentState = () => {
+      const current = stateRef.current;
+      return (
+        stateGenerationRef.current === generation &&
+        current != null &&
+        getBulkHydrationSourceKey(current) === sourceKey
+      );
+    };
+
+    void window.codiff
+      .getDiffSectionsContent({ requestId, source })
+      .then((result) => {
+        if (
+          !isCurrentState() ||
+          (result.headSha && source.headSha && result.headSha !== source.headSha)
+        ) {
+          return;
+        }
+        const current = stateRef.current;
+        if (!current) {
+          return;
+        }
+        const hydratedState = mergeBulkHydratedSections(current, result.sections);
+        stateRef.current = hydratedState;
+        setState(hydratedState);
+        setBulkDiffHydrationStatus({ sourceKey, terminal: true });
+      })
+      .catch((error: unknown) => {
+        if (!isCurrentState() || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        const current = stateRef.current;
+        if (!current) {
+          return;
+        }
+        const reason = `Automatic exact-content loading failed: ${
+          error instanceof Error ? error.message : String(error)
+        } Retry this file with Load.`;
+        const failedState = markBulkHydrationFailed(current, reason);
+        stateRef.current = failedState;
+        setState(failedState);
+        setBulkDiffHydrationStatus({ sourceKey, terminal: true });
+      })
+      .finally(() => {
+        diffContentRequestIdsRef.current.delete(requestId);
+        if (bulkDiffHydrationInFlightRef.current?.requestId === requestId) {
+          bulkDiffHydrationInFlightRef.current = null;
+        }
+      });
+  }, [bulkDiffHydrationStatus, state]);
+
   const loadDiffSection = useCallback(
     (file: ChangedFile, section: DiffSection, repositoryState = stateRef.current) => {
       const currentState = repositoryState;
@@ -479,7 +712,7 @@ export function RepositoryReviewHost({
         return;
       }
 
-      const sourceKey = getSourceKey(currentState.source);
+      const sourceKey = getSourceRevisionKey(currentState.source);
       const stateGeneration = stateGenerationRef.current;
       const reviewKey = getFileReviewIdentity(file).key;
       const key = `${currentState.root}:${sourceKey}:${section.id}`;
@@ -501,7 +734,7 @@ export function RepositoryReviewHost({
           if (
             stateGenerationRef.current !== stateGeneration ||
             stateRef.current?.root !== currentState.root ||
-            getSourceKey(stateRef.current.source) !== sourceKey
+            getSourceRevisionKey(stateRef.current.source) !== sourceKey
           ) {
             return;
           }
@@ -510,7 +743,7 @@ export function RepositoryReviewHost({
               stateGenerationRef.current !== stateGeneration ||
               !current ||
               current.root !== currentState.root ||
-              getSourceKey(current.source) !== sourceKey
+              getSourceRevisionKey(current.source) !== sourceKey
             ) {
               return current;
             }
@@ -535,7 +768,7 @@ export function RepositoryReviewHost({
           if (
             stateGenerationRef.current !== stateGeneration ||
             stateRef.current?.root !== currentState.root ||
-            getSourceKey(stateRef.current.source) !== sourceKey
+            getSourceRevisionKey(stateRef.current.source) !== sourceKey
           ) {
             return;
           }
@@ -544,7 +777,7 @@ export function RepositoryReviewHost({
               stateGenerationRef.current !== stateGeneration ||
               !current ||
               current.root !== currentState.root ||
-              getSourceKey(current.source) !== sourceKey
+              getSourceRevisionKey(current.source) !== sourceKey
             ) {
               return current;
             }
@@ -622,7 +855,7 @@ export function RepositoryReviewHost({
         }
         const sourceRequest = sourceRequestRef.current;
         const stateGeneration = stateGenerationRef.current;
-        const sourceKey = getSourceKey(currentState.source);
+        const sourceKey = getSourceRevisionKey(currentState.source);
 
         try {
           const nextState = await window.codiff.getRepositoryState(
@@ -636,7 +869,7 @@ export function RepositoryReviewHost({
             sourceRequestRef.current !== sourceRequest ||
             stateGenerationRef.current !== stateGeneration ||
             stateRef.current?.root !== currentState.root ||
-            getSourceKey(stateRef.current.source) !== sourceKey
+            getSourceRevisionKey(stateRef.current.source) !== sourceKey
           ) {
             return false;
           }
@@ -647,7 +880,7 @@ export function RepositoryReviewHost({
           stateRef.current = orderedState;
           setState(orderedState);
           setLocalChangesDetected(false);
-          setReviewComments(getReviewCommentsFromState(orderedState));
+          setReviewComments((comments) => mergeStateReviewComments(orderedState, comments));
           if (walkthroughNeedsRefresh) {
             refreshWalkthroughForState(orderedState);
           }
@@ -693,7 +926,7 @@ export function RepositoryReviewHost({
       return;
     }
 
-    sourceSessionsRef.current.set(getSourceKey(currentState.source), {
+    sourceSessionsRef.current.set(getSourceRevisionKey(currentState.source), {
       collapsed: new Set(collapsedRef.current),
       expandedGenerated: new Set(expandedGeneratedRef.current),
       narrativeWalkthrough: narrativeWalkthroughRef.current,
@@ -727,7 +960,12 @@ export function RepositoryReviewHost({
   }, [setShareWalkthroughEnabled, walkthroughSharingEnabled]);
 
   useEffect(() => {
-    if (!state || !supportsLazyDiffContent(state.source) || !selectedPath) {
+    if (
+      !state ||
+      state.source.type === 'pull-request' ||
+      !supportsLazyDiffContent(state.source) ||
+      !selectedPath
+    ) {
       return;
     }
 
@@ -796,7 +1034,7 @@ export function RepositoryReviewHost({
         setSelectedPath(nextSelectedPath);
         setReloadDeltaPaths(new Set());
         setItemVersionByKey({});
-        setReviewComments(getReviewCommentsFromState(orderedState));
+        setReviewComments((comments) => mergeStateReviewComments(orderedState, comments));
         setViewed(nextViewed);
         setCollapsed(getCollapsedViewedPaths(orderedState.files, nextViewed));
         setExpandedGenerated(new Set());
@@ -852,6 +1090,49 @@ export function RepositoryReviewHost({
   useEffect(() => {
     historySourceRef.current = historySource;
   }, [historySource]);
+
+  useEffect(() => {
+    if (!initialHistoryLoading) {
+      return;
+    }
+    const request = historyRequestRef.current + 1;
+    historyRequestRef.current = request;
+    const requestedSource = historySource;
+    const requestedSourceKey = requestedSource ? getSourceRevisionKey(requestedSource) : '';
+    const stateGeneration = stateGenerationRef.current;
+    queueMicrotask(() => {
+      if (historyRequestRef.current !== request) {
+        return;
+      }
+      setHistoryLoading(true);
+      void window.codiff
+        .getRepositoryHistory(HISTORY_PAGE_SIZE, requestedSource ?? undefined)
+        .then((nextHistory) => {
+          const currentSource = historySourceRef.current;
+          const currentSourceKey = currentSource ? getSourceRevisionKey(currentSource) : '';
+          if (
+            historyRequestRef.current !== request ||
+            stateGenerationRef.current !== stateGeneration ||
+            currentSourceKey !== requestedSourceKey
+          ) {
+            return;
+          }
+          setHistoryEntries(nextHistory.entries);
+          setHistoryHasMore(nextHistory.entries.length >= HISTORY_PAGE_SIZE);
+        })
+        .catch(() => {
+          if (historyRequestRef.current === request) {
+            setHistoryHasMore(false);
+          }
+        })
+        .finally(() => {
+          if (historyRequestRef.current === request) {
+            setHistoryLoading(false);
+            setInitialHistoryComplete(true);
+          }
+        });
+    });
+  }, [historySource, initialHistoryLoading]);
 
   useEffect(() => {
     collapsedRef.current = collapsed;
@@ -956,11 +1237,19 @@ export function RepositoryReviewHost({
     const nextLimit = historyLimit + HISTORY_PAGE_SIZE;
     const request = historyRequestRef.current + 1;
     historyRequestRef.current = request;
+    const requestedSourceKey = historySource ? getSourceRevisionKey(historySource) : '';
+    const stateGeneration = stateGenerationRef.current;
     setHistoryLoading(true);
     window.codiff
       .getRepositoryHistory(nextLimit, historySource ?? undefined)
       .then((history) => {
-        if (historyRequestRef.current !== request) {
+        const currentSource = historySourceRef.current;
+        const currentSourceKey = currentSource ? getSourceRevisionKey(currentSource) : '';
+        if (
+          historyRequestRef.current !== request ||
+          stateGenerationRef.current !== stateGeneration ||
+          currentSourceKey !== requestedSourceKey
+        ) {
           return;
         }
 
@@ -990,8 +1279,13 @@ export function RepositoryReviewHost({
       return;
     }
 
+    cancelDiffContentRequests();
     const request = sourceRequestRef.current + 1;
     sourceRequestRef.current = request;
+    reviewCommentsRequestRef.current += 1;
+    reviewCommentsInFlightRef.current = null;
+    const historyRequest = historyRequestRef.current + 1;
+    historyRequestRef.current = historyRequest;
     const refreshSource = getRefreshSource(previousState.source);
     const refreshHistorySource = historySourceRef.current
       ? getRefreshSource(historySourceRef.current)
@@ -1003,7 +1297,7 @@ export function RepositoryReviewHost({
       window.codiff.getRepositoryHistory(historyLimit, refreshHistorySource),
     ])
       .then(([nextState, history]) => {
-        if (sourceRequestRef.current !== request) {
+        if (sourceRequestRef.current !== request || historyRequestRef.current !== historyRequest) {
           return;
         }
 
@@ -1033,6 +1327,8 @@ export function RepositoryReviewHost({
         setCollapsed(reconciliation.collapsed);
         setHistoryEntries(history.entries);
         setHistoryHasMore(history.entries.length >= historyLimit);
+        setHistoryLoading(false);
+        setInitialHistoryComplete(true);
         setHistorySource(reconciliation.historySource);
         setReviewComments(
           mergeReviewComments(getReviewCommentsFromState(orderedState), pendingReviewComments),
@@ -1044,10 +1340,15 @@ export function RepositoryReviewHost({
         setLocalChangesDetected(false);
       })
       .catch(() => {
+        if (sourceRequestRef.current === request && historyRequestRef.current === historyRequest) {
+          setHistoryLoading(false);
+          setInitialHistoryComplete(true);
+        }
         // Keep the current state; the banner stays up as a retry affordance.
       });
   }, [
     bumpItemVersion,
+    cancelDiffContentRequests,
     historyLimit,
     mainModeRef,
     pendingSource,
@@ -1092,6 +1393,11 @@ export function RepositoryReviewHost({
       cancelWalkthroughRequest();
       const request = sourceRequestRef.current + 1;
       sourceRequestRef.current = request;
+      reviewCommentsRequestRef.current += 1;
+      reviewCommentsInFlightRef.current = null;
+      historyRequestRef.current += 1;
+      setHistoryLoading(false);
+      setInitialHistoryComplete(true);
       setPendingSource(source);
       setSurfaceInitialScrollTarget(null);
       setLoadError(null);
@@ -1111,7 +1417,7 @@ export function RepositoryReviewHost({
             ...nextState,
             files: sortFiles(nextState.files),
           };
-          const session = sourceSessionsRef.current.get(getSourceKey(orderedState.source));
+          const session = sourceSessionsRef.current.get(getSourceRevisionKey(orderedState.source));
           const nextViewed =
             session?.viewed ??
             (usesViewedFileState(orderedState.source) ? readViewed(orderedState.root) : {});
@@ -1361,6 +1667,14 @@ export function RepositoryReviewHost({
                     (pendingSource ?? source).type === 'branch-working-tree')
                 }
               />
+              <ReviewCommentsLoadBanner
+                onRetry={() => hydrateReviewComments(stateRef.current)}
+                reason={
+                  state.reviewCommentsLoadState === 'failed'
+                    ? state.reviewCommentsError || 'Could not load review comments.'
+                    : null
+                }
+              />
               <WalkthroughOutdatedBanner
                 onDismiss={() => setWalkthroughFileError(null)}
                 reason={walkthroughFileError?.reason ?? null}
@@ -1481,7 +1795,7 @@ export function RepositoryReviewHost({
       }}
       externalUrl={source.type === 'pull-request' ? source.url : undefined}
       gitIdentity={gitIdentity}
-      key={getSourceKey(source)}
+      key={getSourceRevisionKey(source)}
       keymap={config.keymap}
       onCommandBridgeChange={updateSurfaceCommandBridge}
       providerLabel={

@@ -11,7 +11,6 @@ import {
   defaultLaunchOptions,
   defaultTerminalHelperStatus,
   getAgentLabel,
-  HISTORY_PAGE_SIZE,
 } from './lib/app-constants.ts';
 import type { RepositoryLoadError } from './lib/app-types.ts';
 import { sortFiles } from './lib/files.ts';
@@ -28,7 +27,6 @@ import type {
   CodiffLaunchOptions,
   CodiffMarkdownDocument,
   GitIdentity,
-  HistoryEntry,
   NarrativeWalkthroughResult,
   TerminalHelperStatus,
 } from './types.ts';
@@ -46,8 +44,9 @@ export default function App() {
   const [config, setConfig] = useState<CodiffConfig>(defaultConfig);
   const [features, setFeatures] = useState<CodiffFeatureFlags>(defaultFeatures);
   const [gitIdentity, setGitIdentity] = useState<GitIdentity | null>(null);
-  const [history, setHistory] = useState<ReadonlyArray<HistoryEntry>>([]);
+  const [gitIdentityReady, setGitIdentityReady] = useState(false);
   const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>(defaultLaunchOptions);
+  const [launchOptionsLoaded, setLaunchOptionsLoaded] = useState(false);
   const [loadError, setLoadError] = useState<RepositoryLoadError | null>(null);
   const [planDocument, setPlanDocument] = useState<CodiffMarkdownDocument | null>(null);
   const [planLoadError, setPlanLoadError] = useState<string | null>(null);
@@ -58,103 +57,144 @@ export default function App() {
   const [terminalHelperStatus, setTerminalHelperStatus] = useState<TerminalHelperStatus>(
     defaultTerminalHelperStatus,
   );
+  const [walkthroughLoading, setWalkthroughLoading] = useState(false);
   const [walkthroughResult, setWalkthroughResult] = useState<NarrativeWalkthroughResult>();
   const [walkthroughFileError, setWalkthroughFileError] = useState<WalkthroughFileError | null>(
     null,
   );
 
-  const loadRepository = useCallback(async (options: CodiffLaunchOptions) => {
-    const reloadSelection = consumeReloadSelection();
-    const loadedState = await window.codiff.getRepositoryState(
-      resolveReloadSourceForLaunch(reloadSelection, options),
-    );
-    const nextState = { ...loadedState, files: sortFiles(loadedState.files) };
-    const bootstrap = resolveRepositoryReviewBootstrap({
-      launchOptions: options,
-      reloadSelection,
-      state: nextState,
-    });
-    const nextHistory = await window.codiff.getRepositoryHistory(
-      HISTORY_PAGE_SIZE,
-      bootstrap.historySource ?? undefined,
-    );
-    const shouldLoadWalkthrough = Boolean(options.walkthrough || options.walkthroughFile);
-    const result = shouldLoadWalkthrough
-      ? await window.codiff.getNarrativeWalkthrough(
-          nextState.source,
-          bootstrap.forceInitialWalkthrough ? { force: true } : undefined,
-        )
-      : undefined;
-
-    setHistory(nextHistory.entries);
-    setWalkthroughResult(result);
-    if (options.walkthroughFile && result?.status === 'unavailable') {
-      setRepositoryBootstrap({ ...bootstrap, sidebarMode: 'history' });
-      setWalkthroughFileError({ path: options.walkthroughFile, reason: result.reason });
-    } else {
-      setRepositoryBootstrap(bootstrap);
-      setWalkthroughFileError(null);
-    }
-    setLoadError(null);
-  }, []);
-
   useEffect(() => {
     let canceled = false;
-    let loadingPlan = false;
 
-    const load = async () => {
-      const options = await window.codiff.getLaunchOptions();
-      if (canceled) {
-        return;
-      }
-      setLaunchOptions(options);
-
-      const [nextConfig, nextFeatures, nextAgentSkillStatus, nextTerminalHelperStatus] =
-        await Promise.all([
-          window.codiff.getConfig(),
-          window.codiff.getFeatureFlags(),
-          window.codiff.getAgentSkillStatus().catch(() => defaultAgentSkillStatus),
-          window.codiff.getTerminalHelperStatus().catch(() => defaultTerminalHelperStatus),
-        ]);
-      if (canceled) {
-        return;
-      }
-      setConfig(nextConfig);
-      setFeatures(nextFeatures);
-      setAgentSkillStatus(nextAgentSkillStatus);
-      setTerminalHelperStatus(nextTerminalHelperStatus);
-
-      if (options.planFile) {
-        loadingPlan = true;
-        const document = await window.codiff.getMarkdownDocument({
-          kind: 'plan',
-          path: options.planFile,
-        });
-        if (!canceled) {
-          setPlanDocument(document);
-          setPlanLoadError(null);
-        }
-        return;
-      }
-      await loadRepository(options);
+    const loadOptionalBootstrap = () => {
+      void window.codiff.getConfig().then(
+        (nextConfig) => {
+          if (!canceled) {
+            setConfig(nextConfig);
+          }
+        },
+        () => {},
+      );
+      void window.codiff.getFeatureFlags().then(
+        (nextFeatures) => {
+          if (!canceled) {
+            setFeatures(nextFeatures);
+          }
+        },
+        () => {},
+      );
+      void window.codiff.getAgentSkillStatus().then(
+        (nextStatus) => {
+          if (!canceled) {
+            setAgentSkillStatus(nextStatus);
+          }
+        },
+        () => {},
+      );
+      void window.codiff.getTerminalHelperStatus().then(
+        (nextStatus) => {
+          if (!canceled) {
+            setTerminalHelperStatus(nextStatus);
+          }
+        },
+        () => {},
+      );
     };
 
-    load().catch((error: unknown) => {
-      if (!canceled) {
-        if (loadingPlan) {
-          setPlanLoadError(error instanceof Error ? error.message : String(error));
-        } else {
+    void window.codiff.getLaunchOptions().then(
+      (options) => {
+        if (canceled) {
+          return;
+        }
+        setLaunchOptions(options);
+        setLaunchOptionsLoaded(true);
+        loadOptionalBootstrap();
+
+        if (options.planFile) {
+          void window.codiff
+            .getMarkdownDocument({ kind: 'plan', path: options.planFile })
+            .then((document) => {
+              if (!canceled) {
+                setPlanDocument(document);
+                setPlanLoadError(null);
+              }
+            })
+            .catch((error: unknown) => {
+              if (!canceled) {
+                setPlanLoadError(error instanceof Error ? error.message : String(error));
+              }
+            });
+          return;
+        }
+
+        const reloadSelection = consumeReloadSelection();
+        void window.codiff
+          .getRepositoryState(resolveReloadSourceForLaunch(reloadSelection, options))
+          .then((loadedState) => {
+            if (canceled) {
+              return;
+            }
+            const state = { ...loadedState, files: sortFiles(loadedState.files) };
+            const bootstrap = resolveRepositoryReviewBootstrap({
+              launchOptions: options,
+              reloadSelection,
+              state,
+            });
+            setRepositoryBootstrap(bootstrap);
+            setLoadError(null);
+
+            if (!options.walkthrough && !options.walkthroughFile) {
+              setWalkthroughLoading(false);
+              setWalkthroughResult(undefined);
+              setWalkthroughFileError(null);
+              return;
+            }
+
+            setWalkthroughLoading(true);
+            void window.codiff
+              .getNarrativeWalkthrough(
+                state.source,
+                bootstrap.forceInitialWalkthrough ? { force: true } : undefined,
+              )
+              .catch(
+                (error: unknown): NarrativeWalkthroughResult => ({
+                  reason: error instanceof Error ? error.message : String(error),
+                  status: 'unavailable',
+                }),
+              )
+              .then((result) => {
+                if (canceled) {
+                  return;
+                }
+                setWalkthroughLoading(false);
+                setWalkthroughResult(result);
+                setWalkthroughFileError(
+                  options.walkthroughFile && result.status === 'unavailable'
+                    ? { path: options.walkthroughFile, reason: result.reason }
+                    : null,
+                );
+              });
+          })
+          .catch((error: unknown) => {
+            if (!canceled) {
+              setLoadError(getRepositoryLoadError(error));
+            }
+          });
+      },
+      (error: unknown) => {
+        if (!canceled) {
+          setLaunchOptionsLoaded(true);
           setLoadError(getRepositoryLoadError(error));
         }
-      }
-    });
+      },
+    );
 
     const unsubscribe = window.codiff.onConfigChanged(setConfig);
     return () => {
       canceled = true;
       unsubscribe();
     };
-  }, [loadRepository]);
+  }, []);
 
   useEffect(() => {
     let canceled = false;
@@ -162,11 +202,13 @@ export default function App() {
       (identity) => {
         if (!canceled) {
           setGitIdentity(identity);
+          setGitIdentityReady(true);
         }
       },
       () => {
         if (!canceled) {
           setGitIdentity(null);
+          setGitIdentityReady(true);
         }
       },
     );
@@ -192,6 +234,10 @@ export default function App() {
       .catch(() => setAgentSkillStatus(defaultAgentSkillStatus))
       .finally(() => setAgentSkillInstalling(false));
   }, []);
+
+  if (!launchOptionsLoaded) {
+    return <main className="loading pulse">Loading…</main>;
+  }
 
   if (launchOptions.planFile) {
     if (planLoadError) {
@@ -258,8 +304,10 @@ export default function App() {
       bootstrap={repositoryBootstrap}
       config={config}
       gitIdentity={gitIdentity}
-      initialHistory={history}
+      gitIdentityReady={gitIdentityReady}
+      initialHistoryLoading
       initialWalkthroughFileError={walkthroughFileError}
+      initialWalkthroughLoading={walkthroughLoading}
       initialWalkthroughResult={walkthroughResult}
       key={
         repositoryBootstrap.source.type === 'working-tree'

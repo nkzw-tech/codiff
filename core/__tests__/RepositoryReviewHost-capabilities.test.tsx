@@ -3,7 +3,7 @@
  */
 
 import { act } from 'react';
-import { expect, test, vi } from 'vite-plus/test';
+import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import type { CodiffConfig } from '../config/types.ts';
 import {
   resolveRepositoryReviewBootstrap,
@@ -12,6 +12,7 @@ import {
 import type { ReviewSurfaceProps } from '../SharedWalkthroughApp.tsx';
 import type {
   CodiffLaunchOptions,
+  DiffSectionsContentResult,
   GitSha,
   NarrativeWalkthrough,
   NarrativeWalkthroughResult,
@@ -64,8 +65,21 @@ Object.defineProperty(globalThis, 'localStorage', {
   value: createMemoryStorage(),
 });
 
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
 const unsubscribe = () => {};
 const gitSha = (character: string) => character.repeat(40) as GitSha;
+const deferred = <Value,>() => {
+  let resolve!: (value: Value) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<Value>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, reject, resolve };
+};
 
 const stateFor = (
   source: ResolvedReviewSource,
@@ -79,7 +93,7 @@ const stateFor = (
   source,
 });
 
-const installWindowApi = () => {
+const installWindowApi = (overrides: Record<string, unknown> = {}) => {
   let findInDiffs: (() => void) | null = null;
   let copyPendingComments: (() => string | Promise<string>) | null = null;
   let refreshRequest: (() => void) | null = null;
@@ -99,6 +113,7 @@ const installWindowApi = () => {
       loadState: 'ready',
       patch: '@@ -1 +1 @@\n-old\n+new\n',
     })),
+    getDiffSectionsContent: vi.fn(async () => ({ sections: [] })),
     getNarrativeWalkthrough: vi.fn(
       async (): Promise<NarrativeWalkthroughResult> => ({
         reason: 'Not used.',
@@ -149,6 +164,7 @@ const installWindowApi = () => {
     submitPullRequestComment: vi.fn(async () => ({})),
     submitPullRequestReview: vi.fn(async () => ({ status: 'submitted', submittedDraftIds: [] })),
     updateWalkthroughCommitMessage: vi.fn(async () => ({ status: 'unavailable' })),
+    ...overrides,
   };
   window.codiff = api as unknown as Window['codiff'];
   return {
@@ -163,6 +179,9 @@ const installWindowApi = () => {
 
 type RenderHostOptions = {
   bootstrap?: Partial<RepositoryReviewBootstrap>;
+  initialHistoryLoading?: boolean;
+  initialWalkthroughFileError?: { path: string; reason: string } | null;
+  initialWalkthroughLoading?: boolean;
   initialWalkthroughResult?: NarrativeWalkthroughResult;
   launchOptions?: CodiffLaunchOptions;
 };
@@ -190,6 +209,10 @@ const renderHost = async (
       config={nextConfig}
       disableCodeViewWorkerPool
       gitIdentity={null}
+      gitIdentityReady
+      initialHistoryLoading={options.initialHistoryLoading}
+      initialWalkthroughFileError={options.initialWalkthroughFileError}
+      initialWalkthroughLoading={options.initialWalkthroughLoading}
       initialWalkthroughResult={options.initialWalkthroughResult}
       launchOptions={resolvedLaunchOptions}
       walkthroughSharingEnabled
@@ -218,16 +241,6 @@ const walkthroughFor = (
   title,
   version: 4,
 });
-
-const deferred = <Value,>() => {
-  let resolve!: (value: Value) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<Value>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, reject, resolve };
-};
 
 const getSurfaceProps = () => {
   const props = surfaceProps.mock.lastCall?.[0] as ReviewSurfaceProps | undefined;
@@ -480,6 +493,170 @@ test('asks the review assistant with the flushed note value supplied by the surf
       },
       source: state.source,
     });
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('hydrates all ordinary provider files once after first usable render', async () => {
+  surfaceProps.mockClear();
+  const pending = deferred<DiffSectionsContentResult>();
+  const getDiffSectionsContent = vi.fn(() => pending.promise);
+  const { api } = installWindowApi({ getDiffSectionsContent });
+  const source = {
+    headSha: gitSha('b'),
+    number: 12,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/12',
+  } as const;
+  const files = ['src/first.ts', 'src/second.ts'].map((path) => {
+    const file = createChangedFile(path, { kind: 'pull-request' });
+    return {
+      ...file,
+      sections: file.sections.map((section) => ({
+        ...section,
+        loadState: 'deferred' as const,
+        summary: { canLoad: true, reason: 'Exact contents are queued.' },
+      })),
+    };
+  });
+  const view = await renderHost(stateFor(source, files));
+
+  try {
+    await waitFor(() => expect(getDiffSectionsContent).toHaveBeenCalledTimes(1));
+    expect(getDiffSectionsContent).toHaveBeenCalledWith({
+      requestId: expect.stringMatching(/^bulk-sections:/),
+      source,
+    });
+    expect(api.reportInitialLoadMilestone).toHaveBeenCalledWith('first-usable-review-rendered');
+    expect(api.reportInitialLoadMilestone).not.toHaveBeenCalledWith(
+      'deferred-review-data-complete',
+    );
+    expect(api.reportInitialLoadMilestone.mock.invocationCallOrder[0]).toBeLessThan(
+      getDiffSectionsContent.mock.invocationCallOrder[0]!,
+    );
+
+    await act(async () => {
+      pending.resolve({
+        headSha: source.headSha,
+        sections: files.map((file) => ({
+          path: file.path,
+          section: {
+            ...file.sections[0]!,
+            loadState: 'ready',
+            newFile: { contents: `new ${file.path}`, name: file.path },
+            oldFile: { contents: `old ${file.path}`, name: file.path },
+          },
+        })),
+      });
+      await pending.promise;
+    });
+    await waitFor(() =>
+      expect(
+        getSurfaceProps().snapshot.files.every((file) => file.sections[0]?.loadState === 'ready'),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(api.reportInitialLoadMilestone).toHaveBeenCalledWith('deferred-review-data-complete'),
+    );
+    expect(getDiffSectionsContent).toHaveBeenCalledTimes(1);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('turns bulk provider failures into explicit retryable file evidence', async () => {
+  surfaceProps.mockClear();
+  const getDiffSectionsContent = vi.fn(async () => {
+    throw new Error('Git object batch failed.');
+  });
+  const { api } = installWindowApi({ getDiffSectionsContent });
+  const source = {
+    headSha: gitSha('c'),
+    number: 13,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/13',
+  } as const;
+  const file = createChangedFile('src/retry.ts', { kind: 'pull-request' });
+  const deferredFile = {
+    ...file,
+    sections: file.sections.map((section) => ({
+      ...section,
+      loadState: 'deferred' as const,
+      summary: { canLoad: true, reason: 'Exact contents are queued.' },
+    })),
+  };
+  const view = await renderHost(stateFor(source, [deferredFile]));
+
+  try {
+    await waitFor(() => {
+      expect(getSurfaceProps().snapshot.files[0]?.sections[0]).toMatchObject({
+        loadState: 'error',
+        summary: {
+          canLoad: true,
+          reason: expect.stringContaining('Git object batch failed.'),
+        },
+      });
+    });
+    expect(getDiffSectionsContent).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(api.reportInitialLoadMilestone).toHaveBeenCalledWith('deferred-review-data-complete'),
+    );
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('cancels bulk hydration and discards its result after the source changes', async () => {
+  surfaceProps.mockClear();
+  const pending = deferred<DiffSectionsContentResult>();
+  const getDiffSectionsContent = vi.fn((_request: { requestId?: string }) => pending.promise);
+  const { api } = installWindowApi({ getDiffSectionsContent });
+  const source = {
+    headSha: gitSha('d'),
+    number: 14,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/14',
+  } as const;
+  const file = createChangedFile('src/stale-provider.ts', { kind: 'pull-request' });
+  const deferredFile = {
+    ...file,
+    sections: file.sections.map((section) => ({
+      ...section,
+      loadState: 'deferred' as const,
+      summary: { canLoad: true, reason: 'Exact contents are queued.' },
+    })),
+  };
+  const nextSource = { sha: gitSha('e'), type: 'commit' } as const;
+  const nextRequest = { ref: nextSource.sha, type: 'commit' } as const;
+  api.getRepositoryState.mockResolvedValueOnce(
+    stateFor(nextSource, [createChangedFile('src/current.ts', { kind: 'commit' })]),
+  );
+  const view = await renderHost(stateFor(source, [deferredFile]));
+
+  try {
+    await waitFor(() => expect(getDiffSectionsContent).toHaveBeenCalledTimes(1));
+    const requestId = getDiffSectionsContent.mock.calls[0]![0].requestId;
+    await act(async () => getSurfaceProps().capabilities?.history?.onSelectSource(nextRequest));
+    await waitFor(() => expect(getSurfaceProps().snapshot.repository.source).toEqual(nextSource));
+    expect(api.cancelDiffContentRequest).toHaveBeenCalledWith(requestId);
+
+    await act(async () => {
+      pending.resolve({
+        headSha: source.headSha,
+        sections: [
+          {
+            path: deferredFile.path,
+            section: { ...deferredFile.sections[0]!, loadState: 'ready' },
+          },
+        ],
+      });
+      await pending.promise;
+    });
+    expect(getSurfaceProps().snapshot.files.map(({ path }) => path)).toEqual(['src/current.ts']);
   } finally {
     await view.cleanup();
   }
@@ -865,6 +1042,74 @@ test('ignores a walkthrough result after History switches sources', async () => 
   }
 });
 
+test('ignores a deferred History result after the review source changes', async () => {
+  surfaceProps.mockClear();
+  const firstHistory = deferred<RepositoryHistory>();
+  const secondHistory = deferred<RepositoryHistory>();
+  const { api } = installWindowApi({
+    getRepositoryHistory: vi
+      .fn()
+      .mockImplementationOnce(() => firstHistory.promise)
+      .mockImplementationOnce(() => secondHistory.promise),
+  });
+  const initialState = stateFor({ type: 'working-tree' }, [createChangedFile('src/initial.ts')]);
+  const nextSource = {
+    headSha: gitSha('d'),
+    number: 42,
+    owner: 'example',
+    provider: 'github',
+    repo: 'repo',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/42',
+  } as const;
+  const nextSourceRequest = nextSource;
+  const nextState = stateFor(nextSource, [createChangedFile('src/next.ts')]);
+  api.getRepositoryState.mockResolvedValueOnce(nextState);
+  const view = await renderHost(initialState, undefined, { initialHistoryLoading: true });
+
+  try {
+    await waitFor(() => expect(api.getRepositoryHistory).toHaveBeenCalledTimes(1));
+    await act(async () =>
+      getSurfaceProps().capabilities?.history?.onSelectSource(nextSourceRequest),
+    );
+    await waitFor(() => expect(api.getRepositoryHistory).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      firstHistory.resolve({
+        entries: [
+          {
+            author: 'Stale',
+            committedAt: Date.now(),
+            parentShas: [],
+            sha: gitSha('a'),
+            subject: 'Stale history',
+          },
+        ],
+        root: '/repo',
+      });
+      await firstHistory.promise;
+    });
+    expect(getSurfaceProps().capabilities?.history?.entries).toEqual([]);
+
+    const currentEntry = {
+      author: 'Current',
+      committedAt: Date.now(),
+      parentShas: [],
+      sha: gitSha('b'),
+      subject: 'Current history',
+    };
+    await act(async () => {
+      secondHistory.resolve({ entries: [currentEntry], root: '/repo' });
+      await secondHistory.promise;
+    });
+    await waitFor(() =>
+      expect(getSurfaceProps().capabilities?.history?.entries).toEqual([currentEntry]),
+    );
+  } finally {
+    await view.cleanup();
+  }
+});
+
 test('keeps provider and local drafts in their own History source sessions', async () => {
   surfaceProps.mockClear();
   const { api } = installWindowApi();
@@ -1131,7 +1376,6 @@ test('uses the configured agent for placeholder walkthroughs and honors launch o
     await configuredView.cleanup();
   }
 });
-
 test('applies non-whitespace config updates without reloading repository state', async () => {
   surfaceProps.mockClear();
   const { api } = installWindowApi();
@@ -1239,6 +1483,159 @@ test('keeps failed whitespace reloads recoverable without applying stale state',
     await view.rerenderConfig(hideWhitespace);
     await waitFor(() => expect(view.container.textContent).not.toContain('Reload failed.'));
     expect(getSurfaceProps().snapshot.files.map((file) => file.path)).toEqual(['src/kept.ts']);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('hydrates provider comments after first usable and ignores a superseded source result', async () => {
+  surfaceProps.mockClear();
+  const firstComments = deferred<
+    ReadonlyArray<{
+      author: { login: string };
+      body: string;
+      filePath: string;
+      id: string;
+      lineNumber: number;
+      side: 'additions';
+    }>
+  >();
+  const secondComments = deferred<
+    ReadonlyArray<{
+      author: { login: string };
+      body: string;
+      filePath: string;
+      id: string;
+      lineNumber: number;
+      side: 'additions';
+    }>
+  >();
+  const firstSource = {
+    headSha: gitSha('a'),
+    number: 12,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/12',
+  } as const;
+  const secondSource = {
+    headSha: gitSha('b'),
+    number: 23,
+    projectPath: 'example/repo',
+    provider: 'gitlab',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/example/repo/-/merge_requests/23',
+  } as const;
+  const getReviewComments = vi.fn((source: ResolvedReviewSource, _requestId?: string) =>
+    source.type === 'pull-request' && source.headSha === firstSource.headSha
+      ? firstComments.promise
+      : secondComments.promise,
+  );
+  const getRepositoryState = vi.fn(async () => ({
+    ...stateFor(secondSource, [createChangedFile('src/second.ts')]),
+    reviewComments: [],
+    reviewCommentsLoadState: 'not-loaded' as const,
+  }));
+  installWindowApi({ getRepositoryState, getReviewComments });
+  const view = await renderHost({
+    ...stateFor(firstSource, [createChangedFile('src/first.ts')]),
+    reviewComments: [],
+    reviewCommentsLoadState: 'not-loaded',
+  });
+
+  try {
+    await waitFor(() =>
+      expect(getReviewComments).toHaveBeenCalledWith(
+        firstSource,
+        expect.stringMatching(/^review-comments:/),
+      ),
+    );
+    expect(surfaceProps).toHaveBeenCalled();
+    const initialProps = getSurfaceProps();
+    expect(initialProps.snapshot.repository.source).toEqual(firstSource);
+    expect(initialProps.snapshot.reviewComments ?? []).toEqual([]);
+
+    await act(async () => initialProps.capabilities?.history?.onSelectSource(secondSource));
+    await waitFor(() => expect(getRepositoryState).toHaveBeenCalledWith(secondSource));
+    await waitFor(() => expect(getSurfaceProps().snapshot.repository.source).toEqual(secondSource));
+    await waitFor(() =>
+      expect(getReviewComments).toHaveBeenCalledWith(
+        secondSource,
+        expect.stringMatching(/^review-comments:/),
+      ),
+    );
+
+    await act(async () => {
+      firstComments.resolve([
+        {
+          author: { login: 'stale-reviewer' },
+          body: 'Stale comment',
+          filePath: 'src/first.ts',
+          id: 'stale',
+          lineNumber: 1,
+          side: 'additions',
+        },
+      ]);
+      await firstComments.promise;
+    });
+    expect(getSurfaceProps().snapshot.reviewComments ?? []).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'stale' })]),
+    );
+
+    await act(async () => {
+      secondComments.resolve([
+        {
+          author: { login: 'current-reviewer' },
+          body: 'Current comment',
+          filePath: 'src/second.ts',
+          id: 'current',
+          lineNumber: 1,
+          side: 'additions',
+        },
+      ]);
+      await secondComments.promise;
+    });
+    await waitFor(() =>
+      expect(getSurfaceProps().snapshot.reviewComments).toEqual([
+        expect.objectContaining({ id: 'current' }),
+      ]),
+    );
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('keeps provider comment hydration failures visible and retryable', async () => {
+  surfaceProps.mockClear();
+  const getReviewComments = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('Provider comments are unavailable.'))
+    .mockResolvedValueOnce([]);
+  installWindowApi({ getReviewComments });
+  const source = {
+    headSha: gitSha('c'),
+    number: 31,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/31',
+  } as const;
+  const view = await renderHost({
+    ...stateFor(source),
+    reviewComments: [],
+    reviewCommentsLoadState: 'not-loaded',
+  });
+
+  try {
+    await waitFor(() =>
+      expect(view.container.textContent).toContain('Provider comments are unavailable.'),
+    );
+    const retry = Array.from(view.container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Retry',
+    );
+    expect(retry).toBeDefined();
+    await act(async () => retry?.click());
+    await waitFor(() => expect(getReviewComments).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getSurfaceProps().snapshot.repository.source).toEqual(source));
+    expect(view.container.textContent).not.toContain('Provider comments are unavailable.');
   } finally {
     await view.cleanup();
   }

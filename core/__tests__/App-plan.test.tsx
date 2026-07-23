@@ -89,6 +89,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   getDiffSectionContent: vi.fn(async () => {
     throw new Error('Unexpected diff section load.');
   }),
+  getDiffSectionsContent: vi.fn(async () => ({ sections: [] })),
   getFeatureFlags: vi.fn(async () => ({ planSharing: false, walkthroughSharing: false })),
   getGitIdentity: vi.fn(async () => ({ email: 'reviewer@example.com', name: 'Reviewer' })),
   getKeyboardLayout: vi.fn(async () => null),
@@ -146,6 +147,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   openFile: vi.fn(async () => {}),
   openReleasePage: vi.fn(async () => {}),
   openRepositoryFolder: vi.fn(async () => {}),
+  reportInitialLoadMilestone: vi.fn(),
   resetCodeFontSize: vi.fn(async () => {}),
   resolvePullRequestUrl: vi.fn(async (value) => value),
   saveMarkdownDocument: vi.fn(async (request) => ({

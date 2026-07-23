@@ -80,6 +80,7 @@ declare global {
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
       getReviewComments: (
         source: Extract<ReviewSource, { type: 'pull-request' }>,
+        requestId?: string,
       ) => Promise<ReadonlyArray<PullRequestExistingReviewComment>>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
@@ -111,6 +112,9 @@ declare global {
       openFile: (path: string) => Promise<void>;
       openReleasePage: () => Promise<void>;
       openRepositoryFolder: () => Promise<void>;
+      reportInitialLoadMilestone: (
+        name: 'deferred-review-data-complete' | 'first-usable-review-rendered',
+      ) => void;
       resetCodeFontSize: () => Promise<void>;
       resolvePullRequestUrl: (value: string) => Promise<string>;
       saveMarkdownDocument: (

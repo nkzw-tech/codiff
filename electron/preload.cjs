@@ -40,7 +40,8 @@ const codiff = {
   getRepositoryHistory: (limit, source) =>
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
-  getReviewComments: (source) => ipcRenderer.invoke('codiff:getReviewComments', source),
+  getReviewComments: (source, requestId) =>
+    ipcRenderer.invoke('codiff:getReviewComments', source, requestId),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getUpdateStatus: () => ipcRenderer.invoke('codiff:getUpdateStatus'),
   getNarrativeWalkthrough: (source, options) =>
@@ -142,6 +143,7 @@ const codiff = {
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
   openRepositoryFolder: () => ipcRenderer.invoke('codiff:openRepositoryFolder'),
   resolvePullRequestUrl: (value) => ipcRenderer.invoke('codiff:resolvePullRequestUrl', value),
+  reportInitialLoadMilestone: (name) => ipcRenderer.send('codiff:initialLoadMilestone', name),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),
   setWordWrap: (value) => ipcRenderer.invoke('codiff:setWordWrap', value),
