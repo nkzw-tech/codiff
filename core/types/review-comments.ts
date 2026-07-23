@@ -66,6 +66,12 @@ export type PullRequestExistingReviewComment = PullRequestReviewComment & {
   url?: string;
 };
 
+// These destination-specific names intentionally sit at the capability boundary.
+// Their coordinate shapes are refined by the review-comment coordinate layer.
+export type ProviderCommentSubmission = PullRequestReviewComment;
+export type ShareCommentSubmission = PullRequestReviewComment;
+export type SubmittedReviewComment = PullRequestExistingReviewComment;
+
 export type PullRequestGeneralComment = {
   author: ReviewAuthor;
   body: string;
@@ -82,6 +88,21 @@ export type PullRequestGeneralCommentThread = {
   comments: ReadonlyArray<PullRequestGeneralComment>;
   id: string;
   isResolved?: boolean;
+};
+
+export type ReviewCommenting = {
+  canComment?: boolean;
+  onDeleteComment?: (commentId: string) => Promise<void>;
+  onDeleteGeneralComment?: (commentId: string) => Promise<void>;
+  onReplyGeneralComment?: (threadId: string, body: string) => Promise<void>;
+  onResolveDiscussion?: (discussionId: string, resolved: boolean) => Promise<void>;
+  onSignIn?: () => Promise<void> | void;
+  onSubmitComment?: (
+    comment: PullRequestReviewComment,
+  ) => Promise<PullRequestExistingReviewComment>;
+  onSubmitGeneralComment?: (body: string) => Promise<void>;
+  onUpdateComment?: (commentId: string, body: string) => Promise<void>;
+  onUpdateGeneralComment?: (commentId: string, body: string) => Promise<void>;
 };
 
 export type PullRequestReviewEvent = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';

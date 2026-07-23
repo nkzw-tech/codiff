@@ -244,7 +244,7 @@ const shortDate = (timestamp: number) => {
   return `${Math.floor(months / 12)}y ago`;
 };
 
-function HistorySidebar({
+export function HistorySidebar({
   branchSource,
   currentSource,
   entries,

@@ -4,7 +4,7 @@ import type {
   PullRequestExistingReviewComment,
   PullRequestGeneralCommentThread,
 } from './review-comments.ts';
-import type { PullRequestCodeQualityFinding } from './review-history.ts';
+import type { CommitMetadata, PullRequestCodeQualityFinding } from './review-history.ts';
 import type {
   ChangedFile,
   DiffSection,
@@ -155,6 +155,7 @@ export type SharedWalkthroughSnapshot = {
   branch: string | null;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
   codiffVersion: string;
+  commitMetadata?: CommitMetadata;
   exportedAt: string;
   files: ReadonlyArray<ChangedFile>;
   kind: 'codiff-walkthrough-share';

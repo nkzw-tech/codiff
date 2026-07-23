@@ -1,19 +1,30 @@
 import type {
   GitIdentity,
-  PullRequestExistingReviewComment,
-  PullRequestReviewComment,
+  ShareCommentSubmission,
   SharedWalkthroughSnapshot,
+  SubmittedReviewComment,
 } from '@nkzw/codiff-core';
 import {
   PlanReviewSurface,
   ReviewSurface,
   type PlanReviewCommenting,
-  type ReviewCommenting,
+  type ShareReviewCommentCapabilities,
 } from '@nkzw/codiff-core/react';
 import type { ComponentProps, ReactNode } from 'react';
 
 export type SharedPlanCommenting = PlanReviewCommenting;
-export type SharedWalkthroughCommenting = ReviewCommenting;
+export type SharedWalkthroughCommenting = {
+  canComment?: boolean;
+  onDeleteComment?: (commentId: string) => Promise<void>;
+  onDeleteGeneralComment?: (commentId: string) => Promise<void>;
+  onReplyGeneralComment?: (threadId: string, body: string) => Promise<void>;
+  onResolveDiscussion?: (discussionId: string, resolved: boolean) => Promise<void>;
+  onSignIn?: () => Promise<void> | void;
+  onSubmitComment?: (comment: ShareCommentSubmission) => Promise<SubmittedReviewComment>;
+  onSubmitGeneralComment?: (body: string) => Promise<void>;
+  onUpdateComment?: (commentId: string, body: string) => Promise<void>;
+  onUpdateGeneralComment?: (commentId: string, body: string) => Promise<void>;
+};
 
 type SubmittedShareCommentMessage = {
   authorImage: null | string;
@@ -55,11 +66,11 @@ const submittedShareCommentMessage = (value: unknown): SubmittedShareCommentMess
 };
 
 const toSubmittedReviewComment = (
-  comment: PullRequestReviewComment,
+  comment: ShareCommentSubmission,
   message: SubmittedShareCommentMessage,
   threadId: string,
   canResolveThread: boolean,
-): PullRequestExistingReviewComment => ({
+): SubmittedReviewComment => ({
   ...comment,
   author: {
     ...(message.authorImage ? { avatarUrl: message.authorImage } : {}),
@@ -80,7 +91,7 @@ export const resolveSubmittedShareReply = ({
   result,
 }: {
   canResolveThread: boolean;
-  comment: PullRequestReviewComment & { threadId: string };
+  comment: ShareCommentSubmission & { threadId: string };
   result: unknown;
 }) =>
   toSubmittedReviewComment(
@@ -96,7 +107,7 @@ export const resolveSubmittedShareThread = ({
   result,
 }: {
   canResolveThread: boolean;
-  comment: PullRequestReviewComment;
+  comment: ShareCommentSubmission;
   result: unknown;
 }) => {
   const thread = asRecord(result);
@@ -112,6 +123,39 @@ export const resolveSubmittedShareThread = ({
     canResolveThread,
   );
 };
+
+export const createSharedReviewCommentCapabilities = (
+  commenting?: SharedWalkthroughCommenting,
+): ShareReviewCommentCapabilities | undefined =>
+  commenting
+    ? {
+        anchorPolicy: 'share-snapshot',
+        authoring: {
+          canCreateInline: commenting.canComment === true && commenting.onSubmitComment != null,
+        },
+        destination: 'share',
+        general:
+          commenting.canComment === true
+            ? {
+                onCreate: commenting.onSubmitGeneralComment,
+                onDelete: commenting.onDeleteGeneralComment,
+                onReply: commenting.onReplyGeneralComment,
+                onResolve: commenting.onResolveDiscussion,
+                onUpdate: commenting.onUpdateGeneralComment,
+              }
+            : {},
+        inline:
+          commenting.canComment === true
+            ? {
+                onDelete: commenting.onDeleteComment,
+                onResolve: commenting.onResolveDiscussion,
+                onSubmit: commenting.onSubmitComment,
+                onUpdate: commenting.onUpdateComment,
+              }
+            : {},
+        onSignIn: commenting.onSignIn,
+      }
+    : undefined;
 
 export function SharedPlanApp({
   providerLabel,
@@ -137,9 +181,11 @@ export function SharedWalkthroughApp({
   settingsBar?: ReactNode;
   snapshot: SharedWalkthroughSnapshot;
 }) {
+  const comments = createSharedReviewCommentCapabilities(commenting);
+
   return (
     <ReviewSurface
-      commenting={commenting}
+      capabilities={comments ? { comments } : undefined}
       gitIdentity={gitIdentity}
       onDeleteShare={onDeleteShare}
       providerLabel={providerLabel}

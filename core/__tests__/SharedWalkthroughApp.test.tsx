@@ -247,7 +247,27 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
     root = createRoot(container);
     root.render(
       <ReviewSurface
-        commenting={commenting}
+        capabilities={{
+          comments: {
+            anchorPolicy: 'share-snapshot',
+            authoring: { canCreateInline: false },
+            destination: 'share',
+            general: {
+              onCreate: commenting.onSubmitGeneralComment,
+              onDelete: commenting.onDeleteGeneralComment,
+              onReply: commenting.onReplyGeneralComment,
+              onResolve: commenting.onResolveDiscussion,
+              onUpdate: commenting.onUpdateGeneralComment,
+            },
+            inline: {
+              onDelete: commenting.onDeleteComment,
+              onResolve: commenting.onResolveDiscussion,
+              onSubmit: commenting.onSubmitComment,
+              onUpdate: commenting.onUpdateComment,
+            },
+            onSignIn: commenting.onSignIn,
+          },
+        }}
         onDeleteShare={onDeleteShare}
         providerLabel="GitLab"
         repositoryUrl="/cloudflare/voidzero/codiff-web"

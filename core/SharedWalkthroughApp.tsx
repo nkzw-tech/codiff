@@ -1,18 +1,32 @@
 import { ArrowSquareOutIcon as ArrowSquareOut } from '@phosphor-icons/react/ArrowSquareOut';
 import { ChatCircleIcon as ChatCircle } from '@phosphor-icons/react/ChatCircle';
+import { ClockCounterClockwiseIcon as ClockCounterClockwise } from '@phosphor-icons/react/ClockCounterClockwise';
 import { PathIcon as Path } from '@phosphor-icons/react/Path';
 import { TreeStructureIcon as TreeStructure } from '@phosphor-icons/react/TreeStructure';
+import type { FileDiffLoadedFiles } from '@pierre/diffs';
 import { Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
 import { Button } from './app/components/Button.tsx';
+import { CommandBar } from './app/components/CommandBar.tsx';
 import { ReviewFileTree } from './app/components/FileTree.tsx';
+import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import {
   MergeRequestCommentsView,
   SidebarGeneralCommentList,
-  type ReviewCommenting,
 } from './app/components/merge-request/GeneralComments.tsx';
 import {
   isTerminalPullRequestMergeState,
+  CopyCommentsButton,
+  DiffSearchPanel,
   isPullRequestReviewActionDisabled,
   PullRequestMergeControls,
   PullRequestMergeStatusBadge,
@@ -25,15 +39,23 @@ import {
 } from './app/components/ReviewCodeView.tsx';
 import type { ReviewModeItem } from './app/components/ReviewModeControl.tsx';
 import { ReviewTopBar } from './app/components/ReviewTopBar.tsx';
-import { DiffLineCountBadge } from './app/components/Sidebar.tsx';
+import { DiffLineCountBadge, HistorySidebar } from './app/components/Sidebar.tsx';
+import type {
+  CommitHandler,
+  CommitMessageHandler,
+  CommitOutputSubscriber,
+} from './app/components/walkthrough/CommitView.tsx';
 import { NarrativeSidebar } from './app/components/walkthrough/NarrativeSidebar.tsx';
 import {
   NarrativeWalkthroughView,
   type WalkthroughBlockScrollTarget,
+  type WalkthroughReviewTarget,
 } from './app/components/walkthrough/NarrativeWalkthroughView.tsx';
 import { useNarrativeNavigation } from './app/components/walkthrough/useNarrativeNavigation.ts';
 import { WalkthroughDiffSurface } from './app/components/walkthrough/WalkthroughDiffSurface.tsx';
 import { WalkthroughProgress } from './app/components/walkthrough/WalkthroughProgress.tsx';
+import { useAppKeyboardShortcuts } from './app/hooks/useAppKeyboardShortcuts.ts';
+import { useDiffSearch } from './app/hooks/useDiffSearch.ts';
 import {
   getCodeFontLineHeight,
   normalizeCodeFontSizePreference,
@@ -43,19 +65,27 @@ import { useResizableSidebar } from './app/hooks/useResizableSidebar.ts';
 import { useReviewCommentDrafts } from './app/hooks/useReviewCommentDrafts.ts';
 import { useReviewFileState } from './app/hooks/useReviewState.ts';
 import { createDefaultConfig } from './config/defaults.ts';
-import { matchesShortcut } from './config/keymap.ts';
+import { getShortcutLabel } from './config/keymap.ts';
+import type { CodiffDiffStyle, CodiffKeymap } from './config/types.ts';
 import { getAgentLabel } from './lib/app-constants.ts';
-import type { CodeViewInstance, ReviewComment, ReviewScrollTarget } from './lib/app-types.ts';
+import type {
+  CodeViewInstance,
+  ReviewComment,
+  ReviewScrollTarget,
+  WalkthroughError,
+} from './lib/app-types.ts';
+import type { Command } from './lib/command-registry.ts';
 import {
-  fileHasVisibleDiff,
   getDiffLineCount,
   getTotalDiffLineCount,
   isMarkdownFilePath,
+  shouldPreloadSectionContentsForSearch,
 } from './lib/diff.ts';
-import { abbreviateHomePath, fuzzyMatches, sortFiles } from './lib/files.ts';
+import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
 import {
+  buildReviewCommentsMarkdown,
   getPendingPullRequestReviewComments,
   getReviewCommentsFromState,
   mergeReviewComments,
@@ -69,25 +99,41 @@ import {
   readSidebarWidth,
   writeSidebarWidth,
 } from './lib/sidebar-width.ts';
-import { getSourceLabel, getSourceKey } from './lib/source.ts';
+import {
+  getEmptySourceDetail,
+  getEmptySourceTitle,
+  getSourceLabel,
+  getSourceKey,
+  supportsDiffSearchContentPreload,
+} from './lib/source.ts';
 import type {
+  ChangedFile,
+  DiffImageContentRequest,
+  DiffImageContentResult,
+  DiffSection,
   GitIdentity,
+  HistoryEntry,
+  NarrativeWalkthrough,
   PullRequestMergeOptions,
   PullRequestGeneralComment,
   PullRequestGeneralCommentThread,
   PullRequestExistingReviewComment,
-  PullRequestReviewComment,
   PullRequestReviewEvent,
+  ProviderCommentSubmission,
+  ResolvedReviewSource,
+  ReviewCommenting,
+  ReviewContextResolver,
+  ReviewSource,
   RepositoryState,
+  ShareCommentSubmission,
   SharedWalkthroughSnapshot,
+  SubmittedReviewComment,
   WalkthroughCommitMessageResult,
   WalkthroughCommitResult,
 } from './types.ts';
 
-export {
-  ReadOnlyGeneralCommentCard,
-  type ReviewCommenting,
-} from './app/components/merge-request/GeneralComments.tsx';
+export { ReadOnlyGeneralCommentCard } from './app/components/merge-request/GeneralComments.tsx';
+export type { ReviewCommenting } from './types.ts';
 
 const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
 const emptyGeneralCommentThreads: ReadonlyArray<PullRequestGeneralCommentThread> = [];
@@ -103,7 +149,201 @@ const writeSharedSidebarWidth = (width: number) => {
 };
 
 export type ReviewWalkthroughStatus = 'failed' | 'generating' | 'idle' | 'ready';
-export type ReviewMode = 'comments' | 'tree' | 'walkthrough';
+export type ReviewMode = 'comments' | 'history' | 'tree' | 'walkthrough';
+export type ReviewSurfaceCommandBridge = {
+  copyPendingComments: () => string;
+  copyPendingCommentsLabel: string;
+  getPersistenceState: () => { mode: ReviewMode; selectedPath: string | null };
+  openDiffSearch: () => void;
+};
+
+export type ControlledReviewValue<Value> = Readonly<{
+  onChange: (value: Value) => void;
+  value: Value;
+}>;
+
+export type ControlledReviewDrafts<Draft extends ReviewComment = ReviewComment> = Readonly<{
+  onChange: Dispatch<SetStateAction<ReadonlyArray<Draft>>>;
+  value: ReadonlyArray<Draft>;
+}>;
+
+type ReviewDraftCapabilities = {
+  canCreateInline?: boolean;
+  drafts?: ControlledReviewDrafts;
+  onAsk?: (comment: ReviewComment) => void;
+};
+
+export type LocalReviewNoteCapabilities = ReviewDraftCapabilities;
+
+export type CommentDestination = 'provider' | 'share';
+export type CommentAnchorPolicy = 'provider-target' | 'share-snapshot';
+export type ProviderReviewOutcome = 'approve' | 'comment' | 'request-changes';
+
+export type SubmitProviderReviewRequest = {
+  comments: ReadonlyArray<ProviderCommentSubmission>;
+  outcome: ProviderReviewOutcome;
+  summary?: string;
+};
+
+export type ProviderReviewSessionCapabilities = {
+  drafts: ControlledReviewDrafts;
+  submit: (request: SubmitProviderReviewRequest) => Promise<void>;
+};
+
+type ReviewCommentSubmission<Destination extends CommentDestination> = Destination extends 'share'
+  ? ShareCommentSubmission
+  : ProviderCommentSubmission;
+
+type CommonReviewCommentCapabilities<Destination extends CommentDestination> = {
+  anchorPolicy: Destination extends 'share' ? 'share-snapshot' : 'provider-target';
+  authoring: ReviewDraftCapabilities;
+  destination: Destination;
+  general?: {
+    onCreate?: (body: string) => Promise<void>;
+    onDelete?: (commentId: string) => Promise<void>;
+    onReply?: (threadId: string, body: string) => Promise<void>;
+    onResolve?: (threadId: string, resolved: boolean) => Promise<void>;
+    onUpdate?: (commentId: string, body: string) => Promise<void>;
+  };
+  inline: {
+    onDelete?: (commentId: string) => Promise<void>;
+    onResolve?: (threadId: string, resolved: boolean) => Promise<void>;
+    onSubmit?: (comment: ReviewCommentSubmission<Destination>) => Promise<SubmittedReviewComment>;
+    onUpdate?: (commentId: string, body: string) => Promise<void>;
+  };
+  onSignIn?: () => Promise<void> | void;
+};
+
+export type ShareReviewCommentCapabilities = CommonReviewCommentCapabilities<'share'>;
+
+export type ProviderReviewCommentCapabilities = CommonReviewCommentCapabilities<'provider'> & {
+  reviewSession?: ProviderReviewSessionCapabilities;
+};
+
+export type ReviewCommentCapabilities =
+  | ProviderReviewCommentCapabilities
+  | ShareReviewCommentCapabilities;
+
+export type ReviewContentCapabilities = {
+  forceExpandedPaths?: ReadonlySet<string>;
+  itemVersionByKey?: Readonly<Record<string, number>>;
+  loadingSectionIds?: ReadonlySet<string>;
+  onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
+  onLoadSection?: (file: ChangedFile, section: DiffSection) => Promise<void> | void;
+  onLoadSectionContents?: (file: ChangedFile, section: DiffSection) => Promise<FileDiffLoadedFiles>;
+  onRefreshMarkdown?: (file: ChangedFile, section: DiffSection) => Promise<boolean>;
+  renderUnavailableContent?: (file: ChangedFile, section: DiffSection) => ReactNode;
+  resolveReviewContext?: ReviewContextResolver;
+};
+
+export type ReviewDesktopCapabilities = {
+  beforeContent?: ReactNode;
+  collapsed?: ReadonlySet<string>;
+  commands?: ReadonlyArray<Command>;
+  disableCodeViewWorkerPool?: boolean;
+  isWindowFullscreen?: boolean;
+  onActiveWalkthroughReviewTargetChange?: (target: WalkthroughReviewTarget | null) => void;
+  onCollapsedChange?: (collapsed: Set<string>) => void;
+  onOpenFile?: (file: ChangedFile) => void;
+  onOpenSelectedFile?: () => void;
+  onViewedChange?: (viewed: Record<string, string>) => void;
+  reloadDeltaPaths?: ReadonlySet<string>;
+  viewed?: Readonly<Record<string, string>>;
+};
+
+export type ReviewHistoryModel = {
+  branchSource?: Extract<ReviewSource, { type: 'branch-diff' }> | null;
+  currentSource: ResolvedReviewSource | ReviewSource;
+  entries: ReadonlyArray<HistoryEntry>;
+  hasMore: boolean;
+  loading: boolean;
+  onLoadMore: () => void;
+  onSelectSource: (source: ReviewSource) => void;
+  pullRequestSource?: Extract<ReviewSource, { type: 'pull-request' }> | null;
+};
+
+export type ControlledReviewPreferences = {
+  diffLayout?: ControlledReviewValue<CodiffDiffStyle>;
+  outdatedVisibility?: ControlledReviewValue<boolean>;
+  pendingCommentPrefix?: ControlledReviewValue<string>;
+  selectedPath?: ControlledReviewValue<string | null>;
+  wordWrap?: ControlledReviewValue<boolean>;
+};
+
+export type ReviewSourceNavigation = {
+  onCancelAutoMerge?: () => Promise<void> | void;
+  onClosePullRequest?: () => Promise<void> | void;
+  onMergePullRequest?: (
+    options: PullRequestMergeOptions & { autoMerge: boolean },
+  ) => Promise<void> | void;
+  onUpdateDescription?: (body: string) => Promise<void> | void;
+  onUpdateTitle?: (title: string) => Promise<void> | void;
+  onUploadDescriptionAsset?: (file: File) => Promise<string> | string;
+};
+
+export type ReviewWalkthroughCapabilities = {
+  commit?: CommitHandler;
+  commitOutput?: CommitOutputSubscriber;
+  error?: Pick<WalkthroughError, 'code' | 'reason'> | null;
+  onGenerate?: () => Promise<void> | void;
+  onShare?: () => Promise<void> | void;
+  progress?: ReactNode;
+  status?: ReviewWalkthroughStatus;
+  updateCommitMessage?: CommitMessageHandler;
+};
+
+type ReviewAnnotationCapabilities =
+  | {
+      comments?: never;
+      localReviewNotes: LocalReviewNoteCapabilities;
+    }
+  | {
+      comments: ReviewCommentCapabilities;
+      localReviewNotes?: never;
+    }
+  | {
+      comments?: never;
+      localReviewNotes?: never;
+    };
+
+export type ReviewSurfaceCapabilities = ReviewAnnotationCapabilities & {
+  content?: ReviewContentCapabilities;
+  desktop?: ReviewDesktopCapabilities;
+  history?: ReviewHistoryModel;
+  preferences?: ControlledReviewPreferences;
+  sourceNavigation?: ReviewSourceNavigation;
+  walkthrough?: ReviewWalkthroughCapabilities;
+};
+
+export const buildSharedReviewSnapshot = ({
+  preferences,
+  state,
+  title,
+  walkthrough,
+}: {
+  preferences: SharedWalkthroughSnapshot['preferences'];
+  state: RepositoryState;
+  title: string;
+  walkthrough: NarrativeWalkthrough;
+}): SharedWalkthroughSnapshot => ({
+  branch: state.branch,
+  codeQualityFindings: state.codeQualityFindings,
+  codiffVersion: 'desktop',
+  commitMetadata: state.commitMetadata,
+  exportedAt: new Date(state.generatedAt).toISOString(),
+  files: state.files,
+  kind: 'codiff-walkthrough-share',
+  preferences,
+  repository: {
+    generalComments: state.generalComments,
+    root: state.root,
+    source: state.source,
+    title,
+  },
+  reviewComments: state.reviewComments,
+  version: 1,
+  walkthrough,
+});
 
 const getSnapshotReviewComments = (
   snapshot: SharedWalkthroughSnapshot,
@@ -125,6 +365,17 @@ const getSnapshotReviewComments = (
 
 const noop = () => {};
 
+const toProviderReviewOutcome = (event: PullRequestReviewEvent): ProviderReviewOutcome => {
+  switch (event) {
+    case 'APPROVE':
+      return 'approve';
+    case 'COMMENT':
+      return 'comment';
+    case 'REQUEST_CHANGES':
+      return 'request-changes';
+  }
+};
+
 const disabledCommit = async (): Promise<WalkthroughCommitResult> => ({
   reason: 'Shared walkthroughs are read-only.',
   status: 'failed',
@@ -135,39 +386,13 @@ const disabledCommitMessage = async (): Promise<WalkthroughCommitMessageResult> 
   status: 'unavailable',
 });
 
-export type ReviewSurfaceProps = {
-  commenting?: ReviewCommenting;
+type ReviewSurfaceBaseProps = {
+  capabilities?: ReviewSurfaceCapabilities;
   externalUrl?: string;
   gitIdentity?: GitIdentity | null;
-  initialMode?: ReviewMode;
-  interactive?: {
-    onCancelAutoMerge?: () => Promise<void> | void;
-    onClosePullRequest?: () => Promise<void> | void;
-    onGenerateWalkthrough: () => Promise<void> | void;
-    onHome: () => void;
-    onMergePullRequest?: (
-      options: PullRequestMergeOptions & { autoMerge: boolean },
-    ) => Promise<void> | void;
-    onResolveDiscussion?: (discussionId: string, resolved: boolean) => Promise<void>;
-    onSubmitComment: (
-      comment: PullRequestReviewComment,
-    ) => Promise<PullRequestExistingReviewComment>;
-    onSubmitGeneralComment: (body: string) => Promise<void>;
-    onSubmitReview: (
-      event: PullRequestReviewEvent,
-      comments: ReadonlyArray<PullRequestReviewComment>,
-      body?: string,
-    ) => Promise<void>;
-    onUpdateComment: (commentId: string, body: string) => Promise<void>;
-    onUpdateDescription?: (body: string) => Promise<void> | void;
-    onUpdateGeneralComment: (commentId: string, body: string) => Promise<void>;
-    onUpdateTitle?: (title: string) => Promise<void> | void;
-    onUploadDescriptionAsset?: (file: File) => Promise<string> | string;
-    walkthroughError?: string | null;
-    walkthroughStatus: ReviewWalkthroughStatus;
-  };
+  keymap?: CodiffKeymap;
+  onCommandBridgeChange?: (bridge: ReviewSurfaceCommandBridge | null) => void;
   onDeleteShare?: () => Promise<void> | void;
-  onModeChange?: (mode: ReviewMode) => void;
   providerLabel?: string;
   repositoryUrl?: string;
   settingsBar?: ReactNode;
@@ -177,14 +402,27 @@ export type ReviewSurfaceProps = {
   title?: string;
 };
 
+type ControlledReviewSurfaceProps = ReviewSurfaceBaseProps & {
+  activeMode: ControlledReviewValue<ReviewMode>;
+  initialMode?: never;
+};
+
+type UncontrolledReviewSurfaceProps = ReviewSurfaceBaseProps & {
+  activeMode?: never;
+  initialMode?: ReviewMode;
+};
+
+export type ReviewSurfaceProps = ControlledReviewSurfaceProps | UncontrolledReviewSurfaceProps;
+
 export function ReviewSurface({
-  commenting,
+  activeMode,
+  capabilities,
   externalUrl,
   gitIdentity = null,
   initialMode,
-  interactive,
+  keymap: keymapProp,
+  onCommandBridgeChange,
   onDeleteShare,
-  onModeChange,
   providerLabel = 'provider',
   repositoryUrl,
   settingsBar,
@@ -193,7 +431,53 @@ export function ReviewSurface({
   sourceDescriptionFooterAside,
   title,
 }: ReviewSurfaceProps) {
-  const canComment = commenting?.canComment ?? Boolean(interactive);
+  const content = capabilities?.content;
+  const desktop = capabilities?.desktop;
+  const history = capabilities?.history;
+  const localReviewNotes = capabilities?.localReviewNotes;
+  const comments = capabilities?.comments;
+  const controlledPreferences = capabilities?.preferences;
+  const sourceNavigation = capabilities?.sourceNavigation;
+  const walkthrough = capabilities?.walkthrough;
+  const reviewSession = comments?.destination === 'provider' ? comments.reviewSession : undefined;
+  const canComment =
+    localReviewNotes?.canCreateInline ??
+    comments?.authoring.canCreateInline ??
+    comments?.inline.onSubmit != null;
+  const reviewDrafts =
+    localReviewNotes ??
+    (comments && (canComment || comments.authoring.drafts || reviewSession?.drafts)
+      ? comments.authoring
+      : undefined);
+  const controlledReviewDrafts = reviewSession?.drafts ?? reviewDrafts?.drafts;
+  const copyPendingCommentsLabel = localReviewNotes
+    ? 'Copy Review Notes'
+    : 'Copy Pending Review Comments';
+  const pendingCommentPrefix =
+    controlledPreferences?.pendingCommentPrefix?.value ??
+    (localReviewNotes
+      ? '# Address these Review Notes'
+      : comments
+        ? '# Address these Pending Review Comments'
+        : undefined);
+  const commenting = useMemo<ReviewCommenting | undefined>(
+    () =>
+      comments
+        ? {
+            canComment,
+            onDeleteComment: comments.inline.onDelete,
+            onDeleteGeneralComment: comments.general?.onDelete,
+            onReplyGeneralComment: comments.general?.onReply,
+            onResolveDiscussion: comments.general?.onResolve ?? comments.inline.onResolve,
+            onSignIn: comments.onSignIn,
+            onSubmitComment: comments.inline.onSubmit,
+            onSubmitGeneralComment: comments.general?.onCreate,
+            onUpdateComment: comments.inline.onUpdate,
+            onUpdateGeneralComment: comments.general?.onUpdate,
+          }
+        : undefined,
+    [canComment, comments],
+  );
   const deleteShare = useCallback(async () => {
     if (
       !onDeleteShare ||
@@ -207,60 +491,58 @@ export function ReviewSurface({
       window.alert(error instanceof Error ? error.message : String(error));
     }
   }, [onDeleteShare]);
-  const submitReviewComment = commenting?.onSubmitComment ?? interactive?.onSubmitComment;
-  const submitGeneralDiscussion =
-    commenting?.onSubmitGeneralComment ?? interactive?.onSubmitGeneralComment;
-  const updateReviewComment = commenting?.onUpdateComment ?? interactive?.onUpdateComment;
-  const updateGeneralDiscussion =
-    commenting?.onUpdateGeneralComment ?? interactive?.onUpdateGeneralComment;
-  const resolveDiscussion = commenting?.onResolveDiscussion ?? interactive?.onResolveDiscussion;
+  const submitReviewComment = comments?.inline.onSubmit;
+  const submitGeneralDiscussion = comments?.general?.onCreate;
+  const updateReviewComment = comments?.inline.onUpdate;
+  const updateGeneralDiscussion = comments?.general?.onUpdate;
+  const resolveDiscussion = comments?.inline.onResolve;
   const sharedWalkthrough = useMemo(
-    () => ({
-      ...snapshot.walkthrough,
-      commit: undefined,
-    }),
-    [snapshot.walkthrough],
+    () =>
+      walkthrough?.commit
+        ? snapshot.walkthrough
+        : {
+            ...snapshot.walkthrough,
+            commit: undefined,
+          },
+    [snapshot.walkthrough, walkthrough?.commit],
   );
   const navigation = useNarrativeNavigation(
     sharedWalkthrough,
     snapshot.files,
     `${snapshot.repository.root}:${getSourceKey(snapshot.repository.source)}`,
   );
-  const keymap = useMemo(() => createDefaultConfig().keymap, []);
+  const defaultKeymap = useMemo(() => createDefaultConfig().keymap, []);
+  const keymap = keymapProp ?? defaultKeymap;
+  const [uncontrolledWordWrap, setUncontrolledWordWrap] = useState(snapshot.preferences.wordWrap);
+  const wordWrap = controlledPreferences?.wordWrap?.value ?? uncontrolledWordWrap;
   const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [uncontrolledSidebarMode, setUncontrolledSidebarMode] = useState<ReviewMode>(
-    () => initialMode ?? (interactive ? 'tree' : 'walkthrough'),
+    () => initialMode ?? (desktop ? 'tree' : 'walkthrough'),
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat || !matchesShortcut(event, keymap, 'toggleSidebar')) {
-        return;
-      }
-      event.preventDefault();
-      setSidebarCollapsed((current) => !current);
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [keymap]);
-  const isSidebarModeControlled = Boolean(initialMode && onModeChange);
-  const sidebarMode =
-    isSidebarModeControlled && initialMode ? initialMode : uncontrolledSidebarMode;
+  const sidebarMode = activeMode?.value ?? uncontrolledSidebarMode;
   const [treeScrollTarget, setTreeScrollTarget] = useState<ReviewScrollTarget | null>(null);
   const {
     bumpItemVersion,
     collapsed,
     expandedGenerated,
-    itemVersionByKey,
-    selectedPath,
-    setSelectedPath,
+    itemVersionByKey: uncontrolledItemVersionByKey,
+    selectedPath: uncontrolledSelectedPath,
+    setSelectedPath: setUncontrolledSelectedPath,
     toggleCollapsed,
     toggleViewed,
     viewed,
   } = useReviewFileState({
-    initialSelectedPath: snapshot.files[0]?.path ?? null,
+    collapsed: desktop?.collapsed,
+    initialSelectedPath:
+      controlledPreferences?.selectedPath?.value ?? snapshot.files[0]?.path ?? null,
+    onCollapsedChange: desktop?.onCollapsedChange,
+    onViewedChange: desktop?.onViewedChange,
+    viewed: desktop?.viewed,
   });
+  const itemVersionByKey = content?.itemVersionByKey ?? uncontrolledItemVersionByKey;
+  const selectedPath = controlledPreferences?.selectedPath?.value ?? uncontrolledSelectedPath;
   const { resizeSidebar, sidebarWidth } = useResizableSidebar({
     collapseThreshold: SIDEBAR_COLLAPSE_THRESHOLD,
     onCollapse: () => setSidebarCollapsed(true),
@@ -268,21 +550,46 @@ export function ReviewSurface({
     readWidth: readSharedSidebarWidth,
   });
   const snapshotReviewComments = useMemo(() => getSnapshotReviewComments(snapshot), [snapshot]);
+  const showOutdated = controlledPreferences?.outdatedVisibility?.value ?? true;
   const [editedReviewCommentBodies, setEditedReviewCommentBodies] = useState<
     Readonly<Record<string, string>>
   >({});
   const visibleSnapshotReviewComments = useMemo(
     () =>
-      snapshotReviewComments.map((comment) =>
-        editedReviewCommentBodies[comment.id] != null &&
-        editedReviewCommentBodies[comment.id] !== comment.body
-          ? { ...comment, body: editedReviewCommentBodies[comment.id] }
-          : comment,
-      ),
-    [editedReviewCommentBodies, snapshotReviewComments],
+      snapshotReviewComments
+        .filter((comment) => showOutdated || !comment.isOutdated)
+        .map((comment) => ({
+          ...comment,
+          ...(editedReviewCommentBodies[comment.id] != null &&
+          editedReviewCommentBodies[comment.id] !== comment.body
+            ? { body: editedReviewCommentBodies[comment.id] }
+            : {}),
+          canDelete: comment.canDelete === true && comments?.inline.onDelete != null,
+          canEdit: comment.canEdit === true && comments?.inline.onUpdate != null,
+          canReplyThread: comment.canReplyThread !== false && comments?.inline.onSubmit != null,
+          canResolveThread: comment.canResolveThread === true && comments?.inline.onResolve != null,
+        })),
+    [comments, editedReviewCommentBodies, showOutdated, snapshotReviewComments],
   );
-  const [localReviewComments, setLocalReviewComments] =
+  const [uncontrolledLocalReviewComments, setUncontrolledLocalReviewComments] =
     useState<ReadonlyArray<ReviewComment>>(emptyReviewComments);
+  const uncontrolledLocalReviewCommentsRef = useRef(uncontrolledLocalReviewComments);
+  const localReviewComments = controlledReviewDrafts?.value ?? uncontrolledLocalReviewComments;
+  const setLocalReviewComments = useCallback<
+    Dispatch<SetStateAction<ReadonlyArray<ReviewComment>>>
+  >(
+    (update) => {
+      if (controlledReviewDrafts) {
+        controlledReviewDrafts.onChange(update);
+        return;
+      }
+      const nextComments =
+        typeof update === 'function' ? update(uncontrolledLocalReviewCommentsRef.current) : update;
+      uncontrolledLocalReviewCommentsRef.current = nextComments;
+      setUncontrolledLocalReviewComments(nextComments);
+    },
+    [controlledReviewDrafts],
+  );
   const reviewComments = useMemo(
     () => mergeReviewComments(visibleSnapshotReviewComments, localReviewComments),
     [localReviewComments, visibleSnapshotReviewComments],
@@ -313,7 +620,8 @@ export function ReviewSurface({
     [snapshot.repository.generalComments],
   );
   const generalCommentCount = generalComments.length;
-  const showCommentsTab = Boolean(commenting || interactive || generalCommentCount > 0);
+  const showCommentsTab =
+    comments != null || generalCommentCount > 0 || visibleSnapshotReviewComments.length > 0;
   const [generalCommentDraft, setGeneralCommentDraft] = useState('');
   const [generalCommentEditDraft, setGeneralCommentEditDraft] = useState('');
   const [editingGeneralCommentId, setEditingGeneralCommentId] = useState<string | null>(null);
@@ -330,16 +638,66 @@ export function ReviewSurface({
   const [walkthroughRequestPending, setWalkthroughRequestPending] = useState(false);
   const walkthroughRequestPendingRef = useRef(false);
   const [walkthroughRequestId, setWalkthroughRequestId] = useState(0);
-  const interactiveRef = useRef(interactive);
+  const walkthroughRef = useRef(walkthrough);
 
-  const visibleFiles = useMemo(
-    () =>
-      sortFiles(snapshot.files).filter(
-        (file) =>
-          fuzzyMatches(file.path, fileSearchQuery) &&
-          fileHasVisibleDiff(file, snapshot.preferences.showWhitespace),
-      ),
-    [fileSearchQuery, snapshot.files, snapshot.preferences.showWhitespace],
+  const orderedFiles = useMemo(() => sortFiles(snapshot.files), [snapshot.files]);
+  const {
+    activeMatch: activeDiffSearchMatch,
+    activeMatchIndex: activeDiffSearchMatchIndex,
+    closeSearch: closeDiffSearch,
+    fileFilteredFiles,
+    focusRequest: diffSearchFocusRequest,
+    matches: diffSearchMatches,
+    matchPathSet: diffSearchMatchPathSet,
+    moveMatch: moveDiffSearchMatch,
+    openSearch: openDiffSearch,
+    query: diffSearchQuery,
+    updateQuery: updateDiffSearchQuery,
+    visible: diffSearchVisible,
+    visibleFiles,
+  } = useDiffSearch({
+    files: orderedFiles,
+    fileSearchQuery,
+    showWhitespace: snapshot.preferences.showWhitespace,
+  });
+  useEffect(() => {
+    if (
+      !content?.onLoadSection ||
+      !supportsDiffSearchContentPreload(snapshot.repository.source) ||
+      !diffSearchQuery.trim()
+    ) {
+      return;
+    }
+
+    const requests = fileFilteredFiles.flatMap((file) =>
+      file.sections
+        .filter(shouldPreloadSectionContentsForSearch)
+        .map((section) => ({ file, section })),
+    );
+    if (requests.length === 0) {
+      return;
+    }
+
+    let canceled = false;
+    let cursor = 0;
+    const loadNext = async () => {
+      while (!canceled) {
+        const request = requests[cursor];
+        cursor += 1;
+        if (!request) {
+          return;
+        }
+        await content.onLoadSection!(request.file, request.section);
+      }
+    };
+    void Promise.all(Array.from({ length: Math.min(3, requests.length) }, () => loadNext()));
+    return () => {
+      canceled = true;
+    };
+  }, [content, diffSearchQuery, fileFilteredFiles, snapshot.repository.source]);
+  const forceExpandedPaths = useMemo(
+    () => new Set([...diffSearchMatchPathSet, ...(content?.forceExpandedPaths ?? emptyPaths)]),
+    [content?.forceExpandedPaths, diffSearchMatchPathSet],
   );
   const totalLineCount = useMemo(
     () =>
@@ -348,7 +706,8 @@ export function ReviewSurface({
       ),
     [snapshot.preferences.showWhitespace, visibleFiles],
   );
-  const showTotalLineCount = sidebarMode !== 'comments' && totalLineCount.countable;
+  const showTotalLineCount =
+    sidebarMode !== 'comments' && sidebarMode !== 'history' && totalLineCount.countable;
   const visibleSelectedPath =
     selectedPath && visibleFiles.some((file) => file.path === selectedPath)
       ? selectedPath
@@ -377,10 +736,13 @@ export function ReviewSurface({
 
   const changeSidebarMode = useCallback(
     (mode: ReviewMode) => {
-      setUncontrolledSidebarMode(mode);
-      onModeChange?.(mode);
+      if (activeMode) {
+        activeMode.onChange(mode);
+      } else {
+        setUncontrolledSidebarMode(mode);
+      }
     },
-    [onModeChange],
+    [activeMode],
   );
 
   const activateGeneralComment = useCallback(
@@ -431,19 +793,25 @@ export function ReviewSurface({
   const deleteComment = useCallback(
     (commentId: string) => {
       const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
-      if (comment?.isReadOnly && comment.canDelete && commenting?.onDeleteComment) {
+      if (comment?.isReadOnly && comment.canDelete && comments?.inline.onDelete) {
         updateActiveReviewCommentDraft(null);
         setLocalReviewComments((current) =>
           current.filter((candidate) => candidate.id !== commentId),
         );
-        void commenting.onDeleteComment(commentId).catch((error: unknown) => {
+        void comments.inline.onDelete(commentId).catch((error: unknown) => {
           window.alert(error instanceof Error ? error.message : String(error));
         });
         return;
       }
       deleteLocalComment(commentId);
     },
-    [commenting, deleteLocalComment, reviewCommentsRef, updateActiveReviewCommentDraft],
+    [
+      comments,
+      deleteLocalComment,
+      reviewCommentsRef,
+      setLocalReviewComments,
+      updateActiveReviewCommentDraft,
+    ],
   );
   const submitComment = useCallback(
     (commentId: string) => {
@@ -466,9 +834,10 @@ export function ReviewSurface({
             : candidate,
         ),
       );
-      void submitReviewComment(
-        toPullRequestReviewComment(comment, { includeSectionId: commenting != null }),
-      )
+      const submission = toPullRequestReviewComment(comment, {
+        includeSectionId: comments?.destination === 'share',
+      });
+      void submitReviewComment(submission)
         .then((submittedComment) => {
           clearCommentFocus(commentId);
           setLocalReviewComments((current) =>
@@ -501,17 +870,18 @@ export function ReviewSurface({
     [
       bumpItemVersion,
       clearCommentFocus,
-      commenting,
+      comments?.destination,
       reviewCommentsRef,
+      setLocalReviewComments,
       submitReviewComment,
       updateActiveReviewCommentDraft,
     ],
   );
   const submitReview = useCallback(
-    (event: PullRequestReviewEvent, body?: string) => {
+    (event: PullRequestReviewEvent, body?: string): Promise<void> | void => {
       const source = snapshot.repository.source;
       if (
-        !interactive ||
+        !reviewSession ||
         pullRequestReviewSubmitting ||
         (source.type === 'pull-request' &&
           isPullRequestReviewActionDisabled(source.reviewStatus, event))
@@ -531,9 +901,11 @@ export function ReviewSurface({
       const formattedComments = pendingComments.map((comment) =>
         toPullRequestReviewComment(comment),
       );
-      const submission = body
-        ? interactive.onSubmitReview(event, formattedComments, body)
-        : interactive.onSubmitReview(event, formattedComments);
+      const submission = reviewSession.submit({
+        comments: formattedComments,
+        outcome: toProviderReviewOutcome(event),
+        ...(body?.trim() ? { summary: body } : {}),
+      });
       return submission
         .then(() => {
           updateActiveReviewCommentDraft(null);
@@ -548,18 +920,19 @@ export function ReviewSurface({
         .finally(() => setPullRequestReviewSubmitting(null));
     },
     [
-      interactive,
+      reviewSession,
       pullRequestReviewSubmitting,
       snapshot.repository.source,
       activeReviewCommentDraftRef,
       reviewCommentsRef,
+      setLocalReviewComments,
       updateActiveReviewCommentDraft,
     ],
   );
   const closePullRequest = useCallback(() => {
     const source = snapshot.repository.source;
     if (
-      !interactive?.onClosePullRequest ||
+      !sourceNavigation?.onClosePullRequest ||
       pullRequestCloseSubmitting ||
       source.type !== 'pull-request' ||
       source.reviewStatus?.close?.disabled === true ||
@@ -569,42 +942,42 @@ export function ReviewSurface({
     }
 
     setPullRequestCloseSubmitting(true);
-    void Promise.resolve(interactive.onClosePullRequest())
+    void Promise.resolve(sourceNavigation.onClosePullRequest())
       .catch((error: unknown) => {
         window.alert(error instanceof Error ? error.message : String(error));
       })
       .finally(() => setPullRequestCloseSubmitting(false));
-  }, [interactive, pullRequestCloseSubmitting, snapshot.repository.source]);
+  }, [pullRequestCloseSubmitting, snapshot.repository.source, sourceNavigation]);
   const mergePullRequest = useCallback(
     (options: PullRequestMergeOptions & { autoMerge: boolean }) => {
-      if (!interactive?.onMergePullRequest || pullRequestMergeSubmitting) {
+      if (!sourceNavigation?.onMergePullRequest || pullRequestMergeSubmitting) {
         return;
       }
 
       setPullRequestMergeSubmitting(true);
-      void Promise.resolve(interactive.onMergePullRequest(options))
+      void Promise.resolve(sourceNavigation.onMergePullRequest(options))
         .catch((error: unknown) => {
           window.alert(error instanceof Error ? error.message : String(error));
         })
         .finally(() => setPullRequestMergeSubmitting(false));
     },
-    [interactive, pullRequestMergeSubmitting],
+    [pullRequestMergeSubmitting, sourceNavigation],
   );
   const cancelAutoMerge = useCallback(() => {
-    if (!interactive?.onCancelAutoMerge || pullRequestMergeSubmitting) {
+    if (!sourceNavigation?.onCancelAutoMerge || pullRequestMergeSubmitting) {
       return;
     }
 
     setPullRequestMergeSubmitting(true);
-    void Promise.resolve(interactive.onCancelAutoMerge())
+    void Promise.resolve(sourceNavigation.onCancelAutoMerge())
       .catch((error: unknown) => {
         window.alert(error instanceof Error ? error.message : String(error));
       })
       .finally(() => setPullRequestMergeSubmitting(false));
-  }, [interactive, pullRequestMergeSubmitting]);
+  }, [pullRequestMergeSubmitting, sourceNavigation]);
   useEffect(() => {
-    interactiveRef.current = interactive;
-  }, [interactive]);
+    walkthroughRef.current = walkthrough;
+  }, [walkthrough]);
 
   useEffect(() => {
     if (!walkthroughRequestPending || walkthroughRequestId === 0) {
@@ -612,7 +985,7 @@ export function ReviewSurface({
     }
 
     let cancelled = false;
-    void Promise.resolve(interactiveRef.current?.onGenerateWalkthrough())
+    void Promise.resolve(walkthroughRef.current?.onGenerate?.())
       .catch(() => {})
       .finally(() => {
         if (cancelled) {
@@ -628,8 +1001,8 @@ export function ReviewSurface({
 
   const startWalkthroughGeneration = useCallback(() => {
     if (
-      !interactive ||
-      interactive.walkthroughStatus === 'generating' ||
+      !walkthrough?.onGenerate ||
+      walkthrough.status === 'generating' ||
       walkthroughRequestPendingRef.current
     ) {
       return;
@@ -638,12 +1011,12 @@ export function ReviewSurface({
     walkthroughRequestPendingRef.current = true;
     setWalkthroughRequestPending(true);
     setWalkthroughRequestId((current) => current + 1);
-  }, [interactive]);
+  }, [walkthrough]);
   useEffect(() => {
-    if (sidebarMode === 'walkthrough' && interactive?.walkthroughStatus === 'idle') {
+    if (sidebarMode === 'walkthrough' && walkthrough?.status === 'idle') {
       startWalkthroughGeneration();
     }
-  }, [interactive?.walkthroughStatus, sidebarMode, startWalkthroughGeneration]);
+  }, [sidebarMode, startWalkthroughGeneration, walkthrough?.status]);
   useEffect(() => {
     if (sidebarMode !== 'comments' || generalComments.length === 0) {
       return;
@@ -730,16 +1103,23 @@ export function ReviewSurface({
     generalCommentEditSubmitting,
     updateGeneralDiscussion,
   ]);
+  const selectPath = useCallback(
+    (path: string | null) => {
+      setUncontrolledSelectedPath(path);
+      controlledPreferences?.selectedPath?.onChange(path);
+    },
+    [controlledPreferences?.selectedPath, setUncontrolledSelectedPath],
+  );
   const activateTreePath = useCallback(
     (path: string) => {
-      setSelectedPath(path);
+      selectPath(path);
       setTreeScrollTarget((current) => ({
         behavior: 'smooth',
         path,
         request: (current?.request ?? 0) + 1,
       }));
     },
-    [setSelectedPath],
+    [selectPath],
   );
   const updateSelectedPathFromScroll = useCallback(
     (viewer: CodeViewInstance) => {
@@ -749,41 +1129,173 @@ export function ReviewSurface({
         snapshot.preferences.showWhitespace,
       );
 
-      if (nextPath) {
-        setSelectedPath((current) => (current === nextPath ? current : nextPath));
+      if (nextPath && selectedPath !== nextPath) {
+        selectPath(nextPath);
       }
     },
-    [setSelectedPath, snapshot.preferences.showWhitespace, visibleFiles],
+    [selectPath, selectedPath, snapshot.preferences.showWhitespace, visibleFiles],
   );
+
+  const [hunkNavigation, setHunkNavigation] = useState<{
+    direction: 1 | -1;
+    request: number;
+  } | null>(null);
+  const navigateHunks = useCallback((direction: 1 | -1) => {
+    setHunkNavigation((current) => ({
+      direction,
+      request: (current?.request ?? 0) + 1,
+    }));
+  }, []);
+  const focusFileFilter = useCallback(() => {
+    setSidebarCollapsed(false);
+    changeSidebarMode('tree');
+    requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLInputElement>('.review-surface .sidebar-search');
+      input?.focus();
+      input?.select();
+    });
+  }, [changeSidebarMode]);
+  const toggleWordWrap = useCallback(() => {
+    const nextWordWrap = !wordWrap;
+    setUncontrolledWordWrap(nextWordWrap);
+    controlledPreferences?.wordWrap?.onChange(nextWordWrap);
+  }, [controlledPreferences?.wordWrap, wordWrap]);
+  const { closeCommandBar, commandBarVisible, shortcutsHelpVisible } = useAppKeyboardShortcuts({
+    keymap,
+    navigateHunks,
+    onFocusFileFilter: focusFileFilter,
+    onOpenDiffSearch: openDiffSearch,
+    onOpenSelectedFile: desktop?.onOpenSelectedFile,
+    onToggleSidebar: () => setSidebarCollapsed((current) => !current),
+    onToggleWordWrap: toggleWordWrap,
+    shouldDeferHunkNavigation: () => sidebarMode === 'walkthrough',
+    sidebarCollapsed,
+  });
+  const commandBarCommands = useMemo(
+    () =>
+      [
+        {
+          execute: focusFileFilter,
+          id: 'file-filter',
+          keymapAction: 'fileFilter',
+          title: 'Focus File Filter',
+        },
+        {
+          execute: openDiffSearch,
+          id: 'diff-search',
+          keymapAction: 'diffSearch',
+          title: 'Find in Diffs',
+        },
+        { execute: () => changeSidebarMode('tree'), id: 'sidebar-tree', title: 'Show File Tree' },
+        {
+          execute: () => changeSidebarMode('walkthrough'),
+          id: 'sidebar-walkthrough',
+          title: 'Show Walkthrough',
+        },
+        ...(showCommentsTab
+          ? [
+              {
+                execute: () => changeSidebarMode('comments'),
+                id: 'sidebar-comments',
+                title: 'Show Comments',
+              },
+            ]
+          : []),
+        ...(history
+          ? [
+              {
+                execute: () => changeSidebarMode('history'),
+                id: 'sidebar-history',
+                title: 'Show History',
+              },
+            ]
+          : []),
+        {
+          execute: () => setSidebarCollapsed((current) => !current),
+          id: 'toggle-sidebar',
+          keymapAction: 'toggleSidebar',
+          title: 'Toggle Sidebar',
+        },
+        {
+          execute: toggleWordWrap,
+          id: 'toggle-word-wrap',
+          keymapAction: 'toggleWordWrap',
+          title: 'Toggle Word Wrap',
+        },
+        ...(desktop?.commands ?? []),
+      ] satisfies ReadonlyArray<Command>,
+    [
+      changeSidebarMode,
+      desktop?.commands,
+      focusFileFilter,
+      history,
+      openDiffSearch,
+      showCommentsTab,
+      toggleWordWrap,
+    ],
+  );
+  const commandBridge = useMemo<ReviewSurfaceCommandBridge>(
+    () => ({
+      copyPendingComments: () =>
+        buildReviewCommentsMarkdown(
+          snapshot.files,
+          localReviewComments,
+          snapshot.preferences.showWhitespace,
+          pendingCommentPrefix,
+        ),
+      copyPendingCommentsLabel,
+      getPersistenceState: () => ({ mode: sidebarMode, selectedPath: visibleSelectedPath }),
+      openDiffSearch,
+    }),
+    [
+      copyPendingCommentsLabel,
+      localReviewComments,
+      openDiffSearch,
+      pendingCommentPrefix,
+      sidebarMode,
+      snapshot.files,
+      snapshot.preferences.showWhitespace,
+      visibleSelectedPath,
+    ],
+  );
+  useEffect(() => {
+    onCommandBridgeChange?.(commandBridge);
+    return () => onCommandBridgeChange?.(null);
+  }, [commandBridge, onCommandBridgeChange]);
 
   const diffLineHeight = getCodeFontLineHeight(
     normalizeCodeFontSizePreference(snapshot.preferences.codeFontSize),
   );
   const commonReviewProps = {
-    activeSearchMatch: null,
+    activeSearchMatch: activeDiffSearchMatch,
     agentId: snapshot.walkthrough.agent,
     agentLabel: getAgentLabel(snapshot.walkthrough.agent),
     codeQualityFindings: snapshot.codeQualityFindings,
     collapsed,
     comments: reviewComments,
-    commitMetadata: null,
+    commitMetadata: snapshot.commitMetadata ?? null,
     diffLineHeight,
-    diffStyle: snapshot.preferences.diffStyle,
-    disableWorkerPool: true,
+    diffStyle: controlledPreferences?.diffLayout?.value ?? snapshot.preferences.diffStyle,
+    disableWorkerPool: desktop?.disableCodeViewWorkerPool ?? true,
     expandedGenerated,
     focusCommentId,
     focusCommentRequest,
     gitIdentity,
-    hunkNavigation: null,
+    hunkNavigation,
     initialMarkdownPreviewSectionIds,
     isReadOnly: !canComment,
     itemVersionByKey,
     keymap,
-    loadingSectionIds: new Set<string>(),
+    loadingSectionIds: content?.loadingSectionIds ?? new Set<string>(),
+    onAskCodex: reviewDrafts?.onAsk,
     onCommentDraftChange: updateActiveReviewCommentDraft,
     onCreateComment: createComment,
     onDeleteComment: deleteComment,
-    onLoadSection: noop,
+    onLoadImageContent: content?.onLoadImageContent,
+    onLoadSection: content?.onLoadSection,
+    onLoadSectionContents: content?.onLoadSectionContents,
+    onOpenFile: desktop?.onOpenFile,
+    onRefreshMarkdown: content?.onRefreshMarkdown,
     onResolveThread: resolveDiscussion ?? noop,
     onSaveCommentEdit: updateExistingReviewComment,
     onSelectPathFromScroll: noop,
@@ -791,18 +1303,21 @@ export function ReviewSurface({
     onToggleCollapsed: toggleCollapsed,
     onToggleViewed: toggleViewed,
     onUpdateComment: updateComment,
-    onUpdateSourceDescription: interactive?.onUpdateDescription,
-    onUpdateSourceTitle: interactive?.onUpdateTitle,
-    onUploadSourceDescriptionAsset: interactive?.onUploadDescriptionAsset,
-    searchQuery: '',
+    onUpdateSourceDescription: sourceNavigation?.onUpdateDescription,
+    onUpdateSourceTitle: sourceNavigation?.onUpdateTitle,
+    onUploadSourceDescriptionAsset: sourceNavigation?.onUploadDescriptionAsset,
+    resolveReviewContext: content?.resolveReviewContext,
+    searchQuery: diffSearchQuery,
     showWhitespace: snapshot.preferences.showWhitespace,
     source: snapshot.repository.source,
     supportsReviewCommentActions: submitReviewComment != null,
     theme: snapshot.preferences.theme,
     viewed,
-    wordWrap: snapshot.preferences.wordWrap,
+    wordWrap,
   };
   const source = snapshot.repository.source;
+  const emptySourceDetail = getEmptySourceDetail(source, snapshot.repository.root);
+  const hasDiffSearchQuery = diffSearchQuery.trim().length > 0;
   const sourceMergeState = source.type === 'pull-request' ? source.mergeState : undefined;
   const isTerminalMergeState = sourceMergeState
     ? isTerminalPullRequestMergeState(sourceMergeState)
@@ -812,15 +1327,15 @@ export function ReviewSurface({
       <PullRequestMergeStatusBadge mergeState={sourceMergeState} />
     ) : null;
   const sourceDescriptionActions =
-    interactive && source.type === 'pull-request' ? (
+    (reviewSession || sourceNavigation?.onClosePullRequest) && source.type === 'pull-request' ? (
       <PullRequestReviewButtons
         disabled={pullRequestReviewSubmitting != null || pullRequestCloseSubmitting}
         hasPendingComments={
           getPendingPullRequestReviewComments(localReviewComments, activeReviewCommentDraftState)
             .length > 0
         }
-        onClosePullRequest={closePullRequest}
-        onSubmitReview={submitReview}
+        onClosePullRequest={sourceNavigation?.onClosePullRequest ? closePullRequest : undefined}
+        onSubmitReview={reviewSession ? submitReview : undefined}
         reviewStatus={source.reviewStatus}
         showCommentReview={source.provider === 'github' || source.host === 'github.com'}
       >
@@ -832,13 +1347,15 @@ export function ReviewSurface({
       </div>
     ) : undefined;
   const sourceDescriptionFooterMain =
-    interactive && sourceMergeState && !isTerminalMergeState ? (
+    (sourceNavigation?.onMergePullRequest || sourceNavigation?.onCancelAutoMerge) &&
+    sourceMergeState &&
+    !isTerminalMergeState ? (
       <PullRequestMergeControls
         disabled={pullRequestMergeSubmitting}
         isPending={pullRequestMergeSubmitting}
         mergeState={sourceMergeState}
-        onCancelAutoMerge={cancelAutoMerge}
-        onMergePullRequest={mergePullRequest}
+        onCancelAutoMerge={sourceNavigation?.onCancelAutoMerge ? cancelAutoMerge : undefined}
+        onMergePullRequest={sourceNavigation?.onMergePullRequest ? mergePullRequest : undefined}
       />
     ) : undefined;
   const sourceDescriptionFooter =
@@ -856,9 +1373,9 @@ export function ReviewSurface({
         actions={sourceDescriptionActions}
         footer={sourceDescriptionFooter}
         keymap={keymap}
-        onUpdateDescription={interactive?.onUpdateDescription}
-        onUpdateTitle={interactive?.onUpdateTitle}
-        onUploadDescriptionAsset={interactive?.onUploadDescriptionAsset}
+        onUpdateDescription={sourceNavigation?.onUpdateDescription}
+        onUpdateTitle={sourceNavigation?.onUpdateTitle}
+        onUploadDescriptionAsset={sourceNavigation?.onUploadDescriptionAsset}
         source={source}
       />
     ) : null;
@@ -872,6 +1389,7 @@ export function ReviewSurface({
       <WalkthroughDiffSurface
         allowViewedToggle
         blocks={blocks}
+        forceExpandedPaths={forceExpandedPaths}
         onActiveBlockChange={onActiveBlockChange}
         reviewProps={commonReviewProps}
         scrollTarget={blockScrollTarget}
@@ -894,9 +1412,9 @@ export function ReviewSurface({
       : null;
   const repositoryLinkUrl = repositoryUrl ?? sourceExternalUrl;
   const walkthroughStatus =
-    walkthroughRequestPending && interactive?.walkthroughStatus !== 'ready'
+    walkthroughRequestPending && walkthrough?.status !== 'ready'
       ? 'generating'
-      : interactive?.walkthroughStatus;
+      : walkthrough?.status;
   const [walkthroughProgressRevision, setWalkthroughProgressRevision] = useState(0);
   const previousWalkthroughStatusRef = useRef(walkthroughStatus);
   useEffect(() => {
@@ -908,13 +1426,13 @@ export function ReviewSurface({
     }
     previousWalkthroughStatusRef.current = walkthroughStatus;
   }, [walkthroughStatus]);
-  const walkthroughReady = !interactive || walkthroughStatus === 'ready';
+  const walkthroughReady = !walkthrough || walkthroughStatus === 'ready';
   const walkthroughFailed = walkthroughStatus === 'failed';
   const walkthroughStatusTitle = walkthroughFailed
     ? 'Walkthrough unavailable'
     : 'Generating walkthrough…';
   const walkthroughStatusDescription = walkthroughFailed
-    ? (interactive?.walkthroughError ?? 'Fix the generation issue, then try again.')
+    ? (walkthrough?.error?.reason ?? 'Fix the generation issue, then try again.')
     : null;
   const shellTheme =
     snapshot.preferences.theme === 'system' ? undefined : snapshot.preferences.theme;
@@ -932,6 +1450,15 @@ export function ReviewSurface({
       label: 'Tree',
       value: 'tree',
     },
+    ...(history
+      ? [
+          {
+            icon: <ClockCounterClockwise aria-hidden size={14} weight="bold" />,
+            label: 'History',
+            value: 'history' as const,
+          },
+        ]
+      : []),
     ...(showCommentsTab
       ? [
           {
@@ -974,229 +1501,294 @@ export function ReviewSurface({
     ) : undefined;
 
   return (
-    <div
-      className={`app-shell share-shell${interactive ? ' merge-request-shell' : ''}${
-        sidebarCollapsed ? ' sidebar-collapsed' : ''
-      }`}
-      data-theme={shellTheme}
-      style={
-        sidebarCollapsed ? undefined : { gridTemplateColumns: `${sidebarWidth}px 0 minmax(0, 1fr)` }
-      }
-    >
-      <ReviewTopBar
-        actions={topBarActions}
-        context={
-          <>
-            {snapshot.branch ? (
-              <span className="review-top-bar-branch" title={snapshot.branch}>
-                {snapshot.branch}
-              </span>
-            ) : null}
-            {sourceLabel ? (
-              sourceExternalUrl ? (
-                <a
-                  aria-label={`Open ${sourceLabel} in ${providerLabel}`}
-                  className="review-top-bar-source"
-                  href={sourceExternalUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                  title={`Open ${sourceLabel} in ${providerLabel}`}
-                >
-                  <span>{sourceLabel}</span>
-                  <ArrowSquareOut aria-hidden size={14} weight="bold" />
-                </a>
-              ) : (
-                <span className="review-top-bar-source">{sourceLabel}</span>
-              )
-            ) : null}
-          </>
-        }
-        leading={
-          interactive ? (
-            <button
-              aria-label="Back to Codiff"
-              className="merge-request-nav-button merge-request-home-button"
-              onClick={interactive.onHome}
-              title="Back to Codiff"
-              type="button"
-            >
-              <img
-                alt=""
-                aria-hidden
-                className="merge-request-nav-icon"
-                draggable={false}
-                src="/icon.png"
-              />
-            </button>
-          ) : undefined
-        }
-        mode={sidebarMode}
-        modes={reviewModes}
-        onModeChange={changeSidebarMode}
-        onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
-        repository={
-          repositoryLinkUrl ? (
-            <a
-              className="review-top-bar-repository"
-              href={repositoryLinkUrl}
-              rel="noreferrer"
-              target={repositoryUrl ? undefined : '_blank'}
-            >
-              {rootLabel}
-            </a>
-          ) : (
-            <span className="review-top-bar-repository">{rootLabel}</span>
-          )
-        }
-        repositoryTooltip={snapshot.repository.root}
-        sidebarCollapsed={sidebarCollapsed}
-        toggleTitle={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar`}
+    <>
+      <CommandBar
+        commands={commandBarCommands}
+        keymap={keymap}
+        onClose={closeCommandBar}
+        visible={commandBarVisible}
       />
-      <aside className="squircle sidebar">
-        <div className="sidebar-search-row">
-          <input
-            aria-label="Filter changed files"
-            className="sidebar-search"
-            onChange={(event) => setFileSearchQuery(event.currentTarget.value)}
-            placeholder="Filter files"
-            spellCheck={false}
-            type="search"
-            value={fileSearchQuery}
-          />
-        </div>
-        {sidebarMode === 'tree' ? (
-          <ReviewFileTree
-            files={visibleFiles}
-            onActivatePath={activateTreePath}
-            selectedPath={visibleSelectedPath}
-            showWhitespace={snapshot.preferences.showWhitespace}
-          />
-        ) : sidebarMode === 'comments' ? (
-          <SidebarGeneralCommentList
-            comments={generalComments}
-            focusedCommentId={focusedGeneralCommentId}
-            onActivateComment={activateGeneralComment}
-          />
-        ) : walkthroughReady ? (
-          <NarrativeSidebar
-            allowCommit={false}
-            files={visibleFiles}
-            navigation={navigation}
-            showWhitespace={snapshot.preferences.showWhitespace}
-            walkthrough={sharedWalkthrough}
-          />
-        ) : (
-          <div className="sidebar-walkthrough-status-shell">
-            <div
-              className={`sidebar-walkthrough-status${walkthroughFailed ? '' : ' codex'}`}
-              title={walkthroughStatusDescription ?? undefined}
-            >
-              {walkthroughFailed ? (
+      <div
+        className={`app-shell share-shell review-surface${desktop ? ' merge-request-shell' : ''}${
+          desktop?.isWindowFullscreen ? ' window-fullscreen' : ''
+        }${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}
+        data-theme={shellTheme}
+        style={
+          sidebarCollapsed
+            ? undefined
+            : { gridTemplateColumns: `${sidebarWidth}px 0 minmax(0, 1fr)` }
+        }
+      >
+        <ReviewTopBar
+          actions={topBarActions}
+          context={
+            <>
+              {snapshot.branch ? (
+                <span className="review-top-bar-branch" title={snapshot.branch}>
+                  {snapshot.branch}
+                </span>
+              ) : null}
+              {sourceLabel ? (
+                sourceExternalUrl ? (
+                  <a
+                    aria-label={`Open ${sourceLabel} in ${providerLabel}`}
+                    className="review-top-bar-source"
+                    href={sourceExternalUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                    title={`Open ${sourceLabel} in ${providerLabel}`}
+                  >
+                    <span>{sourceLabel}</span>
+                    <ArrowSquareOut aria-hidden size={14} weight="bold" />
+                  </a>
+                ) : (
+                  <span className="review-top-bar-source">{sourceLabel}</span>
+                )
+              ) : null}
+            </>
+          }
+          mode={sidebarMode}
+          modes={reviewModes}
+          onModeChange={changeSidebarMode}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          repository={
+            repositoryLinkUrl ? (
+              <a
+                className="review-top-bar-repository"
+                href={repositoryLinkUrl}
+                rel="noreferrer"
+                target={repositoryUrl ? undefined : '_blank'}
+              >
+                {rootLabel}
+              </a>
+            ) : (
+              <span className="review-top-bar-repository">{rootLabel}</span>
+            )
+          }
+          repositoryTooltip={snapshot.repository.root}
+          sidebarCollapsed={sidebarCollapsed}
+          toggleTitle={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (${getShortcutLabel(
+            keymap,
+            'toggleSidebar',
+          )})`}
+        />
+        {desktop?.beforeContent}
+        {reviewDrafts ? (
+          <div className="review-action-bar">
+            <CopyCommentsButton
+              actionLabel={copyPendingCommentsLabel}
+              comments={localReviewComments}
+              files={snapshot.files}
+              reviewCommentsPrefix={pendingCommentPrefix ?? ''}
+              showWhitespace={snapshot.preferences.showWhitespace}
+            />
+          </div>
+        ) : null}
+        <DiffSearchPanel
+          activeIndex={activeDiffSearchMatchIndex}
+          focusRequest={diffSearchFocusRequest}
+          keymap={keymap}
+          matchCount={diffSearchMatches.length}
+          onChange={updateDiffSearchQuery}
+          onClose={closeDiffSearch}
+          onNext={() => moveDiffSearchMatch(1)}
+          onPrevious={() => moveDiffSearchMatch(-1)}
+          query={diffSearchQuery}
+          visible={diffSearchVisible}
+        />
+        <aside className="squircle sidebar">
+          <div className="sidebar-search-row">
+            <input
+              aria-label={sidebarMode === 'history' ? 'Filter history' : 'Filter changed files'}
+              className="sidebar-search"
+              onChange={(event) =>
+                sidebarMode === 'history'
+                  ? setHistorySearchQuery(event.currentTarget.value)
+                  : setFileSearchQuery(event.currentTarget.value)
+              }
+              placeholder={sidebarMode === 'history' ? 'Filter history' : 'Filter files'}
+              spellCheck={false}
+              type="search"
+              value={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
+            />
+          </div>
+          {sidebarMode === 'history' && history ? (
+            <HistorySidebar
+              branchSource={history.branchSource ?? null}
+              currentSource={history.currentSource}
+              entries={history.entries}
+              hasMore={history.hasMore}
+              loading={history.loading}
+              onLoadMore={history.onLoadMore}
+              onSelectSource={history.onSelectSource}
+              pullRequestSource={history.pullRequestSource ?? null}
+              searchQuery={historySearchQuery}
+            />
+          ) : sidebarMode === 'tree' ? (
+            <ReviewFileTree
+              files={visibleFiles}
+              onActivatePath={activateTreePath}
+              reloadDeltaPaths={desktop?.reloadDeltaPaths}
+              selectedPath={visibleSelectedPath}
+              showWhitespace={snapshot.preferences.showWhitespace}
+              viewed={viewed}
+            />
+          ) : sidebarMode === 'comments' ? (
+            <SidebarGeneralCommentList
+              comments={generalComments}
+              focusedCommentId={focusedGeneralCommentId}
+              onActivateComment={activateGeneralComment}
+            />
+          ) : walkthroughReady ? (
+            <NarrativeSidebar
+              allowCommit={walkthrough?.commit != null}
+              files={visibleFiles}
+              navigation={navigation}
+              onShareWalkthrough={walkthrough?.onShare}
+              showWhitespace={snapshot.preferences.showWhitespace}
+              walkthrough={sharedWalkthrough}
+            />
+          ) : (
+            <div className="sidebar-walkthrough-status-shell">
+              <div
+                className={`sidebar-walkthrough-status${walkthroughFailed ? '' : ' codex'}`}
+                title={walkthroughStatusDescription ?? undefined}
+              >
+                {walkthrough?.progress ? (
+                  walkthrough.progress
+                ) : walkthroughFailed ? (
+                  <strong>{walkthroughStatusTitle}</strong>
+                ) : (
+                  <WalkthroughProgress
+                    phase={null}
+                    responseLabelIndex={0}
+                    stageRevision={walkthroughProgressRevision}
+                  />
+                )}
+                {walkthroughStatusDescription ? <span>{walkthroughStatusDescription}</span> : null}
+              </div>
+            </div>
+          )}
+          {showTotalLineCount ? (
+            <div className="sidebar-settings-bar">
+              <DiffLineCountBadge
+                ariaLabelPrefix="Total change"
+                className="sidebar-total-line-count sidebar-settings-line-count"
+                lineCount={totalLineCount}
+              />
+            </div>
+          ) : null}
+        </aside>
+        <div aria-hidden className="sidebar-resizer" onPointerDown={resizeSidebar} />
+        <main className="review codiff-web-review">
+          {sidebarMode === 'comments' ? (
+            <MergeRequestCommentsView
+              canComment={comments?.general?.onCreate != null}
+              commenting={commenting}
+              draft={generalCommentDraft}
+              editDraft={generalCommentEditDraft}
+              editError={generalCommentEditError}
+              editingCommentId={editingGeneralCommentId}
+              editSubmitting={generalCommentEditSubmitting}
+              error={generalCommentError}
+              focusedCommentId={focusedGeneralCommentId}
+              focusedCommentRequest={generalCommentScrollRequest}
+              gitIdentity={gitIdentity}
+              keymap={keymap}
+              onCancelEdit={cancelEditGeneralComment}
+              onChangeDraft={setGeneralCommentDraft}
+              onChangeEditDraft={setGeneralCommentEditDraft}
+              onSaveEdit={saveGeneralCommentEdit}
+              onStartEdit={startEditGeneralComment}
+              onSubmit={submitGeneralComment}
+              signInLabel={signInLabel}
+              sourceDescription={sourceDescription}
+              submitting={generalCommentSubmitting}
+              threads={generalCommentThreads}
+            />
+          ) : sidebarMode === 'tree' || sidebarMode === 'history' ? (
+            snapshot.files.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-panel squircle">
+                  <strong>{getEmptySourceTitle(source)}</strong>
+                  {emptySourceDetail.kind === 'code' ? (
+                    <code className="walkthrough-inline-code" title={emptySourceDetail.title}>
+                      {emptySourceDetail.text}
+                    </code>
+                  ) : (
+                    <span>{emptySourceDetail.text}</span>
+                  )}
+                </div>
+              </div>
+            ) : visibleFiles.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-panel squircle">
+                  <strong>
+                    {hasDiffSearchQuery ? 'No matches in diffs' : 'No matching files'}
+                  </strong>
+                  <span>
+                    {diffSearchQuery ||
+                      fileSearchQuery ||
+                      (snapshot.preferences.showWhitespace
+                        ? snapshot.repository.root
+                        : 'Whitespace-only changes hidden')}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <ReviewCodeView
+                {...commonReviewProps}
+                allowViewedToggle
+                files={visibleFiles}
+                forceExpandedPaths={forceExpandedPaths}
+                onSelectPathFromScroll={updateSelectedPathFromScroll}
+                scrollTarget={treeScrollTarget}
+                selectedPath={visibleSelectedPath}
+                sourceDescriptionActions={sourceDescriptionActions}
+                sourceDescriptionFooter={sourceDescriptionFooter}
+                walkthroughNotes={emptyWalkthroughNotes}
+              />
+            )
+          ) : walkthroughReady ? (
+            <NarrativeWalkthroughView
+              allowCommit={walkthrough?.commit != null}
+              files={snapshot.files}
+              navigation={navigation}
+              onActiveReviewTargetChange={desktop?.onActiveWalkthroughReviewTargetChange ?? noop}
+              onCommit={walkthrough?.commit ?? disabledCommit}
+              onCommitOutput={walkthrough?.commitOutput}
+              onShareWalkthrough={walkthrough?.onShare}
+              onUpdateCommitMessage={walkthrough?.updateCommitMessage ?? disabledCommitMessage}
+              renderDiffBlocks={renderWalkthroughDiffBlocks}
+              showWhitespace={snapshot.preferences.showWhitespace}
+              walkthrough={sharedWalkthrough}
+            />
+          ) : walkthroughFailed ? (
+            <div className="empty-state">
+              <div className="empty-panel squircle">
                 <strong>{walkthroughStatusTitle}</strong>
-              ) : (
+                <p>{walkthroughStatusDescription}</p>
+                <div className="empty-panel-actions">
+                  <button onClick={requestWalkthrough} type="button">
+                    Try again
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="loading codex">
+              {walkthrough?.progress ?? (
                 <WalkthroughProgress
                   phase={null}
                   responseLabelIndex={0}
                   stageRevision={walkthroughProgressRevision}
                 />
               )}
-              {walkthroughStatusDescription ? <span>{walkthroughStatusDescription}</span> : null}
             </div>
-          </div>
-        )}
-        {showTotalLineCount ? (
-          <div className="sidebar-settings-bar">
-            <DiffLineCountBadge
-              ariaLabelPrefix="Total change"
-              className="sidebar-total-line-count sidebar-settings-line-count"
-              lineCount={totalLineCount}
-            />
-          </div>
-        ) : null}
-      </aside>
-      <div aria-hidden className="sidebar-resizer" onPointerDown={resizeSidebar} />
-      <main className="review codiff-web-review">
-        {sidebarMode === 'comments' ? (
-          <MergeRequestCommentsView
-            canComment={canComment}
-            commenting={commenting}
-            draft={generalCommentDraft}
-            editDraft={generalCommentEditDraft}
-            editError={generalCommentEditError}
-            editingCommentId={editingGeneralCommentId}
-            editSubmitting={generalCommentEditSubmitting}
-            error={generalCommentError}
-            focusedCommentId={focusedGeneralCommentId}
-            focusedCommentRequest={generalCommentScrollRequest}
-            gitIdentity={gitIdentity}
-            keymap={keymap}
-            onCancelEdit={cancelEditGeneralComment}
-            onChangeDraft={setGeneralCommentDraft}
-            onChangeEditDraft={setGeneralCommentEditDraft}
-            onSaveEdit={saveGeneralCommentEdit}
-            onStartEdit={startEditGeneralComment}
-            onSubmit={submitGeneralComment}
-            signInLabel={signInLabel}
-            sourceDescription={sourceDescription}
-            submitting={generalCommentSubmitting}
-            threads={generalCommentThreads}
-          />
-        ) : sidebarMode === 'tree' ? (
-          visibleFiles.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-panel squircle">
-                <strong>No matching files</strong>
-                <span>{fileSearchQuery}</span>
-              </div>
-            </div>
-          ) : (
-            <ReviewCodeView
-              {...commonReviewProps}
-              allowViewedToggle
-              files={visibleFiles}
-              forceExpandedPaths={emptyPaths}
-              onSelectPathFromScroll={updateSelectedPathFromScroll}
-              scrollTarget={treeScrollTarget}
-              selectedPath={visibleSelectedPath}
-              sourceDescriptionActions={sourceDescriptionActions}
-              sourceDescriptionFooter={sourceDescriptionFooter}
-              walkthroughNotes={emptyWalkthroughNotes}
-            />
-          )
-        ) : walkthroughReady ? (
-          <NarrativeWalkthroughView
-            allowCommit={false}
-            files={snapshot.files}
-            navigation={navigation}
-            onActiveReviewTargetChange={noop}
-            onCommit={disabledCommit}
-            onUpdateCommitMessage={disabledCommitMessage}
-            renderDiffBlocks={renderWalkthroughDiffBlocks}
-            showWhitespace={snapshot.preferences.showWhitespace}
-            walkthrough={sharedWalkthrough}
-          />
-        ) : walkthroughFailed ? (
-          <div className="empty-state">
-            <div className="empty-panel squircle">
-              <strong>{walkthroughStatusTitle}</strong>
-              <p>{walkthroughStatusDescription}</p>
-              <div className="empty-panel-actions">
-                <button onClick={requestWalkthrough} type="button">
-                  Try again
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="loading codex">
-            <WalkthroughProgress
-              phase={null}
-              responseLabelIndex={0}
-              stageRevision={walkthroughProgressRevision}
-            />
-          </div>
-        )}
-      </main>
-    </div>
+          )}
+        </main>
+      </div>
+      <KeyboardShortcutsHelp keymap={keymap} visible={shortcutsHelpVisible} />
+    </>
   );
 }

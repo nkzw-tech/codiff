@@ -724,7 +724,7 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
   position: relative;
 }
 
-.share-shell .review-top-bar {
+.share-shell:not(.merge-request-shell) .review-top-bar {
   padding-left: 14px;
 }
 
