@@ -472,7 +472,7 @@ function PullRequestReviewAction({
   hasPendingComments?: boolean;
   icon: ReactNode;
   label: string;
-  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
+  onSubmitReview?: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   title: string;
 }) {
   const [body, setBody] = useState('');
@@ -676,14 +676,18 @@ export function PullRequestReviewButtons({
   const approveBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'APPROVE');
   const commentBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'COMMENT');
   const requestChangesBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'REQUEST_CHANGES');
+  const canSubmitReview = onSubmitReview != null;
   const closeStatus = reviewStatus?.close;
   const closeVisible = onClosePullRequest && closeStatus && closeStatus.disabled !== true;
   const markReadyStatus = reviewStatus?.markReady;
   const markReadyVisible =
     onMarkPullRequestReady && markReadyStatus && markReadyStatus.disabled !== true;
-  const commentVisible = showCommentReview && !commentBlocked;
+  const commentVisible = canSubmitReview && showCommentReview && !commentBlocked;
   const hasReviewActions =
-    commentVisible || !approveBlocked || !requestChangesBlocked || markReadyVisible || closeVisible;
+    commentVisible ||
+    (canSubmitReview && (!approveBlocked || !requestChangesBlocked)) ||
+    markReadyVisible ||
+    closeVisible;
   if (!hasReviewActions && !children) {
     return null;
   }
@@ -708,11 +712,11 @@ export function PullRequestReviewButtons({
             />
           }
           label="Comment"
-          onSubmitReview={onSubmitReview}
+          onSubmitReview={onSubmitReview!}
           title={getPullRequestReviewActionTitle(reviewStatus, 'COMMENT', 'Submit review comments')}
         />
       ) : null}
-      {!approveBlocked ? (
+      {canSubmitReview && !approveBlocked ? (
         <PullRequestReviewAction
           disabled={disabled}
           event="APPROVE"
@@ -720,11 +724,11 @@ export function PullRequestReviewButtons({
             <Check aria-hidden className="review-submit-icon approve" size={15} weight="bold" />
           }
           label="Approve"
-          onSubmitReview={onSubmitReview}
+          onSubmitReview={onSubmitReview!}
           title={getPullRequestReviewActionTitle(reviewStatus, 'APPROVE', 'Approve review')}
         />
       ) : null}
-      {!requestChangesBlocked ? (
+      {canSubmitReview && !requestChangesBlocked ? (
         <PullRequestReviewAction
           disabled={disabled}
           event="REQUEST_CHANGES"
@@ -737,7 +741,7 @@ export function PullRequestReviewButtons({
             />
           }
           label="Request Changes"
-          onSubmitReview={onSubmitReview}
+          onSubmitReview={onSubmitReview!}
           title={getPullRequestReviewActionTitle(
             reviewStatus,
             'REQUEST_CHANGES',

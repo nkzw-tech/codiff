@@ -220,7 +220,7 @@ function CodeViewHeader({
   isSectionLoading: boolean;
   meta: CodeViewItemMetadata;
   onCreateFileComment: () => void;
-  onLoadSection: (file: ChangedFile, section: DiffSection) => void;
+  onLoadSection?: (file: ChangedFile, section: DiffSection) => void;
   onOpenFile?: (file: ChangedFile) => void;
   onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean, reviewKey: string) => void;
   onToggleMarkdownPreview: (file: ChangedFile, section: DiffSection) => void;
@@ -241,7 +241,7 @@ function CodeViewHeader({
     walkthroughNote,
   } = meta;
   const canOpenFile = file.status !== 'deleted';
-  const canLoadSection = shouldLoadDiffSectionContents(section);
+  const canLoadSection = onLoadSection != null && shouldLoadDiffSectionContents(section);
 
   return (
     <div
@@ -317,18 +317,18 @@ function CodeViewHeader({
           {isMarkdownPreview ? 'View as Diff' : 'View as Markdown'}
         </Button>
       ) : null}
-      {canLoadSection && !readOnly ? (
+      {canLoadSection ? (
         <button
           className="codiff-load-button"
           disabled={isSectionLoading}
-          onClick={() => onLoadSection(file, section)}
+          onClick={() => onLoadSection?.(file, section)}
           title={isSectionLoading ? 'Loading file contents' : 'Load file contents'}
           type="button"
         >
           {isSectionLoading ? 'Loading...' : 'Load'}
         </button>
       ) : null}
-      {!readOnly && onOpenFile ? (
+      {onOpenFile ? (
         <Button
           disabled={!canOpenFile}
           onClick={() => onOpenFile(file)}
@@ -1299,7 +1299,7 @@ function ReviewCommentEditor({
   focusEditorRef: (node: MarkdownEditorHandle | null) => void;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
-  onAskCodex?: (commentId: string) => void;
+  onAskCodex?: (comment: ReviewComment) => void;
   onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
@@ -1438,9 +1438,9 @@ function ReviewCommentEditor({
   const handleAskCodex = useCallback(() => {
     const flushed = flushDraft();
     if (onAskCodex && canAskCodexForComment(flushed)) {
-      onAskCodex(comment.id);
+      onAskCodex(flushed);
     }
-  }, [comment.id, flushDraft, onAskCodex]);
+  }, [flushDraft, onAskCodex]);
 
   const handleSubmitComment = useCallback(() => {
     const flushed = flushDraft();
@@ -1902,7 +1902,7 @@ function ReviewCommentThreadGroup({
   focusEditorRef: (node: MarkdownEditorHandle | null) => void;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
-  onAskCodex?: (commentId: string) => void;
+  onAskCodex?: (comment: ReviewComment) => void;
   onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
@@ -2074,7 +2074,7 @@ function ReviewAnnotation({
   focusCommentRequest: number;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
-  onAskCodex?: (commentId: string) => void;
+  onAskCodex?: (comment: ReviewComment) => void;
   onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
@@ -2580,13 +2580,13 @@ export function ReviewCodeView({
   keymap: CodiffKeymap;
   loadingSectionIds: ReadonlySet<string>;
   onActiveBlockChange?: (blockId: string) => void;
-  onAskCodex?: (commentId: string) => void;
+  onAskCodex?: (comment: ReviewComment) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCreateComment: (comment: Omit<ReviewComment, 'body' | 'id'>) => void;
   onDeleteComment: (commentId: string) => void;
   onFindDefinitions?: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
-  onLoadSection: (file: ChangedFile, section: DiffSection) => void;
+  onLoadSection?: (file: ChangedFile, section: DiffSection) => void;
   onLoadSectionContents?: (file: ChangedFile, section: DiffSection) => Promise<FileDiffLoadedFiles>;
   onOpenDefinition?: (candidate: DefinitionCandidate) => void;
   onOpenFile?: (file: ChangedFile) => void;
@@ -3458,7 +3458,7 @@ export function ReviewCodeView({
           }
 
           if (shouldLoadDiffSectionContents(meta.section)) {
-            onLoadSection(meta.file, meta.section);
+            onLoadSection?.(meta.file, meta.section);
             return;
           }
 

@@ -98,7 +98,7 @@ test('app review comments request and store assistant replies', async () => {
     getState().setReviewComments([comment]);
   });
   await act(async () => {
-    getState().askCodex(comment.id);
+    getState().askCodex(comment);
   });
   expect(askReviewAssistant).toHaveBeenCalledWith({
     comment: {

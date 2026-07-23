@@ -18,7 +18,7 @@
     "share.ts",
     "types.ts",
     "SharedPlanApp.tsx",
-    "SharedWalkthroughApp.tsx",
+    "ReviewSurface.tsx",
     "app/**/*.ts",
     "app/**/*.tsx",
     "config/**/*.ts",

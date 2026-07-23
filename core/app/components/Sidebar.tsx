@@ -25,6 +25,7 @@ import type {
 import { Avatar } from './Avatar.tsx';
 import { Button } from './Button.tsx';
 import { ReviewFileTree } from './FileTree.tsx';
+import { ReviewModeControl, type ReviewModeItem } from './ReviewModeControl.tsx';
 import { NarrativeSidebar } from './walkthrough/NarrativeSidebar.tsx';
 import type { NarrativeNavigation } from './walkthrough/useNarrativeNavigation.ts';
 import { WalkthroughProgress } from './walkthrough/WalkthroughProgress.tsx';
@@ -40,10 +41,12 @@ export function Sidebar({
   historyLoading,
   keymap,
   mode,
+  modes,
   narrativeNavigation,
   narrativeWalkthrough,
   onActivatePath,
   onLoadMoreHistory,
+  onModeChange,
   onSearchQueryChange,
   onSelectSource,
   onShareWalkthrough,
@@ -69,10 +72,12 @@ export function Sidebar({
   historyLoading: boolean;
   keymap: CodiffKeymap;
   mode: SidebarMode;
+  modes: ReadonlyArray<ReviewModeItem<SidebarMode>>;
   narrativeNavigation: NarrativeNavigation;
   narrativeWalkthrough: NarrativeWalkthrough | null;
   onActivatePath: (path: string) => void;
   onLoadMoreHistory: () => void;
+  onModeChange: (mode: SidebarMode) => void;
   onSearchQueryChange: (query: string) => void;
   onSelectSource: (source: ReviewSource) => void;
   onShareWalkthrough?: () => void;
@@ -121,18 +126,21 @@ export function Sidebar({
 
   return (
     <>
-      <div className="sidebar-search-row">
-        <input
-          aria-label="Filter changed files"
-          className="sidebar-search"
-          onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
-          placeholder={mode === 'history' ? 'Filter history' : 'Filter files'}
-          ref={searchInputRef}
-          spellCheck={false}
-          type="search"
-          value={searchQuery}
-        />
-      </div>
+      <ReviewModeControl mode={mode} modes={modes} onModeChange={onModeChange} />
+      {mode === 'tree' ? (
+        <div className="sidebar-search-row">
+          <input
+            aria-label="Filter changed files"
+            className="sidebar-search"
+            onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
+            placeholder="Filter files"
+            ref={searchInputRef}
+            spellCheck={false}
+            type="search"
+            value={searchQuery}
+          />
+        </div>
+      ) : null}
       {mode === 'history' ? (
         <HistorySidebar
           branchSource={branchSource}
@@ -143,7 +151,6 @@ export function Sidebar({
           onLoadMore={onLoadMoreHistory}
           onSelectSource={onSelectSource}
           pullRequestSource={pullRequestSource}
-          searchQuery={searchQuery}
         />
       ) : mode === 'walkthrough' && narrativeWalkthrough ? (
         <NarrativeSidebar
@@ -238,7 +245,7 @@ const shortDate = (timestamp: number) => {
   return `${Math.floor(months / 12)}y ago`;
 };
 
-function HistorySidebar({
+export function HistorySidebar({
   branchSource,
   currentSource,
   entries,
@@ -247,7 +254,6 @@ function HistorySidebar({
   onLoadMore,
   onSelectSource,
   pullRequestSource,
-  searchQuery,
 }: {
   branchSource: Extract<ResolvedReviewSource, { type: 'branch-diff' }> | null;
   currentSource: ResolvedReviewSource | ReviewSource;
@@ -257,10 +263,8 @@ function HistorySidebar({
   onLoadMore: () => void;
   onSelectSource: (source: ReviewSource) => void;
   pullRequestSource: PullRequestSource | null;
-  searchQuery: string;
 }) {
   const currentSourceKey = getSourceKey(currentSource);
-  const normalizedQuery = searchQuery.trim().toLowerCase();
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => {
     const commitRows = entries.map((entry) => ({
@@ -274,33 +278,23 @@ function HistorySidebar({
       source: { ref: entry.sha, type: 'commit' } satisfies ReviewSource,
       subject: entry.subject,
     }));
-    const matchesQuery = (row: (typeof commitRows)[number]) =>
-      !normalizedQuery ||
-      row.subject.toLowerCase().includes(normalizedQuery) ||
-      row.ref.toLowerCase().includes(normalizedQuery) ||
-      row.author.toLowerCase().includes(normalizedQuery);
-
     if (pullRequestSource) {
       const hasScopedRows = commitRows.some((row) => row.scope != null);
-      const pullRequestRows = commitRows
-        .filter((row) => (hasScopedRows ? row.scope === 'pull-request' : row.scope == null))
-        .filter(matchesQuery);
-      const baseRows = hasScopedRows
-        ? commitRows.filter((row) => row.scope === 'base').filter(matchesQuery)
-        : [];
+      const pullRequestRows = commitRows.filter((row) =>
+        hasScopedRows ? row.scope === 'pull-request' : row.scope == null,
+      );
+      const baseRows = hasScopedRows ? commitRows.filter((row) => row.scope === 'base') : [];
       return [
-        !normalizedQuery
-          ? {
-              author: null,
-              committedAt: null,
-              gravatarUrl: undefined,
-              key: getSourceKey(pullRequestSource),
-              kind: 'entry' as const,
-              ref: pullRequestSource.number ? `PR #${pullRequestSource.number}` : 'PR',
-              source: pullRequestSource satisfies ReviewSource,
-              subject: pullRequestSource.title || 'Pull Request',
-            }
-          : null,
+        {
+          author: null,
+          committedAt: null,
+          gravatarUrl: undefined,
+          key: getSourceKey(pullRequestSource),
+          kind: 'entry' as const,
+          ref: pullRequestSource.number ? `PR #${pullRequestSource.number}` : 'PR',
+          source: pullRequestSource satisfies ReviewSource,
+          subject: pullRequestSource.title || 'Pull Request',
+        },
         {
           key: 'history-section:pull-request',
           kind: 'section' as const,
@@ -313,61 +307,53 @@ function HistorySidebar({
     }
 
     if (branchSource) {
-      const localRows = commitRows.filter(matchesQuery);
+      const localRows = commitRows;
       return [
-        !normalizedQuery
-          ? {
-              key: 'history-section:review-scope',
-              kind: 'section' as const,
-              label: 'Review scope',
-            }
-          : null,
-        !normalizedQuery
-          ? {
-              author: null,
-              committedAt: null,
-              gravatarUrl: undefined,
-              key: 'working-tree',
-              kind: 'entry' as const,
-              ref: '',
-              source: { type: 'working-tree' } satisfies ReviewSource,
-              subject: 'Uncommitted changes',
-            }
-          : null,
-        !normalizedQuery
-          ? {
-              author: null,
-              committedAt: null,
-              gravatarUrl: undefined,
-              key: getSourceKey({
-                baseSha: branchSource.baseSha,
-                headSha: branchSource.headSha,
-                ref: branchSource.ref,
-                type: 'branch-working-tree',
-              }),
-              kind: 'entry' as const,
-              ref: 'branch+',
-              source: {
-                baseSha: branchSource.baseSha,
-                headSha: branchSource.headSha,
-                ref: branchSource.ref,
-                type: 'branch-working-tree',
-              } satisfies ReviewSource,
-              subject: `All changes vs ${branchSource.ref}`,
-            }
-          : null,
-        !normalizedQuery
-          ? {
-              author: null,
-              committedAt: null,
-              gravatarUrl: undefined,
-              key: getSourceKey(branchSource),
-              kind: 'entry' as const,
-              ref: 'branch',
-              source: branchSource satisfies ReviewSource,
-              subject: `Committed only vs ${branchSource.ref}`,
-            }
-          : null,
+        {
+          key: 'history-section:review-scope',
+          kind: 'section' as const,
+          label: 'Review scope',
+        },
+        {
+          author: null,
+          committedAt: null,
+          gravatarUrl: undefined,
+          key: 'working-tree',
+          kind: 'entry' as const,
+          ref: '',
+          source: { type: 'working-tree' } satisfies ReviewSource,
+          subject: 'Uncommitted changes',
+        },
+        {
+          author: null,
+          committedAt: null,
+          gravatarUrl: undefined,
+          key: getSourceKey({
+            baseSha: branchSource.baseSha,
+            headSha: branchSource.headSha,
+            ref: branchSource.ref,
+            type: 'branch-working-tree',
+          }),
+          kind: 'entry' as const,
+          ref: 'branch+',
+          source: {
+            baseSha: branchSource.baseSha,
+            headSha: branchSource.headSha,
+            ref: branchSource.ref,
+            type: 'branch-working-tree',
+          } satisfies ReviewSource,
+          subject: `All changes vs ${branchSource.ref}`,
+        },
+        {
+          author: null,
+          committedAt: null,
+          gravatarUrl: undefined,
+          key: getSourceKey(branchSource),
+          kind: 'entry' as const,
+          ref: 'branch',
+          source: branchSource satisfies ReviewSource,
+          subject: `Committed only vs ${branchSource.ref}`,
+        },
         localRows.length > 0
           ? {
               key: 'history-section:branch',
@@ -379,33 +365,30 @@ function HistorySidebar({
       ].filter((row): row is NonNullable<typeof row> => row != null);
     }
 
-    const localRows = commitRows.filter(matchesQuery);
     return [
-      !normalizedQuery
-        ? {
-            author: null,
-            committedAt: null,
-            gravatarUrl: undefined,
-            key: 'working-tree',
-            kind: 'entry' as const,
-            ref: '',
-            source: { type: 'working-tree' } satisfies ReviewSource,
-            subject: 'Uncommitted changes',
-          }
-        : null,
-      ...localRows,
-    ].filter((row): row is NonNullable<typeof row> => row != null);
-  }, [branchSource, entries, normalizedQuery, pullRequestSource]);
+      {
+        author: null,
+        committedAt: null,
+        gravatarUrl: undefined,
+        key: 'working-tree',
+        kind: 'entry' as const,
+        ref: '',
+        source: { type: 'working-tree' } satisfies ReviewSource,
+        subject: 'Uncommitted changes',
+      },
+      ...commitRows,
+    ];
+  }, [branchSource, entries, pullRequestSource]);
   const maybeLoadMore = useCallback(() => {
     const element = listRef.current;
-    if (!element || loading || !hasMore || normalizedQuery) {
+    if (!element || loading || !hasMore) {
       return;
     }
 
     if (element.scrollHeight - element.scrollTop - element.clientHeight < 120) {
       onLoadMore();
     }
-  }, [hasMore, loading, normalizedQuery, onLoadMore]);
+  }, [hasMore, loading, onLoadMore]);
 
   return (
     <div className="history-list" onScroll={maybeLoadMore} ref={listRef}>

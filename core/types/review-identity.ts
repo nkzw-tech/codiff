@@ -106,6 +106,31 @@ export type Revision =
 /** A null endpoint represents an absent file side, such as an unborn-repository addition. */
 export type DiffRange = { base: Revision | null; head: Revision | null };
 
+export type ReviewContextRequest = {
+  baseSha: GitSha;
+  filePath: string;
+  headSha: GitSha;
+  oldPath?: string;
+  range: DiffRange;
+  source: ResolvedReviewSource;
+  status: GitFileStatus;
+};
+
+/** Display-only result used to expand unchanged review context. */
+export type ReviewContextResult =
+  | {
+      newFile: NonNullable<DiffSection['newFile']>;
+      oldFile: NonNullable<DiffSection['oldFile']> | null;
+      status: 'ready';
+    }
+  | { reason: string; status: 'unavailable' };
+
+/**
+ * Host capability for resolving unchanged context without mutating captured
+ * walkthrough provenance or generated-component reuse inputs.
+ */
+export type ReviewContextResolver = (request: ReviewContextRequest) => Promise<ReviewContextResult>;
+
 export type GitIdentity = {
   email: string;
   gravatarUrl?: string;

@@ -51,8 +51,8 @@ const sourceCapabilitiesByType = {
   'pull-request': {
     emptyTitle: 'No review changes',
     historySource: true,
-    lazyDiffContent: false,
-    preloadDiffSearchContent: false,
+    lazyDiffContent: true,
+    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: false,
     viewedFileState: false,
   },
