@@ -88,7 +88,7 @@ test('App bootstraps the desktop shell before mounting the repository host', asy
           state,
         }),
         config,
-        initialHistory: [],
+        initialHistoryLoading: true,
         launchOptions: expect.objectContaining({ walkthrough: false }),
         walkthroughSharingEnabled: true,
       }),
@@ -184,13 +184,14 @@ test('App restores branch History scope and reload deltas as one bootstrap value
     ref: 'feature',
     type: 'branch-working-tree',
   });
-  expect(api.getRepositoryHistory).toHaveBeenCalledWith(30, branchSource);
+  expect(api.getRepositoryHistory).not.toHaveBeenCalled();
   expect(hostProps.mock.lastCall?.[0]).toMatchObject({
     bootstrap: {
       historySource: branchSource,
       reloadDeltaPaths: new Set(['src/branch.ts']),
       selectedPath: 'src/branch.ts',
     },
+    initialHistoryLoading: true,
   });
 });
 

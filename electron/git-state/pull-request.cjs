@@ -918,7 +918,12 @@ const readPullRequestReviewComments = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const pullRequest = parseGitHubPullRequestUrl(source.url);
   await assertPullRequestMatchesRepository(repoRoot, pullRequest);
-  return readPullRequestComments(repoRoot, pullRequest);
+  const comments = await readPullRequestComments(repoRoot, pullRequest);
+  const metadata = await readPullRequestMetadata(repoRoot, pullRequest);
+  if (source.headSha && metadata.head?.sha !== source.headSha) {
+    throw new Error('The pull request head changed. Refresh before loading review comments.');
+  }
+  return comments;
 };
 
 /**

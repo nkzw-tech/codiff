@@ -14,6 +14,7 @@ import type {
 import { useReviewCommentDrafts } from './useReviewCommentDrafts.ts';
 
 type UseAppReviewCommentsOptions = {
+  initialReviewComments?: ReadonlyArray<ReviewComment>;
   isReviewActionDisabled: (
     reviewStatus: PullRequestReviewStatus | undefined,
     event: PullRequestReviewEvent,
@@ -23,11 +24,13 @@ type UseAppReviewCommentsOptions = {
 };
 
 export function useAppReviewComments({
+  initialReviewComments = [],
   isReviewActionDisabled,
   onCommentFileChange,
   stateRef,
 }: UseAppReviewCommentsOptions) {
-  const [reviewComments, setReviewComments] = useState<ReadonlyArray<ReviewComment>>([]);
+  const [reviewComments, setReviewComments] =
+    useState<ReadonlyArray<ReviewComment>>(initialReviewComments);
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
     useState<PullRequestReviewEvent | null>(null);
   const commentDrafts = useReviewCommentDrafts({

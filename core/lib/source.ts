@@ -93,6 +93,16 @@ export const getSourceKey = (source: DisplayReviewSource) =>
               ? `pull-request:${source.provider ?? ''}:${source.host ?? ''}:${source.projectPath ?? `${source.owner ?? ''}/${source.repo ?? ''}`}#${source.number ?? source.url}`
               : 'working-tree';
 
+/**
+ * Identifies the exact revision currently rendered for asynchronous work.
+ * A pull request's logical source key stays stable as its head moves, while
+ * deferred results must never cross that immutable head boundary.
+ */
+export const getSourceRevisionKey = (source: DisplayReviewSource) =>
+  source.type === 'pull-request'
+    ? `${getSourceKey(source)}:${source.headSha ?? 'unresolved-head'}`
+    : getSourceKey(source);
+
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 

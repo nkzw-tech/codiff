@@ -112,7 +112,7 @@ type GitStateModule = {
   readRepositoryState: (
     launchPath: string,
     source?: ReviewSource,
-    options?: { showWhitespace?: boolean },
+    options?: { repositoryRoot?: string; showWhitespace?: boolean },
   ) => Promise<RepositoryState>;
   readWalkthroughRepositoryState: (
     launchPath: string,
@@ -121,7 +121,7 @@ type GitStateModule = {
   ) => Promise<RepositoryState>;
   readWorkingTreeState: (
     launchPath: string,
-    options?: { eagerContents?: boolean; showWhitespace?: boolean },
+    options?: { eagerContents?: boolean; repositoryRoot?: string; showWhitespace?: boolean },
   ) => Promise<RepositoryState>;
   resolvePullRequestContentRefs: (
     repoRoot: string,
@@ -177,6 +177,12 @@ const {
   submitPullRequestComment,
   validateRepositoryPath,
 } = require('../../electron/git-state.cjs') as GitStateModule;
+const { getRepositoryWatcherInitialSnapshot } =
+  require('../../electron/repository-watcher.cjs') as {
+    getRepositoryWatcherInitialSnapshot: (
+      state: object,
+    ) => Promise<{ pathSignatures: Record<string, string>; root: string }> | undefined;
+  };
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
   const { stdout } = await execFileAsync('git', ['-C', repo, ...args], {
@@ -1268,6 +1274,19 @@ test('readRepositoryState and history handle fresh repositories', async () => {
   });
 });
 
+test('readRepositoryState reuses an already resolved startup root', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'notes/todo.txt', 'write tests\n');
+
+    const state = await readRepositoryState(join(repo, 'missing'), undefined, {
+      repositoryRoot: repo,
+    });
+
+    expect(state.root).toBe(repo);
+    expect(state.files.map((file) => file.path)).toEqual(['notes/todo.txt']);
+  });
+});
+
 test(
   'readWalkthroughRepositoryState falls back to HEAD only for a clean implicit source',
   () =>
@@ -1297,8 +1316,17 @@ test(
 test('readWalkthroughRepositoryState keeps a fresh repository on the working tree', () =>
   withRepo(async (repo) => {
     const state = await readWalkthroughRepositoryState(repo);
+    const initialSnapshot = getRepositoryWatcherInitialSnapshot(state);
+
     expect(state.source).toEqual({ type: 'working-tree' });
     expect(state.files).toEqual([]);
+    if (!initialSnapshot) {
+      throw new Error('Expected a fresh working tree to retain a watcher snapshot.');
+    }
+    await expect(initialSnapshot).resolves.toMatchObject({
+      pathSignatures: {},
+      root: repo,
+    });
   }));
 
 test('readWalkthroughRepositoryState preserves nested launch paths', () =>
@@ -1510,6 +1538,36 @@ test('readRepositoryState opens branch refs as current branch diffs against the 
     ]);
   });
 }, 15_000);
+
+test('readRepositoryState retains watcher snapshots through branch working-tree composition', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'initial commit');
+    const baseBranch = (await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+
+    await git(repo, ['checkout', '-b', 'feature']);
+    await writeRepoFile(repo, 'file.txt', 'feature\n');
+    await commitAll(repo, 'feature change');
+    await writeRepoFile(repo, 'file.txt', 'local change\n');
+
+    const state = await readRepositoryState(repo, {
+      ref: baseBranch,
+      type: 'branch-working-tree',
+    });
+    const initialSnapshot = getRepositoryWatcherInitialSnapshot(state);
+
+    expect(state.source.type).toBe('branch-working-tree');
+    if (!initialSnapshot) {
+      throw new Error('Expected the composed repository state to retain a watcher snapshot.');
+    }
+    await expect(initialSnapshot).resolves.toMatchObject({
+      pathSignatures: {
+        'file.txt': expect.any(String),
+      },
+      root: repo,
+    });
+  });
+}, 30_000);
 
 test('readRepositoryState reports missing branch refs clearly', async () => {
   await withRepo(async (repo) => {

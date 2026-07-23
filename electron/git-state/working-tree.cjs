@@ -490,22 +490,34 @@ const gitOrEmpty = async (repoRoot, args) => {
   }
 };
 
+const gitIdentityReads = new Map();
+
 /** @param {string} launchPath */
-const readGitIdentity = async (launchPath) => {
-  const [configuredName, configuredEmail] = await Promise.all([
+const readGitIdentity = (launchPath) => {
+  const existing = gitIdentityReads.get(launchPath);
+  if (existing) {
+    return existing;
+  }
+  const read = Promise.all([
     gitOrEmpty(launchPath, ['config', '--get', 'user.name']),
     gitOrEmpty(launchPath, ['config', '--get', 'user.email']),
-  ]);
-  const email = configuredEmail.trim();
-  const name = configuredName.trim();
-
-  return {
-    email,
-    gravatarUrl: email
-      ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
-      : undefined,
-    name,
-  };
+  ])
+    .then(([configuredName, configuredEmail]) => {
+      const email = configuredEmail.trim();
+      const name = configuredName.trim();
+      return {
+        email,
+        gravatarUrl: email
+          ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
+          : undefined,
+        name,
+      };
+    })
+    .finally(() => {
+      gitIdentityReads.delete(launchPath);
+    });
+  gitIdentityReads.set(launchPath, read);
+  return read;
 };
 
 module.exports = {
