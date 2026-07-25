@@ -231,6 +231,36 @@ test('does not re-read the layout once per keypress when it keeps disagreeing', 
   expect(getReadCount()).toBe(2);
 });
 
+test('asks again on the next keypress when it has no layout at all', async () => {
+  // Arrange: a window with no keyboard attached to it yet reports nothing, and
+  // waiting for it to lose and regain focus is a long way back from that.
+  const { setLayout } = createTestContext({});
+  trackKeyboardLayout();
+  await loadKeyboardLayout();
+  setLayout({ KeyY: 'z', KeyZ: 'y' });
+
+  // Act
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'y' }));
+
+  // Assert
+  await vi.waitFor(() => expect(codeForCharacter('z')).toBe('KeyY'));
+});
+
+test('does not re-read the layout for a key the layout never mentions', async () => {
+  // Arrange: the keyboard map covers the letter, digit and punctuation keys
+  // only, so the space bar reporting a space is not a disagreement.
+  const { getReadCount } = createTestContext({ KeyZ: 'z' });
+  trackKeyboardLayout();
+  await loadKeyboardLayout();
+
+  // Act
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // Assert
+  expect(getReadCount()).toBe(1);
+});
+
 test('re-reads the layout when the window regains focus', async () => {
   // Arrange
   const { setLayout } = createTestContext({ KeyZ: 'z' });

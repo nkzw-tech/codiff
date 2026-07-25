@@ -156,21 +156,33 @@ const handleFocus = (): void => {
 // into another read, so a disagreement only asks once every `rereadInterval`.
 const handleKeyDown = (event: KeyboardEvent): void => {
   if (
-    codeToCharacter === null ||
     event.altKey ||
     event.ctrlKey ||
     event.metaKey ||
     event.shiftKey ||
     event.key.length !== 1 ||
     event.getModifierState('CapsLock') ||
-    performance.now() - lastRereadAt < rereadInterval
+    performance.now() - lastRereadAt < rereadInterval ||
+    !isNewsAboutTheLayout(event)
   ) {
     return;
   }
 
-  const character = codeToCharacter.get(event.code);
-  if (character !== undefined && character !== event.key) {
-    lastRereadAt = performance.now();
-    void loadKeyboardLayout();
+  lastRereadAt = performance.now();
+  void loadKeyboardLayout();
+};
+
+// No layout at all means the read came back empty, which a window with no
+// keyboard attached to it does, so any keypress is reason enough to ask again.
+// Once there is one, only a key reporting a character the layout does not have
+// there says anything new; a key the layout never mentioned, such as the space
+// bar, says nothing either way.
+const isNewsAboutTheLayout = (event: KeyboardEvent): boolean => {
+  if (codeToCharacter === null) {
+    return true;
   }
+
+  const character = codeToCharacter.get(event.code);
+
+  return character !== undefined && character !== event.key;
 };
