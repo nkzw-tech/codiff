@@ -171,9 +171,13 @@ combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Sh
 
 Shortcuts match on the character your layout produces. <kbd>Option</kbd> is the exception: macOS
 replaces the character it would otherwise produce (<kbd>Option</kbd>+<kbd>z</kbd> types `Ω`), so
-`Alt` shortcuts fall back to the US position of the key you named. On a layout that moves keys
-around, an `Alt` shortcut therefore follows the US position rather than the keycap. This applies
-only to a keypress that matches no shortcut by character, so it never overrides one that does.
+`Alt` shortcuts fall back to the key your layout puts that character on. `Alt+z` follows the key
+that types <kbd>z</kbd> on QWERTZ, AZERTY, and Dvorak rather than the one US keyboards label
+<kbd>z</kbd>. On a layout that types no Latin at all, such as Cyrillic or Greek, letters and digits
+stay at their US positions so those shortcuts remain reachable. Shifted `Alt` shortcuts such as
+`Alt+Shift+?` also use US positions, because the layout only reports the character a key produces
+unmodified. This all applies only to a keypress that matches no shortcut by character, so it never
+overrides one that does.
 
 ## Walkthroughs
 

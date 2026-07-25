@@ -149,17 +149,20 @@ const matchesBinding = (
   matchesKey: (event: ShortcutEvent, parsed: ParsedKeyCombo) => boolean,
 ): boolean => getBindingCombos(binding).some((combo) => matchesCombo(event, combo, matchesKey));
 
-// The US key position is a last resort, read only for an Alt press on macOS
-// whose character Option swallowed, and only when the character the event does
-// report matches no binding at all. So a character a layout produces natively
-// (AZERTY "é" on the US "2" key) can never be overruled by the key beneath it.
+// The key position is a last resort, read only for an Alt press on macOS whose
+// character Option swallowed, and only when the character the event does report
+// matches no binding at all. So a character a layout produces natively (AZERTY
+// "é" on the US "2" key) can never be overruled by the key beneath it.
 //
-// The fallback is deliberately defined in terms of US key positions: telling a
-// composed character apart from one a layout produces natively needs layout
-// knowledge this matcher does not have. On a layout that moves keys it can
-// therefore resolve to a position the keycap does not advertise, but only for a
-// keypress that already matched nothing, never by taking one from a shortcut
-// that did match.
+// That last condition is what makes the whole fallback safe. Telling a composed
+// character apart from one a layout produces natively needs more than this
+// matcher can see, so instead of guessing it only ever turns a keypress nothing
+// wanted into one that fires, never takes one from a shortcut that matched.
+//
+// `physicalCode` resolves the position through the user's real layout, so the
+// key it lands on is the one the keycap advertises. Shifted spellings and the
+// window before the layout loads still resolve to US positions, which on a
+// layout that moves keys can fire an action the keycap does not suggest.
 const canFallBackToPhysicalKey = (event: ShortcutEvent, keymap: CodiffKeymap): boolean =>
   event.altKey &&
   isMac() &&
