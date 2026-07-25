@@ -1,6 +1,9 @@
 // @ts-check
 
 const { spawn } = require('node:child_process');
+const { homedir } = require('node:os');
+const { join } = require('node:path');
+const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
 const {
   IMAGE_FILE_LIMIT,
   bufferToImageRevision,
@@ -34,6 +37,52 @@ const { readGitFiles } = require('./git-files.cjs');
  * @typedef {{[key: string]: any}} GitHubReviewComment
  * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
  */
+
+const GH_NOT_FOUND_CODE = 'GH_NOT_FOUND';
+const GH_NOT_FOUND_MESSAGE =
+  'GitHub support requires gh. Install gh, authenticate it, and verify `gh --version` works in Terminal. Codiff searches PATH, ~/.local/bin/gh, /opt/homebrew/bin/gh, and /usr/local/bin/gh. If gh is installed somewhere else, quit Codiff, then launch it with `CODIFF_GH_PATH=/absolute/path/to/gh codiff`.';
+
+/** @param {string} [detail] */
+const createGhNotFoundError = (detail) =>
+  Object.assign(new Error(detail ? `${GH_NOT_FOUND_MESSAGE} ${detail}` : GH_NOT_FOUND_MESSAGE), {
+    code: GH_NOT_FOUND_CODE,
+  });
+
+/**
+ * A Dock or Spotlight launch gives the app a minimal PATH that omits the
+ * directories Homebrew and manual installs use, and later `codiff` invocations
+ * hand their arguments to that first process rather than replacing it, so `gh`
+ * has to be located the same way the other CLIs Codiff shells out to are.
+ */
+const getGhCommand = () => {
+  const ghPath = process.env.CODIFF_GH_PATH?.trim();
+  if (ghPath) {
+    if (isExecutableFile(ghPath)) {
+      return ghPath;
+    }
+
+    throw createGhNotFoundError(
+      `CODIFF_GH_PATH is set to ${JSON.stringify(ghPath)}, but that file is not executable.`,
+    );
+  }
+
+  const pathCommand = findExecutableOnPath('gh');
+  if (pathCommand) {
+    return pathCommand;
+  }
+
+  for (const path of [
+    join(homedir(), '.local/bin/gh'),
+    '/opt/homebrew/bin/gh',
+    '/usr/local/bin/gh',
+  ]) {
+    if (isExecutableFile(path)) {
+      return path;
+    }
+  }
+
+  throw createGhNotFoundError();
+};
 
 /** @param {string} value @returns {PullRequestReference} */
 const parseGitHubPullRequestUrl = (value) => {
@@ -226,14 +275,17 @@ const fetchPullRequestHistoryRefs = (repoRoot, remote, pullRequest, metadata) =>
   ]);
 
 /**
+ * Runs `gh api` and reports how it exited. Callers decide which exit codes are
+ * failures because a missing file is a valid answer for content lookups.
+ *
  * @param {string} repoRoot
  * @param {ReadonlyArray<string>} args
  * @param {unknown} [input]
- * @returns {Promise<string>}
+ * @returns {Promise<{code: number | null; stderr: string; stdout: Buffer}>}
  */
-const ghApi = (repoRoot, args, input) =>
+const runGhApi = (repoRoot, args, input) =>
   new Promise((resolve, reject) => {
-    const child = spawn('gh', ['api', ...args], {
+    const child = spawn(getGhCommand(), ['api', ...args], {
       cwd: repoRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -244,59 +296,50 @@ const ghApi = (repoRoot, args, input) =>
 
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      const output = Buffer.concat(stdout).toString('utf8');
-      if (code === 0) {
-        resolve(output);
-        return;
-      }
+    child.on('error', (error) => reject(error.code === 'ENOENT' ? createGhNotFoundError() : error));
+    child.on('close', (code) =>
+      resolve({
+        code,
+        stderr: Buffer.concat(stderr).toString('utf8'),
+        stdout: Buffer.concat(stdout),
+      }),
+    );
 
-      const errorOutput = Buffer.concat(stderr).toString('utf8').trim();
-      reject(new Error(errorOutput || `gh api exited with code ${code}.`));
-    });
-
-    if (input == null) {
-      child.stdin.end();
-    } else {
-      child.stdin.end(JSON.stringify(input));
-    }
+    child.stdin.end(input == null ? undefined : JSON.stringify(input));
   });
+
+/**
+ * @param {string} repoRoot
+ * @param {ReadonlyArray<string>} args
+ * @param {unknown} [input]
+ * @returns {Promise<string>}
+ */
+const ghApi = async (repoRoot, args, input) => {
+  const { code, stderr, stdout } = await runGhApi(repoRoot, args, input);
+  if (code === 0) {
+    return stdout.toString('utf8');
+  }
+
+  throw new Error(stderr.trim() || `gh api exited with code ${code}.`);
+};
 
 /**
  * @param {string} repoRoot
  * @param {ReadonlyArray<string>} args
  * @returns {Promise<Buffer | undefined>}
  */
-const ghApiBuffer = (repoRoot, args) =>
-  new Promise((resolve, reject) => {
-    const child = spawn('gh', ['api', ...args], {
-      cwd: repoRoot,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    /** @type {Array<Buffer>} */
-    const stdout = [];
-    /** @type {Array<Buffer>} */
-    const stderr = [];
+const ghApiBuffer = async (repoRoot, args) => {
+  const { code, stderr, stdout } = await runGhApi(repoRoot, args);
+  if (code === 0) {
+    return stdout;
+  }
 
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(Buffer.concat(stdout));
-        return;
-      }
+  if (code === 1 && /not found|404/i.test(stderr)) {
+    return undefined;
+  }
 
-      const errorOutput = Buffer.concat(stderr).toString('utf8');
-      if (code === 1 && /not found|404/i.test(errorOutput)) {
-        resolve(undefined);
-        return;
-      }
-
-      reject(new Error(errorOutput.trim() || `gh api exited with code ${code}.`));
-    });
-  });
+  throw new Error(stderr.trim() || `gh api exited with code ${code}.`);
+};
 
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<GitHubPullRequestMetadata>} */
 const readPullRequestMetadata = async (repoRoot, pullRequest) =>
@@ -1062,12 +1105,14 @@ const createPullRequestReviewPayload = (request) => {
 };
 
 module.exports = {
+  GH_NOT_FOUND_CODE,
   PENDING_REVIEW_COMMENT_ERROR,
   collectResolvedReviewCommentIds,
   createPatchFromPullRequestFile,
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSection,
   createPullRequestSource,
+  getGhCommand,
   getPullRequestHeadImageSource,
   listPullRequestHistory,
   normalizeGitHubCommit,
