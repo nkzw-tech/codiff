@@ -230,10 +230,11 @@ test('accepts the unshifted spelling of a shifted keystroke', () => {
 });
 
 test('matches a shifted spelling written by the key it sits on', () => {
-  // Arrange: `Mod+Shift+/` names the keystroke that types "?", with and
-  // without a layout to consult.
+  // Arrange: `Mod+Shift+/` names the "/" key with Shift held, whose keystroke
+  // types "?". Reading a spelling as a key name takes a layout; before one
+  // arrives the spelling keeps meaning the character as written.
   const { keydown, keymap } = createTestContext({ diffSearch: 'Mod+Shift+/' });
-  const event = keydown({ key: '?', metaKey: true, shiftKey: true });
+  const event = keydown({ code: 'Slash', key: '?', metaKey: true, shiftKey: true });
 
   // Act
   const noLayout = matchesShortcut(event, keymap, 'diffSearch');
@@ -241,7 +242,7 @@ test('matches a shifted spelling written by the key it sits on', () => {
   const withLayout = matchesShortcut(event, keymap, 'diffSearch');
 
   // Assert
-  expect({ noLayout, withLayout }).toEqual({ noLayout: true, withLayout: true });
+  expect({ noLayout, withLayout }).toEqual({ noLayout: false, withLayout: true });
 });
 
 test('follows the layout when a spelling is written by its key', () => {
@@ -253,12 +254,12 @@ test('follows the layout when a spelling is written by its key', () => {
   // Act
   const matched = {
     ampersand: matchesShortcut(
-      keydown({ key: '&', metaKey: true, shiftKey: true }),
+      keydown({ code: 'Digit6', key: '&', metaKey: true, shiftKey: true }),
       keymap,
       'diffSearch',
     ),
     slash: matchesShortcut(
-      keydown({ key: '/', metaKey: true, shiftKey: true }),
+      keydown({ code: 'Digit7', key: '/', metaKey: true, shiftKey: true }),
       keymap,
       'diffSearch',
     ),
@@ -300,6 +301,65 @@ test('resolves a digit the layout reaches only through Shift to its real key', (
     movedKey: true,
     usKey: false,
   });
+});
+
+test('does not let a key spelling match its character on a different key', () => {
+  // Arrange: two keys type "?" with Shift. `Mod+Shift+/` names the "/" key,
+  // so the "?" typed on the other key must not fire it, or one keypress would
+  // fire two different actions.
+  const { keydown, keymap } = createTestContext({
+    commandBar: 'Mod+Shift+/',
+    toggleSidebar: 'Mod+Shift+?',
+  });
+  applyKeyboardLayout({
+    KeyQ: { value: 'q', withShift: 'Q' },
+    Semicolon: { value: ';', withShift: '?' },
+    Slash: { value: '/', withShift: '?' },
+  });
+  const onSemicolon = keydown({ code: 'Semicolon', key: '?', metaKey: true, shiftKey: true });
+  const onSlash = keydown({ code: 'Slash', key: '?', metaKey: true, shiftKey: true });
+
+  // Act
+  const matched = {
+    semicolonQuestion: matchesShortcut(onSemicolon, keymap, 'toggleSidebar'),
+    semicolonSlash: matchesShortcut(onSemicolon, keymap, 'commandBar'),
+    slashQuestion: matchesShortcut(onSlash, keymap, 'toggleSidebar'),
+    slashSlash: matchesShortcut(onSlash, keymap, 'commandBar'),
+  };
+
+  // Assert: the character spelling matches wherever "?" is typed; the key
+  // spelling only on the key it names.
+  expect(matched).toEqual({
+    semicolonQuestion: true,
+    semicolonSlash: false,
+    slashQuestion: true,
+    slashSlash: true,
+  });
+});
+
+test('keeps character semantics for shifted spellings when no layout has arrived', () => {
+  // Arrange: without a layout there is no saying which key a spelling names,
+  // so `Mod+Shift+/` keeps meaning the keystroke that types "/", exactly as it
+  // did before layouts were consulted at all. On a German keyboard that is
+  // Shift+7, and the keystroke typing "?" is someone else's.
+  const { keydown, keymap } = createTestContext({ diffSearch: 'Mod+Shift+/' });
+
+  // Act
+  const matched = {
+    question: matchesShortcut(
+      keydown({ code: 'Slash', key: '?', metaKey: true, shiftKey: true }),
+      keymap,
+      'diffSearch',
+    ),
+    slash: matchesShortcut(
+      keydown({ code: 'Digit7', key: '/', metaKey: true, shiftKey: true }),
+      keymap,
+      'diffSearch',
+    ),
+  };
+
+  // Assert
+  expect(matched).toEqual({ question: false, slash: true });
 });
 
 test('keeps a shifted spelling on the key that really types it when it appears in both columns', () => {
@@ -395,7 +455,8 @@ test('lands a key spelling on the key it names when its shifted character lives 
 
 test('gives the combo delimiter character a spelling through Shift+=', () => {
   // Arrange: `+` separates the parts of a combo, so the keystroke that types
-  // it can only be named by the key it sits on.
+  // it can only be named by the key it sits on, and reading a spelling as a
+  // key name takes a layout.
   const { keydown, keymap } = createTestContext({ toggleWordWrap: 'Alt+Shift+=' });
   const event = keydown({ altKey: true, code: 'Equal', key: '±', shiftKey: true });
 
@@ -405,7 +466,7 @@ test('gives the combo delimiter character a spelling through Shift+=', () => {
   const withLayout = matchesShortcut(event, keymap, 'toggleWordWrap');
 
   // Assert
-  expect({ noLayout, withLayout }).toEqual({ noLayout: true, withLayout: true });
+  expect({ noLayout, withLayout }).toEqual({ noLayout: false, withLayout: true });
 });
 
 test('does not let shifted and unshifted punctuation on one key collide', () => {
@@ -425,8 +486,9 @@ test('does not let shifted and unshifted punctuation on one key collide', () => 
 });
 
 test('treats a shifted digit and the character it types as one chord', () => {
-  // Arrange: on a US keyboard Shift+1 and "!" are the same keystroke, so both
-  // spellings describe it and both fire.
+  // Arrange: on a US layout Shift+1 and "!" are the same keystroke, so once
+  // the layout says so both spellings describe it and both fire. Before a
+  // layout arrives only the character spelling resolves.
   const { keydown, keymap } = createTestContext({
     commandBar: 'Alt+Shift+1',
     toggleWordWrap: 'Alt+Shift+!',
@@ -434,13 +496,21 @@ test('treats a shifted digit and the character it types as one chord', () => {
   const event = keydown({ altKey: true, code: 'Digit1', key: '⁄', shiftKey: true });
 
   // Act
-  const matched = {
-    commandBar: matchesShortcut(event, keymap, 'commandBar'),
-    toggleWordWrap: matchesShortcut(event, keymap, 'toggleWordWrap'),
+  const noLayout = {
+    digit: matchesShortcut(event, keymap, 'commandBar'),
+    exclamation: matchesShortcut(event, keymap, 'toggleWordWrap'),
+  };
+  applyKeyboardLayout(usLayout);
+  const withLayout = {
+    digit: matchesShortcut(event, keymap, 'commandBar'),
+    exclamation: matchesShortcut(event, keymap, 'toggleWordWrap'),
   };
 
   // Assert
-  expect(matched).toEqual({ commandBar: true, toggleWordWrap: true });
+  expect({ noLayout, withLayout }).toEqual({
+    noLayout: { digit: false, exclamation: true },
+    withLayout: { digit: true, exclamation: true },
+  });
 });
 
 test('lets a binding on the composed character itself suppress the position fallback', () => {
@@ -711,6 +781,63 @@ test('resolves every combo to a key that really types its character', () => {
   expect(wrongKeys).toEqual([]);
 });
 
+test('never lets one keystroke type its way into two different shortcut combos', () => {
+  // Arrange: the walks above press keys whose character nothing names, which
+  // is the Alt fallback path. This one types the character each keystroke
+  // really produces, the path every other shortcut matches on, where a key
+  // spelling loose from its key would collide with the character typed
+  // elsewhere. Without a layout the matcher still faces a real keyboard; a US
+  // one stands in.
+  const collisions: Array<string> = [];
+
+  for (const [name, layout] of Object.entries(keyboardLayouts)) {
+    resetKeyboardLayout();
+    if (layout !== null) {
+      applyKeyboardLayout(layout);
+    }
+    const keys = layout ?? usLayout;
+
+    // Act
+    for (const [code, mapping] of Object.entries(keys)) {
+      for (const shiftKey of [false, true]) {
+        const character = shiftKey ? mapping.withShift : mapping.value;
+        if (character.length === 1) {
+          const matched = comboSpellings.filter((spelling) =>
+            matchesTypedSpelling(spelling, { code, key: character, shiftKey }),
+          );
+          for (let first = 0; first < matched.length; first++) {
+            for (let second = first + 1; second < matched.length; second++) {
+              if (!describesOneKeystroke(matched[first], matched[second], code, shiftKey, layout)) {
+                collisions.push(
+                  `${name}: typing "${character}" on ${code} matches "${matched[first]}" and "${matched[second]}"`,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Assert
+  expect(collisions).toEqual([]);
+});
+
+function matchesTypedSpelling(
+  spelling: string,
+  press: { code: string; key: string; shiftKey: boolean },
+): boolean {
+  const { keydown, keymap } = createTestContext({
+    toggleWordWrap: `Mod+${press.shiftKey ? 'Shift+' : ''}${spelling}`,
+  });
+
+  return matchesShortcut(
+    keydown({ code: press.code, key: press.key, metaKey: true, shiftKey: press.shiftKey }),
+    keymap,
+    'toggleWordWrap',
+  );
+}
+
 function collect(
   wrongKeys: Array<string>,
   name: string,
@@ -958,12 +1085,21 @@ const bothColumnOverlapLayout: NativeKeyboardLayout = {
   KeyQ: { value: 'q', withShift: 'Q' },
 };
 
+// Two keys typing one character with Shift, which is where a key spelling
+// loose from its key would follow the character to the wrong keystroke.
+const duplicateShiftedLayout: NativeKeyboardLayout = {
+  KeyQ: { value: 'q', withShift: 'Q' },
+  Semicolon: { value: ';', withShift: '?' },
+  Slash: { value: '/', withShift: '?' },
+};
+
 // Layouts whose Latin letters are pinned to US positions on purpose, which the
 // fidelity walk would misread as combos landing on the wrong keys.
 const pinnedLayouts = new Set(['linuxRussian', 'russian']);
 
 const keyboardLayouts: Record<string, NativeKeyboardLayout | null> = {
   azerty: azertyLayout,
+  duplicateShifted: duplicateShiftedLayout,
   dvorak: dvorakLayout,
   german: germanLayout,
   linuxRussian: linuxRussianLayout,

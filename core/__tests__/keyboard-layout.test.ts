@@ -257,6 +257,28 @@ test('ignores a key whose mapping is malformed', () => {
   });
 });
 
+test('survives a layout that is not an object at all', () => {
+  // Act
+  applyKeyboardLayout(null as unknown as NativeKeyboardLayout);
+
+  // Assert
+  expect(hasKeyboardLayout()).toBe(false);
+});
+
+test('ignores a key whose mapping is missing entirely', () => {
+  // Act
+  applyKeyboardLayout({
+    KeyA: null,
+    Slash: key('/', '?'),
+  } as unknown as NativeKeyboardLayout);
+
+  // Assert
+  expect({ loaded: hasKeyboardLayout(), slash: codeForCharacter('/', false) }).toEqual({
+    loaded: true,
+    slash: 'Slash',
+  });
+});
+
 test('reads the layout from the desktop shell when tracking starts', async () => {
   // Arrange
   createTestContext({ initialLayout: { KeyY: key('z', 'Z'), KeyZ: key('y', 'Y') } });
