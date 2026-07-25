@@ -231,7 +231,7 @@ test('matches refs against a prefix the shell has already escaped in bash', asyn
 
 test('generates a syntactically valid bash script', () => {
   expect(() =>
-    execFileSync('bash', ['-n'], {
+    execFileSync('bash', bashArguments(['-n']), {
       encoding: 'utf8',
       input: generateCompletionScript('bash'),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -279,10 +279,18 @@ test.skipIf(!isInstalled('fish'))(
   },
 );
 
+// Bash reads `~/.bashrc` even for `-c` when it takes its standard input for a
+// network connection, which it does under the file system spy `vp run` injects.
+// Whatever that file prints would land in the captured output, so these shells
+// are started without it.
+const bashArguments = (rest: ReadonlyArray<string>) => ['--noprofile', '--norc', ...rest];
+
 // How bash itself renders a word so it survives being typed back on a command
 // line; that is the form completion candidates have to take.
 const quoteForBash = (text: string) =>
-  execFileSync('bash', ['-c', 'printf "%q" "$1"', 'bash', text], { encoding: 'utf8' });
+  execFileSync('bash', bashArguments(['-c', 'printf "%q" "$1"', 'bash', text]), {
+    encoding: 'utf8',
+  });
 
 // Complete `words` with the generated bash script inside a repository whose
 // branches include one named after a command.
@@ -295,10 +303,11 @@ const completeWithBash = (words: ReadonlyArray<string>) =>
       '_codiff',
       `printf '%s\\n' "\${COMPREPLY[@]}"`,
     ].join('\n');
-    const { stdout } = await execFileAsync('bash', ['-c', script, 'bash', scriptPath], {
-      cwd: repository,
-      encoding: 'utf8',
-    });
+    const { stdout } = await execFileAsync(
+      'bash',
+      bashArguments(['-c', script, 'bash', scriptPath]),
+      { cwd: repository, encoding: 'utf8' },
+    );
     return stdout.split('\n').filter(Boolean);
   });
 
