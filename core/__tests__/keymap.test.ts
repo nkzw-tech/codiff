@@ -405,7 +405,7 @@ test('falls back to the US position while no layout has been read', () => {
   expect(matched).toBe(true);
 });
 
-test('never lets two shortcut spellings claim the same key', async () => {
+test('never lets two shortcut combos claim the same key', async () => {
   // Arrange: one key must answer to at most one spelling, or a single keypress
   // fires two actions and which one wins is down to the order the app happens
   // to check them in. Resolution has three sources, and this walks every
@@ -543,6 +543,17 @@ const keyboardLayouts: Record<string, Record<string, string> | null> = {
   dvorak: layoutFromRows(['`1234567890[]', "',.pyfgcrl/=\\", 'aoeuidhtns-', ';qjkxbmwvz']),
   german: layoutFromRows(['^1234567890ß´', 'qwertzuiopü+#', 'asdfghjklöä', 'yxcvbnm,.-']),
   none: null,
+  // Types most of the alphabet but not all of it, which is where filling in the
+  // missing letters one at a time would take a key from one that is there.
+  partialLatin: layoutFromRows(['`1234567890-=', 'ąwertyuiop[]\\', "asdfghjkl;'", 'zxcvbnm,./']),
+  // Puts symbols on the number row and reaches the digits through Shift, so
+  // assuming the US number row would resolve them to the wrong keys.
+  programmerDvorak: layoutFromRows([
+    '$&[{}(=*)+]!#',
+    ';,.pyfgcrl/@\\',
+    'aoeuidhtns-',
+    "'qjkxbmwvz",
+  ]),
   russian: layoutFromRows([']1234567890-=', 'йцукенгшщзхъё', 'фывапролджэ', 'ячсмитьбю.']),
   us: layoutFromRows(['`1234567890-=', 'qwertyuiop[]\\', "asdfghjkl;'", 'zxcvbnm,./']),
 };

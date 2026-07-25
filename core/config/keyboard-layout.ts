@@ -13,7 +13,9 @@ type KeyboardLayoutSource = {
 };
 
 const letters = 'abcdefghijklmnopqrstuvwxyz';
-const digits = '0123456789';
+// How long a keypress that disagrees with the layout waits before another one
+// may ask for a fresh read.
+const rereadInterval = 2000;
 
 // Keyed by character, so a combo naming "z" can find its key.
 let characterToCode: ReadonlyMap<string, string> | null = null;
@@ -24,6 +26,7 @@ let watching = false;
 // Bumped by every reset, so a read that was already in flight cannot land
 // afterwards and put the layout back.
 let generation = 0;
+let lastRereadAt = Number.NEGATIVE_INFINITY;
 
 export const codeForCharacter = (character: string): string | null =>
   characterToCode?.get(character) ?? null;
@@ -56,6 +59,7 @@ export const resetKeyboardLayout = (): void => {
   characterToCode = null;
   codeToCharacter = null;
   reading = null;
+  lastRereadAt = Number.NEGATIVE_INFINITY;
   generation++;
 
   if (watching) {
@@ -69,64 +73,54 @@ const readLayout = async (): Promise<void> => {
   const startedAt = generation;
   const keyboard = (navigator as Navigator & { keyboard?: KeyboardLayoutSource }).keyboard;
   if (!keyboard?.getLayoutMap) {
-    clearLayout();
     return;
   }
 
   try {
     const layout = await keyboard.getLayoutMap();
-    if (startedAt !== generation) {
-      return;
-    }
-    // A window with no keyboard attached to it reports zero keys. That is a
-    // missing answer, not a keyboard that produces nothing, so keep waiting for
-    // a real one instead of caching it.
-    if (layout.size === 0) {
-      clearLayout();
+    // A window with no keyboard attached to it reports zero keys, and a
+    // non-secure context rejects outright. Both are missing answers rather than
+    // news about the keyboard, so whatever is already known survives them; at
+    // startup that is nothing, which is the same as failing outright.
+    if (startedAt !== generation || layout.size === 0) {
       return;
     }
 
     codeToCharacter = new Map(layout);
-    characterToCode = byCharacter(withLatinFallbacks(layout));
+    characterToCode = byCharacter(withLatinLetters(layout));
   } catch {
-    // Platforms without the API and non-secure contexts reject. The US tables
-    // cover both.
-    if (startedAt === generation) {
-      clearLayout();
-    }
+    // Platforms without the API reject too. The US tables cover them.
   }
 };
 
-const clearLayout = (): void => {
-  characterToCode = null;
-  codeToCharacter = null;
-};
-
-// Latin letters and digits every layout can reach, at the position US
-// keyboards put them.
+// Latin letters at the positions US keyboards put them, for a layout that types
+// none of its own.
 //
-// A Cyrillic, Greek, Arabic or Hebrew layout produces no Latin letters, which
-// would leave every letter shortcut with no key to match and silently dead.
-// Digits are a milder version of the same problem: AZERTY types them only with
-// Shift held, and the keyboard map reports unmodified characters only.
+// Cyrillic, Greek, Arabic and Hebrew layouts produce no Latin at all, so every
+// letter shortcut would have no key to match and would silently stop working,
+// including the `Alt+z` Codiff ships. Each letter replaces whatever the layout
+// put on that key rather than being added alongside it, so one position still
+// produces one character and two combo spellings can never claim the same key.
 //
-// Each missing character replaces whatever the layout put on that key rather
-// than being added alongside it, so one position still produces one character
-// and two combo spellings can never claim the same key. VS Code does the same
-// thing with the richer per-key data `native-keymap` gives it.
-const withLatinFallbacks = (layout: ReadonlyMap<string, string>): Map<string, string> => {
+// It is all or nothing on purpose. Filling in individual letters would take a
+// key away from a character the layout really does type there, so a layout that
+// types most of the alphabet is left exactly as it reported itself. Digits get
+// no such treatment at all: AZERTY reaches them only with Shift, which the
+// keyboard map does not report, and while assuming the US number row would be
+// right there, it would be wrong on Programmer Dvorak, which moves the digits.
+// Naming the character the key actually types works on both.
+//
+// VS Code fills in missing letters the same way, per letter rather than all at
+// once, because `native-keymap` gives it the shifted values to disambiguate.
+const withLatinLetters = (layout: ReadonlyMap<string, string>): ReadonlyMap<string, string> => {
   const produced = new Set(layout.values());
-  const result = new Map(layout);
-
-  for (const letter of letters) {
-    if (!produced.has(letter)) {
-      result.set(`Key${letter.toUpperCase()}`, letter);
-    }
+  if ([...letters].some((letter) => produced.has(letter))) {
+    return layout;
   }
-  for (const digit of digits) {
-    if (!produced.has(digit)) {
-      result.set(`Digit${digit}`, digit);
-    }
+
+  const result = new Map(layout);
+  for (const letter of letters) {
+    result.set(`Key${letter.toUpperCase()}`, letter);
   }
 
   return result;
@@ -153,9 +147,13 @@ const handleFocus = (): void => {
 
 // Chromium reports no layout change event, and `navigator.keyboard` is not even
 // an `EventTarget`, so switching input source has to be inferred. A keypress
-// that reports a character the cached layout does not put on that key is proof
-// the layout moved. Modifiers, dead keys and Caps Lock all report something
-// other than the key's plain character, so only an unmodified press counts.
+// that reports a character the cached layout does not put on that key says the
+// layout moved. Modifiers, dead keys and Caps Lock all report something other
+// than the key's plain character, so only an unmodified press counts.
+//
+// Some disagreements never resolve, because remapping software can rewrite what
+// a key reports without the layout knowing. Those must not turn every keystroke
+// into another read, so a disagreement only asks once every `rereadInterval`.
 const handleKeyDown = (event: KeyboardEvent): void => {
   if (
     codeToCharacter === null ||
@@ -164,13 +162,15 @@ const handleKeyDown = (event: KeyboardEvent): void => {
     event.metaKey ||
     event.shiftKey ||
     event.key.length !== 1 ||
-    event.getModifierState('CapsLock')
+    event.getModifierState('CapsLock') ||
+    performance.now() - lastRereadAt < rereadInterval
   ) {
     return;
   }
 
   const character = codeToCharacter.get(event.code);
   if (character !== undefined && character !== event.key) {
+    lastRereadAt = performance.now();
     void loadKeyboardLayout();
   }
 };

@@ -77,7 +77,7 @@ test('reports no layout when reading the keyboard map fails', async () => {
   expect(hasKeyboardLayout()).toBe(false);
 });
 
-test('pins a letter the layout never produces to its US position', async () => {
+test('pins letters to their US positions on a layout that types no Latin', async () => {
   // Arrange: a Cyrillic layout produces no Latin letters at all, so every
   // letter shortcut would otherwise be unreachable.
   createTestContext({ KeyA: 'ф', KeyZ: 'я' });
@@ -112,16 +112,37 @@ test('keeps a letter the layout produces somewhere else instead of pinning it', 
   expect(codeForCharacter('a')).toBe('KeyQ');
 });
 
-test('pins a digit the layout only reaches through Shift', async () => {
-  // Arrange: AZERTY types "&" on the key labelled "1"; the digit needs Shift,
-  // which the keyboard map does not report.
+test('leaves a digit the layout cannot type unmodified unresolved', async () => {
+  // Arrange: AZERTY types "&" on the key labelled "1" and reaches the digit
+  // only with Shift, which the keyboard map does not report. Putting "1" on
+  // that key anyway would be right on AZERTY and wrong on Programmer Dvorak,
+  // which moves the digits elsewhere, and it would take "&" off the key it
+  // really is on. Naming the character the key types works on both.
   createTestContext({ Digit1: '&', KeyA: 'q', KeyQ: 'a' });
 
   // Act
   await loadKeyboardLayout();
 
   // Assert
-  expect(codeForCharacter('1')).toBe('Digit1');
+  expect({ ampersand: codeForCharacter('&'), one: codeForCharacter('1') }).toEqual({
+    ampersand: 'Digit1',
+    one: null,
+  });
+});
+
+test('does not pin letters to US positions on a layout that types some Latin', async () => {
+  // Arrange: putting "a" on the US "a" key would take that key away from "b",
+  // which this layout really does type there.
+  createTestContext({ KeyA: 'b', KeyZ: 'ż' });
+
+  // Act
+  await loadKeyboardLayout();
+
+  // Assert
+  expect({ a: codeForCharacter('a'), b: codeForCharacter('b') }).toEqual({
+    a: null,
+    b: 'KeyA',
+  });
 });
 
 test('resolves to the first position when two keys produce one character', async () => {
@@ -162,6 +183,52 @@ test('does not re-read the layout for a keypress a modifier rewrote', async () =
 
   // Assert
   expect(getReadCount()).toBe(1);
+});
+
+test('keeps the layout it has when a re-read comes back empty', async () => {
+  // Arrange: losing a good layout to one bad answer would send every shortcut
+  // back to guessing at US positions, and nothing would ask again.
+  const { setLayout } = createTestContext({ KeyY: 'z', KeyZ: 'y' });
+  await loadKeyboardLayout();
+  setLayout({});
+
+  // Act
+  await loadKeyboardLayout();
+
+  // Assert
+  expect(codeForCharacter('z')).toBe('KeyY');
+});
+
+test('keeps the layout it has when a re-read fails', async () => {
+  // Arrange
+  const { failReads } = createTestContext({ KeyY: 'z', KeyZ: 'y' });
+  await loadKeyboardLayout();
+  failReads();
+
+  // Act
+  await loadKeyboardLayout();
+
+  // Assert
+  expect(codeForCharacter('z')).toBe('KeyY');
+});
+
+test('does not re-read the layout once per keypress when it keeps disagreeing', async () => {
+  // Arrange: remapping software can make the reported character disagree with
+  // the layout permanently, and asking again on every keypress would never
+  // resolve it.
+  const { getReadCount } = createTestContext({ KeyZ: 'z' });
+  trackKeyboardLayout();
+  await vi.waitFor(() => expect(hasKeyboardLayout()).toBe(true));
+
+  // Act: each press waits for the previous read to settle, so nothing is
+  // coalesced and every one of them is free to ask again.
+  for (let press = 0; press < 5; press++) {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'q' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  // Assert: the startup read, plus one for the first press.
+  expect(getReadCount()).toBe(2);
 });
 
 test('re-reads the layout when the window regains focus', async () => {
@@ -229,6 +296,7 @@ function createSlowTestContext() {
 
 function createTestContext(initial: Record<string, string>) {
   let layout = initial;
+  let failing = false;
   let readCount = 0;
 
   Object.defineProperty(navigator, 'keyboard', {
@@ -236,12 +304,17 @@ function createTestContext(initial: Record<string, string>) {
     value: {
       getLayoutMap: () => {
         readCount++;
-        return Promise.resolve(new Map(Object.entries(layout)));
+        return failing
+          ? Promise.reject(new Error('not allowed in this context'))
+          : Promise.resolve(new Map(Object.entries(layout)));
       },
     },
   });
 
   return {
+    failReads: () => {
+      failing = true;
+    },
     getReadCount: () => readCount,
     setLayout: (next: Record<string, string>) => {
       layout = next;
