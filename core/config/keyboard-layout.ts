@@ -109,7 +109,7 @@ export const applyKeyboardLayout = (layout: NativeKeyboardLayout): void => {
   // that types nothing: the shell validates its reads, but this data crosses
   // the IPC boundary, and applying an empty answer would erase a good layout
   // or pin letters onto a keyboard that was never read.
-  if (!hasUsableKey(layout)) {
+  if (layout === null || typeof layout !== 'object' || !hasUsableKey(layout)) {
     return;
   }
 
@@ -120,7 +120,7 @@ export const applyKeyboardLayout = (layout: NativeKeyboardLayout): void => {
 
   for (const code of writingSystemCodes) {
     const mapping = withLetters[code];
-    if (mapping) {
+    if (isKeyMapping(mapping)) {
       const value = usableCharacter(mapping.value, mapping.valueIsDeadKey);
       const withShift = usableCharacter(mapping.withShift, mapping.withShiftIsDeadKey);
       if (value !== null && !nextUnshifted.has(value)) {
@@ -166,8 +166,9 @@ export const resetKeyboardLayout = (): void => {
 const withLatinLetters = (layout: NativeKeyboardLayout): NativeKeyboardLayout => {
   const typesLatin = Object.values(layout).some(
     (mapping) =>
-      isLatinLetter(mapping.value, mapping.valueIsDeadKey) ||
-      isLatinLetter(mapping.withShift, mapping.withShiftIsDeadKey),
+      isKeyMapping(mapping) &&
+      (isLatinLetter(mapping.value, mapping.valueIsDeadKey) ||
+        isLatinLetter(mapping.withShift, mapping.withShiftIsDeadKey)),
   );
   if (typesLatin) {
     return layout;
@@ -185,11 +186,15 @@ const hasUsableKey = (layout: NativeKeyboardLayout): boolean =>
   writingSystemCodes.some((code) => {
     const mapping = layout[code];
     return (
-      mapping !== undefined &&
+      isKeyMapping(mapping) &&
       (usableCharacter(mapping.value, mapping.valueIsDeadKey) !== null ||
         usableCharacter(mapping.withShift, mapping.withShiftIsDeadKey) !== null)
     );
   });
+
+// Hostile IPC data may hold anything where a mapping belongs.
+const isKeyMapping = (mapping: unknown): mapping is NativeKeyboardKeyMapping =>
+  mapping !== null && typeof mapping === 'object';
 
 const isLatinLetter = (value: string, isDeadKey: boolean | undefined): boolean => {
   const character = usableCharacter(value, isDeadKey);

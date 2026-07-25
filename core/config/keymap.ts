@@ -7,6 +7,11 @@ type ParsedKeyCombo = {
   ctrlKey: boolean;
   key: string;
   metaKey: boolean;
+  // True for a combo that named its key rather than its character, like
+  // `Shift+/` for the keystroke typing "?". Typed matching then requires the
+  // named key too: the same character typed on a different key is a different
+  // keystroke.
+  requiresCode: boolean;
   shiftKey: boolean;
 };
 
@@ -50,34 +55,6 @@ const shiftedPunctuationCodes: Record<string, string> = {
   $: 'Digit4',
 };
 
-// What Shift makes each unshifted US character type, so a combo written by the
-// key, like VS Code's `Shift+/`, means the same keystroke as one written by
-// the character it produces, `Shift+?`. Letters need no entry: their two
-// spellings already collapse when combos are lowercased.
-const usShiftedSpellings: Record<string, string> = {
-  '-': '_',
-  ',': '<',
-  ';': ':',
-  '.': '>',
-  "'": '"',
-  '[': '{',
-  ']': '}',
-  '/': '?',
-  '\\': '|',
-  '`': '~',
-  '=': '+',
-  '0': ')',
-  '1': '!',
-  '2': '@',
-  '3': '#',
-  '4': '$',
-  '5': '%',
-  '6': '^',
-  '7': '&',
-  '8': '*',
-  '9': '(',
-};
-
 // `KeyboardEvent.code` for the letter, digit or punctuation key a combo names,
 // or null for a named key like `Enter` that no modifier rewrites.
 //
@@ -106,51 +83,50 @@ const physicalCode = (key: string, shiftKey: boolean): string | null => {
   return (shiftKey ? shiftedPunctuationCodes : unshiftedPunctuationCodes)[key] ?? null;
 };
 
-type ResolvedComboKey = { code: string | null; key: string };
+type ResolvedComboKey = { code: string | null; key: string; requiresCode: boolean };
 
 // The character and key a shifted combo means, whichever of its two spellings
 // it used. `Shift+?` names the character a keystroke types; `Shift+/` names
-// the "/" key with Shift held, whose keystroke types "?", so both must parse
-// identically or they would claim the "/" key twice.
+// the "/" key with Shift held, whose keystroke types "?", so both must mean
+// the same keystroke or they would claim the "/" key twice.
 //
 // A character some key types with Shift held is always the character
 // spelling, and stays on that key even when another key types it unshifted:
 // Linux Russian types "/" plain on one key and with Shift on another, and
 // `Shift+/` must mean the keystroke that types "/". Only a character no
-// Shift ever produces is read as a key name, and it keeps the key it named
-// rather than following its shifted character to whichever key claimed that
-// character first. Without a layout the US pairing and tables answer.
+// Shift ever produces is read as a key name, and it stays bound to the key it
+// named, in matching too, rather than following its shifted character to
+// whichever key types that character elsewhere.
+//
+// Reading a spelling as a key name takes a layout. Before one arrives, and
+// wherever none ever does, a combo keeps meaning the character as written,
+// exactly as it did before layouts were consulted at all.
 const resolveComboKey = (spelled: string, shiftKey: boolean): ResolvedComboKey => {
-  if (!shiftKey || spelled.length !== 1) {
-    return { code: physicalCode(spelled, shiftKey), key: spelled };
+  if (!shiftKey || spelled.length !== 1 || !hasKeyboardLayout()) {
+    return { code: physicalCode(spelled, shiftKey), key: spelled, requiresCode: false };
   }
 
-  if (hasKeyboardLayout()) {
-    const shiftedCode = codeForCharacter(spelled, true);
-    if (shiftedCode !== null) {
-      return { code: shiftedCode, key: spelled };
-    }
-
-    const unshiftedCode = codeForCharacter(spelled, false);
-    const shiftedCharacter = unshiftedCode === null ? null : shiftedCharacterForCode(unshiftedCode);
-    if (unshiftedCode !== null && shiftedCharacter !== null) {
-      return { code: unshiftedCode, key: shiftedCharacter };
-    }
-
-    // The layout cannot type it with Shift at all; the character may still
-    // arrive composed, so typed matching keeps the spelling as written.
-    return { code: null, key: spelled };
+  const shiftedCode = codeForCharacter(spelled, true);
+  if (shiftedCode !== null) {
+    return { code: shiftedCode, key: spelled, requiresCode: false };
   }
 
-  const key = usShiftedSpellings[spelled] ?? spelled;
-  return { code: physicalCode(key, true), key };
+  const unshiftedCode = codeForCharacter(spelled, false);
+  const shiftedCharacter = unshiftedCode === null ? null : shiftedCharacterForCode(unshiftedCode);
+  if (unshiftedCode !== null && shiftedCharacter !== null) {
+    return { code: unshiftedCode, key: shiftedCharacter, requiresCode: true };
+  }
+
+  // The layout cannot type it with Shift at all; the character may still
+  // arrive composed, so typed matching keeps the spelling as written.
+  return { code: null, key: spelled, requiresCode: false };
 };
 
 const parseKeyCombo = (combo: KeyCombo): ParsedKeyCombo => {
   const parts = combo.split('+').map((part) => part.trim().toLowerCase());
   const mac = isMac();
   const shiftKey = parts.includes('shift');
-  const { code, key } = resolveComboKey(
+  const { code, key, requiresCode } = resolveComboKey(
     parts.find(
       (part) =>
         part !== 'mod' && part !== 'ctrl' && part !== 'alt' && part !== 'shift' && part !== 'meta',
@@ -164,6 +140,7 @@ const parseKeyCombo = (combo: KeyCombo): ParsedKeyCombo => {
     ctrlKey: mac ? parts.includes('ctrl') : parts.includes('mod') || parts.includes('ctrl'),
     key,
     metaKey: mac ? parts.includes('mod') || parts.includes('meta') : parts.includes('meta'),
+    requiresCode,
     shiftKey,
   };
 };
@@ -185,8 +162,11 @@ type ShortcutEvent = Pick<
 const isDeadOrNonAsciiKey = (key: string): boolean =>
   key === 'Dead' || (key.length === 1 && key.charCodeAt(0) > 0x7e);
 
+// A key-spelled combo additionally requires the key it named: two keys may
+// type the same character with Shift, and `Shift+/` means only one of them.
 const matchesTypedKey = (event: ShortcutEvent, parsed: ParsedKeyCombo): boolean =>
-  event.key.toLowerCase() === parsed.key;
+  event.key.toLowerCase() === parsed.key &&
+  (!parsed.requiresCode || (parsed.code !== null && event.code === parsed.code));
 
 const matchesPhysicalKey = (event: ShortcutEvent, parsed: ParsedKeyCombo): boolean =>
   parsed.altKey && parsed.code !== null && event.code === parsed.code;
