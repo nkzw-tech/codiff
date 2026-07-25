@@ -6,15 +6,9 @@ settings:
 
 catalogs:
   default:
-    vite:
-      specifier: npm:@voidzero-dev/vite-plus-core@^0.2.4
-      version: 0.2.4
     vite-plus:
       specifier: ^0.2.4
       version: 0.2.4
-    vitest:
-      specifier: 4.1.10
-      version: 4.1.10
 
 overrides:
   extract-zip>yauzl: ^3.4.0
@@ -28,6 +22,9 @@ importers:
       electron-squirrel-startup:
         specifier: ^1.0.1
         version: 1.0.1
+      native-keymap:
+        specifier: ^3.3.9
+        version: 3.3.9
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -5239,6 +5236,9 @@ packages:
 
   napi-build-utils@2.0.0:
     resolution: {integrity: sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==}
+
+  native-keymap@3.3.9:
+    resolution: {integrity: sha512-d/ydQ5x+GM5W0dyAjFPwexhtc9CDH1g/xWZESS5CXk16ThyFzSBLvlBJq1+FyzUIFf/F2g1MaHdOpa6G9150YQ==}
 
   natural-compare@1.4.0:
     resolution: {integrity: sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw==}
@@ -11763,6 +11763,8 @@ snapshots:
   nanostores@1.4.0: {}
 
   napi-build-utils@2.0.0: {}
+
+  native-keymap@3.3.9: {}
 
   natural-compare@1.4.0: {}
 

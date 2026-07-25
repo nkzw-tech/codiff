@@ -1,3 +1,4 @@
+import type { NativeKeyboardLayout } from './config/keyboard-layout.ts';
 import type { CodiffConfig } from './config/types.ts';
 import type {
   AgentSkillStatus,
@@ -53,6 +54,7 @@ declare global {
       getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
       getFeatureFlags: () => Promise<CodiffFeatureFlags>;
       getGitIdentity: () => Promise<GitIdentity>;
+      getKeyboardLayout: () => Promise<NativeKeyboardLayout | null>;
       getLaunchOptions: () => Promise<CodiffLaunchOptions>;
       getMarkdownDocument: (request: {
         kind: CodiffMarkdownDocument['kind'];
@@ -75,6 +77,7 @@ declare global {
       onConfigChanged: (callback: (config: CodiffConfig) => void) => () => void;
       onCopyPendingCommentsRequest: (callback: () => string | Promise<string>) => () => void;
       onFindInDiffs: (callback: () => void) => () => void;
+      onKeyboardLayoutChanged: (callback: (layout: NativeKeyboardLayout) => void) => () => void;
       onMarkdownDocumentChanged: (
         callback: (
           change:

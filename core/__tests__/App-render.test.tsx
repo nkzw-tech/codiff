@@ -166,6 +166,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     email: 'reviewer@example.com',
     name: 'Reviewer',
   })),
+  getKeyboardLayout: vi.fn(async () => null),
   getLaunchOptions: vi.fn(async () => ({
     repositoryPathProvided: true,
     walkthrough: false,
@@ -226,6 +227,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   onConfigChanged: vi.fn(() => () => {}),
   onCopyPendingCommentsRequest: vi.fn(() => () => {}),
   onFindInDiffs: vi.fn(() => () => {}),
+  onKeyboardLayoutChanged: vi.fn(() => () => {}),
   onMarkdownDocumentChanged: vi.fn(() => () => {}),
   onOpenReviewSource: vi.fn(() => () => {}),
   onPlanCloseRequested: vi.fn(() => () => {}),

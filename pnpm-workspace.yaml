@@ -11,6 +11,7 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+  native-keymap: true
   node-pty: true
   protobufjs: false
   sharp: true

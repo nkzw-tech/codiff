@@ -27,6 +27,7 @@ const codiff = {
   getFeatureFlags: () => ipcRenderer.invoke('codiff:getFeatureFlags'),
   getDiffImageContent: (request) => ipcRenderer.invoke('codiff:getDiffImageContent', request),
   getGitIdentity: () => ipcRenderer.invoke('codiff:getGitIdentity'),
+  getKeyboardLayout: () => ipcRenderer.invoke('codiff:getKeyboardLayout'),
   getLaunchOptions: () => ipcRenderer.invoke('codiff:getLaunchOptions'),
   getMarkdownDocument: (request) => ipcRenderer.invoke('codiff:getMarkdownDocument', request),
   getPreferences: () => ipcRenderer.invoke('codiff:getPreferences'),
@@ -71,6 +72,12 @@ const codiff = {
     const listener = () => callback();
     ipcRenderer.on('codiff:findInDiffs', listener);
     return () => ipcRenderer.removeListener('codiff:findInDiffs', listener);
+  },
+  onKeyboardLayoutChanged: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {import('../core/config/keyboard-layout.ts').NativeKeyboardLayout} layout */
+    const listener = (_event, layout) => callback(layout);
+    ipcRenderer.on('codiff:keyboardLayoutChanged', listener);
+    return () => ipcRenderer.removeListener('codiff:keyboardLayoutChanged', listener);
   },
   onOpenReviewSource: (callback) => {
     /** @param {Electron.IpcRendererEvent} _event @param {import('../core/types.ts').OpenReviewSourceKind} kind */

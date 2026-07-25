@@ -30,6 +30,7 @@ const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
+const { readKeyboardLayout, watchKeyboardLayout } = require('./keyboard-layout.cjs');
 const { diagnoseWalkthroughMismatch } = require('./walkthrough-diagnosis.cjs');
 const { readCommitMessageReply } = require('./walkthrough-commit-message.cjs');
 const { normalizePiModel } = require('./pi.cjs');
@@ -1231,6 +1232,14 @@ if (squirrelStartup || !lock) {
     nativeTheme.themeSource = config.settings.theme;
     Menu.setApplicationMenu(buildApplicationMenu());
 
+    watchKeyboardLayout((layout) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send('codiff:keyboardLayoutChanged', layout);
+        }
+      }
+    });
+
     const launchOptions = getLaunchOptions();
     focusOrCreateWindow(
       getInitialRepositoryPath(getLaunchPath(), launchOptions, config.settings.lastRepositoryPath),
@@ -1692,6 +1701,8 @@ ipcMain.handle('codiff:getGitIdentity', async (event) => {
 ipcMain.handle('codiff:getPreferences', () => configToPreferences(config));
 
 ipcMain.handle('codiff:getConfig', () => config);
+
+ipcMain.handle('codiff:getKeyboardLayout', () => readKeyboardLayout());
 
 ipcMain.handle('codiff:isWindowFullScreen', (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
