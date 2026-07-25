@@ -64,7 +64,7 @@ const shiftedPunctuationCodes: Record<string, string> = {
 // Shifted `Equal` has no spelling at all, since `+` is the combo delimiter.
 const physicalCode = (key: string, shiftKey: boolean): string | null => {
   if (!shiftKey) {
-    const layoutCode = codeForCharacter(key);
+    const layoutCode = codeForCharacter(key, false);
     if (layoutCode !== null) {
       return layoutCode;
     }
