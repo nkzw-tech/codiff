@@ -106,31 +106,51 @@ const physicalCode = (key: string, shiftKey: boolean): string | null => {
   return (shiftKey ? shiftedPunctuationCodes : unshiftedPunctuationCodes)[key] ?? null;
 };
 
-// The one character this combo's keystroke types, whichever of its spellings
-// the combo used. `Shift+/` names the "/" key with Shift held, and that
-// keystroke types "?", so it is `Shift+?` written by the key instead of the
-// character; both must parse identically or they would claim the "/" key
-// twice. The layout answers when it can, so on German `Shift+7` means the "/"
-// that keystroke really types; the US pairing answers when no layout has
-// arrived.
-const canonicalKey = (key: string, shiftKey: boolean): string => {
-  if (!shiftKey || key.length !== 1) {
-    return key;
+type ResolvedComboKey = { code: string | null; key: string };
+
+// The character and key a shifted combo means, whichever of its two spellings
+// it used. `Shift+?` names the character a keystroke types; `Shift+/` names
+// the "/" key with Shift held, whose keystroke types "?", so both must parse
+// identically or they would claim the "/" key twice.
+//
+// A character some key types with Shift held is always the character
+// spelling, and stays on that key even when another key types it unshifted:
+// Linux Russian types "/" plain on one key and with Shift on another, and
+// `Shift+/` must mean the keystroke that types "/". Only a character no
+// Shift ever produces is read as a key name, and it keeps the key it named
+// rather than following its shifted character to whichever key claimed that
+// character first. Without a layout the US pairing and tables answer.
+const resolveComboKey = (spelled: string, shiftKey: boolean): ResolvedComboKey => {
+  if (!shiftKey || spelled.length !== 1) {
+    return { code: physicalCode(spelled, shiftKey), key: spelled };
   }
 
   if (hasKeyboardLayout()) {
-    const code = codeForCharacter(key, false);
-    return (code === null ? null : shiftedCharacterForCode(code)) ?? key;
+    const shiftedCode = codeForCharacter(spelled, true);
+    if (shiftedCode !== null) {
+      return { code: shiftedCode, key: spelled };
+    }
+
+    const unshiftedCode = codeForCharacter(spelled, false);
+    const shiftedCharacter = unshiftedCode === null ? null : shiftedCharacterForCode(unshiftedCode);
+    if (unshiftedCode !== null && shiftedCharacter !== null) {
+      return { code: unshiftedCode, key: shiftedCharacter };
+    }
+
+    // The layout cannot type it with Shift at all; the character may still
+    // arrive composed, so typed matching keeps the spelling as written.
+    return { code: null, key: spelled };
   }
 
-  return usShiftedSpellings[key] ?? key;
+  const key = usShiftedSpellings[spelled] ?? spelled;
+  return { code: physicalCode(key, true), key };
 };
 
 const parseKeyCombo = (combo: KeyCombo): ParsedKeyCombo => {
   const parts = combo.split('+').map((part) => part.trim().toLowerCase());
   const mac = isMac();
   const shiftKey = parts.includes('shift');
-  const key = canonicalKey(
+  const { code, key } = resolveComboKey(
     parts.find(
       (part) =>
         part !== 'mod' && part !== 'ctrl' && part !== 'alt' && part !== 'shift' && part !== 'meta',
@@ -140,7 +160,7 @@ const parseKeyCombo = (combo: KeyCombo): ParsedKeyCombo => {
 
   return {
     altKey: parts.includes('alt'),
-    code: physicalCode(key, shiftKey),
+    code,
     ctrlKey: mac ? parts.includes('ctrl') : parts.includes('mod') || parts.includes('ctrl'),
     key,
     metaKey: mac ? parts.includes('mod') || parts.includes('meta') : parts.includes('meta'),

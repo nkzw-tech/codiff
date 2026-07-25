@@ -105,6 +105,14 @@ export const trackKeyboardLayout = (): void => {
 };
 
 export const applyKeyboardLayout = (layout: NativeKeyboardLayout): void => {
+  // A layout with nothing usable on it is a missing answer, not a keyboard
+  // that types nothing: the shell validates its reads, but this data crosses
+  // the IPC boundary, and applying an empty answer would erase a good layout
+  // or pin letters onto a keyboard that was never read.
+  if (!hasUsableKey(layout)) {
+    return;
+  }
+
   const withLetters = withLatinLetters(layout);
   const nextUnshifted = new Map<string, string>();
   const nextShifted = new Map<string, string>();
@@ -173,6 +181,16 @@ const withLatinLetters = (layout: NativeKeyboardLayout): NativeKeyboardLayout =>
   return result;
 };
 
+const hasUsableKey = (layout: NativeKeyboardLayout): boolean =>
+  writingSystemCodes.some((code) => {
+    const mapping = layout[code];
+    return (
+      mapping !== undefined &&
+      (usableCharacter(mapping.value, mapping.valueIsDeadKey) !== null ||
+        usableCharacter(mapping.withShift, mapping.withShiftIsDeadKey) !== null)
+    );
+  });
+
 const isLatinLetter = (value: string, isDeadKey: boolean | undefined): boolean => {
   const character = usableCharacter(value, isDeadKey);
   return character !== null && letters.includes(character);
@@ -182,9 +200,10 @@ const isLatinLetter = (value: string, isDeadKey: boolean | undefined): boolean =
 // composition rather than typing, named keys like Enter report empty strings,
 // and matching is case-insensitive so a Shift column's "Z" answers to the
 // spelling "z". A character whose lowercase form is longer than itself, like
-// "İ", keeps its own spelling.
+// "İ", keeps its own spelling. The typeof check guards the IPC boundary: a
+// mapping this module never promised must not take the matcher down.
 const usableCharacter = (value: string, isDeadKey: boolean | undefined): string | null => {
-  if (isDeadKey || value.length !== 1) {
+  if (isDeadKey || typeof value !== 'string' || value.length !== 1) {
     return null;
   }
 

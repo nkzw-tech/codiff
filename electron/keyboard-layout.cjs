@@ -4,6 +4,14 @@
 // `native-keymap` because Chromium reports unmodified characters only and has
 // no layout change event. A failed native module load must not take the app
 // down: without an answer the renderer falls back to US key positions.
+//
+// macOS ISO keyboards are left uncompensated on purpose. Apple historically
+// swaps the Backquote and IntlBackslash virtual key codes on some ISO
+// hardware, but `isISOKeyboard()` cannot say whether compensation is needed:
+// on the ISO MacBook this was measured on, Chromium's own `getLayoutMap()`
+// agrees exactly with native-keymap's uncompensated answer, so swapping
+// whenever `isISOKeyboard()` is true would break the very keys it is meant to
+// fix. VS Code ships the same uncompensated data.
 
 /** @typedef {import('../core/config/keyboard-layout.ts').NativeKeyboardLayout} NativeKeyboardLayout */
 
@@ -15,7 +23,7 @@ const readKeyboardLayout = () => {
   }
 
   try {
-    return /** @type {NativeKeyboardLayout} */ (nativeKeymap.getKeyMap());
+    return normalizeKeyboardLayout(nativeKeymap.getKeyMap());
   } catch {
     return null;
   }
@@ -40,6 +48,26 @@ const watchKeyboardLayout = (onChange) => {
   }
 };
 
+// native-keymap catches its own load and read errors internally and answers
+// with an empty array, which is a missing answer rather than a keyboard, and
+// applying it would pin letters onto a keyboard that was never read.
+/**
+ * @param {unknown} raw
+ * @returns {NativeKeyboardLayout | null}
+ */
+const normalizeKeyboardLayout = (raw) => {
+  if (
+    raw === null ||
+    typeof raw !== 'object' ||
+    Array.isArray(raw) ||
+    Object.keys(raw).length === 0
+  ) {
+    return null;
+  }
+
+  return /** @type {NativeKeyboardLayout} */ (raw);
+};
+
 const loadNativeKeymap = () => {
   try {
     return require('native-keymap');
@@ -48,4 +76,4 @@ const loadNativeKeymap = () => {
   }
 };
 
-module.exports = { readKeyboardLayout, watchKeyboardLayout };
+module.exports = { normalizeKeyboardLayout, readKeyboardLayout, watchKeyboardLayout };
