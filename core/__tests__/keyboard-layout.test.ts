@@ -192,6 +192,41 @@ test('stops watching for layout changes once it is reset', async () => {
   expect(getReadCount()).toBe(1);
 });
 
+test('discards a layout read that was still in flight when it was reset', async () => {
+  // Arrange: reads are asynchronous, so one can land after whoever started it
+  // has already given up on it.
+  const { reportLayout } = createSlowTestContext();
+  const pending = loadKeyboardLayout();
+  resetKeyboardLayout();
+
+  // Act
+  reportLayout({ KeyZ: 'z' });
+  await pending;
+
+  // Assert
+  expect(hasKeyboardLayout()).toBe(false);
+});
+
+// A keyboard whose layout arrives only when the test says so.
+function createSlowTestContext() {
+  let resolveLayout!: (layout: Map<string, string>) => void;
+
+  Object.defineProperty(navigator, 'keyboard', {
+    configurable: true,
+    value: {
+      getLayoutMap: () =>
+        new Promise<Map<string, string>>((resolve) => {
+          resolveLayout = resolve;
+        }),
+    },
+  });
+
+  return {
+    reportLayout: (layout: Record<string, string>) =>
+      resolveLayout(new Map(Object.entries(layout))),
+  };
+}
+
 function createTestContext(initial: Record<string, string>) {
   let layout = initial;
   let readCount = 0;

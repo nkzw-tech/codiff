@@ -21,6 +21,9 @@ let characterToCode: ReadonlyMap<string, string> | null = null;
 let codeToCharacter: ReadonlyMap<string, string> | null = null;
 let reading: Promise<void> | null = null;
 let watching = false;
+// Bumped by every reset, so a read that was already in flight cannot land
+// afterwards and put the layout back.
+let generation = 0;
 
 export const codeForCharacter = (character: string): string | null =>
   characterToCode?.get(character) ?? null;
@@ -53,6 +56,7 @@ export const resetKeyboardLayout = (): void => {
   characterToCode = null;
   codeToCharacter = null;
   reading = null;
+  generation++;
 
   if (watching) {
     watching = false;
@@ -62,6 +66,7 @@ export const resetKeyboardLayout = (): void => {
 };
 
 const readLayout = async (): Promise<void> => {
+  const startedAt = generation;
   const keyboard = (navigator as Navigator & { keyboard?: KeyboardLayoutSource }).keyboard;
   if (!keyboard?.getLayoutMap) {
     clearLayout();
@@ -70,6 +75,9 @@ const readLayout = async (): Promise<void> => {
 
   try {
     const layout = await keyboard.getLayoutMap();
+    if (startedAt !== generation) {
+      return;
+    }
     // A window with no keyboard attached to it reports zero keys. That is a
     // missing answer, not a keyboard that produces nothing, so keep waiting for
     // a real one instead of caching it.
@@ -83,7 +91,9 @@ const readLayout = async (): Promise<void> => {
   } catch {
     // Platforms without the API and non-secure contexts reject. The US tables
     // cover both.
-    clearLayout();
+    if (startedAt === generation) {
+      clearLayout();
+    }
   }
 };
 
