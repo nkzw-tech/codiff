@@ -1,4 +1,4 @@
-import { codeForCharacter, hasKeyboardLayout } from './keyboard-layout.ts';
+import { codeForCharacter, hasKeyboardLayout, shiftedCharacterForCode } from './keyboard-layout.ts';
 import type { CodiffKeymap, KeyCombo, KeyComboBinding } from './types.ts';
 
 type ParsedKeyCombo = {
@@ -42,6 +42,7 @@ const shiftedPunctuationCodes: Record<string, string> = {
   '#': 'Digit3',
   '%': 'Digit5',
   '^': 'Digit6',
+  '+': 'Equal',
   '<': 'Comma',
   '>': 'Period',
   '|': 'Backslash',
@@ -49,31 +50,52 @@ const shiftedPunctuationCodes: Record<string, string> = {
   $: 'Digit4',
 };
 
+// What Shift makes each unshifted US character type, so a combo written by the
+// key, like VS Code's `Shift+/`, means the same keystroke as one written by
+// the character it produces, `Shift+?`. Letters need no entry: their two
+// spellings already collapse when combos are lowercased.
+const usShiftedSpellings: Record<string, string> = {
+  '-': '_',
+  ',': '<',
+  ';': ':',
+  '.': '>',
+  "'": '"',
+  '[': '{',
+  ']': '}',
+  '/': '?',
+  '\\': '|',
+  '`': '~',
+  '=': '+',
+  '0': ')',
+  '1': '!',
+  '2': '@',
+  '3': '#',
+  '4': '$',
+  '5': '%',
+  '6': '^',
+  '7': '&',
+  '8': '*',
+  '9': '(',
+};
+
 // `KeyboardEvent.code` for the letter, digit or punctuation key a combo names,
 // or null for a named key like `Enter` that no modifier rewrites.
 //
-// The user's own layout answers first, so `Alt+z` follows the key that really
-// types "z" rather than wherever US keyboards put it. A shifted spelling has to
-// keep using the tables below, because the layout reports unmodified characters
-// only; mixing the two sources within one Shift state would let a spelling the
-// layout placed and a spelling a table placed land on the same key.
-//
-// Combos name the resulting character, so `Shift+?` and `/` describe the same
-// key; keying the tables on the combo's own Shift state keeps at most one
-// spelling able to claim each position and stops the two from colliding.
-// Shifted `Equal` has no spelling at all, since `+` is the combo delimiter.
+// The user's own layout answers first, in the combo's own Shift state, so
+// `Alt+z` follows the key that really types "z" and `Alt+Shift+?` the key
+// whose Shift produces "?", wherever the layout put them. Keeping each Shift
+// state inside one source means two combos can land on one key only by naming
+// the same keystroke, which canonicalization has already collapsed.
 const physicalCode = (key: string, shiftKey: boolean): string | null => {
-  if (!shiftKey) {
-    const layoutCode = codeForCharacter(key, false);
-    if (layoutCode !== null) {
-      return layoutCode;
-    }
-    // With the real layout in hand, a character it cannot type has no key to
-    // match. Guessing the US position would fire the shortcut on whichever key
-    // the layout put there instead, which is the bug this replaces.
-    if (hasKeyboardLayout()) {
-      return null;
-    }
+  const layoutCode = codeForCharacter(key, shiftKey);
+  if (layoutCode !== null) {
+    return layoutCode;
+  }
+  // With the real layout in hand, a character it cannot type has no key to
+  // match. Guessing the US position would fire the shortcut on whichever key
+  // the layout put there instead, which is the bug this replaces.
+  if (hasKeyboardLayout()) {
+    return null;
   }
   if (/^[a-z]$/.test(key)) {
     return `Key${key.toUpperCase()}`;
@@ -84,15 +106,37 @@ const physicalCode = (key: string, shiftKey: boolean): string | null => {
   return (shiftKey ? shiftedPunctuationCodes : unshiftedPunctuationCodes)[key] ?? null;
 };
 
+// The one character this combo's keystroke types, whichever of its spellings
+// the combo used. `Shift+/` names the "/" key with Shift held, and that
+// keystroke types "?", so it is `Shift+?` written by the key instead of the
+// character; both must parse identically or they would claim the "/" key
+// twice. The layout answers when it can, so on German `Shift+7` means the "/"
+// that keystroke really types; the US pairing answers when no layout has
+// arrived.
+const canonicalKey = (key: string, shiftKey: boolean): string => {
+  if (!shiftKey || key.length !== 1) {
+    return key;
+  }
+
+  if (hasKeyboardLayout()) {
+    const code = codeForCharacter(key, false);
+    return (code === null ? null : shiftedCharacterForCode(code)) ?? key;
+  }
+
+  return usShiftedSpellings[key] ?? key;
+};
+
 const parseKeyCombo = (combo: KeyCombo): ParsedKeyCombo => {
   const parts = combo.split('+').map((part) => part.trim().toLowerCase());
   const mac = isMac();
   const shiftKey = parts.includes('shift');
-  const key =
+  const key = canonicalKey(
     parts.find(
       (part) =>
         part !== 'mod' && part !== 'ctrl' && part !== 'alt' && part !== 'shift' && part !== 'meta',
-    ) ?? '';
+    ) ?? '',
+    shiftKey,
+  );
 
   return {
     altKey: parts.includes('alt'),
@@ -100,7 +144,7 @@ const parseKeyCombo = (combo: KeyCombo): ParsedKeyCombo => {
     ctrlKey: mac ? parts.includes('ctrl') : parts.includes('mod') || parts.includes('ctrl'),
     key,
     metaKey: mac ? parts.includes('mod') || parts.includes('meta') : parts.includes('meta'),
-    shiftKey: parts.includes('shift'),
+    shiftKey,
   };
 };
 
@@ -159,10 +203,11 @@ const matchesBinding = (
 // matcher can see, so instead of guessing it only ever turns a keypress nothing
 // wanted into one that fires, never takes one from a shortcut that matched.
 //
-// `physicalCode` resolves the position through the user's real layout, so the
-// key it lands on is the one the keycap advertises. Shifted spellings and the
-// window before the layout loads still resolve to US positions, which on a
-// layout that moves keys can fire an action the keycap does not suggest.
+// `physicalCode` resolves the position through the user's real layout, in the
+// combo's own Shift state, so the key it lands on is the one the keycap
+// advertises. Only the window before the layout arrives resolves against US
+// positions, which on a layout that moves keys can fire an action the keycap
+// does not suggest.
 const canFallBackToPhysicalKey = (event: ShortcutEvent, keymap: CodiffKeymap): boolean =>
   event.altKey &&
   isMac() &&
