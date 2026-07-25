@@ -166,24 +166,7 @@ Set `settings.codeFontFamily` manually to an installed CSS font family name, for
 `"JetBrains Mono"` or `"SF Mono"`. Leave it empty to use Codiff's bundled mono stack.
 Use `Mod` for <kbd>Cmd</kbd> on macOS and <kbd>Ctrl</kbd> on other platforms. Shortcut strings can
 combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Shift+p` or
-`Alt+Enter`. A shifted keystroke can be written either way: `Shift+?` names the character it
-types, `Shift+/` the key it sits on, and both mean the same shortcut. Reading a spelling as a key
-name relies on the keyboard layout the desktop app reads from the operating system; where no
-layout is available a spelling means the character as written, so `Shift+?` is the portable form.
-
-Shortcuts match on the character your layout produces. <kbd>Option</kbd> is the exception: macOS
-replaces the character it would otherwise produce (<kbd>Option</kbd>+<kbd>z</kbd> types `Ω`), so
-`Alt` shortcuts fall back to the key your layout puts that character on, in the combo's own Shift
-state: `Alt+z` follows the key that types <kbd>z</kbd> on QWERTZ, AZERTY, and Dvorak, and
-`Alt+Shift+?` the key whose Shift types <kbd>?</kbd>. Codiff reads the layout from the operating
-system and follows input source switches as they happen. On a layout that types no Latin at all,
-such as Cyrillic or Greek, letters stay at their US positions so those shortcuts remain reachable.
-
-An `Alt` shortcut naming a character your layout reaches only through <kbd>Shift</kbd> must spell
-the Shift out: on AZERTY, `Alt+1` does nothing and `Alt+Shift+1` fires on the keystroke that types
-`1`. Naming the key's unshifted character instead, `Alt+&`, binds the same key without Shift held.
-The fallback applies only to a keypress that matches no shortcut by character, so it never
-overrides one that does.
+`Alt+Enter`.
 
 ## Walkthroughs
 
