@@ -218,6 +218,45 @@ test('resolves a digit the layout types only with Shift through its shifted spel
   }).toEqual({ ampersand: 'Digit1', one: null, shiftedOne: 'Digit1' });
 });
 
+test('keeps the layout it has when an empty one arrives', () => {
+  // Arrange: a failed native read reports nothing rather than a keyboard that
+  // types nothing, so it must not erase a good layout or pin letters onto a
+  // keyboard that was never read.
+  applyKeyboardLayout({ KeyY: key('z', 'Z'), KeyZ: key('y', 'Y') });
+
+  // Act
+  applyKeyboardLayout({});
+
+  // Assert
+  expect(codeForCharacter('z', false)).toBe('KeyY');
+});
+
+test('stays without a layout when the first one to arrive is empty', () => {
+  // Act
+  applyKeyboardLayout({});
+
+  // Assert
+  expect(hasKeyboardLayout()).toBe(false);
+});
+
+test('ignores a key whose mapping is malformed', () => {
+  // Arrange: layout data crosses the IPC boundary, so a shape the native
+  // module never promised must not take the matcher down.
+  const layout = {
+    KeyQ: key('q', 'Q'),
+    KeyZ: { value: 7, withShift: null } as unknown as ReturnType<typeof key>,
+  };
+
+  // Act
+  applyKeyboardLayout(layout);
+
+  // Assert
+  expect({ q: codeForCharacter('q', false), z: codeForCharacter('z', false) }).toEqual({
+    q: 'KeyQ',
+    z: null,
+  });
+});
+
 test('reads the layout from the desktop shell when tracking starts', async () => {
   // Arrange
   createTestContext({ initialLayout: { KeyY: key('z', 'Z'), KeyZ: key('y', 'Y') } });

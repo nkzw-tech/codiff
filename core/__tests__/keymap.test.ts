@@ -302,6 +302,97 @@ test('resolves a digit the layout reaches only through Shift to its real key', (
   });
 });
 
+test('keeps a shifted spelling on the key that really types it when it appears in both columns', () => {
+  // Arrange: Linux Russian types "/" with Shift on the US "\" key and plain on
+  // the key next to the left Shift, which types "|" when shifted. "/" written
+  // with Shift must mean the keystroke that types "/", not get reinterpreted
+  // as the "/" key and land on the keystroke that types "|".
+  const { keydown, keymap } = createTestContext({ diffSearch: 'Mod+Shift+/' });
+  applyKeyboardLayout(bothColumnOverlapLayout);
+
+  // Act
+  const matched = {
+    pipe: matchesShortcut(
+      keydown({ key: '|', metaKey: true, shiftKey: true }),
+      keymap,
+      'diffSearch',
+    ),
+    slash: matchesShortcut(
+      keydown({ key: '/', metaKey: true, shiftKey: true }),
+      keymap,
+      'diffSearch',
+    ),
+  };
+
+  // Assert
+  expect(matched).toEqual({ pipe: false, slash: true });
+});
+
+test('resolves both-column spellings to their own keys', () => {
+  // Arrange
+  const { keydown, keymap } = createTestContext({
+    commandBar: 'Alt+Shift+/',
+    toggleWordWrap: 'Alt+Shift+|',
+  });
+  applyKeyboardLayout(bothColumnOverlapLayout);
+  const onBackslash = keydown({ altKey: true, code: 'Backslash', key: '¿', shiftKey: true });
+  const onIntlBackslash = keydown({
+    altKey: true,
+    code: 'IntlBackslash',
+    key: '¿',
+    shiftKey: true,
+  });
+
+  // Act
+  const matched = {
+    backslashPipe: matchesShortcut(onBackslash, keymap, 'toggleWordWrap'),
+    backslashSlash: matchesShortcut(onBackslash, keymap, 'commandBar'),
+    intlPipe: matchesShortcut(onIntlBackslash, keymap, 'toggleWordWrap'),
+    intlSlash: matchesShortcut(onIntlBackslash, keymap, 'commandBar'),
+  };
+
+  // Assert
+  expect(matched).toEqual({
+    backslashPipe: false,
+    backslashSlash: true,
+    intlPipe: true,
+    intlSlash: false,
+  });
+});
+
+test('lands a key spelling on the key it names when its shifted character lives elsewhere too', () => {
+  // Arrange: two keys type "?" with Shift. `Alt+Shift+/` names the "/" key, so
+  // it must stay on that key rather than follow "?" to whichever key claimed
+  // the character first.
+  const { keydown, keymap } = createTestContext({
+    commandBar: 'Alt+Shift+/',
+    toggleWordWrap: 'Alt+Shift+?',
+  });
+  applyKeyboardLayout({
+    KeyQ: { value: 'q', withShift: 'Q' },
+    Semicolon: { value: ';', withShift: '?' },
+    Slash: { value: '/', withShift: '?' },
+  });
+  const onSemicolon = keydown({ altKey: true, code: 'Semicolon', key: '¿', shiftKey: true });
+  const onSlash = keydown({ altKey: true, code: 'Slash', key: '¿', shiftKey: true });
+
+  // Act
+  const matched = {
+    semicolonQuestion: matchesShortcut(onSemicolon, keymap, 'toggleWordWrap'),
+    semicolonSlash: matchesShortcut(onSemicolon, keymap, 'commandBar'),
+    slashQuestion: matchesShortcut(onSlash, keymap, 'toggleWordWrap'),
+    slashSlash: matchesShortcut(onSlash, keymap, 'commandBar'),
+  };
+
+  // Assert
+  expect(matched).toEqual({
+    semicolonQuestion: true,
+    semicolonSlash: false,
+    slashQuestion: false,
+    slashSlash: true,
+  });
+});
+
 test('gives the combo delimiter character a spelling through Shift+=', () => {
   // Arrange: `+` separates the parts of a combo, so the keystroke that types
   // it can only be named by the key it sits on.
@@ -592,7 +683,7 @@ test('resolves every combo to a key that really types its character', () => {
   const wrongKeys: Array<string> = [];
 
   for (const [name, layout] of Object.entries(keyboardLayouts)) {
-    if (layout !== null && name !== 'russian') {
+    if (layout !== null && !pinnedLayouts.has(name)) {
       resetKeyboardLayout();
       applyKeyboardLayout(layout);
 
@@ -655,8 +746,18 @@ function describesOneKeystroke(
     return false;
   }
 
-  const spellings = [mapping.value.toLowerCase(), mapping.withShift.toLowerCase()];
-  return spellings.includes(a) && spellings.includes(b);
+  const value = mapping.value.toLowerCase();
+  const withShift = mapping.withShift.toLowerCase();
+  if (![a, b].includes(value) || ![a, b].includes(withShift)) {
+    return false;
+  }
+
+  // Naming the key is only a spelling of this keystroke when no key types the
+  // named character with Shift; if one does, the combo belongs on that key
+  // instead and this collision is a real bug, not a dual spelling.
+  return !Object.values(layout).some(
+    (other) => other.withShift.toLowerCase() === value && !other.withShiftIsDeadKey,
+  );
 }
 
 // The key a combo resolves to, found by pressing every key in turn. The event
@@ -840,10 +941,32 @@ const russianLayout = layoutFromRows([
   ['ячсмитьбю.', 'ЯЧСМИТЬБЮ,'],
 ]);
 
+// Linux Russian puts "/" in both columns: typed with Shift on the US "\" key
+// and plain on the key next to the left Shift, whose own Shift types "|". This
+// is VS Code's linux_ru fixture shape, and it is where reinterpreting an
+// actually shifted character as a key name lands a combo on the wrong key.
+const linuxRussianLayout: NativeKeyboardLayout = {
+  ...russianLayout,
+  Backslash: { value: '\\', withShift: '/' },
+  IntlBackslash: { value: '/', withShift: '|' },
+};
+
+// The minimal both-column overlap, with a Latin letter so no pinning applies.
+const bothColumnOverlapLayout: NativeKeyboardLayout = {
+  Backslash: { value: '\\', withShift: '/' },
+  IntlBackslash: { value: '/', withShift: '|' },
+  KeyQ: { value: 'q', withShift: 'Q' },
+};
+
+// Layouts whose Latin letters are pinned to US positions on purpose, which the
+// fidelity walk would misread as combos landing on the wrong keys.
+const pinnedLayouts = new Set(['linuxRussian', 'russian']);
+
 const keyboardLayouts: Record<string, NativeKeyboardLayout | null> = {
   azerty: azertyLayout,
   dvorak: dvorakLayout,
   german: germanLayout,
+  linuxRussian: linuxRussianLayout,
   none: null,
   partialLatin: partialLatinLayout,
   programmerDvorak: programmerDvorakLayout,
