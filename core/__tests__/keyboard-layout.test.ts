@@ -4,396 +4,389 @@
 
 import { afterEach, expect, test, vi } from 'vite-plus/test';
 import {
+  applyKeyboardLayout,
   codeForCharacter,
   hasKeyboardLayout,
-  loadKeyboardLayout,
   resetKeyboardLayout,
+  shiftedCharacterForCode,
   trackKeyboardLayout,
 } from '../config/keyboard-layout.ts';
+import type { NativeKeyboardLayout } from '../config/keyboard-layout.ts';
 
 afterEach(() => {
   resetKeyboardLayout();
-  vi.restoreAllMocks();
-  vi.useRealTimers();
+  delete (window as { codiff?: unknown }).codiff;
 });
 
-test('resolves a character to the key position that produces it', async () => {
+test('resolves a character to the key position that produces it', () => {
   // Arrange: QWERTZ swaps the characters on the US "z" and "y" positions.
-  createTestContext({ KeyY: 'z', KeyZ: 'y' });
+  const layout = { KeyY: key('z', 'Z'), KeyZ: key('y', 'Y') };
 
   // Act
-  await loadKeyboardLayout();
+  applyKeyboardLayout(layout);
 
   // Assert
-  expect(codeForCharacter('z')).toBe('KeyY');
+  expect(codeForCharacter('z', false)).toBe('KeyY');
 });
 
-test('reports no layout before one has been read', () => {
+test('resolves a shifted character through the key that types it with Shift', () => {
+  // Arrange: on German layouts "?" is typed with Shift on the "ß" key, which
+  // sits at the US "-" position.
+  const layout = { KeyQ: key('q', 'Q'), Minus: key('ß', '?') };
+
+  // Act
+  applyKeyboardLayout(layout);
+
+  // Assert
+  expect({
+    plain: codeForCharacter('?', false),
+    shifted: codeForCharacter('?', true),
+  }).toEqual({ plain: null, shifted: 'Minus' });
+});
+
+test('matches a shifted letter by its lowercase spelling', () => {
+  // Arrange: combos spell letters in lowercase, but Shift types them in
+  // uppercase.
+  const layout = { KeyZ: key('z', 'Z') };
+
+  // Act
+  applyKeyboardLayout(layout);
+
+  // Assert
+  expect(codeForCharacter('z', true)).toBe('KeyZ');
+});
+
+test('names the character a key produces with Shift held', () => {
   // Arrange
-  createTestContext({ KeyZ: 'z' });
+  const layout = { KeyZ: key('z', 'Z'), Slash: key('/', '?') };
 
   // Act
-  const layout = { code: codeForCharacter('z'), loaded: hasKeyboardLayout() };
+  applyKeyboardLayout(layout);
 
   // Assert
-  expect(layout).toEqual({ code: null, loaded: false });
+  expect({
+    letter: shiftedCharacterForCode('KeyZ'),
+    slash: shiftedCharacterForCode('Slash'),
+    unknown: shiftedCharacterForCode('Digit1'),
+  }).toEqual({ letter: 'z', slash: '?', unknown: null });
 });
 
-test('reports no layout when the platform exposes no keyboard map', async () => {
-  // Arrange
-  Object.defineProperty(navigator, 'keyboard', { configurable: true, value: undefined });
-
-  // Act
-  await loadKeyboardLayout();
-
+test('reports no layout before one has been applied', () => {
   // Assert
-  expect(hasKeyboardLayout()).toBe(false);
+  expect({
+    code: codeForCharacter('z', false),
+    loaded: hasKeyboardLayout(),
+    shifted: shiftedCharacterForCode('KeyZ'),
+  }).toEqual({ code: null, loaded: false, shifted: null });
 });
 
-test('reports no layout when the keyboard map comes back empty', async () => {
-  // Arrange: a window with no keyboard attached to it reports zero keys, which
-  // is an absent answer rather than a keyboard that produces nothing.
-  createTestContext({});
-
-  // Act
-  await loadKeyboardLayout();
-
-  // Assert
-  expect(hasKeyboardLayout()).toBe(false);
-});
-
-test('reports no layout when reading the keyboard map fails', async () => {
-  // Arrange
-  Object.defineProperty(navigator, 'keyboard', {
-    configurable: true,
-    value: {
-      getLayoutMap: () => Promise.reject(new Error('not allowed in this context')),
+test('skips a position whose character is a dead key', () => {
+  // Arrange: a dead key arms a composition instead of typing its character, so
+  // no keypress ever reports it.
+  const layout = {
+    Backquote: {
+      value: '`',
+      valueIsDeadKey: true,
+      withShift: '~',
+      withShiftIsDeadKey: false,
     },
-  });
+    KeyQ: key('q', 'Q'),
+  };
 
   // Act
-  await loadKeyboardLayout();
+  applyKeyboardLayout(layout);
 
   // Assert
-  expect(hasKeyboardLayout()).toBe(false);
+  expect({
+    backquote: codeForCharacter('`', false),
+    tilde: codeForCharacter('~', true),
+  }).toEqual({ backquote: null, tilde: 'Backquote' });
 });
 
-test('pins letters to their US positions on a layout that types no Latin', async () => {
+test('ignores keys outside the writing system', () => {
+  // Arrange: the numpad types "1" too, but `Alt+1` means the digit on the
+  // number row, and Space is no way to spell a combo.
+  const layout = {
+    Digit1: key('1', '!'),
+    KeyQ: key('q', 'Q'),
+    Numpad1: key('1', '1'),
+    Space: key(' ', ' '),
+  };
+
+  // Act
+  applyKeyboardLayout(layout);
+
+  // Assert
+  expect(codeForCharacter('1', false)).toBe('Digit1');
+
+  // Act: with only the numpad producing the digit, it stays unresolved.
+  applyKeyboardLayout({ KeyQ: key('q', 'Q'), Numpad1: key('1', '1') });
+
+  // Assert
+  expect(codeForCharacter('1', false)).toBe(null);
+});
+
+test('resolves to the first position in a fixed order when two keys produce one character', () => {
+  // Arrange: the claim order is letters, digits, then punctuation in row
+  // order, so the answer does not depend on how the platform happens to order
+  // the map. BracketRight comes before Backslash in that order even though the
+  // fixture lists it second.
+  const layout = { Backslash: key('#', "'"), BracketRight: key('#', '"'), KeyQ: key('q', 'Q') };
+
+  // Act
+  applyKeyboardLayout(layout);
+
+  // Assert
+  expect(codeForCharacter('#', false)).toBe('BracketRight');
+});
+
+test('pins letters to their US positions on a layout that types no Latin', () => {
   // Arrange: a Cyrillic layout produces no Latin letters at all, so every
   // letter shortcut would otherwise be unreachable.
-  createTestContext({ KeyA: 'ф', KeyZ: 'я' });
+  const layout = { KeyA: key('ф', 'Ф'), KeyZ: key('я', 'Я') };
 
   // Act
-  await loadKeyboardLayout();
+  applyKeyboardLayout(layout);
 
-  // Assert
-  expect(codeForCharacter('z')).toBe('KeyZ');
+  // Assert: the pin covers both Shift states, so `Alt+Shift+z` keeps working
+  // too.
+  expect({
+    plain: codeForCharacter('z', false),
+    shifted: codeForCharacter('z', true),
+  }).toEqual({ plain: 'KeyZ', shifted: 'KeyZ' });
 });
 
-test('drops the character a pinned letter displaces', async () => {
+test('drops the character a pinned letter displaces', () => {
   // Arrange
-  createTestContext({ KeyA: 'ф', KeyZ: 'я' });
+  const layout = { KeyA: key('ф', 'Ф'), KeyZ: key('я', 'Я') };
 
   // Act
-  await loadKeyboardLayout();
+  applyKeyboardLayout(layout);
 
   // Assert: one position produces one character, so pinning "z" to the US "z"
   // key takes "я" off it rather than leaving both spellings claiming it.
-  expect(codeForCharacter('я')).toBe(null);
+  expect({
+    plain: codeForCharacter('я', false),
+    shifted: codeForCharacter('я', true),
+  }).toEqual({ plain: null, shifted: null });
 });
 
-test('keeps a letter the layout produces somewhere else instead of pinning it', async () => {
-  // Arrange: AZERTY moves "a" to the US "q" position, so "a" is still typed.
-  createTestContext({ KeyA: 'q', KeyQ: 'a' });
-
-  // Act
-  await loadKeyboardLayout();
-
-  // Assert
-  expect(codeForCharacter('a')).toBe('KeyQ');
-});
-
-test('leaves a digit the layout cannot type unmodified unresolved', async () => {
-  // Arrange: AZERTY types "&" on the key labelled "1" and reaches the digit
-  // only with Shift, which the keyboard map does not report. Putting "1" on
-  // that key anyway would be right on AZERTY and wrong on Programmer Dvorak,
-  // which moves the digits elsewhere, and it would take "&" off the key it
-  // really is on. Naming the character the key types works on both.
-  createTestContext({ Digit1: '&', KeyA: 'q', KeyQ: 'a' });
-
-  // Act
-  await loadKeyboardLayout();
-
-  // Assert
-  expect({ ampersand: codeForCharacter('&'), one: codeForCharacter('1') }).toEqual({
-    ampersand: 'Digit1',
-    one: null,
-  });
-});
-
-test('does not pin letters to US positions on a layout that types some Latin', async () => {
+test('does not pin letters to US positions on a layout that types some Latin', () => {
   // Arrange: putting "a" on the US "a" key would take that key away from "b",
   // which this layout really does type there.
-  createTestContext({ KeyA: 'b', KeyZ: 'ż' });
+  const layout = { KeyA: key('b', 'B'), KeyZ: key('ż', 'Ż') };
 
   // Act
-  await loadKeyboardLayout();
+  applyKeyboardLayout(layout);
 
   // Assert
-  expect({ a: codeForCharacter('a'), b: codeForCharacter('b') }).toEqual({
-    a: null,
-    b: 'KeyA',
-  });
+  expect({
+    a: codeForCharacter('a', false),
+    b: codeForCharacter('b', false),
+  }).toEqual({ a: null, b: 'KeyA' });
 });
 
-test('resolves to the first position when two keys produce one character', async () => {
+test('counts Latin reached only through Shift when deciding whether to pin', () => {
+  // Arrange: a layout that types "b" with Shift somewhere types Latin, so
+  // pinning would displace it.
+  const layout = { KeyA: key('ф', 'B') };
+
+  // Act
+  applyKeyboardLayout(layout);
+
+  // Assert
+  expect({
+    b: codeForCharacter('b', true),
+    z: codeForCharacter('z', false),
+  }).toEqual({ b: 'KeyA', z: null });
+});
+
+test('resolves a digit the layout types only with Shift through its shifted spelling', () => {
+  // Arrange: AZERTY types "&" on the key labelled "1" and reaches the digit
+  // only with Shift. Putting "1" on that key unshifted would fire `Alt+1` on a
+  // press that types "&".
+  const layout = { Digit1: key('&', '1'), KeyQ: key('a', 'A') };
+
+  // Act
+  applyKeyboardLayout(layout);
+
+  // Assert
+  expect({
+    ampersand: codeForCharacter('&', false),
+    one: codeForCharacter('1', false),
+    shiftedOne: codeForCharacter('1', true),
+  }).toEqual({ ampersand: 'Digit1', one: null, shiftedOne: 'Digit1' });
+});
+
+test('reads the layout from the desktop shell when tracking starts', async () => {
   // Arrange
-  createTestContext({ Backslash: '#', BracketRight: '#' });
+  createTestContext({ initialLayout: { KeyY: key('z', 'Z'), KeyZ: key('y', 'Y') } });
 
   // Act
-  await loadKeyboardLayout();
+  trackKeyboardLayout();
 
   // Assert
-  expect(codeForCharacter('#')).toBe('Backslash');
-});
-
-test('re-reads the layout when a keypress disagrees with it', async () => {
-  // Arrange: no layout change event exists, so a plain keypress reporting a
-  // character the cache does not have on that key is the signal.
-  const { setLayout } = createTestContext({ KeyZ: 'z' });
-  trackKeyboardLayout();
   await vi.waitFor(() => expect(hasKeyboardLayout()).toBe(true));
-  setLayout({ KeyY: 'z', KeyZ: 'y' });
-
-  // Act
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'y' }));
-
-  // Assert
-  await vi.waitFor(() => expect(codeForCharacter('z')).toBe('KeyY'));
+  expect(codeForCharacter('z', false)).toBe('KeyY');
 });
 
-test('does not re-read the layout for a keypress a modifier rewrote', async () => {
-  // Arrange
-  const { getReadCount, setLayout } = createTestContext({ KeyZ: 'z' });
+test('stays without a layout when no desktop shell is present', () => {
+  // Arrange: the web build and the test environment have no `window.codiff`,
+  // and the matcher stays on its US tables there.
+
+  // Act
   trackKeyboardLayout();
-  await vi.waitFor(() => expect(hasKeyboardLayout()).toBe(true));
-  setLayout({ KeyY: 'z', KeyZ: 'y' });
-
-  // Act: Option composes the character away, so it says nothing about the key.
-  window.dispatchEvent(new KeyboardEvent('keydown', { altKey: true, code: 'KeyZ', key: 'Ω' }));
-
-  // Assert
-  expect(getReadCount()).toBe(1);
-});
-
-test('keeps the layout it has when a re-read comes back empty', async () => {
-  // Arrange: losing a good layout to one bad answer would send every shortcut
-  // back to guessing at US positions, and nothing would ask again.
-  const { setLayout } = createTestContext({ KeyY: 'z', KeyZ: 'y' });
-  await loadKeyboardLayout();
-  setLayout({});
-
-  // Act
-  await loadKeyboardLayout();
-
-  // Assert
-  expect(codeForCharacter('z')).toBe('KeyY');
-});
-
-test('keeps the layout it has when a re-read fails', async () => {
-  // Arrange
-  const { failReads } = createTestContext({ KeyY: 'z', KeyZ: 'y' });
-  await loadKeyboardLayout();
-  failReads();
-
-  // Act
-  await loadKeyboardLayout();
-
-  // Assert
-  expect(codeForCharacter('z')).toBe('KeyY');
-});
-
-test('does not re-read the layout once per keypress when it keeps disagreeing', async () => {
-  // Arrange: remapping software can make the reported character disagree with
-  // the layout permanently, and asking again on every keypress would never
-  // resolve it.
-  const { getReadCount } = createTestContext({ KeyZ: 'z' });
-  trackKeyboardLayout();
-  await vi.waitFor(() => expect(hasKeyboardLayout()).toBe(true));
-
-  // Act: each press waits for the previous read to settle, so nothing is
-  // coalesced and every one of them is free to ask again.
-  for (let press = 0; press < 5; press++) {
-    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'q' }));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-
-  // Assert: the startup read, plus one for the first press.
-  expect(getReadCount()).toBe(2);
-});
-
-test('asks again on the next keypress when it has no layout at all', async () => {
-  // Arrange: a window with no keyboard attached to it yet reports nothing, and
-  // waiting for it to lose and regain focus is a long way back from that.
-  const { setLayout } = createTestContext({});
-  trackKeyboardLayout();
-  await loadKeyboardLayout();
-  setLayout({ KeyY: 'z', KeyZ: 'y' });
-
-  // Act
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'y' }));
-
-  // Assert
-  await vi.waitFor(() => expect(codeForCharacter('z')).toBe('KeyY'));
-});
-
-test('asks again once the quiet period after a disagreement has passed', async () => {
-  // Arrange: the quiet period stops a permanent disagreement asking on every
-  // keystroke, and must not stop a later real change from being noticed.
-  vi.useFakeTimers({ toFake: ['performance'] });
-  const { getReadCount, setLayout } = createTestContext({ KeyZ: 'z' });
-  trackKeyboardLayout();
-  await loadKeyboardLayout();
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'q' }));
-  await loadKeyboardLayout();
-  setLayout({ KeyY: 'z', KeyZ: 'y' });
-
-  // Act
-  vi.advanceTimersByTime(2000);
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'y' }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  // Assert
-  expect({ code: codeForCharacter('z'), reads: getReadCount() }).toEqual({
-    code: 'KeyY',
-    reads: 3,
-  });
-});
-
-test('does not start a second read while one is already in flight', async () => {
-  // Arrange: a read abandoned by a reset must not hand the in-flight slot back
-  // while the read that replaced it is still running.
-  const { getReadCount, reportLayout } = createSlowTestContext();
-  const abandoned = loadKeyboardLayout();
-  resetKeyboardLayout();
-  loadKeyboardLayout();
-
-  // Act
-  reportLayout({ KeyZ: 'z' });
-  await abandoned;
-  loadKeyboardLayout();
-
-  // Assert
-  expect(getReadCount()).toBe(2);
-});
-
-test('does not re-read the layout for a key the layout never mentions', async () => {
-  // Arrange: the keyboard map covers the letter, digit and punctuation keys
-  // only, so the space bar reporting a space is not a disagreement.
-  const { getReadCount } = createTestContext({ KeyZ: 'z' });
-  trackKeyboardLayout();
-  await loadKeyboardLayout();
-
-  // Act
-  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ' }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  // Assert
-  expect(getReadCount()).toBe(1);
-});
-
-test('re-reads the layout when the window regains focus', async () => {
-  // Arrange
-  const { setLayout } = createTestContext({ KeyZ: 'z' });
-  trackKeyboardLayout();
-  await vi.waitFor(() => expect(hasKeyboardLayout()).toBe(true));
-  setLayout({ KeyY: 'z', KeyZ: 'y' });
-
-  // Act
-  window.dispatchEvent(new Event('focus'));
-
-  // Assert
-  await vi.waitFor(() => expect(codeForCharacter('z')).toBe('KeyY'));
-});
-
-test('stops watching for layout changes once it is reset', async () => {
-  // Arrange
-  const { getReadCount } = createTestContext({ KeyZ: 'z' });
-  trackKeyboardLayout();
-  await vi.waitFor(() => expect(hasKeyboardLayout()).toBe(true));
-  resetKeyboardLayout();
-
-  // Act
-  window.dispatchEvent(new Event('focus'));
-
-  // Assert
-  expect(getReadCount()).toBe(1);
-});
-
-test('discards a layout read that was still in flight when it was reset', async () => {
-  // Arrange: reads are asynchronous, so one can land after whoever started it
-  // has already given up on it.
-  const { reportLayout } = createSlowTestContext();
-  const pending = loadKeyboardLayout();
-  resetKeyboardLayout();
-
-  // Act
-  reportLayout({ KeyZ: 'z' });
-  await pending;
 
   // Assert
   expect(hasKeyboardLayout()).toBe(false);
 });
 
-// A keyboard whose layout arrives only when the test says so, one read at a
-// time and in the order they were started.
-function createSlowTestContext() {
-  const waiting: Array<(layout: Map<string, string>) => void> = [];
-  let readCount = 0;
+test('keeps no layout when the shell cannot read one', async () => {
+  // Arrange
+  createTestContext({ failReads: true });
 
-  Object.defineProperty(navigator, 'keyboard', {
-    configurable: true,
-    value: {
-      getLayoutMap: () => {
-        readCount++;
-        return new Promise<Map<string, string>>((resolve) => {
-          waiting.push(resolve);
-        });
-      },
-    },
-  });
+  // Act
+  trackKeyboardLayout();
+  await flush();
 
-  return {
-    getReadCount: () => readCount,
-    reportLayout: (layout: Record<string, string>) =>
-      waiting.shift()?.(new Map(Object.entries(layout))),
-  };
+  // Assert
+  expect(hasKeyboardLayout()).toBe(false);
+});
+
+test('keeps no layout when the shell reports none', async () => {
+  // Arrange: a platform where native-keymap fails answers with null rather
+  // than a broken map.
+  createTestContext({ initialLayout: null });
+
+  // Act
+  trackKeyboardLayout();
+  await flush();
+
+  // Assert
+  expect(hasKeyboardLayout()).toBe(false);
+});
+
+test('applies a layout change pushed by the shell', async () => {
+  // Arrange: switching input source fires a real event in the main process,
+  // which pushes the fresh layout here.
+  const { pushLayout } = createTestContext({ initialLayout: { KeyZ: key('z', 'Z') } });
+  trackKeyboardLayout();
+  await vi.waitFor(() => expect(hasKeyboardLayout()).toBe(true));
+
+  // Act
+  pushLayout({ KeyY: key('z', 'Z'), KeyZ: key('y', 'Y') });
+
+  // Assert
+  expect(codeForCharacter('z', false)).toBe('KeyY');
+});
+
+test('prefers a pushed layout over a slower startup read', async () => {
+  // Arrange: a push that arrives while the startup read is on the wire is
+  // newer than whatever that read answers with.
+  const { pushLayout, resolveRead } = createTestContext({ deferReads: true });
+  trackKeyboardLayout();
+
+  // Act
+  pushLayout({ KeyY: key('z', 'Z') });
+  resolveRead({ KeyZ: key('z', 'Z') });
+  await flush();
+
+  // Assert
+  expect(codeForCharacter('z', false)).toBe('KeyY');
+});
+
+test('discards a startup read that was still in flight when it was reset', async () => {
+  // Arrange
+  const { resolveRead } = createTestContext({ deferReads: true });
+  trackKeyboardLayout();
+  resetKeyboardLayout();
+
+  // Act
+  resolveRead({ KeyZ: key('z', 'Z') });
+  await flush();
+
+  // Assert
+  expect(hasKeyboardLayout()).toBe(false);
+});
+
+test('stops applying layout pushes once it is reset', () => {
+  // Arrange
+  const { pushLayout } = createTestContext({ initialLayout: null });
+  trackKeyboardLayout();
+  resetKeyboardLayout();
+
+  // Act
+  pushLayout({ KeyZ: key('z', 'Z') });
+
+  // Assert
+  expect(hasKeyboardLayout()).toBe(false);
+});
+
+test('subscribes to layout pushes once no matter how often tracking starts', () => {
+  // Arrange
+  const { getSubscriptionCount } = createTestContext({ initialLayout: null });
+
+  // Act
+  trackKeyboardLayout();
+  trackKeyboardLayout();
+
+  // Assert
+  expect(getSubscriptionCount()).toBe(1);
+});
+
+function key(value: string, withShift: string) {
+  return { value, valueIsDeadKey: false, withShift, withShiftIsDeadKey: false };
 }
 
-function createTestContext(initial: Record<string, string>) {
-  let layout = initial;
-  let failing = false;
-  let readCount = 0;
-
-  Object.defineProperty(navigator, 'keyboard', {
-    configurable: true,
-    value: {
-      getLayoutMap: () => {
-        readCount++;
-        return failing
-          ? Promise.reject(new Error('not allowed in this context'))
-          : Promise.resolve(new Map(Object.entries(layout)));
-      },
-    },
+function flush() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
   });
+}
+
+// A desktop shell whose layout answers arrive only when the test says so.
+function createTestContext({
+  deferReads = false,
+  failReads = false,
+  initialLayout = null,
+}: {
+  deferReads?: boolean;
+  failReads?: boolean;
+  initialLayout?: NativeKeyboardLayout | null;
+} = {}) {
+  const pushCallbacks: Array<(layout: NativeKeyboardLayout) => void> = [];
+  const pendingReads: Array<(layout: NativeKeyboardLayout | null) => void> = [];
+
+  (window as { codiff?: unknown }).codiff = {
+    getKeyboardLayout: () => {
+      if (failReads) {
+        return Promise.reject(new Error('ipc failure'));
+      }
+      if (deferReads) {
+        return new Promise<NativeKeyboardLayout | null>((resolve) => {
+          pendingReads.push(resolve);
+        });
+      }
+      return Promise.resolve(initialLayout);
+    },
+    onKeyboardLayoutChanged: (callback: (layout: NativeKeyboardLayout) => void) => {
+      pushCallbacks.push(callback);
+      return () => {
+        const index = pushCallbacks.indexOf(callback);
+        if (index !== -1) {
+          pushCallbacks.splice(index, 1);
+        }
+      };
+    },
+  };
 
   return {
-    failReads: () => {
-      failing = true;
+    getSubscriptionCount: () => pushCallbacks.length,
+    pushLayout: (layout: NativeKeyboardLayout) => {
+      for (const callback of pushCallbacks) {
+        callback(layout);
+      }
     },
-    getReadCount: () => readCount,
-    setLayout: (next: Record<string, string>) => {
-      layout = next;
-    },
+    resolveRead: (layout: NativeKeyboardLayout | null) => pendingReads.shift()?.(layout),
   };
 }
