@@ -209,10 +209,10 @@ test('lets a binding on the composed character itself suppress the position fall
 });
 
 test('resolves a swallowed character to the US key position when nothing else claims it', () => {
-  // Arrange: this pins the documented semantics. The fallback is defined in
-  // terms of US key positions, so on a layout that moves keys it can fire an
-  // action the label does not suggest. It only ever does so for a keypress no
-  // binding matched by character, so it cannot take one from another shortcut.
+  // Arrange: with no layout read yet, the fallback is defined in terms of US
+  // key positions, so on a layout that moves keys it can fire an action the
+  // label does not suggest. It only ever does so for a keypress no binding
+  // matched by character, so it cannot take one from another shortcut.
   const { keydown, keymap } = createTestContext({ toggleWordWrap: 'Alt+2' });
 
   // Act
@@ -405,6 +405,56 @@ test('falls back to the US position while no layout has been read', () => {
   expect(matched).toBe(true);
 });
 
+test('never lets two shortcut spellings claim the same key', async () => {
+  // Arrange: one key must answer to at most one spelling, or a single keypress
+  // fires two actions and which one wins is down to the order the app happens
+  // to check them in. Resolution has three sources, and this walks every
+  // spelling through all of them on layouts that move keys in different ways.
+  const collisions: Array<string> = [];
+
+  for (const [name, layout] of Object.entries(keyboardLayouts)) {
+    resetKeyboardLayout();
+    if (layout !== null) {
+      await withKeyboardLayout(layout);
+    }
+
+    // Act
+    for (const shiftKey of [false, true]) {
+      const claimedBy = new Map<string, string>();
+      for (const spelling of comboSpellings) {
+        const code = resolvePhysicalKey(spelling, shiftKey);
+        const previous = code === null ? undefined : claimedBy.get(code);
+        if (code !== null && previous !== undefined) {
+          collisions.push(`${name}: "${previous}" and "${spelling}" both claim ${code}`);
+        } else if (code !== null) {
+          claimedBy.set(code, spelling);
+        }
+      }
+    }
+  }
+
+  // Assert
+  expect(collisions).toEqual([]);
+});
+
+// The key a combo resolves to, found by pressing every key in turn. The event
+// reports a character no spelling names, so only the key position can match it.
+function resolvePhysicalKey(spelling: string, shiftKey: boolean): string | null {
+  const { keydown, keymap } = createTestContext({
+    toggleWordWrap: `Alt+${shiftKey ? 'Shift+' : ''}${spelling}`,
+  });
+
+  return (
+    candidateCodes.find((code) =>
+      matchesShortcut(
+        keydown({ altKey: true, code, key: unmatchableCharacter, shiftKey }),
+        keymap,
+        'toggleWordWrap',
+      ),
+    ) ?? null
+  );
+}
+
 function createTestContext({
   platform = 'MacIntel',
   ...overrides
@@ -439,6 +489,75 @@ async function withKeyboardLayout(layout: Record<string, string>) {
   });
 
   await loadKeyboardLayout();
+}
+
+// A character from the Unicode private use area: no keyboard produces it and no
+// shortcut can name it.
+const unmatchableCharacter = '\uE000';
+
+const candidateCodes = [
+  ...'abcdefghijklmnopqrstuvwxyz'.split('').map((letter) => `Key${letter.toUpperCase()}`),
+  ...'0123456789'.split('').map((digit) => `Digit${digit}`),
+  'Backquote',
+  'Minus',
+  'Equal',
+  'BracketLeft',
+  'BracketRight',
+  'Backslash',
+  'Semicolon',
+  'Quote',
+  'Comma',
+  'Period',
+  'Slash',
+  'IntlBackslash',
+];
+
+// Every character a combo can name, so a spelling added to the punctuation
+// tables later is covered without touching this list. `+` separates the parts
+// of a combo and space is trimmed away, so neither can be named, and combos are
+// lowercased when parsed, so `Alt+A` is another way to write `Alt+a` rather
+// than a second spelling that could collide with it.
+const comboSpellings = Array.from({ length: 0x7e - 0x21 + 1 }, (_, index) =>
+  String.fromCharCode(0x21 + index),
+)
+  .filter((character) => character !== '+' && !/^[A-Z]$/.test(character))
+  .concat(['é', 'ü', 'ß', 'я', 'ω']);
+
+// Approximations of real layouts, accurate in the ways that matter here: which
+// keys move, which characters need Shift, and which layouts produce no Latin.
+// Each row runs left to right across `keyRows`.
+const keyRows = [
+  ['Backquote', ...'1234567890'.split('').map((digit) => `Digit${digit}`), 'Minus', 'Equal'],
+  [
+    ...'qwertyuiop'.split('').map((l) => `Key${l.toUpperCase()}`),
+    'BracketLeft',
+    'BracketRight',
+    'Backslash',
+  ],
+  [...'asdfghjkl'.split('').map((l) => `Key${l.toUpperCase()}`), 'Semicolon', 'Quote'],
+  [...'zxcvbnm'.split('').map((l) => `Key${l.toUpperCase()}`), 'Comma', 'Period', 'Slash'],
+];
+
+const keyboardLayouts: Record<string, Record<string, string> | null> = {
+  azerty: layoutFromRows(['@&é"\'(§è!çà)-', 'azertyuiop^$`', 'qsdfghjklmù', 'wxcvbn,;:!']),
+  dvorak: layoutFromRows(['`1234567890[]', "',.pyfgcrl/=\\", 'aoeuidhtns-', ';qjkxbmwvz']),
+  german: layoutFromRows(['^1234567890ß´', 'qwertzuiopü+#', 'asdfghjklöä', 'yxcvbnm,.-']),
+  none: null,
+  russian: layoutFromRows([']1234567890-=', 'йцукенгшщзхъё', 'фывапролджэ', 'ячсмитьбю.']),
+  us: layoutFromRows(['`1234567890-=', 'qwertyuiop[]\\', "asdfghjkl;'", 'zxcvbnm,./']),
+};
+
+function layoutFromRows(rows: ReadonlyArray<string>): Record<string, string> {
+  const layout: Record<string, string> = {};
+
+  rows.forEach((row, index) => {
+    const codes = keyRows[index];
+    [...row].forEach((character, position) => {
+      layout[codes[position]] = character;
+    });
+  });
+
+  return layout;
 }
 
 function keydown({
