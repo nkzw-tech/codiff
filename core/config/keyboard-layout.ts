@@ -110,16 +110,17 @@ const readLayout = async (): Promise<void> => {
 // put on that key rather than being added alongside it, so one position still
 // produces one character and two combo spellings can never claim the same key.
 //
-// It is all or nothing on purpose. Filling in individual letters would take a
-// key away from a character the layout really does type there, so a layout that
-// types most of the alphabet is left exactly as it reported itself. Digits get
-// no such treatment at all: AZERTY reaches them only with Shift, which the
-// keyboard map does not report, and while assuming the US number row would be
-// right there, it would be wrong on Programmer Dvorak, which moves the digits.
-// Naming the character the key actually types works on both.
+// It is all or nothing on purpose. Filling in one missing letter at a time
+// would take a key away from a character the layout really does type there, so
+// a layout that types most of the alphabet is left exactly as it reported
+// itself. VS Code does fill letters in one at a time, but `native-keymap` gives
+// it the shifted values it needs to tell those cases apart.
 //
-// VS Code fills in missing letters the same way, per letter rather than all at
-// once, because `native-keymap` gives it the shifted values to disambiguate.
+// Digits get no such treatment at all. AZERTY reaches them only with Shift, so
+// the keyboard map does not report them, and assuming the US number row would
+// be right there but wrong on Programmer Dvorak, which moves the digits and
+// puts brackets in their place. Naming the character the key really types works
+// on both.
 const withLatinLetters = (layout: ReadonlyMap<string, string>): ReadonlyMap<string, string> => {
   const produced = new Set(layout.values());
   if ([...letters].some((letter) => produced.has(letter))) {
