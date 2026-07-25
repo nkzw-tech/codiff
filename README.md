@@ -178,9 +178,10 @@ system and follows input source switches as they happen. On a layout that types 
 such as Cyrillic or Greek, letters stay at their US positions so those shortcuts remain reachable.
 
 An `Alt` shortcut naming a character your layout reaches only through <kbd>Shift</kbd> must spell
-the Shift out: on AZERTY, `Alt+Shift+1` or equivalently `Alt+&`, rather than `Alt+1`. The fallback
-applies only to a keypress that matches no shortcut by character, so it never overrides one that
-does.
+the Shift out: on AZERTY, `Alt+1` does nothing and `Alt+Shift+1` fires on the keystroke that types
+`1`. Naming the key's unshifted character instead, `Alt+&`, binds the same key without Shift held.
+The fallback applies only to a keypress that matches no shortcut by character, so it never
+overrides one that does.
 
 ## Walkthroughs
 
