@@ -166,7 +166,14 @@ Set `settings.codeFontFamily` manually to an installed CSS font family name, for
 `"JetBrains Mono"` or `"SF Mono"`. Leave it empty to use Codiff's bundled mono stack.
 Use `Mod` for <kbd>Cmd</kbd> on macOS and <kbd>Ctrl</kbd> on other platforms. Shortcut strings can
 combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Shift+p` or
-`Alt+Enter`.
+`Alt+Enter`. Name the character the key produces rather than the unshifted one, so a shortcut on
+<kbd>Shift</kbd>+<kbd>/</kbd> is written `Shift+?`.
+
+Shortcuts match on the character your layout produces. <kbd>Option</kbd> is the exception: macOS
+replaces the character it would otherwise produce (<kbd>Option</kbd>+<kbd>z</kbd> types `Ω`), so
+`Alt` shortcuts fall back to the US position of the key you named. On a layout that moves keys
+around, an `Alt` shortcut therefore follows the US position rather than the keycap. This applies
+only to a keypress that matches no shortcut by character, so it never overrides one that does.
 
 ## Walkthroughs
 
