@@ -14,6 +14,7 @@ import {
 afterEach(() => {
   resetKeyboardLayout();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 test('resolves a character to the key position that produces it', async () => {
@@ -246,6 +247,46 @@ test('asks again on the next keypress when it has no layout at all', async () =>
   await vi.waitFor(() => expect(codeForCharacter('z')).toBe('KeyY'));
 });
 
+test('asks again once the quiet period after a disagreement has passed', async () => {
+  // Arrange: the quiet period stops a permanent disagreement asking on every
+  // keystroke, and must not stop a later real change from being noticed.
+  vi.useFakeTimers({ toFake: ['performance'] });
+  const { getReadCount, setLayout } = createTestContext({ KeyZ: 'z' });
+  trackKeyboardLayout();
+  await loadKeyboardLayout();
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'q' }));
+  await loadKeyboardLayout();
+  setLayout({ KeyY: 'z', KeyZ: 'y' });
+
+  // Act
+  vi.advanceTimersByTime(2000);
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyZ', key: 'y' }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // Assert
+  expect({ code: codeForCharacter('z'), reads: getReadCount() }).toEqual({
+    code: 'KeyY',
+    reads: 3,
+  });
+});
+
+test('does not start a second read while one is already in flight', async () => {
+  // Arrange: a read abandoned by a reset must not hand the in-flight slot back
+  // while the read that replaced it is still running.
+  const { getReadCount, reportLayout } = createSlowTestContext();
+  const abandoned = loadKeyboardLayout();
+  resetKeyboardLayout();
+  loadKeyboardLayout();
+
+  // Act
+  reportLayout({ KeyZ: 'z' });
+  await abandoned;
+  loadKeyboardLayout();
+
+  // Assert
+  expect(getReadCount()).toBe(2);
+});
+
 test('does not re-read the layout for a key the layout never mentions', async () => {
   // Arrange: the keyboard map covers the letter, digit and punctuation keys
   // only, so the space bar reporting a space is not a disagreement.
@@ -304,23 +345,28 @@ test('discards a layout read that was still in flight when it was reset', async 
   expect(hasKeyboardLayout()).toBe(false);
 });
 
-// A keyboard whose layout arrives only when the test says so.
+// A keyboard whose layout arrives only when the test says so, one read at a
+// time and in the order they were started.
 function createSlowTestContext() {
-  let resolveLayout!: (layout: Map<string, string>) => void;
+  const waiting: Array<(layout: Map<string, string>) => void> = [];
+  let readCount = 0;
 
   Object.defineProperty(navigator, 'keyboard', {
     configurable: true,
     value: {
-      getLayoutMap: () =>
-        new Promise<Map<string, string>>((resolve) => {
-          resolveLayout = resolve;
-        }),
+      getLayoutMap: () => {
+        readCount++;
+        return new Promise<Map<string, string>>((resolve) => {
+          waiting.push(resolve);
+        });
+      },
     },
   });
 
   return {
+    getReadCount: () => readCount,
     reportLayout: (layout: Record<string, string>) =>
-      resolveLayout(new Map(Object.entries(layout))),
+      waiting.shift()?.(new Map(Object.entries(layout))),
   };
 }
 

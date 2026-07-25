@@ -48,9 +48,17 @@ export const trackKeyboardLayout = (): void => {
 };
 
 export const loadKeyboardLayout = (): Promise<void> => {
-  reading ??= readLayout().finally(() => {
-    reading = null;
-  });
+  if (reading === null) {
+    // Only the read that still holds the slot may give it up. A read abandoned
+    // by a reset finishes eventually, and clearing the slot then would let a
+    // third read start alongside the one that replaced it.
+    const pending: Promise<void> = readLayout().finally(() => {
+      if (reading === pending) {
+        reading = null;
+      }
+    });
+    reading = pending;
+  }
 
   return reading;
 };
