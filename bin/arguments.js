@@ -6,7 +6,7 @@ import reviewSource from '../electron/review-source.cjs';
 
 const { parseReviewUrl, resolveReviewUrl } = reviewSource;
 
-const flagDefinitions = [
+export const flagDefinitions = [
   {
     argument: '<codex|claude|opencode|pi>',
     description: 'Override the agent backend for this session.',
@@ -15,6 +15,9 @@ const flagDefinitions = [
   },
   {
     argument: '<ref>',
+    // With the source given as a flag, the positional argument can only be the
+    // repository path.
+    consumesSource: true,
     description: 'Review the current branch against a target branch.',
     name: 'branch',
     type: 'string',
@@ -25,11 +28,23 @@ const flagDefinitions = [
     name: 'claude-session',
     type: 'string',
   },
-  { argument: '<ref>', description: 'Review a specific commit.', name: 'commit', type: 'string' },
+  {
+    argument: '<ref>',
+    consumesSource: true,
+    description: 'Review a specific commit.',
+    name: 'commit',
+    type: 'string',
+  },
   {
     argument: '<id>',
     description: 'Attach Codex session metadata to a walkthrough.',
     name: 'codex-session',
+    type: 'string',
+  },
+  {
+    argument: '<bash|fish|zsh>',
+    description: 'Print a shell completion script, then exit.',
+    name: 'completions',
     type: 'string',
   },
   { description: 'Show this help message and exit.', name: 'help', short: 'h', type: 'boolean' },
@@ -47,6 +62,7 @@ const flagDefinitions = [
   },
   {
     argument: '<file>',
+    consumesSource: true,
     description: 'Edit a Markdown plan and wait until it is handed back.',
     name: 'plan',
     type: 'string',
@@ -317,6 +333,14 @@ export const parseArguments = (args) => {
     typeof values['opencode-session'] === 'string' ? values['opencode-session'] : null;
   const piSessionId = typeof values['pi-session'] === 'string' ? values['pi-session'] : null;
   const planFilePath = typeof values.plan === 'string' ? values.plan : null;
+  // `--completions` without a value parses as `true`; keep it as an empty shell
+  // so the command can tell "no shell given" apart from "flag not used".
+  const completionShell =
+    typeof values.completions === 'string'
+      ? values.completions
+      : values.completions === true
+        ? ''
+        : null;
   const agentBackend =
     values.agent === 'codex' ||
     values.agent === 'claude' ||
@@ -428,6 +452,7 @@ export const parseArguments = (args) => {
     ...(branchRef ? { branchRef } : {}),
     ...(range ? { range } : {}),
     commitRef,
+    ...(completionShell === null ? {} : { completionShell }),
     help: values.help === true,
     ...(pullRequestBranch ? { pullRequestBranch } : {}),
     pullRequestNumber,

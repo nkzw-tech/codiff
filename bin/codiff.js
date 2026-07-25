@@ -15,6 +15,7 @@ import {
   parseArguments,
   resolvePullRequestTargetUrl,
 } from './arguments.js';
+import { completionShells, generateCompletionScript } from './completions.js';
 import { waitForPlanResult } from './plan-result.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -114,6 +115,26 @@ const run = async () => {
 
   if (parsedArguments.version) {
     process.stdout.write(`codiff v${packageJson.version}\n`);
+    return;
+  }
+
+  if (parsedArguments.completionShell != null) {
+    const shell = parsedArguments.completionShell;
+    if (!shell) {
+      process.stderr.write(
+        `codiff: --completions requires a shell: ${completionShells.join(', ')}.\n`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (!completionShells.includes(shell)) {
+      process.stderr.write(
+        `codiff: unsupported shell for --completions: ${shell}. Supported shells: ${completionShells.join(', ')}.\n`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    process.stdout.write(generateCompletionScript(shell));
     return;
   }
 

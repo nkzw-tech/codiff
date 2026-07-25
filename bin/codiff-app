@@ -36,6 +36,7 @@ show_help() {
   printf '  %-38s%s%s%s\n' "--commit <ref>" "$gray" "Review a specific commit." "$reset"
   printf '  %-38s%s%s%s\n' "--codex-session <id>" "$gray" "Attach Codex session metadata to a walkthrough." "$reset"
   printf '  %-38s%s%s%s\n' "--claude-session <id>" "$gray" "Attach Claude Code session metadata to a walkthrough." "$reset"
+  printf '  %-38s%s%s%s\n' "--completions <bash|fish|zsh>" "$gray" "Print a shell completion script, then exit." "$reset"
   printf '  %-38s%s%s%s\n' "--help, -h" "$gray" "Show this help message and exit." "$reset"
   printf '  %-38s%s%s%s\n' "--opencode-session <id>" "$gray" "Attach OpenCode session metadata to a walkthrough." "$reset"
   printf '  %-38s%s%s%s\n' "--pi-session <id>" "$gray" "Attach Pi session metadata to a walkthrough." "$reset"
@@ -64,21 +65,25 @@ show_help() {
   printf '  %-32s%s%s%s\n' "codiff --share HEAD" "$gray" "Share a walkthrough for a commit." "$reset"
 }
 
+# Flags the Node entry owns: it does the work and prints the result, so this
+# helper hands the whole command line over to the bundled runtime.
 for arg in "$@"; do
-  if [ "$arg" = "--share" ] || [ "$arg" = "--public" ]; then
-    runtime="${CODIFF_NODE_COMMAND:-}"
-    if [ -z "$runtime" ]; then
-      electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
-      if [ -n "$electron_exec" ]; then
-        runtime="$app_path/Contents/MacOS/$electron_exec"
+  case "$arg" in
+    --share|--public|--completions|--completions=*)
+      runtime="${CODIFF_NODE_COMMAND:-}"
+      if [ -z "$runtime" ]; then
+        electron_exec="$(ls "$app_path/Contents/MacOS/" 2>/dev/null | head -n 1)"
+        if [ -n "$electron_exec" ]; then
+          runtime="$app_path/Contents/MacOS/$electron_exec"
+        fi
       fi
-    fi
-    if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
-      printf '%s\n' "codiff: could not find the bundled runtime for --share." >&2
-      exit 1
-    fi
-    ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script_dir/codiff.js" "$@"
-  fi
+      if [ -z "$runtime" ] || [ ! -x "$runtime" ]; then
+        printf '%s\n' "codiff: could not find the bundled runtime for $arg." >&2
+        exit 1
+      fi
+      ELECTRON_RUN_AS_NODE=1 exec "$runtime" "$script_dir/codiff.js" "$@"
+      ;;
+  esac
 done
 
 repository_path=""

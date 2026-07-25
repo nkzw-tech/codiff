@@ -86,6 +86,20 @@ Show all available options:
 codiff --help
 ```
 
+Codiff prints its own shell completions for bash, fish and zsh. They complete every flag, the
+values those flags accept, and Git refs for the ref argument:
+
+```bash
+# bash, in ~/.bashrc
+source <(codiff --completions bash)
+
+# fish, in ~/.config/fish/completions/codiff.fish
+codiff --completions fish | source
+
+# zsh, on the fpath
+codiff --completions zsh > ~/.zsh/completions/_codiff
+```
+
 Launching Codiff in multiple repositories opens a separate native window for each repository.
 
 ## Command Bar
