@@ -95,8 +95,9 @@ const getReviewProviderMarker = (arg) =>
       ? 'gitlab'
       : null;
 
-/** @param {string} arg */
-const isPullRequestUrlArgument = (arg) => parseReviewUrl(arg) != null;
+/** Stores the canonical form so pasted review tabs, queries and anchors never reach the Git layer.
+ * @param {string} arg */
+const parsePullRequestUrlArgument = (arg) => parseReviewUrl(arg)?.url ?? null;
 
 /** @param {string} repositoryPath @param {number} number */
 const resolvePullRequestUrl = (repositoryPath, number, provider) =>
@@ -169,8 +170,9 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       repositoryPath ??= arg;
       continue;
     }
-    if (!pullRequestUrl && isPullRequestUrlArgument(arg)) {
-      pullRequestUrl = arg;
+    const parsedPullRequestUrl = pullRequestUrl ? null : parsePullRequestUrlArgument(arg);
+    if (parsedPullRequestUrl) {
+      pullRequestUrl = parsedPullRequestUrl;
       continue;
     }
 
@@ -300,7 +302,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   const sourceRef = envCommitRef || commitRef;
   const sourceBranchRef = envBranchRef || branchRef;
   const sourceRange = envRange || range;
-  const sourcePullRequestUrl = envPullRequestUrl || pullRequestUrl;
+  const sourcePullRequestUrl = envPullRequestUrl
+    ? parsePullRequestUrlArgument(envPullRequestUrl) || envPullRequestUrl
+    : pullRequestUrl;
+  const sourcePullRequestProvider = sourcePullRequestUrl
+    ? parseReviewUrl(sourcePullRequestUrl)?.provider
+    : null;
   const repositoryPathProvided = Boolean(
     repositoryPath || (useEnvironment && process.env.CODIFF_REPOSITORY_PATH),
   );
@@ -324,9 +331,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
             }
           : sourcePullRequestUrl
             ? {
-                ...(parseReviewUrl(sourcePullRequestUrl)?.provider
-                  ? { provider: parseReviewUrl(sourcePullRequestUrl).provider }
-                  : {}),
+                ...(sourcePullRequestProvider ? { provider: sourcePullRequestProvider } : {}),
                 type: 'pull-request',
                 url: sourcePullRequestUrl,
               }

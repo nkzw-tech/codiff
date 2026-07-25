@@ -4,39 +4,80 @@ const { execFileSync } = require('node:child_process');
 
 /** @typedef {'github' | 'gitlab'} ReviewProvider */
 
+// Reviews are usually pasted straight from a browser, so anything after the review number is a tab
+// (`/files`, `/changes`, `/diffs`), a query, or an anchor, and none of it identifies the review.
+const gitHubPullRequestPattern = /^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)(?:\/.*)?$/;
+const gitLabMergeRequestPattern = /^\/(.+?)\/-\/merge_requests\/([1-9]\d*)(?:\/.*)?$/;
+// GitLab only introduced the `/-/` separator in 11.0; older instances and links still omit it.
+const legacyGitLabMergeRequestPattern = /^\/(.+?)\/merge_requests\/([1-9]\d*)(?:\/.*)?$/;
+const markdownAutolinkPattern = /^<(.+)>$/;
+const schemePattern = /^[A-Za-z][A-Za-z\d+.-]*:/;
+// A scheme-less paste only counts as a URL when it starts with something host-shaped, so relative
+// paths and refs are never mistaken for links.
+const hostPrefixPattern = /^[^/\s:@]+\.[^/\s:@]+(?::\d+)?\//;
+
 /** @param {string} value */
-const parseReviewUrl = (value) => {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
+const stripGitSuffix = (value) => value.replace(/\.git$/i, '');
+
+/** @param {string} value */
+const toReviewUrl = (value) => {
+  const trimmed = value.trim();
+  const unwrapped = trimmed.match(markdownAutolinkPattern)?.[1] ?? trimmed;
+  const candidate = schemePattern.test(unwrapped)
+    ? unwrapped
+    : hostPrefixPattern.test(unwrapped)
+      ? `https://${unwrapped}`
+      : null;
+  if (!candidate) {
     return null;
   }
 
-  const host = url.host.toLowerCase();
-  const github = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)\/?$/);
-  if (url.hostname.toLowerCase() === 'github.com' && github) {
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url : null;
+  } catch {
+    return null;
+  }
+};
+
+/** @param {URL} url */
+const isGitHubHost = (url) => {
+  const hostname = url.hostname.toLowerCase();
+  return hostname === 'github.com' || hostname === 'www.github.com';
+};
+
+/** @param {string} value */
+const parseReviewUrl = (value) => {
+  const url = toReviewUrl(value);
+  if (!url) {
+    return null;
+  }
+
+  const github = isGitHubHost(url) ? url.pathname.match(gitHubPullRequestPattern) : null;
+  const repo = github ? stripGitSuffix(github[2]) : '';
+  if (github && repo) {
     return {
-      host,
+      host: 'github.com',
       number: Number(github[3]),
       owner: github[1],
-      projectPath: `${github[1]}/${github[2]}`,
+      projectPath: `${github[1]}/${repo}`,
       provider: /** @type {const} */ ('github'),
-      repo: github[2],
-      url: `https://github.com/${github[1]}/${github[2]}/pull/${github[3]}`,
+      repo,
+      url: `https://github.com/${github[1]}/${repo}/pull/${github[3]}`,
     };
   }
 
-  const gitlab = url.pathname.match(/^\/(.+?)\/-\/merge_requests\/([1-9]\d*)\/?$/);
-  if (gitlab) {
+  const gitlab =
+    url.pathname.match(gitLabMergeRequestPattern) ??
+    url.pathname.match(legacyGitLabMergeRequestPattern);
+  const projectPath = gitlab ? stripGitSuffix(gitlab[1]) : '';
+  if (gitlab && projectPath) {
     return {
-      host,
+      host: url.host.toLowerCase(),
       number: Number(gitlab[2]),
-      projectPath: gitlab[1].replace(/\.git$/i, ''),
+      projectPath,
       provider: /** @type {const} */ ('gitlab'),
-      url: `${url.protocol}//${url.host}/${gitlab[1].replace(/\.git$/i, '')}/-/merge_requests/${
-        gitlab[2]
-      }`,
+      url: `${url.protocol}//${url.host}/${projectPath}/-/merge_requests/${gitlab[2]}`,
     };
   }
 

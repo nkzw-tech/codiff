@@ -77,27 +77,6 @@ const resolveMergeBase = (repositoryRoot, baseRef, headRef) => {
   }
 };
 
-/** @param {string} value @returns {ParsedPullRequest | null} */
-const parseGitHubPullRequestUrl = (value) => {
-  try {
-    const url = new URL(value);
-    if (url.hostname.toLowerCase() !== 'github.com') {
-      return null;
-    }
-
-    const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)\/?$/);
-    return match
-      ? {
-          number: Number(match[3]),
-          owner: match[1],
-          repo: match[2].replace(/\.git$/i, ''),
-        }
-      : null;
-  } catch {
-    return null;
-  }
-};
-
 /** @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
 const getPullRequestSourceKey = (source) => {
   const review = parseReviewUrl(source.url);
@@ -113,7 +92,13 @@ const getPullRequestSourceKey = (source) => {
           owner: source.owner,
           repo: source.repo,
         }
-      : parseGitHubPullRequestUrl(source.url);
+      : review?.provider === 'github'
+        ? /** @type {ParsedPullRequest} */ ({
+            number: review.number,
+            owner: review.owner,
+            repo: review.repo,
+          })
+        : null;
 
   return pullRequest
     ? `pull-request:${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${

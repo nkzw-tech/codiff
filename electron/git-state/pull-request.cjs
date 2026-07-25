@@ -14,6 +14,7 @@ const {
   validateRepositoryPath,
 } = require('./common.cjs');
 const { readGitFiles } = require('./git-files.cjs');
+const { parseReviewUrl } = require('../review-source.cjs');
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
@@ -37,28 +38,20 @@ const { readGitFiles } = require('./git-files.cjs');
 
 /** @param {string} value @returns {PullRequestReference} */
 const parseGitHubPullRequestUrl = (value) => {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
+  const parsed = parseReviewUrl(value);
+  if (!parsed) {
     throw new Error('Codiff expected a GitHub pull request URL.');
   }
 
-  if (url.hostname.toLowerCase() !== 'github.com') {
+  if (parsed.provider !== 'github') {
     throw new Error('Codiff only supports GitHub pull request URLs.');
   }
 
-  const match = url.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/);
-  if (!match) {
-    throw new Error('Codiff expected a GitHub pull request URL.');
-  }
-
-  const [, owner, repo, number] = match;
   return {
-    number: Number(number),
-    owner,
-    repo,
-    url: `https://github.com/${owner}/${repo}/pull/${number}`,
+    number: parsed.number,
+    owner: parsed.owner,
+    repo: parsed.repo,
+    url: parsed.url,
   };
 };
 

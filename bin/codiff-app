@@ -141,6 +141,12 @@ is_explicit_path_arg() {
   return 1
 }
 
+# Matches review links as pasted from a browser: an optional scheme, an optional `/-/` separator,
+# and any trailing tab segment, query or anchor. Electron canonicalizes the link it receives.
+is_review_url_arg() {
+  printf '%s' "$1" | grep -Eq '^(https?://[^/]+|[^/[:space:]:@]+\.[^/[:space:]:@]+(:[0-9]+)?)/(.+/)?[^/]+/(-/)?(merge_requests|pull)/[1-9][0-9]*([/?#].*)?$'
+}
+
 is_git_branch_ref() {
   git -C "$1" show-ref --verify --quiet "refs/heads/$2" 2>/dev/null ||
     git -C "$1" show-ref --verify --quiet "refs/remotes/$2" 2>/dev/null
@@ -225,6 +231,11 @@ for arg in "$@"; do
     if printf '%s' "$arg" | grep -Eq '^#?[1-9][0-9]*$'; then
       pull_request_source="#$arg"
       pull_request_source="$(printf '%s' "$pull_request_source" | tr -d '#')"
+      expect_pull_request_value=0
+      continue
+    fi
+    if is_review_url_arg "$arg"; then
+      pull_request_source="$arg"
       expect_pull_request_value=0
       continue
     fi
@@ -343,7 +354,7 @@ for arg in "$@"; do
         expect_pull_request_value=1
       elif [ -z "$pull_request_source" ] && printf '%s' "$arg" | grep -Eq '^#[1-9][0-9]*$'; then
         pull_request_source="$arg"
-      elif [ -z "$pull_request_source" ] && printf '%s' "$arg" | grep -Eq '^https?://[^/]+/(.+/)?[^/]+/(-/merge_requests|pull)/[0-9]+/?$'; then
+      elif [ -z "$pull_request_source" ] && is_review_url_arg "$arg"; then
         pull_request_source="$arg"
       elif [ -z "$commit_ref" ] && [ -z "$branch_ref" ] && [ -z "$source_ref" ] && ! is_explicit_path_arg "$arg"; then
         source_ref="$arg"

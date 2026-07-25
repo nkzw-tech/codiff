@@ -256,7 +256,8 @@ const getReviewProviderMarker = (arg) =>
       ? 'gitlab'
       : null;
 
-const isPullRequestUrlArgument = (arg) => parseReviewUrl(arg) != null;
+// Store the canonical form so pasted review tabs, queries and anchors never reach the Git layer.
+const parsePullRequestUrlArgument = (arg) => parseReviewUrl(arg)?.url ?? null;
 
 export const resolvePullRequestUrl = (repositoryPath, number, provider) =>
   resolveReviewUrl(repositoryPath, number, provider);
@@ -342,8 +343,9 @@ export const parseArguments = (args) => {
       requestedPath ??= arg;
       continue;
     }
-    if (!pullRequestUrl && isPullRequestUrlArgument(arg)) {
-      pullRequestUrl = arg;
+    const parsedPullRequestUrl = pullRequestUrl ? null : parsePullRequestUrlArgument(arg);
+    if (parsedPullRequestUrl) {
+      pullRequestUrl = parsedPullRequestUrl;
       continue;
     }
 
@@ -363,9 +365,11 @@ export const parseArguments = (args) => {
         index += 1;
         continue;
       }
-      if (markerProvider && nextValue && isPullRequestUrlArgument(nextValue)) {
+      const parsedNextValue =
+        markerProvider && nextValue ? parsePullRequestUrlArgument(nextValue) : null;
+      if (parsedNextValue) {
         pullRequestProvider = markerProvider;
-        pullRequestUrl = nextValue;
+        pullRequestUrl = parsedNextValue;
         index += 1;
         continue;
       }
