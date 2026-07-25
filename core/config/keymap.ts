@@ -1,3 +1,4 @@
+import { codeForCharacter, hasKeyboardLayout } from './keyboard-layout.ts';
 import type { CodiffKeymap, KeyCombo, KeyComboBinding } from './types.ts';
 
 type ParsedKeyCombo = {
@@ -48,13 +49,32 @@ const shiftedPunctuationCodes: Record<string, string> = {
   $: 'Digit4',
 };
 
-// US-layout `KeyboardEvent.code` for the letter, digit or punctuation key a
-// combo names, or null for a named key like `Enter` that no modifier rewrites.
+// `KeyboardEvent.code` for the letter, digit or punctuation key a combo names,
+// or null for a named key like `Enter` that no modifier rewrites.
+//
+// The user's own layout answers first, so `Alt+z` follows the key that really
+// types "z" rather than wherever US keyboards put it. A shifted spelling has to
+// keep using the tables below, because the layout reports unmodified characters
+// only; mixing the two sources within one Shift state would let a spelling the
+// layout placed and a spelling a table placed land on the same key.
+//
 // Combos name the resulting character, so `Shift+?` and `/` describe the same
-// key; keying the lookup on the combo's own Shift state keeps at most one
+// key; keying the tables on the combo's own Shift state keeps at most one
 // spelling able to claim each position and stops the two from colliding.
 // Shifted `Equal` has no spelling at all, since `+` is the combo delimiter.
 const physicalCode = (key: string, shiftKey: boolean): string | null => {
+  if (!shiftKey) {
+    const layoutCode = codeForCharacter(key);
+    if (layoutCode !== null) {
+      return layoutCode;
+    }
+    // With the real layout in hand, a character it cannot type has no key to
+    // match. Guessing the US position would fire the shortcut on whichever key
+    // the layout put there instead, which is the bug this replaces.
+    if (hasKeyboardLayout()) {
+      return null;
+    }
+  }
   if (/^[a-z]$/.test(key)) {
     return `Key${key.toUpperCase()}`;
   }

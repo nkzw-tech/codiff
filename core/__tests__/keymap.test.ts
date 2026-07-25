@@ -3,10 +3,12 @@
  */
 
 import { afterEach, expect, test, vi } from 'vite-plus/test';
+import { loadKeyboardLayout, resetKeyboardLayout } from '../config/keyboard-layout.ts';
 import { matchesShortcut } from '../config/keymap.ts';
 import type { CodiffKeymap } from '../config/types.ts';
 
 afterEach(() => {
+  resetKeyboardLayout();
   vi.restoreAllMocks();
 });
 
@@ -284,6 +286,125 @@ test('does not fall back to the physical key for shortcuts without Alt', () => {
   expect(matched).toBe(false);
 });
 
+test('resolves an Alt shortcut to the key that produces its character on this layout', async () => {
+  // Arrange: QWERTZ types "z" on the key US keyboards label "y".
+  const { keydown, keymap } = createTestContext();
+  await withKeyboardLayout({ KeyY: 'z', KeyZ: 'y' });
+
+  // Act
+  const matched = matchesShortcut(
+    keydown({ altKey: true, code: 'KeyY', key: 'Ω' }),
+    keymap,
+    'toggleWordWrap',
+  );
+
+  // Assert
+  expect(matched).toBe(true);
+});
+
+test('does not resolve an Alt shortcut to the US position on a layout that moved it', async () => {
+  // Arrange
+  const { keydown, keymap } = createTestContext();
+  await withKeyboardLayout({ KeyY: 'z', KeyZ: 'y' });
+
+  // Act: this key types "y" on QWERTZ, so it must not toggle word wrap.
+  const matched = matchesShortcut(
+    keydown({ altKey: true, code: 'KeyZ', key: 'Ω' }),
+    keymap,
+    'toggleWordWrap',
+  );
+
+  // Assert
+  expect(matched).toBe(false);
+});
+
+test('resolves an Alt shortcut to a punctuation key when the layout puts a letter there', async () => {
+  // Arrange: Dvorak types "z" on the key US keyboards label "/".
+  const { keydown, keymap } = createTestContext();
+  await withKeyboardLayout({ KeyZ: ';', Slash: 'z' });
+
+  // Act
+  const matched = matchesShortcut(
+    keydown({ altKey: true, code: 'Slash', key: '÷' }),
+    keymap,
+    'toggleWordWrap',
+  );
+
+  // Assert
+  expect(matched).toBe(true);
+});
+
+test('keeps shifted Alt shortcuts on US key positions', async () => {
+  // Arrange: the keyboard map reports unmodified characters only, so a shifted
+  // spelling has no layout answer. Resolving "z" through the layout and "?"
+  // through the US table would otherwise put both on Dvorak's Slash key.
+  const { keydown, keymap } = createTestContext({
+    commandBar: 'Alt+Shift+z',
+    toggleWordWrap: 'Alt+Shift+?',
+  });
+  await withKeyboardLayout({ KeyZ: ';', Slash: 'z' });
+  const event = keydown({ altKey: true, code: 'Slash', key: '¿', shiftKey: true });
+
+  // Act
+  const matched = {
+    commandBar: matchesShortcut(event, keymap, 'commandBar'),
+    toggleWordWrap: matchesShortcut(event, keymap, 'toggleWordWrap'),
+  };
+
+  // Assert
+  expect(matched).toEqual({ commandBar: false, toggleWordWrap: true });
+});
+
+test('resolves a letter shortcut to its US position on a layout that types no Latin', async () => {
+  // Arrange
+  const { keydown, keymap } = createTestContext();
+  await withKeyboardLayout({ KeyA: 'ф', KeyZ: 'я' });
+
+  // Act
+  const matched = matchesShortcut(
+    keydown({ altKey: true, code: 'KeyZ', key: 'Ω' }),
+    keymap,
+    'toggleWordWrap',
+  );
+
+  // Assert
+  expect(matched).toBe(true);
+});
+
+test('does not fire an Alt shortcut whose character the layout cannot type', async () => {
+  // Arrange: German types "-" where US keyboards have "/", and reaches "/"
+  // only through Shift. Falling back to the US position would fire this on the
+  // key that types "-", which already answers to `Alt+-`.
+  const { keydown, keymap } = createTestContext({ toggleWordWrap: 'Alt+/' });
+  await withKeyboardLayout({ Minus: 'ß', Slash: '-' });
+
+  // Act
+  const matched = matchesShortcut(
+    keydown({ altKey: true, code: 'Slash', key: '÷' }),
+    keymap,
+    'toggleWordWrap',
+  );
+
+  // Assert
+  expect(matched).toBe(false);
+});
+
+test('falls back to the US position while no layout has been read', () => {
+  // Arrange: the layout arrives asynchronously, so every keypress before it
+  // lands resolves the way it did before layouts were consulted at all.
+  const { keydown, keymap } = createTestContext();
+
+  // Act
+  const matched = matchesShortcut(
+    keydown({ altKey: true, code: 'KeyZ', key: 'Ω' }),
+    keymap,
+    'toggleWordWrap',
+  );
+
+  // Assert
+  expect(matched).toBe(true);
+});
+
 function createTestContext({
   platform = 'MacIntel',
   ...overrides
@@ -309,6 +430,15 @@ function createTestContext({
   } satisfies CodiffKeymap;
 
   return { keydown, keymap };
+}
+
+async function withKeyboardLayout(layout: Record<string, string>) {
+  Object.defineProperty(navigator, 'keyboard', {
+    configurable: true,
+    value: { getLayoutMap: () => Promise.resolve(new Map(Object.entries(layout))) },
+  });
+
+  await loadKeyboardLayout();
 }
 
 function keydown({
