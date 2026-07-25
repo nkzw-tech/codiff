@@ -360,6 +360,35 @@ test('parses full GitHub pull request URLs as launch sources', () => {
   });
 });
 
+test('canonicalizes GitHub pull request URLs copied from a review tab', () => {
+  for (const value of [
+    'https://github.com/nkzw-tech/codiff/pull/11/changes#r4821',
+    'https://github.com/nkzw-tech/codiff/pull/11/files',
+    'https://www.github.com/nkzw-tech/codiff/pull/11?diff=split',
+    'github.com/nkzw-tech/codiff/pull/11/commits',
+  ]) {
+    expect(readCommandLine(['codiff', value, '/repo']).launchOptions.source).toEqual({
+      provider: 'github',
+      type: 'pull-request',
+      url: 'https://github.com/nkzw-tech/codiff/pull/11',
+    });
+  }
+});
+
+test('canonicalizes GitLab merge request URLs copied from a review tab', () => {
+  for (const value of [
+    'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23/diffs#note_991',
+    'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23/commits',
+    'https://gitlab.example.com/group/subgroup/project/merge_requests/23',
+  ]) {
+    expect(readCommandLine(['codiff', value, '/repo']).launchOptions.source).toEqual({
+      provider: 'gitlab',
+      type: 'pull-request',
+      url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23',
+    });
+  }
+});
+
 test('resolves GitHub and GitLab review markers through repository remotes', async () => {
   await using directory = await createTemporaryDirectory('codiff-review-markers-');
   const githubRepo = join(directory.path, 'github');

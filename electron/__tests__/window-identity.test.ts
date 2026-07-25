@@ -226,6 +226,28 @@ test('window identities normalize GitHub pull request sources', async () => {
   );
 });
 
+test('window identities normalize pull request URLs copied from a review tab', async () => {
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
+
+  expect(
+    getWindowIdentity(directory.path, {
+      source: {
+        type: 'pull-request',
+        url: 'https://github.com/NKZW-Tech/Codiff/pull/8/changes#r4821',
+      },
+    })?.sourceKey,
+  ).toBe('pull-request:nkzw-tech/codiff#8');
+  expect(
+    getWindowIdentity(directory.path, {
+      source: {
+        type: 'pull-request',
+        url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/8/diffs',
+      },
+    })?.sourceKey,
+  ).toBe('pull-request:gitlab:gitlab.example.com/group/subgroup/project#8');
+});
+
 test('window identities normalize GitLab merge request sources', async () => {
   await using directory = await createTemporaryDirectory('codiff-window-identity-');
   await initRepository(directory.path);

@@ -143,6 +143,24 @@ describe('GitLab merge requests', () => {
     });
   });
 
+  test('canonicalizes merge request URLs copied from a review tab', () => {
+    for (const value of [
+      'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23/diffs#note_991',
+      'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23/commits',
+      'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23?commit_id=0f1e2d3c',
+      'https://gitlab.example.com/group/subgroup/project/merge_requests/23',
+      'gitlab.example.com/group/subgroup/project/-/merge_requests/23/diffs',
+    ]) {
+      expect(parseGitLabMergeRequestUrl(value)).toMatchObject({
+        host: 'gitlab.example.com',
+        number: 23,
+        projectPath: 'group/subgroup/project',
+        provider: 'gitlab',
+        url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23',
+      });
+    }
+  });
+
   test('builds local head and target branch fetch refspecs', () => {
     expect(
       createMergeRequestFetchRefspecs(

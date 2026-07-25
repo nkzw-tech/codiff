@@ -396,6 +396,35 @@ test('parseGitHubPullRequestUrl reads canonical pull request URLs', () => {
   });
 });
 
+test('parseGitHubPullRequestUrl canonicalizes URLs copied from a review tab', () => {
+  for (const value of [
+    'https://github.com/nkzw-tech/codiff/pull/3/changes#r4821',
+    'https://github.com/nkzw-tech/codiff/pull/3/files',
+    'https://github.com/nkzw-tech/codiff/pull/3/commits/0f1e2d3c',
+    'https://www.github.com/nkzw-tech/codiff/pull/3?diff=split',
+    'github.com/nkzw-tech/codiff/pull/3',
+  ]) {
+    expect(parseGitHubPullRequestUrl(value)).toEqual({
+      number: 3,
+      owner: 'nkzw-tech',
+      repo: 'codiff',
+      url: 'https://github.com/nkzw-tech/codiff/pull/3',
+    });
+  }
+});
+
+test('parseGitHubPullRequestUrl rejects values that are not GitHub pull requests', () => {
+  expect(() => parseGitHubPullRequestUrl('not a url')).toThrow(
+    'Codiff expected a GitHub pull request URL.',
+  );
+  expect(() => parseGitHubPullRequestUrl('https://github.com/nkzw-tech/codiff')).toThrow(
+    'Codiff expected a GitHub pull request URL.',
+  );
+  expect(() =>
+    parseGitHubPullRequestUrl('https://gitlab.example.com/group/project/-/merge_requests/3'),
+  ).toThrow('Codiff only supports GitHub pull request URLs.');
+});
+
 test('validateRepositoryPath returns normalized repository paths', () => {
   expect(validateRepositoryPath('src/./file.ts')).toBe(join('src', 'file.ts'));
   expect(validateRepositoryPath('src//nested/file.ts')).toBe(join('src', 'nested', 'file.ts'));

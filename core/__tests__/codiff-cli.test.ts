@@ -125,6 +125,28 @@ test('parseArguments treats HEAD positional revisions as commit refs', () => {
   });
 });
 
+test('parseArguments canonicalizes review URLs copied from a review tab', () => {
+  for (const value of [
+    'https://github.com/nkzw-tech/codiff/pull/1728/changes#r4821',
+    'https://github.com/nkzw-tech/codiff/pull/1728/files',
+    'https://www.github.com/nkzw-tech/codiff/pull/1728?diff=split',
+    'github.com/nkzw-tech/codiff/pull/1728',
+  ]) {
+    expect(parseArguments([value])).toMatchObject({
+      pullRequestUrl: 'https://github.com/nkzw-tech/codiff/pull/1728',
+    });
+  }
+
+  for (const value of [
+    'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23/diffs#note_991',
+    'https://gitlab.example.com/group/subgroup/project/merge_requests/23',
+  ]) {
+    expect(parseArguments([value])).toMatchObject({
+      pullRequestUrl: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23',
+    });
+  }
+});
+
 test('parseArguments treats plain branch refs as branch refs', async () => {
   await withCwd(refRepositoryPath, () => {
     expect(parseArguments(['feature'])).toEqual({
@@ -549,6 +571,31 @@ test('packaged terminal helper forwards GitLab MR markers to Electron', async ()
     '23',
     process.cwd(),
   ]);
+});
+
+test('packaged terminal helper forwards review URLs copied from a review tab', async () => {
+  for (const value of [
+    'https://github.com/nkzw-tech/codiff/pull/1728/changes#r4821',
+    'https://github.com/nkzw-tech/codiff/pull/1728/files',
+    'https://www.github.com/nkzw-tech/codiff/pull/1728?diff=split',
+    'github.com/nkzw-tech/codiff/pull/1728',
+    'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23/diffs#note_991',
+    'https://gitlab.example.com/group/subgroup/project/merge_requests/23',
+  ]) {
+    await using logger = await createFakeOpenLogger();
+
+    await execFileAsync(resolve('bin/codiff-app'), [value], {
+      env: logger.env,
+    });
+
+    expect(await logger.readArgs()).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      value,
+      process.cwd(),
+    ]);
+  }
 });
 
 test('packaged terminal helper forwards HEAD^1 to Electron as a commit', async () => {
