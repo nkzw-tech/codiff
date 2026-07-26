@@ -47,7 +47,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y fakeroot rpm
+          sudo apt install -y fakeroot rpm libx11-dev libxkbfile-dev
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -120,6 +120,13 @@ jobs:
         id: pnpm-install
         with:
           run_install: false
+
+      # native-keymap compiles from source during install, and on a Linux host
+      # that requires the X11 headers even when packaging for another platform.
+      - name: Install native-keymap dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libx11-dev libxkbfile-dev
 
       - name: Cache Electron Downloads
         uses: actions/cache@v4
