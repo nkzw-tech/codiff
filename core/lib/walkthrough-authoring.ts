@@ -876,7 +876,12 @@ ${buildWalkthroughSizingGuidance(size)}
 Product rules:
 - Write all user-visible text in English.
 - Order the review by conceptual leverage, not file path.
-- Keep prose concise, concrete, and evidence-based. Inline code is allowed, but no headings or lists.
+- Keep prose concise, concrete, and evidence-based. Inline code is allowed.
+- Walk the reviewer through each branch of the implementation logic. Establish contracts and state before the behavior that consumes them, and explain behavior before downstream effects.
+- When multiple hunks cooperate, explain the invariant one establishes, what depends on it, and the relevant data or control flow.
+- Match explanation depth to complexity. Simple stops may use one paragraph; complex stops may use multiple short paragraphs covering behavior, mechanism, dependencies, and reviewer considerations.
+- Do not narrate syntax line by line. Explain why the code is structured this way, what changed in the execution path, and what downstream code now assumes.
+- Stop prose supports paragraphs and safe inline Markdown. Do not use headings or lists.
 - Do not claim tests, risks, or behavior that the diff does not support.
 - Prefer conceptual chapters across the complete diff.
 ${buildCustomInstructionsGuidance(generationRequest.customInstructions)}

@@ -62,9 +62,12 @@ choose.
 - Do not make one stop per file for broad changes. Group hunks that implement the same idea in
   one stop.
 - Never split a generated-like file across stops or support items. Use its single synthetic hunk id.
-- Keep `summary` to one concrete sentence. Keep `prose` short and specific. Do not use markdown
-  headings, lists, or other block structure. Inline code is supported, though: wrap symbol names,
-  file paths, flags, and other literals in backticks, e.g. `--walkthrough-file` or `renderInlineMarkdown`.
+- Keep `summary` to one concrete sentence. Keep `prose` specific and proportionate to the
+  implementation: simple stops may use one paragraph, while complex stops may use a few short
+  paragraphs explaining behavior, dependencies, and data or control flow. Do not narrate syntax
+  line by line or use Markdown headings, lists, or other block structure. Inline code is supported:
+  wrap symbol names, file paths, flags, and other literals in backticks, e.g.
+  `--walkthrough-file` or `renderInlineMarkdown`.
 - Avoid generic filler, broad assurance language, and meta-explanatory labels.
 - Do not invent bugs, risks, tests, or validation. Describe what the diff and conversation
   actually support.

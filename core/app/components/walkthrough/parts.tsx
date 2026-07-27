@@ -43,9 +43,17 @@ export function WalkthroughLineCount({ added, deleted }: { added: number; delete
 }
 
 export function Narration({ prose }: { prose: string }) {
+  const paragraphs = prose
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
   return (
     <div className="wt-narration">
-      <p className="wt-narration-prose">{renderInlineMarkdown(prose)}</p>
+      {(paragraphs.length > 0 ? paragraphs : [prose]).map((paragraph, index) => (
+        <p className="wt-narration-prose" key={`${index}:${paragraph}`}>
+          {renderInlineMarkdown(paragraph)}
+        </p>
+      ))}
     </div>
   );
 }
