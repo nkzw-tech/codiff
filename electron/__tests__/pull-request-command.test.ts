@@ -95,7 +95,10 @@ test('reports a missing GitHub CLI when the resolved executable cannot be spawne
   await writeFile(fakeGh, '#!/codiff-missing-interpreter\n');
   await chmod(fakeGh, 0o755);
 
-  await using _environment = createTemporaryEnvironment({ CODIFF_GH_PATH: fakeGh });
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_GH_PATH: fakeGh,
+    SHELL: undefined,
+  });
 
   await expect(
     submitPullRequestReview(repo, {
@@ -158,6 +161,7 @@ printf '%s' '{}'
     CODIFF_GH_PATH: fakeGh,
     CODIFF_GITHUB_COMMAND_TEST_CALLS: callsPath,
     PATH: pathBin,
+    SHELL: undefined,
   });
 
   await submitPullRequestReview(repo, {
@@ -177,4 +181,67 @@ printf '%s' '{}'
     'api -X POST repos/nkzw-tech/codiff/pulls/12/reviews --input - | ' +
       '{"body":"General feedback.","comments":[],"event":"COMMENT"}',
   ]);
+});
+
+test('authenticates gh from the login shell environment when the app inherited none', async () => {
+  await using directory = await createTemporaryDirectory('codiff-gh-login-env-');
+  const repo = join(directory.path, 'repo');
+  const fakeGh = join(directory.path, 'gh');
+  const fakeShell = join(directory.path, 'fake-login-shell');
+
+  await mkdir(repo);
+  await execFileAsync('git', ['-C', repo, 'init']);
+  await execFileAsync('git', [
+    '-C',
+    repo,
+    'remote',
+    'add',
+    'origin',
+    'git@github.com:nkzw-tech/codiff.git',
+  ]);
+
+  // A GUI-launched Codiff keeps launchd's minimal environment: no GH_TOKEN,
+  // even when the user's login shell exports one. This gh fails auth exactly
+  // the way the real one does when the token never reaches it.
+  await writeFile(
+    fakeShell,
+    `#!/bin/sh
+GH_TOKEN='from-login-shell' exec /bin/sh -c "$3"
+`,
+  );
+  await writeFile(
+    fakeGh,
+    `#!/bin/sh
+if [ "$GH_TOKEN" != 'from-login-shell' ]; then
+  echo 'To get started with GitHub CLI, please run:  gh auth login' >&2
+  exit 4
+fi
+for arg in "$@"; do
+  if [ "$arg" = 'repos/nkzw-tech/codiff/pulls/12' ]; then
+    printf '%s' '{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}'
+    exit 0
+  fi
+done
+printf '%s' '{}'
+`,
+  );
+  await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGh, 0o755)]);
+
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_GH_PATH: fakeGh,
+    GH_TOKEN: undefined,
+    GITHUB_TOKEN: undefined,
+    SHELL: fakeShell,
+  });
+
+  await submitPullRequestReview(repo, {
+    body: 'General feedback.',
+    comments: [],
+    event: 'COMMENT',
+    source: {
+      provider: 'github',
+      type: 'pull-request',
+      url: 'https://github.com/nkzw-tech/codiff/pull/12',
+    },
+  });
 });
