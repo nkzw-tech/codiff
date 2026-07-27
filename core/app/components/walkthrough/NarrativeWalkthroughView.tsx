@@ -24,6 +24,7 @@ import {
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { ChangedFile, WalkthroughHunkGroup, WalkthroughModel } from '../../../types.ts';
+import { ReadOnlyMarkdownView } from '../ReadOnlyMarkdownView.tsx';
 import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import {
   CommitView,
@@ -109,6 +110,32 @@ type WalkthroughBlockSet = {
   firstBlockIdByStop: ReadonlyArray<string | null>;
   stopIndexByBlockId: ReadonlyMap<string, number>;
 };
+
+function ReviewFocus({ focus }: { focus: string }) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <section className="wt-focus">
+      <div className="wt-focus-header">
+        <button
+          aria-expanded={!collapsed}
+          className="wt-focus-label"
+          onClick={() => setCollapsed((value) => !value)}
+          type="button"
+        >
+          Review focus
+        </button>
+      </div>
+      {!collapsed ? (
+        <ReadOnlyMarkdownView
+          ariaLabel="Review focus"
+          className="wt-focus-markdown"
+          density="compact"
+          value={focus}
+        />
+      ) : null}
+    </section>
+  );
+}
 
 type WalkthroughNavigationKeyEvent = Pick<
   KeyboardEvent,
@@ -678,6 +705,7 @@ export function NarrativeWalkthroughView({
         onTouchStartCapture={navigation.releaseStopScrollLock}
         onWheelCapture={navigation.releaseStopScrollLock}
       >
+        {navigation.mode === 'commit' ? null : <ReviewFocus focus={walkthrough.focus} />}
         {navigation.mode === 'commit' ? (
           <CommitView
             branch={walkthrough.repo.branch}

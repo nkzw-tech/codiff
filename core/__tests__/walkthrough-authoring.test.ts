@@ -76,6 +76,9 @@ test('indexes stable hunk ids but sends compact aliases in the prompt', () => {
   expect(prompt).not.toContain('"id":"src/app.ts:pull-request:42:h1"');
   expect(prompt).toContain('compact request-local aliases');
   expect(prompt).toContain('Every stop must have a concise semantic title');
+  expect(prompt).toContain('Match explanation depth to complexity');
+  expect(prompt).toContain('Do not narrate syntax line by line');
+  expect(prompt).toContain('Complex stops should use two to four short paragraphs');
 });
 
 test('uses source-aware terminology and applies custom instructions once', () => {
