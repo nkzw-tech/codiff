@@ -8,6 +8,7 @@
 import {
   array,
   boolean,
+  check,
   type InferOutput,
   literal,
   looseObject,
@@ -39,6 +40,7 @@ import type {
   WalkthroughGenerationRequest,
   WalkthroughHunk,
   WalkthroughNarrativeV5,
+  WalkthroughRegion,
 } from '../types.ts';
 import {
   getSectionWalkthroughHunks,
@@ -68,6 +70,10 @@ export const createWalkthroughGenerationProfile = (
 
 const boundedString = (maximum: number) => pipe(string(), maxLength(maximum));
 const nonEmptyString = (maximum: number) => pipe(string(), minLength(1), maxLength(maximum));
+const positiveInt = pipe(
+  number(),
+  check((value) => Number.isInteger(value) && value > 0, 'Expected a positive integer.'),
+);
 const noteSchema = object({
   body: nonEmptyString(500),
   hunkId: nonEmptyString(200),
@@ -136,10 +142,24 @@ const groupFields = {
   title: optional(boundedString(200)),
 };
 
+const regionSchema = pipe(
+  strictObject({
+    endLine: positiveInt,
+    hunkId: nonEmptyString(200),
+    id: nonEmptyString(100),
+    side: picklist(['additions', 'deletions']),
+    startLine: positiveInt,
+    title: nonEmptyString(120),
+    tooltip: nonEmptyString(600),
+  }),
+  check((region) => region.endLine >= region.startLine, 'Invalid region line range.'),
+);
+
 const stopSchema = object({
   ...groupFields,
   importance: picklist(['critical', 'normal', 'context']),
   prose: nonEmptyString(4000),
+  regions: optional(pipe(array(regionSchema), maxLength(4))),
 });
 
 const supportSchema = object({
@@ -240,6 +260,7 @@ const compactWalkthroughDraftSchema = strictObject({
               id: groupFields.id,
               importance: picklist(['critical', 'normal', 'context']),
               prose: nonEmptyString(4000),
+              regions: optional(pipe(array(regionSchema), maxLength(4))),
               title: nonEmptyString(80),
             }),
           ),
@@ -329,6 +350,7 @@ export const parseWalkthroughDraft = (value: unknown): WalkthroughDraft => {
         id: stop.id,
         importance: stop.importance,
         prose: stop.prose,
+        ...(stop.regions ? { regions: stop.regions } : {}),
         title: stop.title,
       })),
       title: chapter.title,
@@ -458,6 +480,7 @@ export const normalizeWalkthroughDraft = (
   const index = indexWalkthroughHunks(state.files);
   const used = new Set<string>();
   const itemIds = new Set<string>();
+  const usedRegionIds = new Set<string>();
 
   const resolveGroup = (
     group:
@@ -516,15 +539,49 @@ export const normalizeWalkthroughDraft = (
     };
   };
 
+  const resolveRegions = (
+    regions: ReadonlyArray<WalkthroughRegion> | undefined,
+    prose: string,
+    hunkIds: ReadonlyArray<string>,
+  ): ReadonlyArray<WalkthroughRegion> =>
+    (regions ?? []).flatMap((region) => {
+      const hunk = index.byId.get(region.hunkId);
+      const escapedRegionId = region.id.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+      const hasReference = new RegExp(`\\[[^\\]\\n]+\\]\\(#${escapedRegionId}\\)`).test(prose);
+      const sideRange =
+        region.side === 'additions'
+          ? [hunk?.additionStart, hunk?.additionEnd]
+          : [hunk?.deletionStart, hunk?.deletionEnd];
+      const tooltipHasUnsupportedMarkdown =
+        /\[[^\]]*\]\([^)]*\)|(^|\n)\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s)/m.test(region.tooltip);
+      if (
+        !hunk ||
+        !hunkIds.includes(hunk.id) ||
+        !hasReference ||
+        usedRegionIds.has(region.id) ||
+        sideRange[0] == null ||
+        sideRange[1] == null ||
+        region.startLine < sideRange[0] ||
+        region.endLine > sideRange[1] ||
+        tooltipHasUnsupportedMarkdown
+      ) {
+        return [];
+      }
+      usedRegionIds.add(region.id);
+      return [{ ...region, hunkId: hunk.id }];
+    });
+
   const chapters = authored.chapters.flatMap((chapter) => {
     const stops = chapter.stops.flatMap((stop) => {
       const group = resolveGroup(stop);
+      const regions = group ? resolveRegions(stop.regions, stop.prose, group.hunkIds) : [];
       return group
         ? [
             {
               ...group,
               importance: stop.importance,
               prose: clean(stop.prose),
+              ...(regions.length > 0 ? { regions } : {}),
             },
           ]
         : [];
@@ -882,6 +939,8 @@ Product rules:
 - Match explanation depth to complexity. Simple stops may use one paragraph; complex stops may use multiple short paragraphs covering behavior, mechanism, dependencies, and reviewer considerations.
 - Do not narrate syntax line by line. Explain why the code is structured this way, what changed in the execution path, and what downstream code now assumes.
 - Stop prose supports paragraphs and safe inline Markdown. Do not use headings or lists.
+- Regions are optional, but strongly prefer one or two precise regions when a substantive stop makes a line-local implementation claim. Structural, cross-file, and whole-file explanations may omit them. Never add more than four. A region must stay inside one supplied hunk and one side, and stop prose must reference it as [phrase](#region-id).
+- Region titles are short labels. Tooltips use safe inline Markdown only, no links or block elements, and explain why the selected range matters. Do not add regions that merely cover a whole hunk without added precision.
 - Do not claim tests, risks, or behavior that the diff does not support.
 - Prefer conceptual chapters across the complete diff.
 ${buildCustomInstructionsGuidance(generationRequest.customInstructions)}

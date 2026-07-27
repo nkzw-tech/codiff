@@ -561,7 +561,54 @@
 .wt-stop-block-header.current {
   box-shadow: inset 3px 0 0 var(--tree-selection-focus);
 }
-
+.wt-code-unavailable {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--diff-deletion) 7%, var(--code-bg));
+  border: 1px solid color-mix(in srgb, var(--diff-deletion) 34%, var(--file-border));
+  border-radius: 12px;
+  color: var(--text);
+  display: flex;
+  font: 13px/1.45 var(--font-sans);
+  gap: 10px;
+  margin: 2px 0 16px;
+  padding: 12px 14px;
+}
+.wt-code-unavailable > svg {
+  color: var(--diff-deletion);
+  flex: none;
+  margin-top: 1px;
+}
+.wt-code-unavailable p {
+  color: var(--muted);
+  margin: 3px 0 0;
+}
+.wt-code-unavailable details {
+  margin-top: 8px;
+}
+.wt-code-unavailable summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 650;
+}
+.wt-code-unavailable ul {
+  display: grid;
+  gap: 5px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+.wt-code-unavailable li {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+.wt-code-unavailable li code {
+  overflow-wrap: anywhere;
+}
+.wt-code-unavailable li span {
+  color: var(--muted);
+}
 /* The whole order as one continuous scroll: each stop is a block (narration +
    diff) stacked top-to-bottom, separated by a rule, with the scroll-focused stop
    lightly accented so the reader can see where the arc's highlight comes from. */
@@ -1311,6 +1358,32 @@
   border-color: rgb(127 127 127 / 0.18);
   box-shadow: none;
   color: var(--muted);
+}
+
+.walkthrough-region-annotation {
+  align-items: baseline;
+  background: color-mix(in srgb, var(--tree-selection-focus) 10%, transparent);
+  border-left: 3px solid var(--tree-selection-focus);
+  color: var(--text);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0;
+  padding: 6px 10px;
+}
+
+.walkthrough-region-annotation strong {
+  color: var(--tree-selection-focus);
+  font: 700 11px/1.35 var(--font-sans);
+}
+
+.walkthrough-region-annotation span {
+  font: 12px/1.4 var(--font-sans);
+}
+
+.walkthrough-region-annotation.active {
+  background: color-mix(in srgb, var(--tree-selection-focus) 18%, transparent);
+  border-left-width: 4px;
 }
 .wt-commit-btn .lc {
   color: #fff;

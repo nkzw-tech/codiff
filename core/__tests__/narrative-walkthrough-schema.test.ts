@@ -3,6 +3,7 @@ import {
   parseNarrativeWalkthroughV4,
   parseWalkthroughArtifactV5,
   parseWalkthroughModel,
+  resolveWalkthroughFiles,
 } from '../lib/narrative-walkthrough-schema.ts';
 import { buildWalkthroughView } from '../lib/narrative-walkthrough.ts';
 import {
@@ -165,6 +166,37 @@ test('exposes V5 envelope capabilities by field presence', () => {
   expect(hasGenerationRequestCapability(model)).toBe(true);
 });
 
+test('prefers V5 captured files over mismatched live evidence', () => {
+  const artifact = v5();
+  const model = parseWalkthroughModel({
+    ...artifact,
+    capturedContext: {
+      ...artifact.capturedContext,
+      files: [
+        {
+          fingerprint: 'captured-file',
+          path: 'src/captured.ts',
+          sections: [
+            {
+              binary: false,
+              id: 'src/captured.ts:unstaged',
+              kind: 'unstaged',
+              patch: '@@ -1 +1 @@\n-old\n+new\n',
+            },
+          ],
+          status: 'modified',
+        },
+      ],
+    },
+  });
+
+  expect(
+    resolveWalkthroughFiles(model, [
+      { fingerprint: 'live', path: 'src/live.ts', sections: [], status: 'modified' },
+    ]).map(({ path }) => path),
+  ).toEqual(['src/captured.ts']);
+});
+
 test('preserves every resolved V4 review source variant', () => {
   const sources: ReadonlyArray<NarrativeWalkthroughV4['source']> = [
     { type: 'working-tree' },
@@ -236,25 +268,54 @@ test('rejects invalid documents and fields owned by later revisions', () => {
   for (const invalid of [
     { ...persistedV4, capturedContext: {} },
     { ...persistedV4, reviewHistory: [] },
+    {
+      ...persistedV4,
+      chapters: persistedV4.chapters.map((chapter) => ({
+        ...chapter,
+        stops: chapter.stops.map((stop) => ({ ...stop, regions: [] })),
+      })),
+    },
     { ...persistedV4, source: { sha: 'HEAD', type: 'commit' } },
     { ...persistedV4, version: 5 },
     { ...artifact, generationRequest: undefined },
     { ...artifact, narrative: { ...artifact.narrative, assessments: [] } },
-    {
-      ...artifact,
-      narrative: {
-        ...artifact.narrative,
-        chapters: [
-          {
-            ...artifact.narrative.chapters[0],
-            stops: [{ ...artifact.narrative.chapters[0].stops[0], regions: [] }],
-          },
-        ],
-      },
-    },
   ]) {
     expect(() => parseWalkthroughModel(invalid)).toThrow();
   }
+});
+
+test('accepts grounded regions only in V5 narrative content', () => {
+  const artifact = v5();
+  const stop = artifact.narrative.chapters[0]!.stops[0]!;
+  const parsed = parseWalkthroughArtifactV5({
+    ...artifact,
+    narrative: {
+      ...artifact.narrative,
+      chapters: [
+        {
+          ...artifact.narrative.chapters[0]!,
+          stops: [
+            {
+              ...stop,
+              regions: [
+                {
+                  endLine: 4,
+                  hunkId: stop.hunkIds[0]!,
+                  id: 'compatibility-boundary',
+                  side: 'additions',
+                  startLine: 3,
+                  title: 'Compatibility boundary',
+                  tooltip: 'This range preserves the persisted boundary.',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  expect(parsed.narrative.chapters[0]?.stops[0]?.regions).toHaveLength(1);
 });
 
 test('round trips the initial composite V5 artifact without changing its shape', () => {

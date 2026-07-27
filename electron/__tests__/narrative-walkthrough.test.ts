@@ -215,6 +215,7 @@ test('exposes a schema requiring the hunk-based narrative fields', async () => {
     narrativeWalkthroughSchema.properties.chapters.items.properties.stops.items.properties;
   expect(stopProperties.added).toBeUndefined();
   expect(stopProperties.anchor).toBeUndefined();
+  expect(stopProperties.regions.maxItems).toBe(4);
 });
 
 test('keeps the renderer JSON schema in sync with the live narrative schema', async () => {

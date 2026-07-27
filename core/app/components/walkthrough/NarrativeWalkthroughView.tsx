@@ -6,6 +6,8 @@ import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { GitBranchIcon as GitBranch } from '@phosphor-icons/react/GitBranch';
 import { PathIcon as Path } from '@phosphor-icons/react/Path';
 import { ShareNetworkIcon as ShareNetwork } from '@phosphor-icons/react/ShareNetwork';
+import { WarningCircleIcon as WarningCircle } from '@phosphor-icons/react/WarningCircle';
+import type { SelectedLineRange } from '@pierre/diffs';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ReviewIdentity } from '../../../lib/app-types.ts';
 import type { ReviewScrollBehavior } from '../../../lib/app-types.ts';
@@ -37,8 +39,14 @@ import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
 type FocusedRunDiff = {
   file: ChangedFile;
+  hunkIds: ReadonlyArray<string>;
   note?: string;
   reviewIdentity: ReviewIdentity;
+};
+
+type WalkthroughCodeIssue = {
+  hunkId: string;
+  reason: 'file' | 'hunk' | 'metadata' | 'section';
 };
 
 export type WalkthroughReviewTarget = {
@@ -49,6 +57,7 @@ export type WalkthroughReviewTarget = {
 export type WalkthroughBlockScrollTarget = {
   behavior?: ReviewScrollBehavior;
   blockId: string;
+  range?: SelectedLineRange;
   request: number;
 };
 
@@ -85,25 +94,70 @@ const getFocusedRunDiffs = (
 ): ReadonlyArray<FocusedRunDiff> =>
   resolveWalkthroughHunkRuns(item, files).flatMap((run) => {
     const focused = focusChangedFileForHunks(run.resolved.file, run.resolved.section, run.hunks);
-    return focused
-      ? [
-          {
-            file: focused,
-            note: getWalkthroughRunNote(item, run),
-            reviewIdentity: {
-              fingerprint: focused.fingerprint,
-              key: `walkthrough:${run.key}`,
-            },
-          },
-        ]
-      : [];
+    const focusedRuns = focused
+      ? [{ file: focused, hunks: run.hunks, key: run.key }]
+      : run.hunks.flatMap((hunk) => {
+          const singleHunkFile = focusChangedFileForHunks(run.resolved.file, run.resolved.section, [
+            hunk,
+          ]);
+          return singleHunkFile
+            ? [{ file: singleHunkFile, hunks: [hunk], key: `${run.key}:${hunk.id}` }]
+            : [];
+        });
+    return focusedRuns.map(({ file, hunks, key }) => ({
+      file,
+      hunkIds: hunks.map((hunk) => hunk.id),
+      note: getWalkthroughRunNote(item, { ...run, hunks, key }),
+      reviewIdentity: {
+        fingerprint: file.fingerprint,
+        key: `walkthrough:${key}`,
+      },
+    }));
   });
+
+const getWalkthroughCodeIssues = (
+  item: WalkthroughHunkGroup,
+  files: ReadonlyArray<ChangedFile>,
+  focusedRuns: ReadonlyArray<FocusedRunDiff>,
+): ReadonlyArray<WalkthroughCodeIssue> => {
+  const renderedHunkIds = new Set(focusedRuns.flatMap(({ hunkIds }) => hunkIds));
+  const hunkById = new Map(item.hunks.map((hunk) => [hunk.id, hunk]));
+
+  return item.hunkIds.flatMap<WalkthroughCodeIssue>((hunkId) => {
+    if (renderedHunkIds.has(hunkId)) {
+      return [];
+    }
+    const hunk = hunkById.get(hunkId);
+    if (!hunk) {
+      return [{ hunkId, reason: 'metadata' as const }];
+    }
+    const matchingFiles = files.filter((candidate) => candidate.path === hunk.path);
+    if (matchingFiles.length === 0) {
+      return [{ hunkId, reason: 'file' as const }];
+    }
+    if (
+      !matchingFiles.some((file) =>
+        file.sections.some((section) => section.id === hunk.anchor.sectionId),
+      )
+    ) {
+      return [{ hunkId, reason: 'section' as const }];
+    }
+    return [{ hunkId, reason: 'hunk' as const }];
+  });
+};
 
 export type RenderWalkthroughDiffBlocks = (
   blocks: ReadonlyArray<ReviewDiffBlock>,
   scrollTarget: WalkthroughBlockScrollTarget | null,
   onActiveBlockChange: (blockId: string) => void,
 ) => ReactNode;
+
+type WalkthroughRegionTarget = {
+  blockId: string;
+  range: SelectedLineRange;
+};
+
+let nextRegionScrollRequest = 0;
 
 type WalkthroughBlockSet = {
   blocks: ReadonlyArray<ReviewDiffBlock>;
@@ -172,14 +226,56 @@ const emptyWalkthroughBlockSet: WalkthroughBlockSet = {
   stopIndexByBlockId: new Map(),
 };
 
-function StopHeader({ current, stop }: { current: boolean; stop: WalkthroughStopView }) {
+function StopHeader({
+  codeIssues,
+  current,
+  onRegionLink,
+  stop,
+}: {
+  codeIssues: ReadonlyArray<WalkthroughCodeIssue>;
+  current: boolean;
+  onRegionLink: (regionId: string) => void;
+  stop: WalkthroughStopView;
+}) {
   return (
     <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
       <div className="wt-stage-title-row">
         <h2 className="wt-stage-title">{stop.title ?? walkthroughItemTitleFallback(stop)}</h2>
         <ImportancePill importance={stop.importance} />
       </div>
-      <Narration prose={stop.prose} />
+      <Narration onRegionLink={onRegionLink} prose={stop.prose} />
+      {codeIssues.length > 0 ? (
+        <div className="wt-code-unavailable" role="alert">
+          <WarningCircle aria-hidden size={18} weight="fill" />
+          <div>
+            <strong>Code unavailable for this walkthrough step</strong>
+            <p>
+              Codiff could not resolve {codeIssues.length} of {stop.hunkIds.length} authored diff{' '}
+              {stop.hunkIds.length === 1 ? 'hunk' : 'hunks'} from the saved walkthrough evidence.
+              Regenerate the walkthrough to recapture the code.
+            </p>
+            <details>
+              <summary>Debug details</summary>
+              <ul>
+                {codeIssues.map(({ hunkId, reason }) => (
+                  <li key={hunkId}>
+                    <code>{hunkId}</code>
+                    <span>
+                      {reason === 'file'
+                        ? 'captured file is missing'
+                        : reason === 'section'
+                          ? 'captured diff section is missing'
+                          : reason === 'metadata'
+                            ? 'walkthrough hunk metadata is missing'
+                            : 'hunk is absent from the captured patch'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -199,19 +295,36 @@ const createWalkthroughBlocks = (
   files: ReadonlyArray<ChangedFile>,
   walkthroughView: WalkthroughView,
   currentIndex: number,
+  activeRegionId: string | null,
+  onRegionLink: (regionId: string, target: WalkthroughRegionTarget) => void,
 ): WalkthroughBlockSet => {
   const blocks: Array<ReviewDiffBlock> = [];
   const firstBlockIdByStop: Array<string | null> = [];
+  const regionTargets = new Map<string, WalkthroughRegionTarget>();
   const stopIndexByBlockId = new Map<string, number>();
+  const routeRegionLink = (regionId: string) => {
+    const target = regionTargets.get(regionId);
+    if (target) {
+      onRegionLink(regionId, target);
+    }
+  };
 
   for (const stop of walkthroughView.sequence) {
     const focusedRuns = getFocusedRunDiffs(stop, files);
+    const codeIssues = getWalkthroughCodeIssues(stop, files, focusedRuns);
     if (focusedRuns.length === 0) {
       const blockId = `walkthrough:${stop.id}:missing`;
       firstBlockIdByStop[stop.index] = blockId;
       stopIndexByBlockId.set(blockId, stop.index);
       blocks.push({
-        header: <StopHeader current={stop.index === currentIndex} stop={stop} />,
+        header: (
+          <StopHeader
+            codeIssues={codeIssues}
+            current={stop.index === currentIndex}
+            onRegionLink={routeRegionLink}
+            stop={stop}
+          />
+        ),
         headerSelected: stop.index === currentIndex,
         id: blockId,
       });
@@ -220,17 +333,48 @@ const createWalkthroughBlocks = (
 
     firstBlockIdByStop[stop.index] = `walkthrough:${stop.id}:0`;
 
+    const regionsByRun = focusedRuns.map(({ hunkIds }, runIndex) => {
+      const blockId = `walkthrough:${stop.id}:${runIndex}`;
+      const regions =
+        'regions' in stop && stop.regions
+          ? stop.regions.filter((region) => hunkIds.includes(region.hunkId))
+          : [];
+      for (const region of regions) {
+        regionTargets.set(region.id, {
+          blockId,
+          range: {
+            end: region.endLine,
+            endSide: region.side,
+            side: region.side,
+            start: region.startLine,
+          },
+        });
+      }
+      return regions;
+    });
     focusedRuns.forEach(({ file, note, reviewIdentity }, runIndex) => {
       const blockId = `walkthrough:${stop.id}:${runIndex}`;
+      const regions = regionsByRun[runIndex] ?? [];
       stopIndexByBlockId.set(blockId, stop.index);
       blocks.push({
+        ...(regions.some((region) => region.id === activeRegionId)
+          ? { activeRegionId: activeRegionId ?? undefined }
+          : {}),
         file,
         header:
-          runIndex === 0 ? <StopHeader current={stop.index === currentIndex} stop={stop} /> : null,
+          runIndex === 0 ? (
+            <StopHeader
+              codeIssues={codeIssues}
+              current={stop.index === currentIndex}
+              onRegionLink={routeRegionLink}
+              stop={stop}
+            />
+          ) : null,
         headerSelected: stop.index === currentIndex,
         id: blockId,
         itemIdPrefix: blockId,
         note,
+        ...(regions.length > 0 ? { regions } : {}),
         reviewIdentity,
       });
     });
@@ -550,12 +694,43 @@ export function NarrativeWalkthroughView({
 }) {
   const { walkthroughView } = navigation;
   const committable = allowCommit && isWalkthroughCommittable(walkthrough);
+  const navigationKey = `${navigation.mode}:${navigation.scrollTarget.nonce}:${navigation.supportScrollRequest}`;
+  const [regionSelection, setRegionSelection] = useState<{
+    id: string;
+    navigationKey: string;
+    scrollTarget: WalkthroughBlockScrollTarget;
+  } | null>(null);
+  const currentRegionSelection =
+    regionSelection?.navigationKey === navigationKey ? regionSelection : null;
+  const activeRegionId = currentRegionSelection?.id ?? null;
+  const handleRegionLink = useCallback(
+    (regionId: string, target: WalkthroughRegionTarget) => {
+      nextRegionScrollRequest -= 1;
+      setRegionSelection({
+        id: regionId,
+        navigationKey,
+        scrollTarget: {
+          behavior: 'smooth',
+          blockId: target.blockId,
+          range: target.range,
+          request: nextRegionScrollRequest,
+        },
+      });
+    },
+    [navigationKey],
+  );
   const walkthroughBlocks = useMemo(
     () =>
       walkthroughView
-        ? createWalkthroughBlocks(files, walkthroughView, navigation.index)
+        ? createWalkthroughBlocks(
+            files,
+            walkthroughView,
+            navigation.index,
+            activeRegionId,
+            handleRegionLink,
+          )
         : emptyWalkthroughBlockSet,
-    [files, navigation.index, walkthroughView],
+    [activeRegionId, files, handleRegionLink, navigation.index, walkthroughView],
   );
   const supportBlocks = useMemo(
     () =>
@@ -575,13 +750,15 @@ export function NarrativeWalkthroughView({
     [supportBlocks, walkthroughBlocks.blocks],
   );
   const activeBlockId = walkthroughBlocks.firstBlockIdByStop[navigation.scrollTarget.index];
-  const reviewBlockScrollTarget = getWalkthroughBlockScrollTarget({
-    activeBlockId,
-    firstSupportBlockId,
-    mode: navigation.mode,
-    stopScrollRequest: navigation.scrollTarget.nonce,
-    supportScrollRequest: navigation.supportScrollRequest,
-  });
+  const reviewBlockScrollTarget =
+    currentRegionSelection?.scrollTarget ??
+    getWalkthroughBlockScrollTarget({
+      activeBlockId,
+      firstSupportBlockId,
+      mode: navigation.mode,
+      stopScrollRequest: navigation.scrollTarget.nonce,
+      supportScrollRequest: navigation.supportScrollRequest,
+    });
   const handleActiveBlockChange = useCallback(
     (blockId: string) => {
       onActiveReviewTargetChange(getBlockReviewTarget(reviewBlocks, blockId));

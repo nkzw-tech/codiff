@@ -4,7 +4,7 @@ import { GearIcon as Gear } from '@phosphor-icons/react/Gear';
 import { PathIcon as Path } from '@phosphor-icons/react/Path';
 import { ReadCvLogoIcon as Doc } from '@phosphor-icons/react/ReadCvLogo';
 import { WrenchIcon as Wrench } from '@phosphor-icons/react/Wrench';
-import type { ComponentType } from 'react';
+import type { ComponentType, MouseEvent as ReactMouseEvent } from 'react';
 import { renderInlineMarkdown } from '../../../lib/markdown.tsx';
 import { importanceLabel } from '../../../lib/narrative-walkthrough.ts';
 import type { WalkthroughIcon, WalkthroughStop } from '../../../types.ts';
@@ -42,13 +42,33 @@ export function WalkthroughLineCount({ added, deleted }: { added: number; delete
   );
 }
 
-export function Narration({ prose }: { prose: string }) {
+export function Narration({
+  onRegionLink,
+  prose,
+}: {
+  onRegionLink?: (regionId: string) => void;
+  prose: string;
+}) {
   const paragraphs = prose
     .split(/\n\s*\n/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
   return (
-    <div className="wt-narration">
+    <div
+      className="wt-narration"
+      onClick={(event: ReactMouseEvent<HTMLDivElement>) => {
+        const link = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#"]');
+        if (!link || !event.currentTarget.contains(link)) {
+          return;
+        }
+        const target = link.getAttribute('href');
+        if (!target?.startsWith('#') || target.length === 1) {
+          return;
+        }
+        event.preventDefault();
+        onRegionLink?.(target.slice(1));
+      }}
+    >
       {(paragraphs.length > 0 ? paragraphs : [prose]).map((paragraph, index) => (
         <p className="wt-narration-prose" key={`${index}:${paragraph}`}>
           {renderInlineMarkdown(paragraph)}

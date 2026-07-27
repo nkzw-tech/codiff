@@ -88,6 +88,32 @@
                 },
                 "prose": {
                   "type": "string"
+                },
+                "regions": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "endLine": { "maximum": 1000000000, "minimum": 1, "type": "number" },
+                      "hunkId": { "type": "string" },
+                      "id": { "type": "string" },
+                      "side": { "enum": ["additions", "deletions"], "type": "string" },
+                      "startLine": { "maximum": 1000000000, "minimum": 1, "type": "number" },
+                      "title": { "maxLength": 120, "type": "string" },
+                      "tooltip": { "maxLength": 600, "type": "string" }
+                    },
+                    "required": [
+                      "id",
+                      "hunkId",
+                      "side",
+                      "startLine",
+                      "endLine",
+                      "title",
+                      "tooltip"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 4,
+                  "type": "array"
                 }
               },
               "required": ["id", "hunkIds", "importance", "prose"],

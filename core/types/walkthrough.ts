@@ -125,9 +125,21 @@ export type WalkthroughHunkGroup = {
   summary?: string;
   title?: string;
 };
+export type WalkthroughRegion = {
+  endLine: number;
+  hunkId: string;
+  id: string;
+  side: 'additions' | 'deletions';
+  startLine: number;
+  title: string;
+  tooltip: string;
+};
 export type WalkthroughStop = WalkthroughHunkGroup & {
   importance: 'critical' | 'normal' | 'context';
   prose: string;
+};
+export type WalkthroughStopV5 = WalkthroughStop & {
+  regions?: ReadonlyArray<WalkthroughRegion>;
 };
 export type WalkthroughSupportGroup = WalkthroughHunkGroup & { note?: string; reason: string };
 export type WalkthroughChapter = {
@@ -209,7 +221,13 @@ export type WalkthroughGenerationRequest = {
 };
 
 /** The initial single-call narrative stored inside a V5 artifact envelope. */
-export type WalkthroughNarrativeV5 = Omit<NarrativeWalkthroughV4, 'repo' | 'source' | 'version'> & {
+export type WalkthroughNarrativeV5 = Omit<
+  NarrativeWalkthroughV4,
+  'chapters' | 'repo' | 'source' | 'version'
+> & {
+  chapters: ReadonlyArray<
+    Omit<WalkthroughChapter, 'stops'> & { stops: ReadonlyArray<WalkthroughStopV5> }
+  >;
   generationMetadata: GenerationMetadata;
   /** Display identity only; persisted V5 never contains a checkout-local root. */
   repo: { branch: string | null };
@@ -251,9 +269,10 @@ type Immutable<T> = T extends (...arguments_: Array<never>) => unknown
  * instead of checking the source document version. Live provider state stays
  * separate from this captured model.
  */
-export type WalkthroughModel = Immutable<Omit<NarrativeWalkthroughV4, 'version'>> & {
+export type WalkthroughModel = Immutable<Omit<NarrativeWalkthroughV4, 'chapters' | 'version'>> & {
   /** Present only when the source artifact supplied captured-context capability. */
   readonly capturedContext?: Immutable<WalkthroughArtifactV5['capturedContext']>;
+  readonly chapters: Immutable<WalkthroughNarrativeV5['chapters']>;
   /** Present only for V5 model-produced narrative content. */
   readonly generationMetadata?: Immutable<GenerationMetadata>;
   /** Present only when the source artifact supplied generation-request capability. */

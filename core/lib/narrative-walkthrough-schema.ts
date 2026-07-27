@@ -1,6 +1,7 @@
 import {
   array,
   boolean,
+  check,
   literal,
   minLength,
   null_,
@@ -17,7 +18,13 @@ import {
   union,
   variant,
 } from 'valibot';
-import type { NarrativeWalkthroughV4, WalkthroughArtifactV5, WalkthroughModel } from '../types.ts';
+import type {
+  ChangedFile,
+  DiffRange,
+  NarrativeWalkthroughV4,
+  WalkthroughArtifactV5,
+  WalkthroughModel,
+} from '../types.ts';
 
 const gitShaSchema = pipe(string(), regex(/^(?:[\da-f]{40}|[\da-f]{64})$/i));
 
@@ -158,6 +165,31 @@ const stopSchema = strictObject({
   importance: picklist(['critical', 'normal', 'context']),
   prose: string(),
 });
+const regionSchema = pipe(
+  strictObject({
+    endLine: number(),
+    hunkId: string(),
+    id: string(),
+    side: picklist(['additions', 'deletions']),
+    startLine: number(),
+    title: string(),
+    tooltip: string(),
+  }),
+  check(
+    (region) =>
+      Number.isInteger(region.startLine) &&
+      Number.isInteger(region.endLine) &&
+      region.startLine > 0 &&
+      region.endLine >= region.startLine,
+    'Invalid region line range.',
+  ),
+);
+const stopV5Schema = strictObject({
+  ...hunkGroupFields,
+  importance: picklist(['critical', 'normal', 'context']),
+  prose: string(),
+  regions: optional(array(regionSchema)),
+});
 const supportSchema = strictObject({
   ...hunkGroupFields,
   note: optional(string()),
@@ -168,6 +200,13 @@ const chapterSchema = strictObject({
   icon: picklist(['bug', 'wrench', 'path', 'flask', 'beaker', 'doc', 'gear']),
   id: string(),
   stops: array(stopSchema),
+  title: string(),
+});
+const chapterV5Schema = strictObject({
+  blurb: string(),
+  icon: picklist(['bug', 'wrench', 'path', 'flask', 'beaker', 'doc', 'gear']),
+  id: string(),
+  stops: array(stopV5Schema),
   title: string(),
 });
 const commitSchema = strictObject({ body: optional(string()), title: optional(string()) });
@@ -330,6 +369,7 @@ export const walkthroughArtifactV5Schema = strictObject({
   generationRequest: generationRequestSchema,
   narrative: strictObject({
     ...narrativeFields,
+    chapters: array(chapterV5Schema),
     generationMetadata: generationMetadataSchema,
     repo: strictObject({ branch: union([string(), null_()]) }),
     source: capturedSourceSchema,
@@ -384,3 +424,18 @@ export const parseWalkthroughModel = (value: unknown): WalkthroughModel => {
     sourceVersion: 5,
   };
 };
+
+/** Use the exact evidence a V5 narrative was authored against when it is available. */
+export const resolveWalkthroughFiles = (
+  walkthrough: WalkthroughModel | null,
+  fallback: ReadonlyArray<ChangedFile>,
+): ReadonlyArray<ChangedFile> =>
+  walkthrough?.capturedContext?.files.length
+    ? walkthrough.capturedContext.files.map((file) => ({
+        ...file,
+        sections: file.sections.map(({ range, ...section }) => ({
+          ...section,
+          ...(range ? { range: range as unknown as DiffRange } : {}),
+        })),
+      }))
+    : fallback;

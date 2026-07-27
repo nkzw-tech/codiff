@@ -163,6 +163,62 @@ test('normalizes draft aliases back onto live hunk ids and fills support', () =>
   expect(walkthrough.support.some((item) => item.hunkIds.includes(index.hunks[1]!.id))).toBe(true);
 });
 
+test('normalizes grounded V5 regions and drops invalid regions', () => {
+  const index = indexWalkthroughHunks(state.files);
+  const walkthrough = normalizeWalkthroughDraft(
+    {
+      chapters: [
+        {
+          blurb: 'Core change',
+          icon: 'path',
+          id: 'c1',
+          stops: [
+            {
+              hunkIds: ['h1'],
+              id: 's1',
+              importance: 'critical',
+              prose: 'The [new call](#new-call) is the new execution path.',
+              regions: [
+                {
+                  endLine: 1,
+                  hunkId: 'h1',
+                  id: 'new-call',
+                  side: 'additions',
+                  startLine: 1,
+                  title: 'New call',
+                  tooltip: 'This invokes the replacement path.',
+                },
+                {
+                  endLine: 4,
+                  hunkId: 'h1',
+                  id: 'outside-hunk',
+                  side: 'additions',
+                  startLine: 3,
+                  title: 'Invalid range',
+                  tooltip: 'Outside the supplied hunk.',
+                },
+              ],
+              title: 'New call path',
+            },
+          ],
+          title: 'Core',
+        },
+      ],
+      focus: 'Review the feature.',
+      kind: 'narrative',
+      title: 'Feature walkthrough',
+    },
+    state,
+    generationMetadata,
+  );
+
+  const stop = walkthrough.chapters[0]?.stops[0];
+  expect(stop?.hunkIds).toEqual([index.hunks[0]!.id]);
+  expect(stop?.regions).toEqual([
+    expect.objectContaining({ hunkId: index.hunks[0]!.id, id: 'new-call' }),
+  ]);
+});
+
 test('accepts compact and legacy nullable draft shapes', () => {
   const compact = parseWalkthroughDraft({
     chapters: [

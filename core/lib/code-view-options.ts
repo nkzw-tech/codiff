@@ -198,6 +198,16 @@ export const codeViewUnsafeCSS = `
     box-shadow: 0 0 0 1px rgb(255 142 36 / 0.4);
   }
 
+  [data-walkthrough-region] {
+    --diffs-line-bg: color-mix(in srgb, var(--diffs-modified-base) 12%, var(--diffs-bg));
+    box-shadow: inset 2px 0 color-mix(in srgb, var(--diffs-modified-base) 72%, transparent);
+  }
+
+  [data-walkthrough-region-active] {
+    --diffs-line-bg: color-mix(in srgb, var(--diffs-modified-base) 24%, var(--diffs-bg));
+    box-shadow: inset 3px 0 var(--diffs-modified-base);
+  }
+
   [data-utility-button] {
     background: color-mix(in srgb, var(--diffs-bg) 88%, var(--diffs-modified-base));
     border: 1px solid color-mix(in srgb, var(--diffs-modified-base) 34%, transparent);
