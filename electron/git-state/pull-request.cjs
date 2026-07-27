@@ -4,6 +4,7 @@ const { spawn } = require('node:child_process');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
+const { getLoginShellEnvironment } = require('../login-shell-environment.cjs');
 const {
   IMAGE_FILE_LIMIT,
   bufferToImageRevision,
@@ -276,10 +277,14 @@ const fetchPullRequestHistoryRefs = (repoRoot, remote, pullRequest, metadata) =>
  * @param {unknown} [input]
  * @returns {Promise<{code: number | null; stderr: string; stdout: Buffer}>}
  */
-const runGhApi = (repoRoot, args, input) =>
-  new Promise((resolve, reject) => {
+const runGhApi = async (repoRoot, args, input) => {
+  // GUI launches miss login shell variables like GH_TOKEN, so fill the gaps;
+  // the process environment wins for anything it already defines.
+  const environment = { ...(await getLoginShellEnvironment()), ...process.env };
+  return new Promise((resolve, reject) => {
     const child = spawn(getGhCommand(), ['api', ...args], {
       cwd: repoRoot,
+      env: environment,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     /** @type {Array<Buffer>} */
@@ -300,6 +305,7 @@ const runGhApi = (repoRoot, args, input) =>
 
     child.stdin.end(input == null ? undefined : JSON.stringify(input));
   });
+};
 
 /**
  * @param {string} repoRoot
