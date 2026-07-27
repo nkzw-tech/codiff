@@ -13,47 +13,6 @@ const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const cache = new Map();
 
 /**
- * @param {string} output
- * @returns {Readonly<Record<string, string>>}
- */
-const parseEnvironment = (output) => {
-  const markerIndex = output.indexOf(ENVIRONMENT_MARKER);
-  if (markerIndex === -1) {
-    return {};
-  }
-
-  /** @type {Record<string, string>} */
-  const environment = {};
-  for (const entry of output.slice(markerIndex + ENVIRONMENT_MARKER.length).split('\0')) {
-    const separator = entry.indexOf('=');
-    if (separator > 0 && VARIABLE_NAME.test(entry.slice(0, separator))) {
-      environment[entry.slice(0, separator)] = entry.slice(separator + 1);
-    }
-  }
-  return environment;
-};
-
-/**
- * @param {string} shell
- * @returns {Promise<Readonly<Record<string, string>>>}
- */
-const resolveLoginShellEnvironment = (shell) =>
-  new Promise((resolve) => {
-    const child = spawn(shell, ['-l', '-c', ENVIRONMENT_COMMAND], {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: RESOLUTION_TIMEOUT,
-    });
-    /** @type {Array<Buffer>} */
-    const stdout = [];
-
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.on('error', () => resolve({}));
-    child.on('close', (code) =>
-      resolve(code === 0 ? parseEnvironment(Buffer.concat(stdout).toString('utf8')) : {}),
-    );
-  });
-
-/**
  * The environment of the user's login shell, resolved once per shell and
  * cached. GUI launches inherit launchd's minimal environment, so variables
  * like `GH_TOKEN` may only exist in the login shell; resolving them lets CLI
@@ -76,6 +35,62 @@ const getLoginShellEnvironment = () => {
   return environment;
 };
 
+/**
+ * Resolution settles no matter how the shell behaves: the deadline
+ * force-kills a shell that ignores termination and releases a stdout pipe
+ * kept open by a background child the shell left behind, the case where
+ * `close` trails `exit` indefinitely. A dump the shell completed cleanly
+ * before such a straggler is still used.
+ *
+ * @param {string} shell
+ * @param {number} [timeout]
+ * @returns {Promise<Readonly<Record<string, string>>>}
+ */
+const resolveLoginShellEnvironment = (shell, timeout = RESOLUTION_TIMEOUT) =>
+  new Promise((resolve) => {
+    const child = spawn(shell, ['-l', '-c', ENVIRONMENT_COMMAND], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    /** @type {Array<Buffer>} */
+    const stdout = [];
+    /** @param {number | null} code */
+    const finish = (code) => {
+      clearTimeout(deadline);
+      resolve(code === 0 ? parseEnvironment(Buffer.concat(stdout).toString('utf8')) : {});
+    };
+    const deadline = setTimeout(() => {
+      finish(child.exitCode);
+      child.kill('SIGKILL');
+      child.stdout.destroy();
+    }, timeout);
+
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.on('error', () => finish(null));
+    child.on('close', finish);
+  });
+
+/**
+ * @param {string} output
+ * @returns {Readonly<Record<string, string>>}
+ */
+const parseEnvironment = (output) => {
+  const markerIndex = output.indexOf(ENVIRONMENT_MARKER);
+  if (markerIndex === -1) {
+    return {};
+  }
+
+  /** @type {Record<string, string>} */
+  const environment = {};
+  for (const entry of output.slice(markerIndex + ENVIRONMENT_MARKER.length).split('\0')) {
+    const separator = entry.indexOf('=');
+    if (separator > 0 && VARIABLE_NAME.test(entry.slice(0, separator))) {
+      environment[entry.slice(0, separator)] = entry.slice(separator + 1);
+    }
+  }
+  return environment;
+};
+
 module.exports = {
   getLoginShellEnvironment,
+  resolveLoginShellEnvironment,
 };
