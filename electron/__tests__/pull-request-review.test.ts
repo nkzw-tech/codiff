@@ -71,6 +71,7 @@ process.stdin.on('end', () => {
   await using _environment = createTemporaryEnvironment({
     CODIFF_GITHUB_REVIEW_TEST_CALLS: callsPath,
     PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+    SHELL: undefined,
   });
 
   const source = {

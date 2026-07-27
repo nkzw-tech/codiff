@@ -8,9 +8,14 @@ import {
 } from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
-const { getLoginShellEnvironment } = require('../login-shell-environment.cjs') as {
-  getLoginShellEnvironment: () => Promise<Readonly<Record<string, string>>>;
-};
+const { getLoginShellEnvironment, resolveLoginShellEnvironment } =
+  require('../login-shell-environment.cjs') as {
+    getLoginShellEnvironment: () => Promise<Readonly<Record<string, string>>>;
+    resolveLoginShellEnvironment: (
+      shell: string,
+      timeout?: number,
+    ) => Promise<Readonly<Record<string, string>>>;
+  };
 
 const createFakeLoginShell = async (directory: string, body: string) => {
   const shellPath = join(directory, 'fake-login-shell');
@@ -72,4 +77,33 @@ CODIFF_FAKE_TOKEN='from-login-shell' exec /bin/sh -c "$3"
   expect(second).toBe(first);
   expect(third).toBe(first);
   expect((await readFile(runsPath, 'utf8')).trim().split('\n')).toHaveLength(1);
+});
+
+test('salvages a clean environment dump when a background child holds stdout open', async () => {
+  await using directory = await createTemporaryDirectory('codiff-login-shell-');
+  // The shell finishes the dump and exits cleanly, but leaves behind a child
+  // that inherits stdout, so `close` stays hours away from `exit`.
+  const shell = await createFakeLoginShell(
+    directory.path,
+    `CODIFF_FAKE_TOKEN='from-login-shell' /bin/sh -c "$3"
+sleep 10 &
+exit 0
+`,
+  );
+
+  const environment = await resolveLoginShellEnvironment(shell, 500);
+
+  expect(environment.CODIFF_FAKE_TOKEN).toBe('from-login-shell');
+});
+
+test('abandons a login shell that ignores termination', async () => {
+  await using directory = await createTemporaryDirectory('codiff-login-shell-');
+  const shell = await createFakeLoginShell(
+    directory.path,
+    `trap '' TERM
+sleep 10
+`,
+  );
+
+  expect(await resolveLoginShellEnvironment(shell, 500)).toEqual({});
 });
