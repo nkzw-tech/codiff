@@ -8,7 +8,11 @@ import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
 import { createDefaultConfig } from '../config/defaults.ts';
 import { ReviewSurface } from '../SharedWalkthroughApp.tsx';
-import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
+import type {
+  NarrativeWalkthrough,
+  SharedWalkthroughSnapshot,
+  WalkthroughArtifactV5,
+} from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { waitFor } from './helpers/react.tsx';
 
@@ -615,6 +619,115 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
   await waitFor(() => {
     expect(container.querySelector('.walkthrough-list')).not.toBeNull();
     expect(container.querySelector('.file-tree-shell')).toBeNull();
+  });
+});
+
+test('cached V5 walkthroughs explain unresolved authored code instead of omitting it', async () => {
+  const source = { type: 'working-tree' } as const;
+  const capturedFile = createChangedFile('src/aggregate.ts');
+  const missingHunkId = 'src/missing.ts:unstaged:h1';
+  const walkthrough = {
+    capturedContext: {
+      branch: 'feature',
+      files: [capturedFile],
+      source,
+    },
+    generationRequest: { review: { relation: 'single-diff', structure: 'single-diff' } },
+    narrative: {
+      agent: 'codex',
+      chapters: [
+        {
+          blurb: 'Review the missing evidence.',
+          icon: 'path',
+          id: 'implementation',
+          stops: [
+            {
+              added: 1,
+              deleted: 1,
+              hunkIds: [missingHunkId],
+              hunks: [
+                {
+                  added: 1,
+                  anchor: {
+                    display: 'src/missing.ts:1',
+                    sectionId: 'src/missing.ts:unstaged',
+                    side: 'both',
+                  },
+                  deleted: 1,
+                  id: missingHunkId,
+                  path: 'src/missing.ts',
+                  status: 'modified',
+                },
+              ],
+              id: 'missing-code',
+              importance: 'critical',
+              prose: 'This step must not appear to have loaded its code successfully.',
+              title: 'Missing code',
+            },
+          ],
+          title: 'Implementation',
+        },
+      ],
+      focus: 'Review the captured implementation.',
+      generatedAt: '2026-07-29T12:00:00.000Z',
+      generationMetadata: {
+        agent: 'codex',
+        generatedAt: '2026-07-29T12:00:00.000Z',
+        model: 'example-model',
+        profile: {
+          agent: 'codex',
+          authoringVersion: 'walkthrough-v5-single-diff-1',
+          modelCandidates: ['example-model'],
+        },
+      },
+      kind: 'narrative',
+      repo: { branch: 'feature' },
+      source,
+      structure: 'single-diff',
+      support: [],
+      title: 'Cached walkthrough',
+    },
+    version: 5,
+  } satisfies WalkthroughArtifactV5;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: '1.9.1',
+    exportedAt: '2026-07-29T12:00:00.000Z',
+    files: [capturedFile],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source },
+    version: 1,
+    walkthrough,
+  } satisfies SharedWalkthroughSnapshot;
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<ReviewSurface snapshot={snapshot} />);
+  });
+  await waitFor(() => {
+    const diagnostic = container.querySelector('[role="alert"].wt-code-unavailable');
+    expect(diagnostic?.textContent).toContain('Code unavailable for this walkthrough step');
+    expect(diagnostic?.textContent).toContain('captured file is missing');
+    expect(diagnostic?.textContent).toContain(missingHunkId);
   });
 });
 

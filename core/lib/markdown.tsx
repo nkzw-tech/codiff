@@ -253,7 +253,12 @@ export const renderInlineMarkdown = (text: string): ReactNode => {
         nodes.push(...renderText(text.slice(lastIndex, index), `${lastIndex}`));
       }
       nodes.push(
-        <a href={target} key={`${index}:${target}`} rel="noreferrer" target="_blank">
+        <a
+          href={target}
+          key={`${index}:${target}`}
+          rel="noreferrer"
+          target={target.startsWith('#') ? undefined : '_blank'}
+        >
           {renderText(label, `${index}:link`)}
         </a>,
       );

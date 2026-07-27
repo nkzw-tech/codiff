@@ -1449,6 +1449,7 @@ test('codiff --walkthrough-guide prints the guide and embedded schema, then exit
   expect(stdout).toContain('```json');
   expect(stdout).toContain('"chapters"');
   expect(stdout).toContain('"hunkId"');
+  expect(stdout).toContain('"regions"');
   expect(stdout).not.toContain('"version"');
 });
 

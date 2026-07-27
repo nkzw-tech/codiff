@@ -47,6 +47,14 @@ choose.
   recognizes `linguist-generated` and `gitlab-generated` attributes from `.gitattributes`.
 - **`changeType?` / `commitNote?`** — optional commit composer metadata for committable
   walkthroughs.
+- **`regions`** — return this array for every stop. Include one or two precise ranges when the stop
+  makes a substantive claim about specific lines. Use an empty array only when every supplied hunk
+  is synthetic or the explanation is inherently structural, cross-file, or whole-file. Each range
+  belongs to one supplied hunk and one diff side, contains a concise title and tooltip, and must be
+  referenced from the stop prose as `[descriptive phrase](#region-id)`. Region IDs are local to one
+  generated walkthrough. Codiff renders the complete range as one contiguous, comment-like note
+  even when the diff presentation is segmented. Regions are walkthrough-only visual callouts and
+  never create provider comments or local submission drafts.
 - **`commit?`** — for working-tree walkthroughs, include `title` and `body` when there is enough
   signal for a useful commit message. Omit it for commits, branches, and pull requests.
 

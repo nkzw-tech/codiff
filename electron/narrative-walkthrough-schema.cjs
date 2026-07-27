@@ -47,6 +47,16 @@ const hunkGroupProperties = {
   title: { type: 'string' },
 };
 
+const regionProperties = {
+  endLine: { maximum: 1_000_000_000, minimum: 1, type: 'number' },
+  hunkId: { type: 'string' },
+  id: { type: 'string' },
+  side: { enum: ['additions', 'deletions'], type: 'string' },
+  startLine: { maximum: 1_000_000_000, minimum: 1, type: 'number' },
+  title: { maxLength: 120, type: 'string' },
+  tooltip: { maxLength: 600, type: 'string' },
+};
+
 // Keep in sync with core/walkthrough/narrative-walkthrough.schema.json;
 // electron/__tests__/narrative-walkthrough.test.ts enforces equality.
 // Authoring agents constrain output to it; the renderer trusts only the
@@ -76,6 +86,16 @@ const narrativeWalkthroughSchema = {
                 ...hunkGroupProperties,
                 importance: { enum: [...IMPORTANCES], type: 'string' },
                 prose: { type: 'string' },
+                regions: {
+                  items: {
+                    additionalProperties: false,
+                    properties: regionProperties,
+                    required: ['id', 'hunkId', 'side', 'startLine', 'endLine', 'title', 'tooltip'],
+                    type: 'object',
+                  },
+                  maxItems: 4,
+                  type: 'array',
+                },
               },
               required: ['id', 'hunkIds', 'importance', 'prose'],
               type: 'object',
@@ -133,9 +153,12 @@ const narrativeWalkthroughGenerationSchema = {
                 id: hunkGroupProperties.id,
                 importance: { enum: [...IMPORTANCES], type: 'string' },
                 prose: { type: 'string' },
+                regions:
+                  narrativeWalkthroughSchema.properties.chapters.items.properties.stops.items
+                    .properties.regions,
                 title: { maxLength: 80, type: 'string' },
               },
-              required: ['id', 'hunkIds', 'importance', 'prose', 'title'],
+              required: ['id', 'hunkIds', 'importance', 'prose', 'regions', 'title'],
               type: 'object',
             },
           },

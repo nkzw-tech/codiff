@@ -7,6 +7,7 @@ const {
   buildNarrativeWalkthroughPrompt,
   getNarrativeWalkthroughCacheKey,
   narrativeWalkthroughSchema,
+  narrativeWalkthroughResponseSchema,
   normalizeNarrativeWalkthrough,
   readNarrativeWalkthrough,
   resolveNarrativeWalkthroughModel,
@@ -215,6 +216,11 @@ test('exposes a schema requiring the hunk-based narrative fields', async () => {
     narrativeWalkthroughSchema.properties.chapters.items.properties.stops.items.properties;
   expect(stopProperties.added).toBeUndefined();
   expect(stopProperties.anchor).toBeUndefined();
+  expect(stopProperties.regions.maxItems).toBe(4);
+  const responseStop =
+    narrativeWalkthroughResponseSchema.properties.chapters.items.properties.stops.items;
+  expect(responseStop.required).toContain('regions');
+  expect(responseStop.properties.regions.type).toBe('array');
 });
 
 test('keeps the renderer JSON schema in sync with the live narrative schema', async () => {

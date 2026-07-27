@@ -79,6 +79,8 @@ test('indexes stable hunk ids but sends compact aliases in the prompt', () => {
   expect(prompt).toContain('Match explanation depth to complexity');
   expect(prompt).toContain('Do not narrate syntax line by line');
   expect(prompt).toContain('Complex stops should use two to four short paragraphs');
+  expect(prompt).toContain('Return regions[] for every stop');
+  expect(prompt).toContain('Use an empty array only when every supplied hunk is synthetic');
 });
 
 test('uses source-aware terminology and applies custom instructions once', () => {
@@ -162,6 +164,62 @@ test('normalizes draft aliases back onto live hunk ids and fills support', () =>
   expect(walkthrough.chapters[0]?.stops[0]?.hunkIds).toEqual([index.hunks[0]!.id]);
   expect(walkthrough.support.length).toBeGreaterThan(0);
   expect(walkthrough.support.some((item) => item.hunkIds.includes(index.hunks[1]!.id))).toBe(true);
+});
+
+test('normalizes grounded V5 regions and drops invalid regions', () => {
+  const index = indexWalkthroughHunks(state.files);
+  const walkthrough = normalizeWalkthroughDraft(
+    {
+      chapters: [
+        {
+          blurb: 'Core change',
+          icon: 'path',
+          id: 'c1',
+          stops: [
+            {
+              hunkIds: ['h1'],
+              id: 's1',
+              importance: 'critical',
+              prose: 'The [new call](#new-call) is the new execution path.',
+              regions: [
+                {
+                  endLine: 1,
+                  hunkId: 'h1',
+                  id: 'new-call',
+                  side: 'additions',
+                  startLine: 1,
+                  title: 'New call',
+                  tooltip: 'This invokes the replacement path.',
+                },
+                {
+                  endLine: 4,
+                  hunkId: 'h1',
+                  id: 'outside-hunk',
+                  side: 'additions',
+                  startLine: 3,
+                  title: 'Invalid range',
+                  tooltip: 'Outside the supplied hunk.',
+                },
+              ],
+              title: 'New call path',
+            },
+          ],
+          title: 'Core',
+        },
+      ],
+      focus: 'Review the feature.',
+      kind: 'narrative',
+      title: 'Feature walkthrough',
+    },
+    state,
+    generationMetadata,
+  );
+
+  const stop = walkthrough.chapters[0]?.stops[0];
+  expect(stop?.hunkIds).toEqual([index.hunks[0]!.id]);
+  expect(stop?.regions).toEqual([
+    expect.objectContaining({ hunkId: index.hunks[0]!.id, id: 'new-call' }),
+  ]);
 });
 
 test('accepts compact and legacy nullable draft shapes', () => {

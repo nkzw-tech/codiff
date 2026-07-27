@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { SidebarMode, WalkthroughError } from '../../lib/app-types.ts';
-import { parseWalkthroughModel } from '../../lib/narrative-walkthrough-schema.ts';
+import {
+  parseWalkthroughModel,
+  resolveWalkthroughFiles,
+} from '../../lib/narrative-walkthrough-schema.ts';
 import { buildCommitModel, buildGenericCommitModel } from '../../lib/narrative-walkthrough.ts';
 import type { ReloadMainMode } from '../../lib/reload-selection.ts';
 import {
@@ -88,9 +91,13 @@ export function useAppWalkthrough({
   const initialSourceKeyRef = useRef(state ? getSourceRevisionKey(state.source) : null);
   const initialStateGenerationRef = useRef(0);
   const navigationResetKey = state ? `${state.root}:${getSourceRevisionKey(state.source)}` : '';
-  const narrativeNavigation = useNarrativeNavigation(
+  const narrativeWalkthroughFiles = resolveWalkthroughFiles(
     narrativeWalkthrough,
     state?.files ?? emptyFiles,
+  );
+  const narrativeNavigation = useNarrativeNavigation(
+    narrativeWalkthrough,
+    narrativeWalkthroughFiles,
     navigationResetKey,
   );
   const setWalkthroughLoading = useCallback((loading: boolean) => {
@@ -450,6 +457,7 @@ export function useAppWalkthrough({
     mainModeRef,
     narrativeNavigation,
     narrativeWalkthrough,
+    narrativeWalkthroughFiles,
     narrativeWalkthroughRef,
     openCommitView,
     persistedNarrativeWalkthroughRef,
