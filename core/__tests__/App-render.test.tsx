@@ -495,9 +495,9 @@ test('top bar source menu opens the review source dialog', async () => {
     trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 
-  const pullRequestItem = [
-    ...app.container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
-  ].find((item) => item.textContent === 'Open PR');
+  const pullRequestItem = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+    (item) => item.textContent === 'Open PR',
+  );
   if (!pullRequestItem) {
     throw new Error('Expected an Open PR menu item.');
   }
@@ -507,7 +507,7 @@ test('top bar source menu opens the review source dialog', async () => {
 
   const input = app.container.querySelector<HTMLInputElement>('#open-review-source-input');
   expect(input?.placeholder).toBe('#123 or https://github.com/owner/repo/pull/123');
-  expect(app.container.querySelector('[role="menu"]')).toBeNull();
+  expect(document.querySelector('[role="menu"]')).toBeNull();
 });
 
 test('empty repository state fills the review pane for centered layout', async () => {

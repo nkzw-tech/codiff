@@ -13,14 +13,25 @@ test('opens the menu from the trigger and moves focus to the first action', asyn
 
   expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
   expect(trigger.getAttribute('aria-expanded')).toBe('false');
-  expect(view.container.querySelector('[role="menu"]')).toBeNull();
+  expect(queryMenu()).toBeNull();
 
   await click(trigger);
 
   expect(trigger.getAttribute('aria-expanded')).toBe('true');
-  const items = getMenuItems(view.container);
+  const items = getMenuItems();
   expect(items.map((item) => item.textContent)).toEqual(['Open PR', 'Open Branch', 'Open Commit']);
   expect(document.activeElement).toBe(items[0]);
+});
+
+test('renders the open menu outside the top bar so stacking contexts cannot trap it', async () => {
+  await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
+
+  await click(getTrigger(view.container));
+
+  const menu = queryMenu();
+  expect(menu).not.toBeNull();
+  expect(view.container.contains(menu)).toBe(false);
+  expect(menu?.parentElement).toBe(document.body);
 });
 
 test('selecting an action reports its kind and closes the menu', async () => {
@@ -28,16 +39,14 @@ test('selecting an action reports its kind and closes the menu', async () => {
   await using view = await renderReact(<OpenReviewSourceMenu onOpen={onOpen} />);
 
   await click(getTrigger(view.container));
-  const commitItem = getMenuItems(view.container).find(
-    (item) => item.textContent === 'Open Commit',
-  );
+  const commitItem = getMenuItems().find((item) => item.textContent === 'Open Commit');
   if (!commitItem) {
     throw new Error('Expected an Open Commit menu item.');
   }
   await click(commitItem);
 
   expect(onOpen).toHaveBeenCalledExactlyOnceWith('commit');
-  expect(view.container.querySelector('[role="menu"]')).toBeNull();
+  expect(queryMenu()).toBeNull();
   expect(getTrigger(view.container).getAttribute('aria-expanded')).toBe('false');
 });
 
@@ -45,7 +54,7 @@ test('arrow keys move through the actions and wrap around', async () => {
   await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
 
   await click(getTrigger(view.container));
-  const [pullRequest, branch, commit] = getMenuItems(view.container);
+  const [pullRequest, branch, commit] = getMenuItems();
 
   await pressKey('ArrowDown');
   expect(document.activeElement).toBe(branch);
@@ -68,7 +77,7 @@ test('Escape closes the menu and returns focus to the trigger', async () => {
   await click(trigger);
   await pressKey('Escape');
 
-  expect(view.container.querySelector('[role="menu"]')).toBeNull();
+  expect(queryMenu()).toBeNull();
   expect(document.activeElement).toBe(trigger);
 });
 
@@ -81,7 +90,7 @@ test('clicking outside dismisses the menu without opening anything', async () =>
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   });
 
-  expect(view.container.querySelector('[role="menu"]')).toBeNull();
+  expect(queryMenu()).toBeNull();
   expect(onOpen).not.toHaveBeenCalled();
 });
 
@@ -93,8 +102,12 @@ function getTrigger(container: HTMLElement) {
   return trigger;
 }
 
-function getMenuItems(container: HTMLElement) {
-  return [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+function queryMenu() {
+  return document.querySelector('[role="menu"]');
+}
+
+function getMenuItems() {
+  return [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
 }
 
 async function click(element: HTMLElement) {
