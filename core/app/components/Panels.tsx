@@ -85,13 +85,60 @@ export function RepositoryChangeBanner({
 
 export type { CodiffUpdateStatus as UpdateStatus } from '../../types.ts';
 
-export function UpdateBanner(_props: {
+export function UpdateBanner({
+  onApply,
+  onDismiss,
+  onOpenReleasePage,
+  status,
+}: {
   onApply: () => void;
   onDismiss: () => void;
   onOpenReleasePage: () => void;
   status: import('../../types.ts').CodiffUpdateStatus;
 }) {
-  return null;
+  const { message, phase, version } = status;
+  const isVisible = phase !== 'idle';
+
+  return (
+    <div aria-live="polite" className={`update-banner${isVisible ? ' visible' : ''}`} role="status">
+      <span className="update-banner-content">
+        {phase === 'available' ? (
+          <>
+            <span>{`Codiff ${version} is available,`}</span>
+            <button className="update-banner-action" onClick={onApply} type="button">
+              update now.
+            </button>
+          </>
+        ) : phase === 'updating' ? (
+          <span>{`Updating to Codiff ${version}…`}</span>
+        ) : phase === 'installerReady' ? (
+          <span>The installer was downloaded and opened. Quit Codiff to finish updating.</span>
+        ) : phase === 'error' ? (
+          <>
+            <span>{`Update failed${message ? `: ${message}` : '.'}`}</span>
+            <button className="update-banner-action" onClick={onApply} type="button">
+              Try again
+            </button>
+            <span>or</span>
+            <button className="update-banner-manual" onClick={onOpenReleasePage} type="button">
+              download it manually.
+            </button>
+          </>
+        ) : null}
+      </span>
+      {phase === 'available' || phase === 'error' ? (
+        <button
+          aria-label="Dismiss update notification"
+          className="repository-change-dismiss"
+          onClick={onDismiss}
+          title="Dismiss"
+          type="button"
+        >
+          <X aria-hidden className="diff-search-icon" size={15} weight="bold" />
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 export function WalkthroughOutdatedBanner({
