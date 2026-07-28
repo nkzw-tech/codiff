@@ -11,9 +11,14 @@
  * @param {(url: string) => Promise<void>} openExternal
  */
 const attachExternalLinkHandling = (webContents, openExternal) => {
+  // shell.openExternal rejects when the operating system cannot open the url;
+  // an unhandled rejection in the main process is all that would come of it.
+  const openSafely = (url) => {
+    void openExternal(url).catch(() => {});
+  };
   webContents.setWindowOpenHandler(({ url }) => {
     if (isOpenableExternally(url)) {
-      void openExternal(url);
+      openSafely(url);
     }
     return { action: 'deny' };
   });
@@ -23,7 +28,7 @@ const attachExternalLinkHandling = (webContents, openExternal) => {
     }
     event.preventDefault();
     if (isOpenableExternally(url)) {
-      void openExternal(url);
+      openSafely(url);
     }
   });
 };
