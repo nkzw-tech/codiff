@@ -17,9 +17,11 @@ import {
 import type {
   ChangedFile,
   CommitMetadata,
+  GitSha,
   NarrativeWalkthrough,
   PlanReview,
   RepositoryState,
+  ResolvedReviewSource,
   ReviewSource,
   WalkthroughProgressEvent,
 } from '../types.ts';
@@ -47,6 +49,8 @@ class StubWorker extends EventTarget {
   terminate() {}
 }
 reactActEnvironment.Worker ??= StubWorker as unknown as typeof Worker;
+
+const gitSha = (value: string) => value as GitSha;
 
 const createMemoryStorage = (): Storage => {
   const values = new Map<string, string>();
@@ -110,10 +114,10 @@ const createCommitMetadataFixture = (body: string): CommitMetadata => ({
       status: 'modified',
     },
   ],
-  parents: ['parent-sha'],
-  ref: 'abc1234',
+  parentShas: [gitSha('parent-sha')],
   refs: ['main'],
-  shortRef: 'abc1234',
+  sha: gitSha('abc1234'),
+  shortSha: 'abc1234',
   signature: {
     key: 'SHA256:abcdefghijklmnopqrstuvwxyz0123456789',
     signer: 'signer@example.test',
@@ -146,7 +150,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   })),
   completePlan: vi.fn(async () => {}),
   createWalkthroughCommit: vi.fn(async () => ({
-    hash: '0000000000000000000000000000000000000000',
+    sha: gitSha('0000000000000000000000000000000000000000'),
     status: 'committed' as const,
   })),
   decreaseCodeFontSize: vi.fn(async () => {}),
@@ -729,7 +733,7 @@ test('repository reload restores the selected file when it still exists', async 
 test('repository reload restores the selected file from the previous source', async () => {
   const firstFile = createChangedFile('src/first.ts');
   const secondFile = createChangedFile('src/second.ts');
-  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const source = { sha: gitSha('abc1234'), type: 'commit' } satisfies ResolvedReviewSource;
   const nextState = {
     ...repositoryState,
     files: [firstFile, secondFile],
@@ -772,13 +776,13 @@ test('repository reload restores the selected file from the previous source', as
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(openFile).toHaveBeenCalledWith(secondFile.path);
-  expect(getRepositoryState).toHaveBeenCalledWith(source);
+  expect(getRepositoryState).toHaveBeenCalledWith({ ref: source.sha, type: 'commit' });
 });
 
 test('repository reload preserves a branch diff source even without a selected file', async () => {
   const source = {
-    baseRef: 'base123',
-    headRef: 'head123',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-diff',
   } satisfies ReviewSource;
@@ -821,8 +825,8 @@ test('repository reload preserves a branch diff source even without a selected f
 
 test('branch history keeps branch diff available after selecting uncommitted changes', async () => {
   const branchSource = {
-    baseRef: 'base123',
-    headRef: 'head123',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-diff',
   } satisfies ReviewSource;
@@ -846,8 +850,8 @@ test('branch history keeps branch diff available after selecting uncommitted cha
         {
           author: 'Reviewer',
           committedAt: Date.now(),
-          parents: [],
-          ref: '99e7b27',
+          parentShas: [],
+          sha: gitSha('99e7b27'),
           subject: 'Add branch diff review mode',
         },
       ],
@@ -899,8 +903,8 @@ test('branch history keeps branch diff available after selecting uncommitted cha
 
 test('repository reload restores branch diff scope after selecting uncommitted changes', async () => {
   const branchSource = {
-    baseRef: 'base123',
-    headRef: 'head123',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-diff',
   } satisfies ReviewSource;
@@ -914,8 +918,8 @@ test('repository reload restores branch diff scope after selecting uncommitted c
       {
         author: 'Reviewer',
         committedAt: Date.now(),
-        parents: [],
-        ref: '99e7b27',
+        parentShas: [],
+        sha: gitSha('99e7b27'),
         subject: 'Add branch diff review mode',
       },
     ],
@@ -961,9 +965,11 @@ test('repository reload restores branch diff scope after selecting uncommitted c
 
 test('repository reload does not let stale selection override launch source', async () => {
   const launchSource = {
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-working-tree',
-  } satisfies ReviewSource;
+  } satisfies ReviewSource & ResolvedReviewSource;
   const staleState = {
     ...repositoryState,
     source: { type: 'working-tree' },
@@ -1243,7 +1249,7 @@ test('tree sidebar subtly mutes files currently marked viewed', async () => {
 
 test('before unload saves the current source and selected file for any reload trigger', async () => {
   const changedFile = createChangedFile('src/app.ts');
-  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const source = { sha: gitSha('abc1234'), type: 'commit' } satisfies ResolvedReviewSource;
   const nextState = {
     ...repositoryState,
     files: [changedFile],
@@ -1306,7 +1312,7 @@ test('Mod+K does not open deleted files', async () => {
 
 test('commit messages use the shared source description presentation', async () => {
   const changedFile = createChangedFile('src/app.ts');
-  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const source = { sha: gitSha('abc1234'), type: 'commit' } satisfies ResolvedReviewSource;
   const commitMetadata = createCommitMetadataFixture('## Details\n\nDetailed **commit** body.');
   const historyAvatarUrl = 'https://avatars.githubusercontent.com/u/1?v=4';
 
@@ -1317,8 +1323,8 @@ test('commit messages use the shared source description presentation', async () 
           author: commitMetadata.author.name,
           committedAt: Date.parse(commitMetadata.author.date),
           gravatarUrl: historyAvatarUrl,
-          parents: commitMetadata.parents,
-          ref: commitMetadata.ref,
+          parentShas: commitMetadata.parentShas,
+          sha: commitMetadata.sha,
           subject: commitMetadata.subject,
         },
       ],
@@ -1376,10 +1382,7 @@ test('commit messages use the shared source description presentation', async () 
 
 test('bodyless commits still render the author and profile image', async () => {
   const commitMetadata = createCommitMetadataFixture('');
-  const source = {
-    ref: commitMetadata.ref,
-    type: 'commit',
-  } satisfies ReviewSource;
+  const source = { sha: commitMetadata.sha, type: 'commit' } satisfies ResolvedReviewSource;
 
   window.codiff = createCodiffMock({
     getRepositoryState: vi.fn(async () => ({
@@ -1696,7 +1699,7 @@ test('narrative walkthrough stops show pull request descriptions once', async ()
 
 test('narrative walkthrough stops do not repeat commit details', async () => {
   const changedFile = createChangedFile('src/app.ts');
-  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const source = { sha: gitSha('abc1234'), type: 'commit' } satisfies ResolvedReviewSource;
   const commitMetadata = {
     author: {
       date: '2026-01-01T12:00:00Z',
@@ -1718,10 +1721,10 @@ test('narrative walkthrough stops do not repeat commit details', async () => {
         status: 'modified' as const,
       },
     ],
-    parents: ['parent-sha'],
-    ref: 'abc1234',
+    parentShas: [gitSha('parent-sha')],
     refs: ['main'],
-    shortRef: 'abc1234',
+    sha: gitSha('abc1234'),
+    shortSha: 'abc1234',
     signature: {
       status: 'N',
     },
@@ -1783,7 +1786,7 @@ test('narrative walkthrough stops do not repeat commit details', async () => {
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
       repositoryPathProvided: true,
-      source,
+      source: { ref: source.sha, type: 'commit' as const },
       walkthrough: true,
       walkthroughFile: '/tmp/walkthrough.json',
     })),
@@ -1825,7 +1828,7 @@ test('narrative walkthrough stops do not repeat commit details', async () => {
 });
 
 test('a walkthrough file loads even without the walkthrough launch flag', async () => {
-  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const source = { sha: gitSha('abc1234'), type: 'commit' } satisfies ResolvedReviewSource;
   const narrativeWalkthrough = {
     agent: 'claude',
     chapters: [
@@ -1879,7 +1882,7 @@ test('a walkthrough file loads even without the walkthrough launch flag', async 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
       repositoryPathProvided: true,
-      source,
+      source: { ref: source.sha, type: 'commit' as const },
       walkthrough: false,
       walkthroughFile: '/tmp/walkthrough.json',
     })),
@@ -2710,11 +2713,11 @@ test('plan mode recovers from an unreadable review sidecar', async () => {
 });
 
 test('a walkthrough file that no longer anchors surfaces a dismissible banner', async () => {
-  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const source = { sha: gitSha('abc1234'), type: 'commit' } satisfies ResolvedReviewSource;
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
       repositoryPathProvided: true,
-      source,
+      source: { ref: source.sha, type: 'commit' as const },
       walkthrough: false,
       walkthroughFile: '/tmp/broken-walkthrough.json',
     })),
@@ -2908,14 +2911,14 @@ test('clicking the change banner refreshes the repository in place', async () =>
 
 test('refreshing all changes re-resolves the branch snapshot', async () => {
   const initialSource = {
-    baseRef: 'base123',
-    headRef: 'head123',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-working-tree',
   } satisfies ReviewSource;
   const refreshedSource = {
-    baseRef: 'base123',
-    headRef: 'head456',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head456'),
     ref: 'main',
     type: 'branch-working-tree',
   } satisfies ReviewSource;
@@ -3021,8 +3024,8 @@ test('refreshing all changes re-resolves the branch snapshot', async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(getRepositoryState).toHaveBeenLastCalledWith({
-    baseRef: refreshedSource.baseRef,
-    headRef: refreshedSource.headRef,
+    baseSha: refreshedSource.baseSha,
+    headSha: refreshedSource.headSha,
     ref: refreshedSource.ref,
     type: 'branch-diff',
   });
@@ -3661,15 +3664,15 @@ test('history filter matches commits by author name', async () => {
         {
           author: 'Ada Lovelace',
           committedAt: Date.now(),
-          parents: [],
-          ref: 'aaa1111',
+          parentShas: [],
+          sha: gitSha('aaa1111'),
           subject: 'Fix parser',
         },
         {
           author: 'Grace Hopper',
           committedAt: Date.now(),
-          parents: [],
-          ref: 'bbb2222',
+          parentShas: [],
+          sha: gitSha('bbb2222'),
           subject: 'Update docs',
         },
       ],

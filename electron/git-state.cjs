@@ -155,8 +155,8 @@ const isGitLabReviewSource = (source) =>
 
 /** @param {Extract<ReviewSource, {type: 'branch' | 'branch-diff' | 'branch-working-tree'}>} source */
 const getBranchHistoryRef = (source) =>
-  source.type !== 'branch' && source.baseRef && source.headRef
-    ? `${source.baseRef}..${source.headRef}`
+  source.type !== 'branch' && source.baseSha && source.headSha
+    ? `${source.baseSha}..${source.headSha}`
     : `${source.ref}..HEAD`;
 
 /** @param {string} launchPath @param {number} [limit] @param {ReviewSource} [source] @returns {Promise<RepositoryHistory>} */
@@ -195,9 +195,14 @@ const readDiffSectionContent = async (launchPath, request) =>
       : request.source?.type === 'branch-working-tree'
         ? readBranchWorkingTreeSectionContent(launchPath, request)
         : request.kind === 'commit' || request.source?.type === 'commit'
-          ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
-              force: request.force,
-            })
+          ? readCommitSectionContent(
+              launchPath,
+              request.source?.type === 'commit' ? request.source.sha : 'HEAD',
+              request.path,
+              {
+                force: request.force,
+              },
+            )
           : readWorkingTreeDiffSectionContent(launchPath, request);
 
 /** @param {string} launchPath @param {DiffImageContentRequest} request @returns {Promise<DiffImageContentResult>} */
@@ -219,7 +224,11 @@ const readDiffImageContent = (launchPath, request) =>
         : request.source?.type === 'branch-working-tree'
           ? readBranchWorkingTreeImageContent(launchPath, request)
           : request.kind === 'commit' || request.source?.type === 'commit'
-            ? readCommitImageContent(launchPath, request.source?.ref || 'HEAD', request.path)
+            ? readCommitImageContent(
+                launchPath,
+                request.source?.type === 'commit' ? request.source.sha : 'HEAD',
+                request.path,
+              )
             : readWorkingTreeDiffImageContent(launchPath, request);
 
 module.exports = {

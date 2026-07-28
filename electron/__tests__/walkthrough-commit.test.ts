@@ -19,7 +19,7 @@ const { createWalkthroughCommit } = require('../walkthrough-commit.cjs') as {
     repoPath: string,
     request: { body?: string; paths?: ReadonlyArray<string>; subject?: string },
     onOutput?: (chunk: string) => void,
-  ) => Promise<{ hash: string; status: 'committed' } | { reason: string; status: 'failed' }>;
+  ) => Promise<{ sha: string; status: 'committed' } | { reason: string; status: 'failed' }>;
 };
 
 const execFileAsync = promisify(execFile);

@@ -3,7 +3,7 @@ import {
   createReviewCommandTarget,
   resolveReviewCommandTarget,
 } from '../lib/review-command-target.ts';
-import type { ChangedFile, ReviewSource } from '../types.ts';
+import type { ChangedFile, GitSha, ResolvedReviewSource, ReviewSource } from '../types.ts';
 
 const file = (path: string): ChangedFile => ({
   fingerprint: `${path}:1`,
@@ -58,7 +58,10 @@ test('review command target falls back to selected path outside active walkthrou
 
 test('review command target ignores stale active target from another source', () => {
   const selectedFile = file('src/first.ts');
-  const currentSource = { ref: 'HEAD', type: 'commit' } satisfies ReviewSource;
+  const currentSource = {
+    sha: 'HEAD' as GitSha,
+    type: 'commit',
+  } satisfies ResolvedReviewSource;
   const staleSource = { type: 'working-tree' } satisfies ReviewSource;
 
   const target = resolveReviewCommandTarget({

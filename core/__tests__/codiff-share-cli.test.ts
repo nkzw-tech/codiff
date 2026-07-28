@@ -451,7 +451,7 @@ exit 1
   expect(stdout).toBe(`${origin}/w/generated-walkthrough\n`);
   expect(body.snapshot.repository).toMatchObject({
     root: await realpath(repositoryPath),
-    source: { ref: head, type: 'commit' },
+    source: { sha: head, type: 'commit' },
     title: 'Update example',
   });
   expect(body.snapshot.walkthrough).toMatchObject({

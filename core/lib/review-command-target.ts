@@ -1,4 +1,4 @@
-import type { ChangedFile, ReviewSource } from '../types.ts';
+import type { ChangedFile, ResolvedReviewSource } from '../types.ts';
 import type { ReviewIdentity } from './app-types.ts';
 import { getFileReviewIdentity } from './review-identity.ts';
 import { getSourceKey } from './source.ts';
@@ -10,7 +10,7 @@ export type ReviewCommandTarget = {
 };
 
 export const createReviewCommandTarget = (
-  source: ReviewSource,
+  source: ResolvedReviewSource,
   file: ChangedFile,
   reviewIdentity: ReviewIdentity = getFileReviewIdentity(file),
 ): ReviewCommandTarget => ({
@@ -29,7 +29,7 @@ export const resolveReviewCommandTarget = ({
   activeTarget: ReviewCommandTarget | null;
   files: ReadonlyArray<ChangedFile>;
   selectedPath: string | null;
-  source: ReviewSource;
+  source: ResolvedReviewSource;
   useActiveTarget: boolean;
 }): ReviewCommandTarget | null => {
   const sourceKey = getSourceKey(source);

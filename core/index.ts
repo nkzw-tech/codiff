@@ -1,4 +1,5 @@
 export { defaultReviewPreferences } from './defaults.ts';
+export { diffRange, isCommitRevision, shaForRevision } from './lib/review-history.ts';
 export {
   parsePlanShareManifest,
   parsePlanShareUpload,
@@ -9,8 +10,10 @@ export type {
   ChangedFile,
   CodiffFeatureFlags,
   CodiffPreferences,
+  DiffRange,
   DiffSection,
   GitIdentity,
+  GitSha,
   NarrativeWalkthrough,
   PlanCommentThread,
   PullRequestCodeQualityFinding,
@@ -25,6 +28,8 @@ export type {
   PullRequestReviewer,
   ReviewPreferences,
   RepositoryState,
+  Revision,
+  RevisionLabel,
   ReviewSource,
   SharePlanResult,
   ShareWalkthroughResult,

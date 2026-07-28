@@ -109,6 +109,7 @@ import type {
   GitIdentity,
   PullRequestCodeQualityFinding,
   PullRequestExistingReviewComment,
+  ResolvedReviewSource,
   ReviewAuthor,
   ReviewSource,
 } from '../../types.ts';
@@ -1017,7 +1018,7 @@ function ImageDiffPreview({
   loadImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
   onLayoutReady: (sectionId: string) => void;
   section: DiffSection;
-  source: ReviewSource;
+  source: ResolvedReviewSource;
 }) {
   const loadingResult: DiffImageContentResult = {
     reason: 'Loading image...',
@@ -2563,7 +2564,7 @@ export function ReviewCodeView({
   selectedPath: string | null;
   showSourceDescription?: boolean;
   showWhitespace: boolean;
-  source: ReviewSource;
+  source: ResolvedReviewSource;
   sourceDescriptionActions?: ReactNode;
   sourceDescriptionFooter?: ReactNode;
   supportsReviewCommentActions: boolean;
@@ -2637,13 +2638,13 @@ export function ReviewCodeView({
       ? getPullRequestDescriptionAuthor(source.author)
       : undefined;
   const sourceTitle = shouldShowCommitMessage
-    ? commitMessageMetadata.subject.trim() || commitMessageMetadata.shortRef
+    ? commitMessageMetadata.subject.trim() || commitMessageMetadata.shortSha
     : shouldShowSourceDescription
       ? (source.title?.trim() ?? '')
       : '';
   const sourceDescriptionItemId =
     shouldShowCommitMessage && source.type === 'commit'
-      ? `commit-message:${source.ref}`
+      ? `commit-message:${source.sha}`
       : shouldShowSourceDescription && (sourceDescription || sourceTitle)
         ? `source-description:${source.provider ?? ''}:${source.url}`
         : null;

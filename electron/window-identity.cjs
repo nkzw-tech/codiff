@@ -126,20 +126,20 @@ const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
   }
 
   if (source.type === 'branch-diff') {
-    const base = resolveCommitRef(repositoryRoot, source.baseRef);
-    const head = resolveCommitRef(repositoryRoot, source.headRef);
+    const base = resolveCommitRef(repositoryRoot, source.baseSha);
+    const head = resolveCommitRef(repositoryRoot, source.headSha);
     return base && head ? `branch-diff:${source.ref}:${base}:${head}` : null;
   }
 
   if (source.type === 'branch-working-tree') {
     if (
-      typeof source.baseRef === 'string' &&
-      typeof source.headRef === 'string' &&
-      source.baseRef &&
-      source.headRef
+      typeof source.baseSha === 'string' &&
+      typeof source.headSha === 'string' &&
+      source.baseSha &&
+      source.headSha
     ) {
-      const base = resolveCommitRef(repositoryRoot, source.baseRef);
-      const head = resolveCommitRef(repositoryRoot, source.headRef);
+      const base = resolveCommitRef(repositoryRoot, source.baseSha);
+      const head = resolveCommitRef(repositoryRoot, source.headSha);
       return base && head ? `branch-working-tree:${source.ref}:${base}:${head}` : null;
     }
 
@@ -156,19 +156,19 @@ const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
   return null;
 };
 
-/** @param {ReviewSource} source */
+/** @param {import('../core/types.ts').ResolvedReviewSource} source */
 const getResolvedSourceKey = (source) => {
   if (source.type === 'working-tree') {
     return 'working-tree';
   }
   if (source.type === 'commit') {
-    return `commit:${source.ref.toLowerCase()}`;
+    return `commit:${source.sha.toLowerCase()}`;
   }
   if (source.type === 'branch-diff') {
-    return `branch-diff:${source.ref}:${source.baseRef.toLowerCase()}:${source.headRef.toLowerCase()}`;
+    return `branch-diff:${source.ref}:${source.baseSha.toLowerCase()}:${source.headSha.toLowerCase()}`;
   }
-  if (source.type === 'branch-working-tree' && source.baseRef && source.headRef) {
-    return `branch-working-tree:${source.ref}:${source.baseRef.toLowerCase()}:${source.headRef.toLowerCase()}`;
+  if (source.type === 'branch-working-tree' && source.baseSha && source.headSha) {
+    return `branch-working-tree:${source.ref}:${source.baseSha.toLowerCase()}:${source.headSha.toLowerCase()}`;
   }
   if (source.type === 'pull-request') {
     return getPullRequestSourceKey(source);
@@ -213,7 +213,7 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
 const getWindowIdentityForSource = (repositoryPath, source) =>
   getWindowIdentity(repositoryPath, { source });
 
-/** @param {{root: string; source: ReviewSource}} state */
+/** @param {{root: string; source: import('../core/types.ts').ResolvedReviewSource}} state */
 const getWindowIdentityForRepositoryState = (state) => {
   const repositoryRoot = getRealPath(state.root);
   const sourceKey = getResolvedSourceKey(state.source);

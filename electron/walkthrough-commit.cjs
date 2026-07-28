@@ -16,6 +16,7 @@ const { git, validateRepositoryPath } = require('./git-state/common.cjs');
 /**
  * @typedef {import('../core/types.ts').WalkthroughCommitRequest} WalkthroughCommitRequest
  * @typedef {import('../core/types.ts').WalkthroughCommitResult} WalkthroughCommitResult
+ * @typedef {import('../core/types.ts').GitSha} GitSha
  */
 
 // Cols must match the xterm instance in
@@ -146,7 +147,7 @@ const createWalkthroughCommit = async (repoPath, request, onOutput) => {
       rmSync(tempDirectory, { force: true, recursive: true });
     }
     const hash = (await git(repoPath, ['rev-parse', 'HEAD'])).trim();
-    return { hash, status: 'committed' };
+    return { sha: /** @type {GitSha} */ (hash), status: 'committed' };
   } catch (error) {
     return {
       reason: error instanceof Error ? error.message : String(error),
