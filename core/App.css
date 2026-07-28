@@ -768,17 +768,10 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
   white-space: nowrap;
 }
 
-button.review-top-bar-repository {
+.review-top-bar-repository-path {
   align-items: center;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
   display: flex;
   flex: 0 1 auto;
-  font: inherit;
-  padding: 0;
-  text-align: left;
 }
 
 .review-top-bar-repository-head {
@@ -816,14 +809,12 @@ a.review-top-bar-source {
 }
 
 a.review-top-bar-repository:hover,
-a.review-top-bar-source:hover,
-button.review-top-bar-repository:hover {
+a.review-top-bar-source:hover {
   color: var(--text);
 }
 
 a.review-top-bar-repository:focus-visible,
-a.review-top-bar-source:focus-visible,
-button.review-top-bar-repository:focus-visible {
+a.review-top-bar-source:focus-visible {
   border-radius: 3px;
   outline: 1px solid var(--tree-selection-focus);
   outline-offset: 2px;

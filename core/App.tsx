@@ -1809,15 +1809,10 @@ export default function App() {
         onModeChange={changeSidebarMode}
         onToggleSidebar={toggleSidebar}
         repository={
-          <button
-            aria-label={`Open a different repository (current: ${state.root})`}
-            className="review-top-bar-repository"
-            onClick={openRepositoryFolder}
-            type="button"
-          >
+          <span className="review-top-bar-repository review-top-bar-repository-path">
             <span className="review-top-bar-repository-head">{repositoryPathParts.head}</span>
             <span className="review-top-bar-repository-tail">{repositoryPathParts.tail}</span>
-          </button>
+          </span>
         }
         repositoryTooltip={state.root}
         sidebarCollapsed={sidebarCollapsed}
