@@ -39,3 +39,13 @@ Asking GitHub for `requestedBase...head` may return a different
 `merge_base_commit`. Dedupe the in-flight read by the pair we asked for, and
 record the effective base GitHub actually used on the returned range and
 stack.
+
+Core owns these contracts and request-local reuse. Provider packages normalize
+wire data; hosts retain authentication, process spawning, persistence, and
+other I/O policy.
+
+## Target Comparison plans
+
+Target Comparison classifiers choose either `net-change` or `commit-by-commit`.
+Ordinary commit units retain their Git SHA identity, and resolved target plans
+never contain Evolution Units.

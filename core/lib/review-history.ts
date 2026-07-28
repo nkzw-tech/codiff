@@ -1,4 +1,13 @@
-import type { DiffComparison, DiffRange, GitSha, Revision, RevisionLabel } from '../types.ts';
+import type {
+  DiffComparison,
+  DiffRange,
+  GitSha,
+  ReviewPlan,
+  ReviewUnit,
+  Revision,
+  RevisionLabel,
+  TargetComparisonReviewStructure,
+} from '../types.ts';
 
 export const commitRevisionLabel = (text: string, url?: string): RevisionLabel => ({
   kind: 'commit',
@@ -58,3 +67,21 @@ export const diffComparison = (before: DiffRange, after: DiffRange): DiffCompari
   after,
   before,
 });
+
+export const resolveReviewPlan = ({
+  structure,
+  units,
+}: {
+  structure: TargetComparisonReviewStructure;
+  units?: ReadonlyArray<ReviewUnit>;
+}): ReviewPlan => {
+  if (structure === 'net-change') {
+    return { reviewRelation: 'target-comparison', structure: 'net-change' };
+  }
+
+  return {
+    reviewRelation: 'target-comparison',
+    structure: 'commit-by-commit',
+    units: units ?? [],
+  };
+};

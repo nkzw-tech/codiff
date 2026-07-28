@@ -1,5 +1,10 @@
 import { expect, test } from 'vite-plus/test';
-import { handleSharingApiRequest, readRequestText, type SharingEnv } from './api.ts';
+import {
+  handleSharingApiRequest,
+  parseShareUpload,
+  readRequestText,
+  type SharingEnv,
+} from './api.ts';
 
 test('reads request bodies within a byte limit', async () => {
   const request = new Request('https://codiff.dev/api/uploads', {
@@ -78,3 +83,27 @@ test('creates anonymous upload intents without touching persistent storage', asy
   });
   expect(databaseAccesses).toBe(0);
 });
+
+for (const [name, reviewScope] of [
+  ['net change', { kind: 'merge-request', structure: 'net-change' }],
+  ['commit-by-commit merge request', { kind: 'merge-request', structure: 'commit-by-commit' }],
+] as const) {
+  test(`preserves ${name} scope metadata in version 1 walkthrough uploads`, () => {
+    const parsed = parseShareUpload(
+      JSON.stringify({
+        branch: 'feature',
+        codiffVersion: 'test',
+        exportedAt: '2026-07-22T00:00:00.000Z',
+        files: [],
+        kind: 'codiff-walkthrough-share',
+        repository: { source: { type: 'working-tree' } },
+        reviewScope,
+        version: 1,
+        walkthrough: { title: 'Walkthrough' },
+      }),
+    );
+
+    expect(parsed.kind).toBe('walkthrough');
+    expect(parsed.snapshot.reviewScope).toEqual(reviewScope);
+  });
+}

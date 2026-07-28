@@ -1,4 +1,5 @@
-import type { GitSha, ResolvedReviewSource } from './review-identity.ts';
+import type { RepositoryState, ReviewUnit, TargetComparisonReviewPlan } from './review-history.ts';
+import type { DiffRange, GitSha, ResolvedReviewSource } from './review-identity.ts';
 import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
 export type GenerationSettings = Readonly<Record<string, boolean | number | string>>;
@@ -17,6 +18,19 @@ export type GenerationMetadata = {
   generatedAt: string;
   model: string;
   profile: GenerationProfile;
+};
+
+/** Top-level walkthrough authoring context for one Target Comparison. */
+export type WalkthroughGenerationInput = {
+  kind: 'range';
+  plan: TargetComparisonReviewPlan;
+  range: DiffRange;
+  /** Aggregate state for net-change review or later composition. */
+  state: RepositoryState;
+  unitStates?: ReadonlyArray<{
+    state: RepositoryState;
+    unit: ReviewUnit;
+  }>;
 };
 
 export type WalkthroughGenerationUnitProgress = {

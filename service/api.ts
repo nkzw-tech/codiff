@@ -123,6 +123,10 @@ const walkthroughSourceSchema = z
     url: boundedString(4096).optional(),
   })
   .passthrough();
+const sharedReviewScopeSchema = z.object({
+  kind: z.literal('merge-request'),
+  structure: z.enum(['commit-by-commit', 'net-change']),
+});
 const walkthroughManifestSchema = z
   .object({
     branch: boundedString(1024).optional(),
@@ -138,6 +142,7 @@ const walkthroughManifestSchema = z
       })
       .passthrough(),
     reviewComments: z.array(reviewCommentSchema).max(10_000).optional(),
+    reviewScope: sharedReviewScopeSchema.optional(),
     version: z.literal(1),
     walkthrough: z
       .object({

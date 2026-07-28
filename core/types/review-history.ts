@@ -81,6 +81,43 @@ export type ReviewCommitSummary = {
   webUrl?: string;
 };
 
+/** One ordinary commit in a Target Comparison review plan. */
+export type ReviewCommitUnit = {
+  commit: ReviewCommitSummary;
+  kind: 'commit';
+  order: number;
+  reviewable: true;
+};
+
+/** Reviewable work units begin with ordinary commits; V01 adds Evolution Units. */
+export type ReviewUnit = ReviewCommitUnit;
+
+/** One Tree projection for a Target Comparison. */
+export type TreeInspectionScope = { kind: 'complete-diff' } | { kind: 'commit'; sha: GitSha };
+
+export type TargetComparisonReviewStructure = 'commit-by-commit' | 'net-change';
+
+/** Target Comparison generation never uses Evolution Units. */
+export type TargetComparisonReviewPlan =
+  | {
+      reviewRelation: 'target-comparison';
+      structure: 'net-change';
+    }
+  | {
+      reviewRelation: 'target-comparison';
+      structure: 'commit-by-commit';
+      units: ReadonlyArray<ReviewCommitUnit>;
+    };
+
+/** Resolved generation plan; V01 extends this union with Version Comparison plans. */
+export type ReviewPlan = TargetComparisonReviewPlan;
+
+export type ReviewStrategySummary = {
+  confidence: number;
+  mode: TargetComparisonReviewStructure;
+  reason: string;
+};
+
 export type CommitMetadataPerson = {
   date: string;
   email: string;
