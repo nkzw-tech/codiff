@@ -479,6 +479,37 @@ test('keeps source-loading errors in the open-source dialog', async () => {
   expect(app.container.textContent).not.toContain('Unable to read repository');
 });
 
+test('top bar source menu opens the review source dialog', async () => {
+  window.codiff = createCodiffMock();
+
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.app-shell')).not.toBeNull());
+
+  const trigger = app.container.querySelector<HTMLButtonElement>(
+    '.review-top-bar .open-review-source-trigger',
+  );
+  if (!trigger) {
+    throw new Error('Expected the open review source trigger in the top bar.');
+  }
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  const pullRequestItem = [
+    ...app.container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'Open PR');
+  if (!pullRequestItem) {
+    throw new Error('Expected an Open PR menu item.');
+  }
+  await act(async () => {
+    pullRequestItem.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  const input = app.container.querySelector<HTMLInputElement>('#open-review-source-input');
+  expect(input?.placeholder).toBe('#123 or https://github.com/owner/repo/pull/123');
+  expect(app.container.querySelector('[role="menu"]')).toBeNull();
+});
+
 test('empty repository state fills the review pane for centered layout', async () => {
   window.codiff = createCodiffMock();
 
