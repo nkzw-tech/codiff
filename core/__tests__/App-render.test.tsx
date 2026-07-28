@@ -495,9 +495,9 @@ test('top bar source menu opens the review source dialog', async () => {
     trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 
-  const pullRequestItem = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-    (item) => item.textContent === 'Open PR',
-  );
+  const pullRequestItem = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'Open PR');
   if (!pullRequestItem) {
     throw new Error('Expected an Open PR menu item.');
   }
