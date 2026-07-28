@@ -72,6 +72,21 @@ test('lets the packaged renderer reload its own file url', () => {
   expect(openExternal).not.toHaveBeenCalled();
 });
 
+test('attaches rejection handling so a failed browser launch cannot crash the app', () => {
+  const openExternalResult = { catch: vi.fn() };
+  const openExternal = vi.fn(() => openExternalResult as unknown as Promise<void>);
+  const { navigate, openWindow } = createFakeWebContents(
+    'file:///Applications/Codiff.app/Contents/Resources/app/web/dist/index.html',
+    openExternal,
+  );
+
+  openWindow('https://github.com/nkzw-tech/codiff/pull/1728');
+  navigate('https://github.com/nkzw-tech/codiff/pull/1728');
+
+  expect(openExternal).toHaveBeenCalledTimes(2);
+  expect(openExternalResult.catch).toHaveBeenCalledTimes(2);
+});
+
 test('blocks navigation to other local files without opening anything', () => {
   const { navigate, openExternal } = createFakeWebContents(
     'file:///Applications/Codiff.app/Contents/Resources/app/web/dist/index.html',
@@ -83,10 +98,12 @@ test('blocks navigation to other local files without opening anything', () => {
   expect(openExternal).not.toHaveBeenCalled();
 });
 
-function createFakeWebContents(currentUrl = 'http://127.0.0.1:5173/') {
+function createFakeWebContents(
+  currentUrl = 'http://127.0.0.1:5173/',
+  openExternal: (url: string) => Promise<void> = vi.fn(async () => {}),
+) {
   let windowOpenHandler: WindowOpenHandler | null = null;
   const navigationListeners: Array<(event: FakeNavigationEvent, url: string) => void> = [];
-  const openExternal = vi.fn(async () => {});
 
   const webContents: FakeWebContents = {
     getURL: () => currentUrl,
