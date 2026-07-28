@@ -784,6 +784,10 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
 
 .review-top-bar-repository-tail {
   flex: none;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
