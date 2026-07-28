@@ -762,6 +762,15 @@ export type ReviewPreferences = Pick<
   'codeFontFamily' | 'codeFontSize' | 'diffStyle' | 'showWhitespace' | 'theme' | 'wordWrap'
 >;
 
+export type CodiffUpdatePhase = 'available' | 'error' | 'idle' | 'installerReady' | 'updating';
+
+export type CodiffUpdateStatus = {
+  currentVersion: string;
+  message?: string;
+  phase: CodiffUpdatePhase;
+  version?: string;
+};
+
 export type PullRequestReviewComment = {
   anchor?: 'file' | 'line';
   body: string;
