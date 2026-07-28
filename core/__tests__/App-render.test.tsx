@@ -511,26 +511,28 @@ test('top bar source menu opens the review source dialog', async () => {
   expect(document.querySelector('[role="menu"]')).toBeNull();
 });
 
-test('repository label opens the folder picker instead of linking to the pull request', async () => {
+test('repository label is plain text and clicking it does nothing', async () => {
   const openRepositoryFolder = vi.fn(async () => {});
   window.codiff = createCodiffMock({ openRepositoryFolder });
 
   await using app = await renderReact(<App />);
   await waitFor(() => expect(app.container.querySelector('.app-shell')).not.toBeNull());
 
-  const label = app.container.querySelector<HTMLButtonElement>('button.review-top-bar-repository');
+  const label = app.container.querySelector<HTMLElement>('.review-top-bar-repository');
   if (!label) {
-    throw new Error('Expected the repository label button in the top bar.');
+    throw new Error('Expected the repository label in the top bar.');
   }
+  expect(label.tagName).toBe('SPAN');
   expect(label.textContent).toBe('/repo');
-  expect(label.getAttribute('aria-label')).toBe('Open a different repository (current: /repo)');
+  expect(label.closest('.review-top-bar-repository-slot')?.getAttribute('title')).toBe('/repo');
   expect(app.container.querySelector('a.review-top-bar-repository')).toBeNull();
+  expect(app.container.querySelector('button.review-top-bar-repository')).toBeNull();
 
   await act(async () => {
     label.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
 
-  expect(openRepositoryFolder).toHaveBeenCalledOnce();
+  expect(openRepositoryFolder).not.toHaveBeenCalled();
 });
 
 test('empty repository state fills the review pane for centered layout', async () => {
@@ -1478,11 +1480,9 @@ test('pull request description collapse button toggles the markdown body', async
   await waitFor(() => {
     expect(app.container.querySelector('.source-description-markdown')).not.toBeNull();
   });
-  const repositoryButton = app.container.querySelector<HTMLButtonElement>(
-    'button.review-top-bar-repository',
-  );
+  const repositoryLabel = app.container.querySelector<HTMLElement>('.review-top-bar-repository');
   const sourceLink = app.container.querySelector<HTMLAnchorElement>('.review-top-bar-source');
-  expect(repositoryButton).not.toBeNull();
+  expect(repositoryLabel).not.toBeNull();
   expect(sourceLink?.href).toBe(source.url);
   expect(sourceLink?.textContent).toBe('PR #12');
   expect(sourceLink?.querySelector('svg')).not.toBeNull();
