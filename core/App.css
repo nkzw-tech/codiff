@@ -3844,6 +3844,7 @@ diffs-container .review-comment-thread {
 
 .empty-panel code {
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .empty-panel-menu-path {

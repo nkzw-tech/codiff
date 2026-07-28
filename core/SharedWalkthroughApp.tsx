@@ -51,7 +51,7 @@ import {
   getTotalDiffLineCount,
   isMarkdownFilePath,
 } from './lib/diff.ts';
-import { compactPath, fuzzyMatches, sortFiles } from './lib/files.ts';
+import { abbreviateHomePath, fuzzyMatches, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
 import {
@@ -886,7 +886,7 @@ export function ReviewSurface({
       : getSourceLabel(snapshot.repository.source);
   const rootLabel = repositoryUrl
     ? snapshot.repository.root
-    : compactPath(snapshot.repository.root);
+    : abbreviateHomePath(snapshot.repository.root);
   const sourceExternalUrl =
     snapshot.repository.source.type === 'pull-request'
       ? (externalUrl ?? snapshot.repository.source.url)

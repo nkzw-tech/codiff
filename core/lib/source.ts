@@ -1,6 +1,6 @@
 import type { ReviewSource } from '../types.ts';
 import type { RepositoryLoadError } from './app-types.ts';
-import { compactPath } from './files.ts';
+import { abbreviateHomePath } from './files.ts';
 
 const rangeLabel = (source: Extract<ReviewSource, { type: 'range' }>) =>
   `${source.base}${source.symmetric ? '...' : '..'}${source.head}`;
@@ -162,4 +162,4 @@ export const getEmptySourceDetail = (
         source.type === 'branch-diff' ||
         source.type === 'branch-working-tree'
       ? { kind: 'text', text: source.ref }
-      : { kind: 'code', text: compactPath(root), title: root };
+      : { kind: 'code', text: abbreviateHomePath(root), title: root };

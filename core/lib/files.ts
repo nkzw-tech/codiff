@@ -16,27 +16,11 @@ export const fileTreeSort = (
   right: { isDirectory: boolean; path: string; segments?: ReadonlyArray<string> },
 ) => compareTreePaths(left.path, right.path);
 
-const abbreviateHome = (path: string) =>
+export const abbreviateHomePath = (path: string) =>
   path
     .replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
     .replace(/^\/home\/[^/]+(?=\/|$)/, '~')
     .replace(/^[A-Za-z]:[/\\]Users[/\\][^/\\]+(?=[/\\]|$)/, '~');
-
-export const compactPath = (path: string) => {
-  const homePath = abbreviateHome(path);
-  const parts = homePath.split('/').filter(Boolean);
-
-  if (parts.length <= 2) {
-    return homePath;
-  }
-
-  const prefix = homePath.startsWith('/') ? '/' : '';
-  const [first, ...rest] = parts;
-  const last = rest.pop();
-  const middle = rest.map((part) => part[0]).join('/');
-
-  return `${prefix}${first}/${middle ? `${middle}/` : ''}${last}`;
-};
 
 /**
  * Splits a repository path into a shrinkable head and the repository's own
@@ -44,7 +28,7 @@ export const compactPath = (path: string) => {
  * ellipsis in the middle when the full path overflows.
  */
 export const splitRepositoryPath = (path: string) => {
-  const homePath = abbreviateHome(path);
+  const homePath = abbreviateHomePath(path);
   const separator = Math.max(homePath.lastIndexOf('/'), homePath.lastIndexOf('\\'));
   return separator > 0
     ? { head: homePath.slice(0, separator), tail: homePath.slice(separator) }
