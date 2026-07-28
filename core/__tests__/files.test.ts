@@ -1,5 +1,16 @@
 import { expect, test } from 'vite-plus/test';
-import { splitRepositoryPath } from '../lib/files.ts';
+import { abbreviateHomePath, splitRepositoryPath } from '../lib/files.ts';
+
+test('abbreviates the home directory but keeps the rest of the path complete', () => {
+  expect(abbreviateHomePath('/Users/hafez/dev/websites/blog')).toBe('~/dev/websites/blog');
+  expect(abbreviateHomePath('/home/ada/projects/analytical-engine')).toBe(
+    '~/projects/analytical-engine',
+  );
+  expect(abbreviateHomePath(String.raw`C:\Users\Ada\dev\analytical-engine`)).toBe(
+    String.raw`~\dev\analytical-engine`,
+  );
+  expect(abbreviateHomePath('/srv/git/deploy-tools')).toBe('/srv/git/deploy-tools');
+});
 
 test('splits a home repository path into a head and a repository tail', () => {
   expect(splitRepositoryPath('/Users/hafez/dev/websites/blog')).toEqual({

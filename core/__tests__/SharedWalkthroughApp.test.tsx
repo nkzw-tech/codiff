@@ -96,6 +96,63 @@ test('review top bar renders its leading control at the far left', async () => {
   container.remove();
 });
 
+test('share viewer shows the complete repository path when there is no repository link', async () => {
+  const file = createChangedFile('src/app.ts');
+  const source = { type: 'working-tree' } as const;
+  const snapshot = {
+    branch: 'main',
+    codiffVersion: '1.4.1',
+    exportedAt: '2026-06-19T00:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/Users/ada/dev/codiff-web', source },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Focus on the implementation.',
+      generatedAt: '2026-06-19T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'main', root: '/Users/ada/dev/codiff-web' },
+      source,
+      support: [],
+      title: 'Shared walkthrough',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<ReviewSurface snapshot={snapshot} title="Review shared walkthrough" />);
+  });
+
+  await waitFor(() => {
+    expect(container.querySelector('.review-top-bar-repository')).not.toBeNull();
+  });
+  expect(container.querySelector('.review-top-bar-repository')?.textContent).toBe(
+    '~/dev/codiff-web',
+  );
+});
+
 test('shared walkthroughs switch between walkthrough and tree review modes', async () => {
   const onDeleteShare = vi.fn();
   const confirmDelete = vi.spyOn(window, 'confirm').mockReturnValue(false);
