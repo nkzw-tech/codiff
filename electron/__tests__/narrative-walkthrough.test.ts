@@ -1335,7 +1335,7 @@ test('strips the commit composer when the source is not a working tree', () => {
   input.commit = { title: 'Fix hunk nav' };
 
   const result = normalizeNarrativeWalkthrough(input, files, {
-    source: { ref: 'abc1234', type: 'commit' },
+    source: { sha: 'abc1234', type: 'commit' },
   });
 
   expect(result.commit).toBeUndefined();

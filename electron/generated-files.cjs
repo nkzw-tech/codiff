@@ -15,14 +15,14 @@ const isGeneratedAttributeValue = (value) =>
 /** @param {string} value */
 const isNotGeneratedAttributeValue = (value) => value === 'unset' || value === 'false';
 
-/** @param {import('../core/types.ts').ReviewSource} source */
+/** @param {import('../core/types.ts').ResolvedReviewSource} source */
 const getGeneratedAttributeSource = (source) =>
   source.type === 'commit'
-    ? source.ref
+    ? source.sha
     : source.type === 'range'
       ? source.head
       : source.type === 'branch-diff'
-        ? source.headRef
+        ? source.headSha
         : source.type === 'pull-request'
           ? source.headSha
           : // `branch-working-tree` includes live uncommitted files, so the generated

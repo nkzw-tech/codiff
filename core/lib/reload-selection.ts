@@ -1,4 +1,9 @@
-import type { GitFileStatus, RepositoryState, ReviewSource } from '../types.ts';
+import type {
+  GitFileStatus,
+  RepositoryState,
+  ResolvedReviewSource,
+  ReviewSource,
+} from '../types.ts';
 import { getSourceKey } from './source.ts';
 
 const reloadSelectionStorageKey = 'codiff.reloadSelection.v3';
@@ -17,7 +22,7 @@ type ReloadSelection = {
   mainMode?: ReloadMainMode;
   root: string;
   selectedPath: string | null;
-  source: ReviewSource;
+  source: ResolvedReviewSource;
 };
 
 const getStorage = () => {
@@ -61,8 +66,8 @@ const isReviewSource = (value: unknown): value is ReviewSource => {
   if (value.type === 'branch-diff' || value.type === 'branch-working-tree') {
     return (
       typeof value.ref === 'string' &&
-      typeof value.baseRef === 'string' &&
-      typeof value.headRef === 'string'
+      typeof value.baseSha === 'string' &&
+      typeof value.headSha === 'string'
     );
   }
 
@@ -75,6 +80,26 @@ const isReviewSource = (value: unknown): value is ReviewSource => {
     isOptionalString(value.repo) &&
     isOptionalString(value.title)
   );
+};
+
+const isResolvedReviewSource = (value: unknown): value is ResolvedReviewSource => {
+  if (!isObject(value) || typeof value.type !== 'string') {
+    return false;
+  }
+
+  if (value.type === 'commit') {
+    return typeof value.sha === 'string';
+  }
+
+  if (value.type === 'branch-working-tree') {
+    return (
+      typeof value.ref === 'string' &&
+      typeof value.baseSha === 'string' &&
+      typeof value.headSha === 'string'
+    );
+  }
+
+  return isReviewSource(value);
 };
 
 const isGitFileStatus = (value: unknown): value is GitFileStatus =>
@@ -99,7 +124,7 @@ const isReloadSelection = (value: unknown): value is ReloadSelection =>
   (value.mainMode == null || value.mainMode === 'commit' || value.mainMode === 'review') &&
   typeof value.root === 'string' &&
   (value.selectedPath == null || typeof value.selectedPath === 'string') &&
-  isReviewSource(value.source);
+  isResolvedReviewSource(value.source);
 
 const getMatchingSelection = (selection: ReloadSelection | null, state: RepositoryState) =>
   selection?.root === state.root && getSourceKey(selection.source) === getSourceKey(state.source)

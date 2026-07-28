@@ -10,7 +10,7 @@ import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
 } from '../lib/review-identity.ts';
-import type { ChangedFile, PullRequestCodeQualityFinding, ReviewSource } from '../types.ts';
+import type { ChangedFile, GitSha, PullRequestCodeQualityFinding, ReviewSource } from '../types.ts';
 import { createChangedFile, createChangedFileWithPatch } from './helpers/fixtures.ts';
 import { renderReact, setInputValue, waitFor } from './helpers/react.tsx';
 import {
@@ -19,6 +19,8 @@ import {
   ReviewCodeViewHarness,
   type ReviewDiffBlock,
 } from './helpers/review-code-view.tsx';
+
+const gitSha = (value: string) => value as GitSha;
 
 const markdownEditorMock = vi.hoisted(() => ({
   flush: vi.fn<() => Promise<boolean>>(async () => true),
@@ -281,8 +283,8 @@ test('combined branch Markdown edits only the final working-tree section', async
   const initialFile = createCombinedFile('# Edited\n', 'plan.md:combined-initial');
   const refreshedFile = createCombinedFile('# Saved\n', 'plan.md:combined-refreshed');
   const combinedSource = {
-    baseRef: 'base123',
-    headRef: 'head123',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-working-tree',
   } satisfies ReviewSource;
@@ -367,8 +369,8 @@ test('combined branch-only Markdown sections remain read-only', async () => {
       <ReviewCodeViewHarness
         files={[file]}
         source={{
-          baseRef: 'base123',
-          headRef: 'head123',
+          baseSha: gitSha('base123'),
+          headSha: gitSha('head123'),
           ref: 'main',
           type: 'branch-working-tree',
         }}

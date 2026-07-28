@@ -23,6 +23,8 @@ const { parseReviewUrl } = require('../review-source.cjs');
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
  * @typedef {import('../../core/types.ts').DiffImageContentResult} DiffImageContentResult
+ * @typedef {import('../../core/types.ts').GitSha} GitSha
+ * @typedef {import('../../core/types.ts').HistoryEntry} HistoryEntry
  * @typedef {import('../../core/types.ts').PullRequestReviewComment} PullRequestReviewComment
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../../core/types.ts').ReviewSource} ReviewSource
@@ -599,12 +601,12 @@ const readRepositoryCommits = async (repoRoot, pullRequest, sha, limit) => {
   return commits;
 };
 
-/** @param {GitHubCommit} commit @param {'base' | 'pull-request'} [scope] */
+/** @param {GitHubCommit} commit @param {'base' | 'pull-request'} [scope] @returns {HistoryEntry | null} */
 const normalizeGitHubCommit = (commit, scope) => {
-  const ref = commit.sha;
+  const sha = commit.sha;
   const committedAt = Date.parse(commit.commit?.author?.date || '');
   const message = commit.commit?.message || '';
-  if (!ref || !message || !Number.isFinite(committedAt)) {
+  if (!sha || !message || !Number.isFinite(committedAt)) {
     return null;
   }
 
@@ -612,8 +614,11 @@ const normalizeGitHubCommit = (commit, scope) => {
     author: commit.commit?.author?.name || '',
     committedAt,
     gravatarUrl: commit.author?.avatar_url,
-    parents: commit.parents?.map((parent) => parent.sha).filter(Boolean) || [],
-    ref,
+    parentShas:
+      commit.parents?.flatMap((parent) =>
+        parent.sha ? [/** @type {GitSha} */ (parent.sha)] : [],
+      ) || [],
+    sha: /** @type {GitSha} */ (sha),
     ...(scope ? { scope } : {}),
     subject: message.split('\n')[0],
   };
@@ -637,8 +642,13 @@ const listPullRequestHistory = async (launchPath, source, limit = 200) => {
     : [];
   return {
     entries: [
-      ...commits.map(normalizeGitHubPullRequestCommit).filter(Boolean).reverse(),
-      ...baseCommits.map((commit) => normalizeGitHubCommit(commit, 'base')).filter(Boolean),
+      ...commits
+        .map(normalizeGitHubPullRequestCommit)
+        .filter((entry) => entry != null)
+        .reverse(),
+      ...baseCommits
+        .map((commit) => normalizeGitHubCommit(commit, 'base'))
+        .filter((entry) => entry != null),
     ],
     root: repoRoot,
   };

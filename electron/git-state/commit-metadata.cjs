@@ -5,6 +5,7 @@ const { fileSort, getGravatarHash, git, gitBufferWithInput, gitOrEmpty } = requi
 /**
  * @typedef {import('../../core/types.ts').CommitMetadata} CommitMetadata
  * @typedef {import('../../core/types.ts').CommitMetadataFile} CommitMetadataFile
+ * @typedef {import('../../core/types.ts').GitSha} GitSha
  * @typedef {import('./common.cjs').StatusItem} StatusItem
  * @typedef {{additions?: number; binary: boolean; deletions?: number; path: string}} NumstatItem
  */
@@ -124,9 +125,9 @@ const readCommitMessageParts = async (repoRoot, subject, body) => {
 const parseCommitMetadataHeader = (raw) => {
   const parts = raw.split('\0');
   const [
-    ref,
-    shortRef,
-    parents,
+    sha,
+    shortSha,
+    parentShas,
     authorName,
     authorEmail,
     authorDate,
@@ -144,9 +145,11 @@ const parseCommitMetadataHeader = (raw) => {
     author: createCommitMetadataPerson(authorName, authorEmail, authorDate),
     body: body || '',
     committer: createCommitMetadataPerson(committerName, committerEmail, committerDate),
-    parents: parents ? parents.split(' ').filter(Boolean) : [],
-    ref: ref || '',
-    shortRef: shortRef || '',
+    parentShas: parentShas
+      ? /** @type {Array<GitSha>} */ (parentShas.split(' ').filter(Boolean))
+      : [],
+    sha: /** @type {GitSha} */ (sha || ''),
+    shortSha: shortSha || '',
     signature: {
       ...(signatureKey ? { key: signatureKey.trim() } : {}),
       ...(signatureSigner ? { signer: signatureSigner } : {}),
@@ -236,7 +239,7 @@ const readCommitMetadataForCommit = async (repoRoot, commit, firstParent, status
     ...header,
     body: messageParts.body,
     files,
-    ref: commit,
+    sha: /** @type {GitSha} */ (commit),
     refs: refs
       .split('\n')
       .map((value) => value.trim())

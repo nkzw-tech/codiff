@@ -19,6 +19,7 @@ import type {
   PlanReview,
   RepositoryHistory,
   RepositoryState,
+  ResolvedReviewSource,
   ReviewAssistantRequest,
   ReviewAssistantResult,
   ReviewSource,
@@ -64,7 +65,7 @@ declare global {
         path: string;
       }) => Promise<CodiffMarkdownDocument>;
       getNarrativeWalkthrough: (
-        source?: ReviewSource,
+        source?: ResolvedReviewSource,
         options?: NarrativeWalkthroughRequestOptions,
       ) => Promise<NarrativeWalkthroughResult>;
       getPlanReview: () => Promise<PlanReview | null>;

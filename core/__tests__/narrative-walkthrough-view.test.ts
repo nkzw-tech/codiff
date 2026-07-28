@@ -23,10 +23,13 @@ import {
 } from '../lib/narrative-walkthrough.ts';
 import type {
   ChangedFile,
+  GitSha,
   NarrativeWalkthrough,
   WalkthroughHunk,
   WalkthroughHunkGroup,
 } from '../types.ts';
+
+const gitSha = (value: string) => value as GitSha;
 
 const hunk = ({
   added,
@@ -627,7 +630,7 @@ test('working-tree walkthroughs are committable even without commit seed text', 
   const committedReview: NarrativeWalkthrough = {
     ...walkthrough(),
     commit: {},
-    source: { ref: 'HEAD', type: 'commit' },
+    source: { sha: gitSha('HEAD'), type: 'commit' },
   };
 
   expect(isWalkthroughCommittable(wt)).toBe(true);
