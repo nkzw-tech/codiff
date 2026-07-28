@@ -144,13 +144,13 @@ export function OpenReviewSourceMenu({
         aria-controls={open ? 'open-review-source-menu' : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label="Open a PR, branch, or commit"
+        aria-label="Open a PR, branch, commit, or folder"
         className="open-review-source-trigger review-top-bar-icon-button"
         id="open-review-source-trigger"
         onClick={open ? close : openMenu}
         onKeyDown={handleTriggerKeyDown}
         ref={triggerRef}
-        title="Open a PR, branch, or commit"
+        title="Open a PR, branch, commit, or folder"
         type="button"
       >
         <Plus aria-hidden size={16} weight="bold" />

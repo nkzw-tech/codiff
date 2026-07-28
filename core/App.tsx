@@ -1810,6 +1810,7 @@ export default function App() {
         onToggleSidebar={toggleSidebar}
         repository={
           <button
+            aria-label={`Open a different repository (current: ${state.root})`}
             className="review-top-bar-repository"
             onClick={openRepositoryFolder}
             type="button"

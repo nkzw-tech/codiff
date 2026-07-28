@@ -17,7 +17,10 @@ export const fileTreeSort = (
 ) => compareTreePaths(left.path, right.path);
 
 const abbreviateHome = (path: string) =>
-  path.replace(/^\/Users\/[^/]+(?=\/|$)/, '~').replace(/^\/home\/[^/]+(?=\/|$)/, '~');
+  path
+    .replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/home\/[^/]+(?=\/|$)/, '~')
+    .replace(/^[A-Za-z]:[/\\]Users[/\\][^/\\]+(?=[/\\]|$)/, '~');
 
 export const compactPath = (path: string) => {
   const homePath = abbreviateHome(path);
@@ -42,7 +45,7 @@ export const compactPath = (path: string) => {
  */
 export const splitRepositoryPath = (path: string) => {
   const homePath = abbreviateHome(path);
-  const separator = homePath.lastIndexOf('/');
+  const separator = Math.max(homePath.lastIndexOf('/'), homePath.lastIndexOf('\\'));
   return separator > 0
     ? { head: homePath.slice(0, separator), tail: homePath.slice(separator) }
     : { head: '', tail: homePath };
