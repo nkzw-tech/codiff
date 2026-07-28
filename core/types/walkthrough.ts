@@ -6,7 +6,11 @@ import type {
   PullRequestGeneralCommentThread,
   ReviewCommentPosition,
 } from './review-comments.ts';
-import type { CommitMetadata, PullRequestCodeQualityFinding } from './review-history.ts';
+import type {
+  CommitMetadata,
+  PullRequestCodeQualityFinding,
+  TargetComparisonReviewStructure,
+} from './review-history.ts';
 import type {
   ChangedFile,
   DiffRange,
@@ -389,6 +393,11 @@ export const hasGenerationRequestCapability = (
   readonly generationRequest: Immutable<WalkthroughArtifactV5['generationRequest']>;
 } => 'generationRequest' in walkthrough;
 
+export type SharedWalkthroughReviewScope = {
+  kind: 'merge-request';
+  structure: TargetComparisonReviewStructure;
+};
+
 export type SharedWalkthroughSnapshot = {
   branch: string | null;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
@@ -408,6 +417,7 @@ export type SharedWalkthroughSnapshot = {
     title?: string;
   };
   reviewComments?: ReadonlyArray<PullRequestExistingReviewComment>;
+  reviewScope?: SharedWalkthroughReviewScope;
   version: 1;
   walkthrough: PersistedWalkthrough;
 };
