@@ -523,6 +523,7 @@ test('repository label opens the folder picker instead of linking to the pull re
     throw new Error('Expected the repository label button in the top bar.');
   }
   expect(label.textContent).toBe('/repo');
+  expect(label.getAttribute('aria-label')).toBe('Open a different repository (current: /repo)');
   expect(app.container.querySelector('a.review-top-bar-repository')).toBeNull();
 
   await act(async () => {

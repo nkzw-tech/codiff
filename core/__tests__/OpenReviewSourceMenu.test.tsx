@@ -15,6 +15,8 @@ test('opens the menu from the trigger and moves focus to the first action', asyn
 
   expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
   expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(trigger.getAttribute('aria-label')).toBe('Open a PR, branch, commit, or folder');
+  expect(trigger.title).toBe('Open a PR, branch, commit, or folder');
   expect(queryMenu()).toBeNull();
 
   await click(trigger);

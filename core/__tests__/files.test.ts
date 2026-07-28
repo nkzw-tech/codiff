@@ -20,6 +20,21 @@ test('keeps paths outside the home directory absolute', () => {
   expect(splitRepositoryPath('/repo')).toEqual({ head: '', tail: '/repo' });
 });
 
+test('splits and abbreviates Windows repository paths', () => {
+  expect(splitRepositoryPath(String.raw`C:\Users\Ada\dev\analytical-engine`)).toEqual({
+    head: String.raw`~\dev`,
+    tail: String.raw`\analytical-engine`,
+  });
+  expect(splitRepositoryPath('C:/Users/Ada/dev/analytical-engine')).toEqual({
+    head: '~/dev',
+    tail: '/analytical-engine',
+  });
+  expect(splitRepositoryPath(String.raw`D:\srv\deploy-tools`)).toEqual({
+    head: String.raw`D:\srv`,
+    tail: String.raw`\deploy-tools`,
+  });
+});
+
 test('handles the home directory itself and short paths', () => {
   expect(splitRepositoryPath('/Users/hafez')).toEqual({ head: '', tail: '~' });
   expect(splitRepositoryPath('~/blog')).toEqual({ head: '~', tail: '/blog' });
