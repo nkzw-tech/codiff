@@ -54,3 +54,10 @@
   color: var(--muted);
   flex: none;
 }
+
+.open-review-source-menu-separator {
+  background: var(--file-border);
+  flex: none;
+  height: 1px;
+  margin: 3px 6px;
+}

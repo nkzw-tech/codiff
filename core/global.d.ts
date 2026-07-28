@@ -94,6 +94,7 @@ declare global {
       onWindowFullScreenChanged: (callback: (isFullScreen: boolean) => void) => () => void;
       openConfigFile: () => Promise<void>;
       openFile: (path: string) => Promise<void>;
+      openRepositoryFolder: () => Promise<void>;
       resetCodeFontSize: () => Promise<void>;
       resolvePullRequestUrl: (value: string) => Promise<string>;
       saveMarkdownDocument: (

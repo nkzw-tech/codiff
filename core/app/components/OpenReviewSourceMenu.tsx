@@ -1,3 +1,4 @@
+import { FolderOpenIcon as FolderOpen } from '@phosphor-icons/react/FolderOpen';
 import { GitBranchIcon as GitBranch } from '@phosphor-icons/react/GitBranch';
 import { GitCommitIcon as GitCommit } from '@phosphor-icons/react/GitCommit';
 import { GitPullRequestIcon as GitPullRequest } from '@phosphor-icons/react/GitPullRequest';
@@ -35,7 +36,13 @@ const menuActions: ReadonlyArray<{
   },
 ];
 
-export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSourceKind) => void }) {
+export function OpenReviewSourceMenu({
+  onOpen,
+  onOpenFolder,
+}: {
+  onOpen: (kind: OpenReviewSourceKind) => void;
+  onOpenFolder: () => void;
+}) {
   // The top bar creates a stacking context (backdrop-filter) that later
   // sibling rows paint over on non-macOS platforms, so the menu is portaled to
   // the document body and positioned from the trigger's viewport rect.
@@ -178,6 +185,23 @@ export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSour
                   <span>{action.label}</span>
                 </button>
               ))}
+              <div className="open-review-source-menu-separator" role="separator" />
+              <button
+                className="open-review-source-menu-item"
+                onClick={() => {
+                  close();
+                  onOpenFolder();
+                }}
+                ref={(element) => {
+                  itemRefs.current[menuActions.length] = element;
+                }}
+                role="menuitem"
+                tabIndex={-1}
+                type="button"
+              >
+                <FolderOpen aria-hidden size={15} weight="bold" />
+                <span>Open Folder</span>
+              </button>
             </div>,
             document.body,
           )

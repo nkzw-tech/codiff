@@ -1743,6 +1743,10 @@ ipcMain.handle('codiff:resetCodeFontSize', () => {
 
 ipcMain.handle('codiff:openConfigFile', () => openConfigFile());
 
+ipcMain.handle('codiff:openRepositoryFolder', (event) =>
+  openRepositoryFolder(BrowserWindow.fromWebContents(event.sender) ?? undefined),
+);
+
 ipcMain.handle('codiff:openFile', async (event, filePath) => {
   const repositoryRoot = getWindowRepositoryRoot(event.sender.id);
   const repositoryFilePath = validateRepositoryPath(filePath);

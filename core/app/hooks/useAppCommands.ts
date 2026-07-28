@@ -78,6 +78,13 @@ export function useAppCommands({
         title: 'Open Branch',
       }),
       registry.register({
+        execute: () => {
+          void window.codiff.openRepositoryFolder().catch(() => {});
+        },
+        id: 'open-folder',
+        title: 'Open Folder',
+      }),
+      registry.register({
         execute: () => changeSidebarMode('tree'),
         id: 'sidebar-tree',
         title: 'Show File Tree',

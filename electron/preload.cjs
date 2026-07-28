@@ -126,6 +126,7 @@ const codiff = {
   },
   openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
+  openRepositoryFolder: () => ipcRenderer.invoke('codiff:openRepositoryFolder'),
   resolvePullRequestUrl: (value) => ipcRenderer.invoke('codiff:resolvePullRequestUrl', value),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),

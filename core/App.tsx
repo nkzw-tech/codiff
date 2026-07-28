@@ -67,7 +67,7 @@ import {
   shouldLoadDiffSectionContents,
   shouldPreloadSectionContentsForSearch,
 } from './lib/diff.ts';
-import { compactPath, sortFiles } from './lib/files.ts';
+import { sortFiles, splitRepositoryPath } from './lib/files.ts';
 import {
   consumeReloadSelection,
   getChangedPaths,
@@ -1496,6 +1496,10 @@ export default function App() {
     setOpenReviewSourceKind(kind);
   }, []);
 
+  const openRepositoryFolder = useCallback(() => {
+    void window.codiff.openRepositoryFolder().catch(() => {});
+  }, []);
+
   useEffect(
     () => window.codiff.onOpenReviewSource(showOpenReviewSourceDialog),
     [showOpenReviewSourceDialog],
@@ -1649,7 +1653,7 @@ export default function App() {
       walkthroughError?.code === 'OPENCODE_NOT_FOUND' ||
       walkthroughError?.code === 'PI_NOT_FOUND');
 
-  const sidebarLabel = compactPath(state.root);
+  const repositoryPathParts = splitRepositoryPath(state.root);
   const sidebarSourceLabel =
     state.source.type !== 'working-tree' ? getSourceLabel(state.source) : null;
   const pullRequestUrl = state.source.type === 'pull-request' ? state.source.url : null;
@@ -1805,22 +1809,23 @@ export default function App() {
         onModeChange={changeSidebarMode}
         onToggleSidebar={toggleSidebar}
         repository={
-          pullRequestUrl ? (
-            <a
-              className="review-top-bar-repository"
-              href={pullRequestUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {sidebarLabel}
-            </a>
-          ) : (
-            <span className="review-top-bar-repository">{sidebarLabel}</span>
-          )
+          <button
+            className="review-top-bar-repository"
+            onClick={openRepositoryFolder}
+            type="button"
+          >
+            <span className="review-top-bar-repository-head">{repositoryPathParts.head}</span>
+            <span className="review-top-bar-repository-tail">{repositoryPathParts.tail}</span>
+          </button>
         }
         repositoryTooltip={state.root}
         sidebarCollapsed={sidebarCollapsed}
-        sourceMenu={<OpenReviewSourceMenu onOpen={showOpenReviewSourceDialog} />}
+        sourceMenu={
+          <OpenReviewSourceMenu
+            onOpen={showOpenReviewSourceDialog}
+            onOpenFolder={openRepositoryFolder}
+          />
+        }
         toggleTitle={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (${getShortcutLabel(
           codiffConfig.keymap,
           'toggleSidebar',
