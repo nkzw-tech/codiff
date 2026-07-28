@@ -14,6 +14,7 @@ import {
 import type {
   ChangedFile,
   DefinitionSearchResult,
+  GitSha,
   PullRequestCodeQualityFinding,
   ReviewSource,
 } from '../types.ts';
@@ -25,6 +26,8 @@ import {
   ReviewCodeViewHarness,
   type ReviewDiffBlock,
 } from './helpers/review-code-view.tsx';
+
+const gitSha = (value: string) => value as GitSha;
 
 const markdownEditorMock = vi.hoisted(() => ({
   flush: vi.fn<() => Promise<boolean>>(async () => true),

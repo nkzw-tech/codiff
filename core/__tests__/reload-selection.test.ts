@@ -14,7 +14,15 @@ import {
   haveReloadedFilesChanged,
   writeReloadSelection,
 } from '../lib/reload-selection.ts';
-import type { ChangedFile, GitFileStatus, RepositoryState, ReviewSource } from '../types.ts';
+import type {
+  ChangedFile,
+  GitFileStatus,
+  GitSha,
+  RepositoryState,
+  ReviewSource,
+} from '../types.ts';
+
+const gitSha = (value: string) => value as GitSha;
 
 beforeEach(() => {
   window.sessionStorage.clear();
@@ -56,8 +64,8 @@ test('reload selection preserves the branch diff source without a selected file'
   const currentState = {
     ...state([]),
     source: {
-      baseRef: 'base123',
-      headRef: 'head123',
+      baseSha: gitSha('base123'),
+      headSha: gitSha('head123'),
       ref: 'main',
       type: 'branch-diff',
     },
@@ -72,8 +80,8 @@ test('reload selection preserves the branch diff source without a selected file'
 
 test('reload selection preserves history source for the current source', () => {
   const branchSource = {
-    baseRef: 'base123',
-    headRef: 'head123',
+    baseSha: gitSha('base123'),
+    headSha: gitSha('head123'),
     ref: 'main',
     type: 'branch-diff',
   } satisfies ReviewSource;
@@ -87,7 +95,7 @@ test('reload selection preserves history source for the current source', () => {
   expect(
     getReloadHistorySource(selection, {
       ...currentState,
-      source: { ref: 'abc1234', type: 'commit' },
+      source: { sha: gitSha('abc1234'), type: 'commit' },
     }),
   ).toBeNull();
 });
@@ -103,7 +111,7 @@ test('reload selection preserves the commit view for the current source', () => 
   expect(
     getReloadMainMode(selection, {
       ...currentState,
-      source: { ref: 'abc1234', type: 'commit' },
+      source: { sha: gitSha('abc1234'), type: 'commit' },
     }),
   ).toBeNull();
 });
@@ -163,7 +171,7 @@ test('reload selection is ignored when it belongs to another repository source',
   const workingTreeState = state([changedFile]);
   const commitState = {
     ...workingTreeState,
-    source: { ref: 'abc1234', type: 'commit' },
+    source: { sha: gitSha('abc1234'), type: 'commit' },
   } satisfies RepositoryState;
 
   writeReloadSelection(workingTreeState, changedFile.path);

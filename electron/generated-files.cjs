@@ -15,21 +15,6 @@ const isGeneratedAttributeValue = (value) =>
 /** @param {string} value */
 const isNotGeneratedAttributeValue = (value) => value === 'unset' || value === 'false';
 
-/** @param {import('../core/types.ts').ReviewSource} source */
-const getGeneratedAttributeSource = (source) =>
-  source.type === 'commit'
-    ? source.ref
-    : source.type === 'range'
-      ? source.head
-      : source.type === 'branch-diff'
-        ? source.headRef
-        : source.type === 'pull-request'
-          ? source.headSha
-          : // `branch-working-tree` includes live uncommitted files, so the generated
-            // attribute state must be computed live (like `working-tree`) rather than
-            // pinned to a fixed ref.
-            undefined;
-
 /** @param {Buffer} output */
 const parseGeneratedAttributeStates = (output) => {
   const fields = output.toString('utf8').split('\0');
@@ -89,15 +74,18 @@ const readGeneratedAttributeStatesFromTree = async (repoRoot, paths, source) => 
 /**
  * @param {string} repoRoot
  * @param {ReadonlyArray<string>} paths
- * @param {string | undefined} source
+ * @param {import('../core/types.ts').Revision} revision
  */
-const readGeneratedAttributeStates = async (repoRoot, paths, source) => {
+const readRevisionGeneratedAttributeStates = async (repoRoot, paths, revision) => {
   if (paths.length === 0) {
     return new Map();
   }
 
+  const kind = revision.kind || 'commit';
+  const source = kind === 'commit' && 'sha' in revision ? revision.sha : undefined;
+  const options = kind === 'index' ? ['--cached'] : source ? ['--source', source] : [];
   try {
-    return await checkGeneratedAttributeStates(repoRoot, paths, source ? ['--source', source] : []);
+    return await checkGeneratedAttributeStates(repoRoot, paths, options);
   } catch {
     if (source) {
       try {
@@ -129,19 +117,22 @@ const applyGeneratedAttributeStates = (state, generatedAttributeStates) => ({
   }),
 });
 
-/** @param {import('../core/types.ts').RepositoryState} state */
-const annotateGeneratedFiles = async (state) =>
+/**
+ * @param {import('../core/types.ts').RepositoryState} state
+ * @param {import('../core/types.ts').Revision} revision
+ */
+const annotateGeneratedFiles = async (state, revision) =>
   applyGeneratedAttributeStates(
     state,
-    await readGeneratedAttributeStates(
+    await readRevisionGeneratedAttributeStates(
       state.root,
       state.files.map((file) => file.path),
-      getGeneratedAttributeSource(state.source),
+      revision,
     ),
   );
 
 module.exports = {
   annotateGeneratedFiles,
   applyGeneratedAttributeStates,
-  readGeneratedAttributeStates,
+  readRevisionGeneratedAttributeStates,
 };

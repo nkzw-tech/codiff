@@ -23,7 +23,7 @@ const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepos
         source?:
           | { type: 'working-tree' }
           | { ref: string; type: 'branch' }
-          | { baseRef: string; headRef: string; ref: string; type: 'branch-diff' }
+          | { baseSha: string; headSha: string; ref: string; type: 'branch-diff' }
           | { ref: string; type: 'commit' }
           | {
               number?: number;
@@ -42,8 +42,8 @@ const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepos
       root: string;
       source:
         | { type: 'working-tree' }
-        | { ref: string; type: 'commit' }
-        | { baseRef: string; headRef: string; ref: string; type: 'branch-diff' };
+        | { sha: string; type: 'commit' }
+        | { baseSha: string; headSha: string; ref: string; type: 'branch-diff' };
     }) => { key: string; repositoryRoot: string; sourceKey: string } | null;
   };
 
@@ -141,7 +141,7 @@ test.sequential('resolved repository states build identities without invoking Gi
   expect(
     getWindowIdentityForRepositoryState({
       root: repository.path,
-      source: { ref: head, type: 'commit' },
+      source: { sha: head, type: 'commit' },
     }),
   ).toMatchObject({
     repositoryRoot: await realpath(repository.path),
@@ -189,7 +189,7 @@ test('window identities distinguish branch history launches', async () => {
 
   expect(
     getWindowIdentity(directory.path, {
-      source: { baseRef: head, headRef: nextHead, ref: 'feature', type: 'branch-diff' },
+      source: { baseSha: head, headSha: nextHead, ref: 'feature', type: 'branch-diff' },
     })?.sourceKey,
   ).toBe(`branch-diff:feature:${head}:${nextHead}`);
 });
@@ -205,7 +205,7 @@ test('window identities normalize GitHub pull request sources', async () => {
         url: 'https://github.com/NKZW-Tech/Codiff/pull/8',
       },
     })?.sourceKey,
-  ).toBe('pull-request:nkzw-tech/codiff#8');
+  ).toBe('pull-request:github:github.com:nkzw-tech/codiff#8');
   expect(
     getWindowIdentity(directory.path, {
       source: {
@@ -237,7 +237,7 @@ test('window identities normalize pull request URLs copied from a review tab', a
         url: 'https://github.com/NKZW-Tech/Codiff/pull/8/changes#r4821',
       },
     })?.sourceKey,
-  ).toBe('pull-request:nkzw-tech/codiff#8');
+  ).toBe('pull-request:github:github.com:nkzw-tech/codiff#8');
   expect(
     getWindowIdentity(directory.path, {
       source: {
@@ -245,7 +245,7 @@ test('window identities normalize pull request URLs copied from a review tab', a
         url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/8/diffs',
       },
     })?.sourceKey,
-  ).toBe('pull-request:gitlab:gitlab.example.com/group/subgroup/project#8');
+  ).toBe('pull-request:gitlab:gitlab.example.com:group/subgroup/project#8');
 });
 
 test('window identities normalize GitLab merge request sources', async () => {
@@ -259,7 +259,7 @@ test('window identities normalize GitLab merge request sources', async () => {
         url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/8',
       },
     })?.sourceKey,
-  ).toBe('pull-request:gitlab:gitlab.example.com/group/subgroup/project#8');
+  ).toBe('pull-request:gitlab:gitlab.example.com:group/subgroup/project#8');
 });
 
 test('window identity matching requires exact identity matches', () => {

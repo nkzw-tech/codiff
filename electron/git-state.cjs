@@ -94,9 +94,19 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
     source.type === 'range' ||
     source.type === 'branch' ||
     source.type === 'branch-diff';
+  const generatedRevision =
+    state.source.type === 'pull-request' && state.source.headSha
+      ? {
+          label: { kind: 'commit', text: state.source.headSha.slice(0, 7) },
+          sha: state.source.headSha,
+        }
+      : {
+          kind: /** @type {const} */ ('working-copy'),
+          label: { kind: /** @type {const} */ ('review-marker'), text: 'Working Copy' },
+        };
   const [branch, annotatedState] = await Promise.all([
     gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD']),
-    comparisonState ? state : annotateGeneratedFiles(state),
+    comparisonState ? state : annotateGeneratedFiles(state, generatedRevision),
   ]);
   return { ...annotatedState, branch: branch.trim() || null };
 };
@@ -155,8 +165,8 @@ const isGitLabReviewSource = (source) =>
 
 /** @param {Extract<ReviewSource, {type: 'branch' | 'branch-diff' | 'branch-working-tree'}>} source */
 const getBranchHistoryRef = (source) =>
-  source.type !== 'branch' && source.baseRef && source.headRef
-    ? `${source.baseRef}..${source.headRef}`
+  source.type !== 'branch' && source.baseSha && source.headSha
+    ? `${source.baseSha}..${source.headSha}`
     : `${source.ref}..HEAD`;
 
 /** @param {string} launchPath @param {number} [limit] @param {ReviewSource} [source] @returns {Promise<RepositoryHistory>} */
@@ -195,9 +205,14 @@ const readDiffSectionContent = async (launchPath, request) =>
       : request.source?.type === 'branch-working-tree'
         ? readBranchWorkingTreeSectionContent(launchPath, request)
         : request.kind === 'commit' || request.source?.type === 'commit'
-          ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
-              force: request.force,
-            })
+          ? readCommitSectionContent(
+              launchPath,
+              request.source?.type === 'commit' ? request.source.sha : 'HEAD',
+              request.path,
+              {
+                force: request.force,
+              },
+            )
           : readWorkingTreeDiffSectionContent(launchPath, request);
 
 /** @param {string} launchPath @param {DiffImageContentRequest} request @returns {Promise<DiffImageContentResult>} */
@@ -219,7 +234,11 @@ const readDiffImageContent = (launchPath, request) =>
         : request.source?.type === 'branch-working-tree'
           ? readBranchWorkingTreeImageContent(launchPath, request)
           : request.kind === 'commit' || request.source?.type === 'commit'
-            ? readCommitImageContent(launchPath, request.source?.ref || 'HEAD', request.path)
+            ? readCommitImageContent(
+                launchPath,
+                request.source?.type === 'commit' ? request.source.sha : 'HEAD',
+                request.path,
+              )
             : readWorkingTreeDiffImageContent(launchPath, request);
 
 module.exports = {

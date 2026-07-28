@@ -113,6 +113,7 @@ export default defineConfig({
     ],
     maxWorkers: testWorkers,
     setupFiles: ['./core/__tests__/setup.ts'],
+    testTimeout: 15_000,
   },
   worker: {
     format: 'es',

@@ -17,6 +17,8 @@ export type DiffSection = {
     name: string;
   };
   patch: string;
+  /** Provider-neutral revision range represented by this diff section. */
+  range?: DiffRange;
   summary?: {
     canLoad?: boolean;
     fileCount?: number;
@@ -110,6 +112,9 @@ export type PullRequestMergeState = {
   statusLabel: string;
 };
 
+/** A full, resolved Git commit object ID. Never use this for a ref selector. */
+export type GitSha = string & { readonly __gitSha: unique symbol };
+
 export type ReviewSource =
   | {
       type: 'working-tree';
@@ -124,9 +129,9 @@ export type ReviewSource =
     }
   | {
       /** Resolved base commit for a branch diff snapshot. */
-      baseRef: string;
+      baseSha: GitSha;
       /** Resolved head commit for a branch diff snapshot. */
-      headRef: string;
+      headSha: GitSha;
       /** Target branch the current branch was compared against. */
       ref: string;
       type: 'branch-diff';
@@ -138,9 +143,9 @@ export type ReviewSource =
        * (`codiff main`), before merge-base resolution happens; the resolved
        * state's `source` always carries a concrete value.
        */
-      baseRef?: string;
-      /** Resolved head commit for the branch part of the comparison. See {@link baseRef}. */
-      headRef?: string;
+      baseSha?: GitSha;
+      /** Resolved head commit for the branch part of the comparison. See {@link baseSha}. */
+      headSha?: GitSha;
       /** Target branch the current branch was compared against. */
       ref: string;
       type: 'branch-working-tree';
@@ -179,13 +184,32 @@ export type ReviewSource =
 /** Sources that can be entered from the palette or native application menu. */
 export type OpenReviewSourceKind = 'branch' | 'commit' | 'pull-request';
 
+/**
+ * A source after Git resolution. Commit selectors become full SHAs, and a
+ * branch-working-tree snapshot always carries the exact branch comparison it
+ * was read against. Persisted and rendered sources use this shape so a `ref`
+ * never silently changes from a selector into object identity.
+ */
+export type ResolvedReviewSource =
+  | Exclude<ReviewSource, { type: 'branch' | 'branch-working-tree' | 'commit' }>
+  | {
+      sha: GitSha;
+      type: 'commit';
+    }
+  | {
+      baseSha: GitSha;
+      headSha: GitSha;
+      ref: string;
+      type: 'branch-working-tree';
+    };
+
 export type HistoryEntry = {
   author: string;
   committedAt: number;
   gravatarUrl?: string;
-  parents: ReadonlyArray<string>;
-  ref: string;
+  parentShas: ReadonlyArray<GitSha>;
   scope?: 'base' | 'pull-request';
+  sha: GitSha;
   subject: string;
 };
 
@@ -210,10 +234,10 @@ export type CommitMetadata = {
   body: string;
   committer: CommitMetadataPerson;
   files: ReadonlyArray<CommitMetadataFile>;
-  parents: ReadonlyArray<string>;
-  ref: string;
+  parentShas: ReadonlyArray<GitSha>;
   refs: ReadonlyArray<string>;
-  shortRef: string;
+  sha: GitSha;
+  shortSha: string;
   signature: {
     key?: string;
     signer?: string;
@@ -248,7 +272,7 @@ export type RepositoryState = {
   launchPath: string;
   reviewComments?: ReadonlyArray<PullRequestExistingReviewComment>;
   root: string;
-  source: ReviewSource;
+  source: ResolvedReviewSource;
 };
 
 export type CodiffFeatureFlags = {
@@ -347,7 +371,7 @@ export type SharedWalkthroughSnapshot = {
   repository: {
     generalComments?: ReadonlyArray<PullRequestGeneralCommentThread>;
     root: string;
-    source: ReviewSource;
+    source: ResolvedReviewSource;
     title?: string;
   };
   reviewComments?: ReadonlyArray<PullRequestExistingReviewComment>;
@@ -390,6 +414,39 @@ export type ShareResult =
 
 export type SharePlanResult = ShareResult;
 export type ShareWalkthroughResult = ShareResult;
+
+/** Mutable display text for a revision; never durable object identity. */
+export type RevisionLabel = {
+  kind: 'bookmark' | 'branch' | 'commit' | 'review-marker' | 'tag' | 'version';
+  text: string;
+  url?: string;
+};
+
+/** Provider-neutral revision identity, distinct from mutable labels and selectors. */
+export type Revision =
+  | {
+      aliases?: ReadonlyArray<RevisionLabel>;
+      kind?: 'commit';
+      label: RevisionLabel;
+      sha: GitSha;
+    }
+  | {
+      aliases?: ReadonlyArray<RevisionLabel>;
+      kind: 'index';
+      label: RevisionLabel;
+      stage?: 1 | 2 | 3;
+    }
+  | {
+      aliases?: ReadonlyArray<RevisionLabel>;
+      kind: 'working-copy';
+      label: RevisionLabel;
+    };
+
+/** Provider-neutral base/head identity for one review range. Null means that file side is absent. */
+export type DiffRange = {
+  base: Revision | null;
+  head: Revision | null;
+};
 
 export type WalkthroughContext = {
   changedFiles?: ReadonlyArray<{
@@ -597,7 +654,7 @@ export type NarrativeWalkthrough = {
     branch: string | null;
     root: string;
   };
-  source: ReviewSource;
+  source: ResolvedReviewSource;
   support: ReadonlyArray<WalkthroughSupportGroup>;
   title: string;
   version: 4;
@@ -630,7 +687,7 @@ export type WalkthroughCommitRequest = {
   body: string;
   /** Repo-relative paths to commit; other staged changes are left untouched. */
   paths: ReadonlyArray<string>;
-  source?: ReviewSource;
+  source?: ResolvedReviewSource;
   /** First line of the commit message. */
   subject: string;
 };
@@ -638,7 +695,7 @@ export type WalkthroughCommitRequest = {
 export type WalkthroughCommitResult =
   | {
       /** Full SHA of the new commit. */
-      hash: string;
+      sha: GitSha;
       status: 'committed';
     }
   | {
@@ -656,7 +713,7 @@ export type WalkthroughCommitMessageRequest = {
   body: string;
   /** Repo-relative paths still selected for the commit. */
   paths: ReadonlyArray<string>;
-  source?: ReviewSource;
+  source?: ResolvedReviewSource;
   /** The current subject line. */
   subject: string;
 };
@@ -683,7 +740,7 @@ export type ReviewAssistantRequest = {
     startLineNumber?: number;
     startSide?: 'additions' | 'deletions';
   };
-  source?: ReviewSource;
+  source?: ResolvedReviewSource;
   walkthroughNote?: {
     action: 'review' | 'scan' | 'skim';
     context: string;
@@ -717,7 +774,7 @@ export type DiffSectionContentRequest = {
   kind: DiffSection['kind'];
   path: string;
   showWhitespace?: boolean;
-  source?: ReviewSource;
+  source?: ResolvedReviewSource;
 };
 
 export type DefinitionSearchRequest = {
@@ -752,7 +809,7 @@ export type DefinitionSearchResult =
 export type DiffImageContentRequest = {
   kind: DiffSection['kind'];
   path: string;
-  source?: ReviewSource;
+  source?: ResolvedReviewSource;
 };
 
 export type DiffImageRevision = {

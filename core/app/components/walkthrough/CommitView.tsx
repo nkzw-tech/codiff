@@ -473,7 +473,7 @@ export function CommitView({
                   Committed {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}
                 </strong>
                 <span>
-                  {result && result.status === 'committed' ? result.hash.slice(0, 10) : ''}
+                  {result && result.status === 'committed' ? result.sha.slice(0, 10) : ''}
                   {branch ? ` · onto ${branch}` : ''}
                 </span>
               </span>

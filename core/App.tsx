@@ -170,11 +170,11 @@ const getReloadSourceForLaunch = (
   }
 
   if (!launchOptions.source) {
-    return reloadSelection.source;
+    return getRefreshSource(reloadSelection.source);
   }
 
   return getSourceKey(reloadSelection.source) === getSourceKey(launchOptions.source)
-    ? reloadSelection.source
+    ? getRefreshSource(reloadSelection.source)
     : undefined;
 };
 
@@ -513,7 +513,9 @@ export default function App() {
         const sourceKey = getSourceKey(currentState.source);
 
         try {
-          const nextState = await window.codiff.getRepositoryState(currentState.source);
+          const nextState = await window.codiff.getRepositoryState(
+            getRefreshSource(currentState.source),
+          );
           const orderedState = {
             ...nextState,
             files: sortFiles(nextState.files),
@@ -1047,7 +1049,7 @@ export default function App() {
       setLoadingSectionIds(new Set());
 
       window.codiff
-        .getRepositoryState(currentState.source)
+        .getRepositoryState(getRefreshSource(currentState.source))
         .then((nextState) => {
           if (sourceRequestRef.current !== request) {
             return;
@@ -1693,7 +1695,7 @@ export default function App() {
     state.source.type === 'commit' && state.commitMetadata
       ? (() => {
           const historyAvatarUrl = historyEntries.find(
-            (entry) => entry.ref === state.commitMetadata?.ref,
+            (entry) => entry.sha === state.commitMetadata?.sha,
           )?.gravatarUrl;
           return historyAvatarUrl
             ? {
@@ -1919,11 +1921,11 @@ export default function App() {
             historySource?.type === 'branch-diff'
               ? historySource
               : historySource?.type === 'branch-working-tree' &&
-                  historySource.baseRef &&
-                  historySource.headRef
+                  historySource.baseSha &&
+                  historySource.headSha
                 ? {
-                    baseRef: historySource.baseRef,
-                    headRef: historySource.headRef,
+                    baseSha: historySource.baseSha,
+                    headSha: historySource.headSha,
                     ref: historySource.ref,
                     type: 'branch-diff',
                   }

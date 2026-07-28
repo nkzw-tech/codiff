@@ -9,6 +9,7 @@ import { fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
 import type {
   DiffSection,
   DiffSectionContentRequest,
+  GitSha,
   RepositoryState,
   ReviewSource,
 } from '../types.ts';
@@ -140,6 +141,7 @@ type GitStateModule = {
 };
 
 const execFileAsync = promisify(execFile);
+const gitSha = (value: string) => value as GitSha;
 const require = createRequire(import.meta.url);
 const { readGeneratedAttributeStates } =
   require('../../electron/generated-files.cjs') as GeneratedFilesModule;
@@ -979,9 +981,9 @@ test('normalizeGitHubPullRequestCommit reads GitHub PR commit metadata', () => {
     author: 'PR Author',
     committedAt: Date.parse('2026-05-22T12:34:56Z'),
     gravatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
-    parents: ['parent-sha'],
-    ref: 'commit-sha',
+    parentShas: ['parent-sha'],
     scope: 'pull-request',
+    sha: 'commit-sha',
     subject: 'Feature commit',
   });
 });
@@ -1139,27 +1141,31 @@ test('readRepositoryState and history handle fresh repositories', async () => {
   });
 });
 
-test('readWalkthroughRepositoryState falls back to HEAD only for a clean implicit source', () =>
-  withRepo(async (repo) => {
-    await writeRepoFile(repo, 'example.txt', 'before\n');
-    await commitAll(repo, 'initial commit');
-    await writeRepoFile(repo, 'example.txt', 'after\n');
-    await commitAll(repo, 'update example');
+test(
+  'readWalkthroughRepositoryState falls back to HEAD only for a clean implicit source',
+  () =>
+    withRepo(async (repo) => {
+      await writeRepoFile(repo, 'example.txt', 'before\n');
+      await commitAll(repo, 'initial commit');
+      await writeRepoFile(repo, 'example.txt', 'after\n');
+      await commitAll(repo, 'update example');
 
-    const cleanState = await readWalkthroughRepositoryState(repo);
-    expect(cleanState.source).toMatchObject({ type: 'commit' });
-    expect(cleanState.commitMetadata?.subject).toBe('update example');
+      const cleanState = await readWalkthroughRepositoryState(repo);
+      expect(cleanState.source).toMatchObject({ type: 'commit' });
+      expect(cleanState.commitMetadata?.subject).toBe('update example');
 
-    const explicitWorkingTreeState = await readWalkthroughRepositoryState(repo, {
-      type: 'working-tree',
-    });
-    expect(explicitWorkingTreeState.source).toEqual({ type: 'working-tree' });
-    expect(explicitWorkingTreeState.files).toEqual([]);
+      const explicitWorkingTreeState = await readWalkthroughRepositoryState(repo, {
+        type: 'working-tree',
+      });
+      expect(explicitWorkingTreeState.source).toEqual({ type: 'working-tree' });
+      expect(explicitWorkingTreeState.files).toEqual([]);
 
-    await writeRepoFile(repo, 'example.txt', 'local\n');
-    const dirtyState = await readWalkthroughRepositoryState(repo);
-    expect(dirtyState.source).toEqual({ type: 'working-tree' });
-  }));
+      await writeRepoFile(repo, 'example.txt', 'local\n');
+      const dirtyState = await readWalkthroughRepositoryState(repo);
+      expect(dirtyState.source).toEqual({ type: 'working-tree' });
+    }),
+  15_000,
+);
 
 test('readWalkthroughRepositoryState keeps a fresh repository on the working tree', () =>
   withRepo(async (repo) => {
@@ -1213,9 +1219,9 @@ test('readRepositoryState reports commit metadata for root commits', async () =>
     if (!metadata) {
       throw new Error('Expected commit metadata.');
     }
-    expect(metadata.ref).toBe(commit);
+    expect(metadata.sha).toBe(commit);
     expect(metadata.subject).toBe('initial commit');
-    expect(metadata.parents).toEqual([]);
+    expect(metadata.parentShas).toEqual([]);
     expect(metadata.stats).toEqual({
       additions: 2,
       binaryFiles: 0,
@@ -1261,7 +1267,7 @@ test('readRepositoryState reports commit body, trailers, refs, and rename stats'
     if (!metadata) {
       throw new Error('Expected commit metadata.');
     }
-    expect(metadata.ref).toBe(commit);
+    expect(metadata.sha).toBe(commit);
     expect(metadata.body).toBe('Detailed comment.');
     expect(metadata.body).not.toContain('Co-authored-by');
     expect(metadata.trailers).toEqual([
@@ -1346,8 +1352,8 @@ test('readRepositoryState opens branch refs as current branch diffs against the 
 
     expect(source.ref).toBe(baseBranch);
     expect(source.type).toBe('branch-diff');
-    expect(source.baseRef).toBeTruthy();
-    expect(source.headRef).toBeTruthy();
+    expect(source.baseSha).toBeTruthy();
+    expect(source.headSha).toBeTruthy();
     expect(state.files.map((file) => file.path)).toEqual(['file.txt']);
     expect(state.files[0].sections[0].oldFile?.contents).toBe('base\n');
     expect(state.files[0].sections[0].newFile?.contents).toBe('feature two\n');
@@ -1376,7 +1382,7 @@ test('readRepositoryState opens branch refs as current branch diffs against the 
       'feature one',
     ]);
   });
-});
+}, 15_000);
 
 test('readRepositoryState reports missing branch refs clearly', async () => {
   await withRepo(async (repo) => {
@@ -1789,7 +1795,7 @@ test('readRepositoryState reads commit diffs from short hashes', async () => {
     });
 
     expect(state.source).toEqual({
-      ref: commit,
+      sha: commit,
       type: 'commit',
     });
     expect(state.files.map((file) => file.path).sort()).toEqual(['file.txt', 'new.txt']);
@@ -1904,7 +1910,7 @@ test('readRepositoryState defers medium committed files and loads them on demand
       kind: 'commit',
       path: 'large.txt',
       source: {
-        ref: commit,
+        sha: gitSha(commit),
         type: 'commit',
       },
     });
@@ -1913,7 +1919,7 @@ test('readRepositoryState defers medium committed files and loads them on demand
     expect(loadedSection.newFile?.contents).toBe(contents);
     expect(loadedSection.patch).toContain('+large committed line');
   });
-});
+}, 15_000);
 
 test('readRepositoryState rejects non-repository launch paths', async () => {
   await using directory = await createTemporaryDirectory('codiff-not-a-repo-');

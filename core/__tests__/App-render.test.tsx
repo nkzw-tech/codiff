@@ -48,6 +48,8 @@ class StubWorker extends EventTarget {
 }
 reactActEnvironment.Worker ??= StubWorker as unknown as typeof Worker;
 
+const gitSha = (value: string) => value as GitSha;
+
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
