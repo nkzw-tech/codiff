@@ -81,6 +81,23 @@ test('Escape closes the menu and returns focus to the trigger', async () => {
   expect(document.activeElement).toBe(trigger);
 });
 
+test('Tab hands focus back to the trigger so traversal continues from the top bar', async () => {
+  await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
+  const trigger = getTrigger(view.container);
+
+  await click(trigger);
+  await pressKey('Tab');
+
+  expect(queryMenu()).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+
+  await click(trigger);
+  await pressKey('Tab', { shiftKey: true });
+
+  expect(queryMenu()).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+});
+
 test('clicking outside dismisses the menu without opening anything', async () => {
   const onOpen = vi.fn();
   await using view = await renderReact(<OpenReviewSourceMenu onOpen={onOpen} />);
@@ -116,8 +133,10 @@ async function click(element: HTMLElement) {
   });
 }
 
-async function pressKey(key: string) {
+async function pressKey(key: string, { shiftKey = false } = {}) {
   await act(async () => {
-    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key }));
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, key, shiftKey }),
+    );
   });
 }
