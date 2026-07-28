@@ -96,7 +96,10 @@ export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSour
   const handleMenuKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key === 'Tab') {
-        close();
+        // The portal lives at the end of the body, so native traversal from a
+        // menu item would wrap to the document edges. Refocusing the trigger
+        // before the default action makes Tab continue from the top bar.
+        closeWithFocus();
         return;
       }
       if (event.key === 'Escape') {
@@ -125,7 +128,7 @@ export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSour
         items[nextIndex]?.focus();
       }
     },
-    [close, closeWithFocus],
+    [closeWithFocus],
   );
 
   return (
