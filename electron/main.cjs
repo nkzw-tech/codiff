@@ -26,6 +26,7 @@ const {
   submitPullRequestReview,
   validateRepositoryPath,
 } = require('./git-state.cjs');
+const { attachExternalLinkHandling } = require('./external-links.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
@@ -903,6 +904,8 @@ const createWindow = (
   if (validatedState?.isFullScreen) {
     window.setFullScreen(true);
   }
+
+  attachExternalLinkHandling(window.webContents, (url) => shell.openExternal(url));
 
   const webContentsId = window.webContents.id;
   openWindows.add(window);
