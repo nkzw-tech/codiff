@@ -103,6 +103,7 @@ test('app commands register the complete command set and delegate dynamic action
     'open-pull-request',
     'open-commit',
     'open-branch',
+    'open-folder',
     'sidebar-tree',
     'sidebar-history',
     'sidebar-walkthrough',

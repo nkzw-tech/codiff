@@ -8,7 +8,9 @@ import { OpenReviewSourceMenu } from '../app/components/OpenReviewSourceMenu.tsx
 import { renderReact } from './helpers/react.tsx';
 
 test('opens the menu from the trigger and moves focus to the first action', async () => {
-  await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={() => {}} onOpenFolder={() => {}} />,
+  );
   const trigger = getTrigger(view.container);
 
   expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
@@ -19,12 +21,19 @@ test('opens the menu from the trigger and moves focus to the first action', asyn
 
   expect(trigger.getAttribute('aria-expanded')).toBe('true');
   const items = getMenuItems();
-  expect(items.map((item) => item.textContent)).toEqual(['Open PR', 'Open Branch', 'Open Commit']);
+  expect(items.map((item) => item.textContent)).toEqual([
+    'Open PR',
+    'Open Branch',
+    'Open Commit',
+    'Open Folder',
+  ]);
   expect(document.activeElement).toBe(items[0]);
 });
 
 test('renders the open menu outside the top bar so stacking contexts cannot trap it', async () => {
-  await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={() => {}} onOpenFolder={() => {}} />,
+  );
 
   await click(getTrigger(view.container));
 
@@ -36,7 +45,9 @@ test('renders the open menu outside the top bar so stacking contexts cannot trap
 
 test('selecting an action reports its kind and closes the menu', async () => {
   const onOpen = vi.fn();
-  await using view = await renderReact(<OpenReviewSourceMenu onOpen={onOpen} />);
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={onOpen} onOpenFolder={() => {}} />,
+  );
 
   await click(getTrigger(view.container));
   const commitItem = getMenuItems().find((item) => item.textContent === 'Open Commit');
@@ -51,27 +62,33 @@ test('selecting an action reports its kind and closes the menu', async () => {
 });
 
 test('arrow keys move through the actions and wrap around', async () => {
-  await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={() => {}} onOpenFolder={() => {}} />,
+  );
 
   await click(getTrigger(view.container));
-  const [pullRequest, branch, commit] = getMenuItems();
+  const [pullRequest, branch, commit, folder] = getMenuItems();
 
   await pressKey('ArrowDown');
   expect(document.activeElement).toBe(branch);
   await pressKey('ArrowDown');
   expect(document.activeElement).toBe(commit);
   await pressKey('ArrowDown');
+  expect(document.activeElement).toBe(folder);
+  await pressKey('ArrowDown');
   expect(document.activeElement).toBe(pullRequest);
   await pressKey('ArrowUp');
-  expect(document.activeElement).toBe(commit);
+  expect(document.activeElement).toBe(folder);
   await pressKey('Home');
   expect(document.activeElement).toBe(pullRequest);
   await pressKey('End');
-  expect(document.activeElement).toBe(commit);
+  expect(document.activeElement).toBe(folder);
 });
 
 test('Escape closes the menu and returns focus to the trigger', async () => {
-  await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={() => {}} onOpenFolder={() => {}} />,
+  );
   const trigger = getTrigger(view.container);
 
   await click(trigger);
@@ -81,8 +98,29 @@ test('Escape closes the menu and returns focus to the trigger', async () => {
   expect(document.activeElement).toBe(trigger);
 });
 
+test('opens the folder picker from a separated menu action', async () => {
+  const onOpenFolder = vi.fn();
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={() => {}} onOpenFolder={onOpenFolder} />,
+  );
+
+  await click(getTrigger(view.container));
+  expect(document.querySelector('[role="menu"] [role="separator"]')).not.toBeNull();
+
+  const folderItem = getMenuItems().find((item) => item.textContent === 'Open Folder');
+  if (!folderItem) {
+    throw new Error('Expected an Open Folder menu item.');
+  }
+  await click(folderItem);
+
+  expect(onOpenFolder).toHaveBeenCalledOnce();
+  expect(queryMenu()).toBeNull();
+});
+
 test('Tab hands focus back to the trigger so traversal continues from the top bar', async () => {
-  await using view = await renderReact(<OpenReviewSourceMenu onOpen={() => {}} />);
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={() => {}} onOpenFolder={() => {}} />,
+  );
   const trigger = getTrigger(view.container);
 
   await click(trigger);
@@ -100,7 +138,9 @@ test('Tab hands focus back to the trigger so traversal continues from the top ba
 
 test('clicking outside dismisses the menu without opening anything', async () => {
   const onOpen = vi.fn();
-  await using view = await renderReact(<OpenReviewSourceMenu onOpen={onOpen} />);
+  await using view = await renderReact(
+    <OpenReviewSourceMenu onOpen={onOpen} onOpenFolder={() => {}} />,
+  );
 
   await click(getTrigger(view.container));
   await act(async () => {
