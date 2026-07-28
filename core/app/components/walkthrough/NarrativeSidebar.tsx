@@ -12,7 +12,7 @@ import {
   type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, NarrativeWalkthrough } from '../../../types.ts';
+import type { ChangedFile, WalkthroughModel } from '../../../types.ts';
 import { ChapterIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
@@ -162,7 +162,7 @@ export function NarrativeSidebar({
   onShareWalkthrough?: () => void;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
-  walkthrough: NarrativeWalkthrough;
+  walkthrough: WalkthroughModel;
 }) {
   const { walkthroughView } = navigation;
   if (!walkthroughView) {

@@ -1,4 +1,14 @@
 export { defaultReviewPreferences } from './defaults.ts';
+export { hasCapturedContextCapability, hasGenerationRequestCapability } from './types.ts';
+export {
+  narrativeWalkthroughV4Schema,
+  parseNarrativeWalkthroughV4,
+  parseWalkthroughArtifactV5,
+  parseWalkthroughModel,
+  safeParseNarrativeWalkthroughV4,
+  walkthroughArtifactV5Schema,
+  walkthroughModelFromV4,
+} from './lib/narrative-walkthrough-schema.ts';
 export {
   diffRangesMatch,
   resolveProviderCommentTarget,
@@ -74,6 +84,7 @@ export type {
   GitIdentity,
   GitSha,
   NarrativeWalkthrough,
+  NarrativeWalkthroughV4,
   PlanCommentThread,
   PullRequestCodeQualityFinding,
   PullRequestGeneralComment,
@@ -108,8 +119,11 @@ export type {
   SubmitPullRequestReviewResult,
   WalkthroughShareManifestV1,
   WalkthroughHunk,
+  WalkthroughArtifactV5,
   WalkthroughGenerationProgress,
   WalkthroughGenerationUnitProgress,
+  WalkthroughModel,
+  WalkthroughNarrativeV5,
   WalkthroughProgressEvent,
   WalkthroughProgressPhase,
 } from './types.ts';

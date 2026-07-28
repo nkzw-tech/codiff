@@ -135,7 +135,11 @@ export type WalkthroughChapter = {
   title: string;
 };
 export type WalkthroughCommit = { body?: string; title?: string };
-export type NarrativeWalkthrough = {
+/**
+ * The released V4 persistence shape. This type is frozen: new walkthrough
+ * capabilities belong to V5 artifacts and the runtime model, never here.
+ */
+export type NarrativeWalkthroughV4 = {
   agent: 'codex' | 'claude' | 'opencode' | 'pi';
   chapters: ReadonlyArray<WalkthroughChapter>;
   commit?: WalkthroughCommit;
@@ -150,6 +154,69 @@ export type NarrativeWalkthrough = {
   title: string;
   version: 4;
 };
+
+/** The model-authored narrative stored inside a V5 artifact envelope. */
+export type WalkthroughNarrativeV5 = Omit<NarrativeWalkthroughV4, 'version'>;
+
+/**
+ * The initial persisted V5 artifact boundary.
+ *
+ * The narrative deliberately starts with V4-equivalent behavior. Captured
+ * context and generation request are artifact-owned capability positions that
+ * later authoring revisions can populate without changing frozen V4 storage.
+ */
+export type WalkthroughArtifactV5 = {
+  /** Sanitized, host-neutral context captured before prompt projection. */
+  capturedContext: Record<never, never>;
+  /** Resolved review selection and authoring choices for this artifact. */
+  generationRequest: Record<never, never>;
+  /** Model-authored content; artifact lifecycle state does not live here. */
+  narrative: WalkthroughNarrativeV5;
+  version: 5;
+};
+
+type Immutable<T> = T extends (...arguments_: Array<never>) => unknown
+  ? T
+  : T extends ReadonlyArray<infer Item>
+    ? ReadonlyArray<Immutable<Item>>
+    : T extends object
+      ? { readonly [Key in keyof T]: Immutable<T[Key]> }
+      : T;
+
+/**
+ * Core's immutable, document-derived rendering and navigation representation.
+ *
+ * Persisted JSON is normalized exactly once at the Core trust boundary. The
+ * model is never serialized as V4 or V5, and `sourceVersion` is diagnostic
+ * only. Rendering and reuse decisions must narrow optional capability fields
+ * instead of checking the source document version. Live provider state stays
+ * separate from this captured model.
+ */
+export type WalkthroughModel = Immutable<WalkthroughNarrativeV5> & {
+  /** Present only when the source artifact supplied captured-context capability. */
+  readonly capturedContext?: Immutable<WalkthroughArtifactV5['capturedContext']>;
+  /** Present only when the source artifact supplied generation-request capability. */
+  readonly generationRequest?: Immutable<WalkthroughArtifactV5['generationRequest']>;
+  /** Informational persisted document version; never a capability gate. */
+  readonly sourceVersion: 4 | 5;
+};
+
+/** Frozen name retained for V4-producing hosts until their explicit V5 integration. */
+export type NarrativeWalkthrough = NarrativeWalkthroughV4;
+
+/** Capability checks are field-based so model behavior is independent of document labels. */
+export const hasCapturedContextCapability = (
+  walkthrough: WalkthroughModel,
+): walkthrough is WalkthroughModel & {
+  readonly capturedContext: Immutable<WalkthroughArtifactV5['capturedContext']>;
+} => 'capturedContext' in walkthrough;
+
+/** Capability checks are field-based so later request shapes do not require version branches. */
+export const hasGenerationRequestCapability = (
+  walkthrough: WalkthroughModel,
+): walkthrough is WalkthroughModel & {
+  readonly generationRequest: Immutable<WalkthroughArtifactV5['generationRequest']>;
+} => 'generationRequest' in walkthrough;
 
 export type SharedWalkthroughSnapshot = {
   branch: string | null;

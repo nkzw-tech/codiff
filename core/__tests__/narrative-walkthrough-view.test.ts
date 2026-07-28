@@ -4,6 +4,7 @@ import {
   getWalkthroughNavigationKeyDirection,
 } from '../app/components/walkthrough/NarrativeWalkthroughView.tsx';
 import { parseSectionDiffWithOptions } from '../lib/diff.ts';
+import { walkthroughModelFromV4 } from '../lib/narrative-walkthrough-schema.ts';
 import {
   buildCommitModel,
   buildGenericCommitModel,
@@ -24,7 +25,7 @@ import {
 import type {
   ChangedFile,
   GitSha,
-  NarrativeWalkthrough,
+  WalkthroughModel,
   WalkthroughHunk,
   WalkthroughHunkGroup,
 } from '../types.ts';
@@ -144,48 +145,49 @@ const group = ({
   title,
 });
 
-const walkthrough = (): NarrativeWalkthrough => ({
-  agent: 'claude',
-  chapters: [
-    {
-      blurb: 'The bug.',
-      icon: 'bug',
-      id: 'bug',
-      stops: [
-        {
-          ...group({ hunks: [appHunk], id: 's1' }),
-          importance: 'critical',
-          prose: 'Bug.',
-        },
-      ],
-      title: 'The bug',
-    },
-    {
-      blurb: 'The proof.',
-      icon: 'flask',
-      id: 'proof',
-      stops: [
-        {
-          ...group({ hunks: [testHunk], id: 's2' }),
-          importance: 'normal',
-          prose: 'Test.',
-        },
-      ],
-      title: 'Proof',
-    },
-  ],
-  focus: 'Focus.',
-  generatedAt: '2026-06-05T00:00:00.000Z',
-  kind: 'narrative',
-  repo: { branch: 'main', root: '/repo' },
-  source: { type: 'working-tree' },
-  support: [
-    { ...group({ hunks: [lockHunk], id: 'lock' }), note: 'Regenerated.', reason: 'Lockfile' },
-    { ...group({ hunks: [mirrorHunk], id: 'mirror' }), note: 'Mirror.', reason: 'Mechanical' },
-  ],
-  title: 'Title',
-  version: 4,
-});
+const walkthrough = (): WalkthroughModel =>
+  walkthroughModelFromV4({
+    agent: 'claude',
+    chapters: [
+      {
+        blurb: 'The bug.',
+        icon: 'bug',
+        id: 'bug',
+        stops: [
+          {
+            ...group({ hunks: [appHunk], id: 's1' }),
+            importance: 'critical',
+            prose: 'Bug.',
+          },
+        ],
+        title: 'The bug',
+      },
+      {
+        blurb: 'The proof.',
+        icon: 'flask',
+        id: 'proof',
+        stops: [
+          {
+            ...group({ hunks: [testHunk], id: 's2' }),
+            importance: 'normal',
+            prose: 'Test.',
+          },
+        ],
+        title: 'Proof',
+      },
+    ],
+    focus: 'Focus.',
+    generatedAt: '2026-06-05T00:00:00.000Z',
+    kind: 'narrative',
+    repo: { branch: 'main', root: '/repo' },
+    source: { type: 'working-tree' },
+    support: [
+      { ...group({ hunks: [lockHunk], id: 'lock' }), note: 'Regenerated.', reason: 'Lockfile' },
+      { ...group({ hunks: [mirrorHunk], id: 'mirror' }), note: 'Mirror.', reason: 'Mechanical' },
+    ],
+    title: 'Title',
+    version: 4,
+  });
 
 test('formatWalkthroughFileList shows filenames up to five unique files', () => {
   expect(
@@ -304,7 +306,7 @@ test('buildWalkthroughView indexes stops and groups support by reason', () => {
 
 test('buildWalkthroughView preserves cross-file hunk groups in one stop', () => {
   const base = walkthrough();
-  const wt: NarrativeWalkthrough = {
+  const wt: WalkthroughModel = {
     ...base,
     chapters: [
       {
@@ -347,7 +349,7 @@ test('buildCommitModel collapses chapters plus support into unique file groups',
 
 test('buildCommitModel carries per-file change-type tags and notes onto rows', () => {
   const base = walkthrough();
-  const wt: NarrativeWalkthrough = {
+  const wt: WalkthroughModel = {
     ...base,
     chapters: [
       {
@@ -622,12 +624,12 @@ test('buildGenericCommitModel creates a commit group from live tree files', () =
 });
 
 test('working-tree walkthroughs are committable even without commit seed text', () => {
-  const wt: NarrativeWalkthrough = {
+  const wt: WalkthroughModel = {
     ...walkthrough(),
     commit: undefined,
     source: { type: 'working-tree' },
   };
-  const committedReview: NarrativeWalkthrough = {
+  const committedReview: WalkthroughModel = {
     ...walkthrough(),
     commit: {},
     source: { sha: gitSha('HEAD'), type: 'commit' },

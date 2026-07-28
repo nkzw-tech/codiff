@@ -3,13 +3,13 @@ import {
   buildWalkthroughView,
   getCommitSelectionPaths,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, NarrativeWalkthrough } from '../../../types.ts';
+import type { ChangedFile, WalkthroughModel } from '../../../types.ts';
 
 export type NarrativeViewMode = 'stop' | 'support' | 'commit';
 
 export type NarrativeNavigation = ReturnType<typeof useNarrativeNavigation>;
 
-const firstStopId = (walkthrough: NarrativeWalkthrough | null): string | undefined =>
+const firstStopId = (walkthrough: WalkthroughModel | null): string | undefined =>
   walkthrough?.chapters[0]?.stops[0]?.id;
 
 /**
@@ -17,7 +17,7 @@ const firstStopId = (walkthrough: NarrativeWalkthrough | null): string | undefin
  * to both the sidebar table-of-contents and the main hybrid view.
  */
 export const useNarrativeNavigation = (
-  walkthrough: NarrativeWalkthrough | null,
+  walkthrough: WalkthroughModel | null,
   files: ReadonlyArray<ChangedFile>,
   resetKey = '',
 ) => {
@@ -58,9 +58,9 @@ export const useNarrativeNavigation = (
   // ref write.
   const pendingStopScrollRef = useRef<{
     index: number;
-    walkthrough: NarrativeWalkthrough | null;
+    walkthrough: WalkthroughModel | null;
   } | null>(null);
-  const pendingSupportScrollRef = useRef<{ walkthrough: NarrativeWalkthrough | null } | null>(null);
+  const pendingSupportScrollRef = useRef<{ walkthrough: WalkthroughModel | null } | null>(null);
 
   const setCommitSubject = useCallback((value: string) => {
     commitSubjectDirtyRef.current = true;
@@ -75,7 +75,7 @@ export const useNarrativeNavigation = (
   // Reset navigation when a new walkthrough arrives, adjusting state during
   // render rather than in an effect (see
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes).
-  const [seededFor, setSeededFor] = useState<NarrativeWalkthrough | null>(null);
+  const [seededFor, setSeededFor] = useState<WalkthroughModel | null>(null);
   if (walkthrough && seededFor !== walkthrough) {
     setSeededFor(walkthrough);
     // A refresh can land while the reviewer is on the commit screen — e.g.

@@ -18,9 +18,9 @@ import { getShortRef, getSourceKey } from '../../lib/source.ts';
 import type {
   ChangedFile,
   HistoryEntry,
-  NarrativeWalkthrough,
   ResolvedReviewSource,
   ReviewSource,
+  WalkthroughModel,
 } from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
 import { Button } from './Button.tsx';
@@ -74,7 +74,7 @@ export function Sidebar({
   mode: SidebarMode;
   modes: ReadonlyArray<ReviewModeItem<SidebarMode>>;
   narrativeNavigation: NarrativeNavigation;
-  narrativeWalkthrough: NarrativeWalkthrough | null;
+  narrativeWalkthrough: WalkthroughModel | null;
   onActivatePath: (path: string) => void;
   onLoadMoreHistory: () => void;
   onModeChange: (mode: SidebarMode) => void;
