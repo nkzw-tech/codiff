@@ -19,11 +19,7 @@ test('opens the menu from the trigger and moves focus to the first action', asyn
 
   expect(trigger.getAttribute('aria-expanded')).toBe('true');
   const items = getMenuItems(view.container);
-  expect(items.map((item) => item.textContent)).toEqual([
-    'Open PR',
-    'Open Branch',
-    'Open Commit',
-  ]);
+  expect(items.map((item) => item.textContent)).toEqual(['Open PR', 'Open Branch', 'Open Commit']);
   expect(document.activeElement).toBe(items[0]);
 });
 

@@ -908,7 +908,8 @@ a.review-top-bar-source:focus-visible {
   width: 6px;
 }
 
-.sidebar-toggle-button {
+.sidebar-toggle-button,
+.open-review-source-trigger {
   -webkit-app-region: no-drag;
   align-items: center;
   background: transparent;
@@ -928,13 +929,72 @@ a.review-top-bar-source:focus-visible {
   width: 28px;
 }
 
-.sidebar-toggle-button:hover {
+.sidebar-toggle-button:hover,
+.open-review-source-trigger:hover {
   background: rgb(127 127 127 / 0.14);
   color: var(--sidebar-text);
 }
 
-.sidebar-toggle-button:active {
+.sidebar-toggle-button:active,
+.open-review-source-trigger:active,
+.open-review-source-trigger[aria-expanded='true'] {
   background: rgb(127 127 127 / 0.2);
+  color: var(--sidebar-text);
+}
+
+.open-review-source-menu {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  flex: none;
+  position: relative;
+}
+
+.open-review-source-menu-list {
+  backdrop-filter: blur(28px) saturate(1.4);
+  background: color-mix(in srgb, var(--code-bg) 92%, transparent);
+  border: 1px solid var(--file-border);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.08) inset,
+    0 12px 32px -18px rgb(0 0 0 / 0.6),
+    0 4px 12px -8px rgb(0 0 0 / 0.5);
+  corner-shape: squircle;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  left: 0;
+  min-width: 176px;
+  padding: 4px;
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 60;
+}
+
+.open-review-source-menu-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--text);
+  corner-shape: squircle;
+  cursor: pointer;
+  display: flex;
+  font: 600 12px/1 var(--font-sans);
+  gap: 8px;
+  padding: 7px 9px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.open-review-source-menu-item:hover,
+.open-review-source-menu-item:focus {
+  background: rgb(127 127 127 / 0.14);
+  outline: none;
+}
+
+.open-review-source-menu-item svg {
+  color: var(--muted);
+  flex: none;
 }
 
 .sidebar-resizer {

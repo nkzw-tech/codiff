@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CommandBar } from './app/components/CommandBar.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import { OpenReviewSourceDialog } from './app/components/OpenReviewSourceDialog.tsx';
+import { OpenReviewSourceMenu } from './app/components/OpenReviewSourceMenu.tsx';
 import {
   AgentUnavailablePanel,
   CopyCommentsButton,
@@ -1819,6 +1820,7 @@ export default function App() {
         }
         repositoryTooltip={state.root}
         sidebarCollapsed={sidebarCollapsed}
+        sourceMenu={<OpenReviewSourceMenu onOpen={showOpenReviewSourceDialog} />}
         toggleTitle={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar (${getShortcutLabel(
           codiffConfig.keymap,
           'toggleSidebar',

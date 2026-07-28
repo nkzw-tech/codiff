@@ -21,6 +21,7 @@ export function ReviewTopBar<Mode extends string>({
   repository,
   repositoryTooltip,
   sidebarCollapsed,
+  sourceMenu,
   toggleTitle,
 }: {
   actions?: ReactNode;
@@ -33,6 +34,7 @@ export function ReviewTopBar<Mode extends string>({
   repository: ReactNode;
   repositoryTooltip?: string;
   sidebarCollapsed: boolean;
+  sourceMenu?: ReactNode;
   toggleTitle: string;
 }) {
   return (
@@ -48,6 +50,7 @@ export function ReviewTopBar<Mode extends string>({
         >
           <SidebarSimple aria-hidden size={18} weight="bold" />
         </button>
+        {sourceMenu}
         <div className="review-top-bar-repository-slot" title={repositoryTooltip}>
           {repository}
         </div>
