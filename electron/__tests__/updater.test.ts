@@ -268,6 +268,31 @@ test('checkForUpdates swallows network failures and keeps the cached state', asy
   expect(persisted.lastCheckedAt).toBe(previous.lastCheckedAt);
 });
 
+test('checkForUpdates rejects on failure only when forced', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.statusCode = 500;
+    response.end('nope');
+  });
+
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    log: () => {},
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  await expect(updater.checkForUpdates()).resolves.toEqual({
+    currentVersion: '1.9.2',
+    phase: 'idle',
+  });
+  await expect(updater.checkForUpdates({ force: true })).rejects.toThrow();
+});
+
 test('checkForUpdates does nothing for unpackaged builds', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   let requests = 0;
