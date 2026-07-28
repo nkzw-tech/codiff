@@ -233,6 +233,10 @@ const mergeConfig = (raw) => {
     },
     settings: {
       agentBackend: normalizeAgentBackend(rawSettings.agentBackend),
+      checkForUpdates:
+        typeof rawSettings.checkForUpdates === 'boolean'
+          ? rawSettings.checkForUpdates
+          : defaults.settings.checkForUpdates,
       claudeModel:
         typeof rawSettings.claudeModel === 'string'
           ? rawSettings.claudeModel

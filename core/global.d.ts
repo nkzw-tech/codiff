@@ -6,6 +6,7 @@ import type {
   CodiffLaunchOptions,
   CodiffMarkdownDocument,
   CodiffPreferences,
+  CodiffUpdateStatus,
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
@@ -42,12 +43,14 @@ declare module '*.css';
 declare global {
   interface Window {
     codiff: {
+      applyUpdate: () => Promise<CodiffUpdateStatus>;
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
       completePlan: (review: PlanReview, status: PlanHandoffStatus) => Promise<void>;
       createWalkthroughCommit: (
         request: WalkthroughCommitRequest,
       ) => Promise<WalkthroughCommitResult>;
       decreaseCodeFontSize: () => Promise<void>;
+      dismissUpdate: () => Promise<CodiffUpdateStatus>;
       getAgentSkillStatus: () => Promise<AgentSkillStatus>;
       getConfig: () => Promise<CodiffConfig>;
       getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
@@ -69,6 +72,7 @@ declare global {
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
+      getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;
       installAgentSkill: () => Promise<AgentSkillStatus>;
       installTerminalHelper: () => Promise<TerminalHelperStatus>;
@@ -89,11 +93,13 @@ declare global {
       onPlanCloseRequested: (callback: () => void) => () => void;
       onRefreshRequest: (callback: () => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
+      onUpdateStatusChanged: (callback: (status: CodiffUpdateStatus) => void) => () => void;
       onWalkthroughCommitOutput: (callback: (chunk: string) => void) => () => void;
       onWalkthroughProgress: (callback: (progress: WalkthroughProgressEvent) => void) => () => void;
       onWindowFullScreenChanged: (callback: (isFullScreen: boolean) => void) => () => void;
       openConfigFile: () => Promise<void>;
       openFile: (path: string) => Promise<void>;
+      openReleasePage: () => Promise<void>;
       openRepositoryFolder: () => Promise<void>;
       resetCodeFontSize: () => Promise<void>;
       resolvePullRequestUrl: (value: string) => Promise<string>;

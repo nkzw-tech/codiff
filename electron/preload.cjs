@@ -14,7 +14,9 @@ if (document.documentElement) {
 
 /** @type {Window['codiff']} */
 const codiff = {
+  applyUpdate: () => ipcRenderer.invoke('codiff:applyUpdate'),
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
+  dismissUpdate: () => ipcRenderer.invoke('codiff:dismissUpdate'),
   createWalkthroughCommit: (request) =>
     ipcRenderer.invoke('codiff:createWalkthroughCommit', request),
   completePlan: (review, status) => ipcRenderer.invoke('codiff:completePlan', review, status),
@@ -36,6 +38,7 @@ const codiff = {
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
+  getUpdateStatus: () => ipcRenderer.invoke('codiff:getUpdateStatus'),
   getNarrativeWalkthrough: (source, options) =>
     ipcRenderer.invoke('codiff:getNarrativeWalkthrough', source, options),
   installAgentSkill: () => ipcRenderer.invoke('codiff:installAgentSkill'),
@@ -124,7 +127,14 @@ const codiff = {
     ipcRenderer.on('codiff:refreshRequest', listener);
     return () => ipcRenderer.removeListener('codiff:refreshRequest', listener);
   },
+  onUpdateStatusChanged: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {import('../core/types.ts').CodiffUpdateStatus} status */
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('codiff:updateStatusChanged', listener);
+    return () => ipcRenderer.removeListener('codiff:updateStatusChanged', listener);
+  },
   openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
+  openReleasePage: () => ipcRenderer.invoke('codiff:openReleasePage'),
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
   openRepositoryFolder: () => ipcRenderer.invoke('codiff:openRepositoryFolder'),
   resolvePullRequestUrl: (value) => ipcRenderer.invoke('codiff:resolvePullRequestUrl', value),

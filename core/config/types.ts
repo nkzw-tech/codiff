@@ -4,6 +4,7 @@ export type CodiffAgentBackend = 'codex' | 'claude' | 'opencode' | 'pi';
 
 export type CodiffSettings = {
   agentBackend: CodiffAgentBackend;
+  checkForUpdates: boolean;
   claudeModel: string;
   codeFontFamily: string;
   codeFontSize: number;

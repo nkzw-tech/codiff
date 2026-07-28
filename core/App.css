@@ -1120,6 +1120,70 @@ a.review-top-bar-source:focus-visible {
   font-weight: 700;
 }
 
+.update-banner {
+  -webkit-app-region: no-drag;
+  align-items: center;
+  background: color-mix(in srgb, var(--viewed) 10%, var(--code-bg));
+  border: 1px solid color-mix(in srgb, var(--viewed) 18%, transparent);
+  border-radius: 17px;
+  box-shadow: 0 16px 46px -30px color-mix(in srgb, var(--viewed) 52%, rgb(0 0 0));
+  color: color-mix(in srgb, var(--viewed) 36%, var(--text));
+  corner-shape: squircle;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 8px;
+  left: 50%;
+  line-height: 1.25;
+  max-width: min(620px, calc(100vw - 48px));
+  padding: 8px 8px 8px 13px;
+  pointer-events: none;
+  position: fixed;
+  top: 18px;
+  transform: translate(-50%, -66px);
+  transition:
+    opacity 180ms ease,
+    transform 320ms cubic-bezier(0.2, 0.82, 0.22, 1);
+  z-index: 23;
+}
+
+.update-banner.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+
+.update-banner:not(.visible) {
+  opacity: 0;
+}
+
+.update-banner-content {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.update-banner button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.update-banner-action,
+.update-banner-manual {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.update-banner-action:hover,
+.update-banner-manual:hover {
+  text-decoration: none;
+}
+
 .diff-search-panel {
   -webkit-app-region: no-drag;
   align-items: center;

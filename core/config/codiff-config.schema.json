@@ -20,6 +20,11 @@
           "default": "codex",
           "description": "Which agent CLI powers review assistance and walkthroughs. 'codex' uses the OpenAI Codex CLI; 'claude' uses the Claude Code CLI; 'opencode' uses the OpenCode CLI; 'pi' uses the Pi CLI."
         },
+        "checkForUpdates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check GitHub Releases once a day for a newer Codiff version and show an update notification. Set to false if updates are centrally managed."
+        },
         "claudeModel": {
           "type": "string",
           "default": "claude-sonnet-4-6",

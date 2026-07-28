@@ -5,6 +5,7 @@ const { basename, dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const {
   app,
+  autoUpdater,
   BrowserWindow,
   clipboard,
   dialog,
@@ -56,6 +57,8 @@ const {
   writeConfig,
 } = require('./config.cjs');
 const { readReviewAssistantReply } = require('./review-assist.cjs');
+const { releasePageUrl } = require('./update-check.cjs');
+const { createUpdater, resolveUpdateStrategy } = require('./updater.cjs');
 const { parseReviewUrl, resolveReviewUrl } = require('./review-source.cjs');
 const {
   getPlanWindowTitle,
@@ -580,6 +583,12 @@ const buildApplicationMenu = () =>
               label: 'Codiff',
               submenu: [
                 { role: 'about' },
+                {
+                  click: () => {
+                    void checkForUpdatesFromMenu();
+                  },
+                  label: 'Check for Updates…',
+                },
                 { type: 'separator' },
                 {
                   click: (_menuItem, browserWindow) =>
@@ -1192,6 +1201,78 @@ const focusOrCreateWindow = (
   return createWindow(repositoryPath, launchOptions, identity);
 };
 
+const INITIAL_UPDATE_CHECK_DELAY_MS = 10 * 1000;
+const UPDATE_CHECK_TIMER_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
+/** @type {ReturnType<typeof createUpdater> | null} */
+let updater = null;
+
+/** @param {import('../core/types.ts').CodiffUpdateStatus} status */
+const sendUpdateStatusChanged = (status) => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send('codiff:updateStatusChanged', status);
+    }
+  }
+};
+
+const hasSquirrelUpdateExe = () =>
+  process.platform === 'win32' && existsSync(join(dirname(process.execPath), '..', 'Update.exe'));
+
+const detectLinuxPackageFlavor = () =>
+  existsSync('/etc/debian_version')
+    ? /** @type {const} */ ('deb')
+    : existsSync('/etc/redhat-release')
+      ? /** @type {const} */ ('rpm')
+      : null;
+
+const initUpdater = () => {
+  updater = createUpdater({
+    arch: process.arch,
+    autoUpdater,
+    currentVersion: app.getVersion(),
+    downloadDirectory: app.getPath('downloads'),
+    isPackaged: app.isPackaged,
+    linuxFlavor: process.platform === 'linux' ? detectLinuxPackageFlavor() : null,
+    onStatusChange: sendUpdateStatusChanged,
+    openPath: (path) => shell.openPath(path),
+    platform: process.platform,
+    strategy: resolveUpdateStrategy({
+      hasSquirrelUpdateExe: hasSquirrelUpdateExe(),
+      platform: process.platform,
+    }),
+  });
+};
+
+const runScheduledUpdateCheck = () => {
+  if (updater && config.settings.checkForUpdates) {
+    void updater.checkForUpdates().catch(() => {});
+  }
+};
+
+const checkForUpdatesFromMenu = async () => {
+  if (!updater) {
+    return;
+  }
+
+  try {
+    const status = await updater.checkForUpdates({ force: true });
+    if (status.phase === 'idle') {
+      void dialog.showMessageBox({
+        message: `Codiff ${app.getVersion()} is up to date.`,
+        type: 'info',
+      });
+    }
+  } catch (error) {
+    void dialog.showMessageBox({
+      message: `Checking for updates failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      type: 'error',
+    });
+  }
+};
+
 const lock =
   !squirrelStartup &&
   app.requestSingleInstanceLock({
@@ -1242,6 +1323,10 @@ if (squirrelStartup || !lock) {
         }
       }
     });
+
+    initUpdater();
+    setTimeout(runScheduledUpdateCheck, INITIAL_UPDATE_CHECK_DELAY_MS);
+    setInterval(runScheduledUpdateCheck, UPDATE_CHECK_TIMER_INTERVAL_MS);
 
     const launchOptions = getLaunchOptions();
     focusOrCreateWindow(
@@ -1313,6 +1398,25 @@ if (squirrelStartup || !lock) {
     quitting = true;
   });
 }
+
+ipcMain.handle('codiff:getUpdateStatus', () =>
+  updater ? updater.getStatus() : { currentVersion: app.getVersion(), phase: 'idle' },
+);
+
+ipcMain.handle('codiff:applyUpdate', () =>
+  updater ? updater.applyUpdate() : { currentVersion: app.getVersion(), phase: 'idle' },
+);
+
+ipcMain.handle('codiff:dismissUpdate', () =>
+  updater ? updater.dismissUpdate() : { currentVersion: app.getVersion(), phase: 'idle' },
+);
+
+ipcMain.handle('codiff:openReleasePage', () => {
+  const version = updater?.getStatus().version;
+  return shell.openExternal(
+    version ? releasePageUrl(version) : 'https://github.com/nkzw-tech/codiff/releases',
+  );
+});
 
 ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
