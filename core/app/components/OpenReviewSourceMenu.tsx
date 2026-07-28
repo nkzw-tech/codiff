@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import type { OpenReviewSourceKind } from '../../types.ts';
 
 const menuActions: ReadonlyArray<{
@@ -35,10 +36,23 @@ const menuActions: ReadonlyArray<{
 ];
 
 export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSourceKind) => void }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  // The top bar creates a stacking context (backdrop-filter) that later
+  // sibling rows paint over on non-macOS platforms, so the menu is portaled to
+  // the document body and positioned from the trigger's viewport rect.
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  const open = menuPosition != null;
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const openMenu = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    setMenuPosition({ left: rect?.left ?? 0, top: (rect?.bottom ?? 0) + 6 });
+  }, []);
+
+  const close = useCallback(() => {
+    setMenuPosition(null);
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -47,31 +61,42 @@ export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSour
 
     itemRefs.current[0]?.focus();
     const dismiss = (event: PointerEvent) => {
-      // oxlint-disable-next-line @nkzw/no-instanceof
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
-        setOpen(false);
+      if (
+        // oxlint-disable-next-line @nkzw/no-instanceof
+        event.target instanceof Node &&
+        !triggerRef.current?.contains(event.target) &&
+        !menuRef.current?.contains(event.target)
+      ) {
+        close();
       }
     };
     document.addEventListener('pointerdown', dismiss);
-    return () => document.removeEventListener('pointerdown', dismiss);
-  }, [open]);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      window.removeEventListener('resize', close);
+    };
+  }, [close, open]);
 
   const closeWithFocus = useCallback(() => {
-    setOpen(false);
+    close();
     triggerRef.current?.focus();
-  }, []);
+  }, [close]);
 
-  const handleTriggerKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setOpen(true);
-    }
-  }, []);
+  const handleTriggerKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        openMenu();
+      }
+    },
+    [openMenu],
+  );
 
   const handleMenuKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.key === 'Tab') {
-        setOpen(false);
+        close();
         return;
       }
       if (event.key === 'Escape') {
@@ -100,11 +125,11 @@ export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSour
         items[nextIndex]?.focus();
       }
     },
-    [closeWithFocus],
+    [close, closeWithFocus],
   );
 
   return (
-    <div className="open-review-source-menu" ref={rootRef}>
+    <div className="open-review-source-menu">
       <button
         aria-controls={open ? 'open-review-source-menu' : undefined}
         aria-expanded={open}
@@ -112,7 +137,7 @@ export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSour
         aria-label="Open a PR, branch, or commit"
         className="open-review-source-trigger"
         id="open-review-source-trigger"
-        onClick={() => setOpen((previous) => !previous)}
+        onClick={open ? close : openMenu}
         onKeyDown={handleTriggerKeyDown}
         ref={triggerRef}
         title="Open a PR, branch, or commit"
@@ -120,35 +145,40 @@ export function OpenReviewSourceMenu({ onOpen }: { onOpen: (kind: OpenReviewSour
       >
         <Plus aria-hidden size={16} weight="bold" />
       </button>
-      {open ? (
-        <div
-          aria-labelledby="open-review-source-trigger"
-          className="open-review-source-menu-list"
-          id="open-review-source-menu"
-          onKeyDown={handleMenuKeyDown}
-          role="menu"
-        >
-          {menuActions.map((action, index) => (
-            <button
-              className="open-review-source-menu-item"
-              key={action.kind}
-              onClick={() => {
-                setOpen(false);
-                onOpen(action.kind);
-              }}
-              ref={(element) => {
-                itemRefs.current[index] = element;
-              }}
-              role="menuitem"
-              tabIndex={-1}
-              type="button"
+      {menuPosition
+        ? createPortal(
+            <div
+              aria-labelledby="open-review-source-trigger"
+              className="open-review-source-menu-list"
+              id="open-review-source-menu"
+              onKeyDown={handleMenuKeyDown}
+              ref={menuRef}
+              role="menu"
+              style={{ left: menuPosition.left, top: menuPosition.top }}
             >
-              {action.icon}
-              <span>{action.label}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
+              {menuActions.map((action, index) => (
+                <button
+                  className="open-review-source-menu-item"
+                  key={action.kind}
+                  onClick={() => {
+                    close();
+                    onOpen(action.kind);
+                  }}
+                  ref={(element) => {
+                    itemRefs.current[index] = element;
+                  }}
+                  role="menuitem"
+                  tabIndex={-1}
+                  type="button"
+                >
+                  {action.icon}
+                  <span>{action.label}</span>
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

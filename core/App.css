@@ -946,7 +946,6 @@ a.review-top-bar-source:focus-visible {
   -webkit-app-region: no-drag;
   display: inline-flex;
   flex: none;
-  position: relative;
 }
 
 .open-review-source-menu-list {
@@ -962,11 +961,9 @@ a.review-top-bar-source:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  left: 0;
   min-width: 176px;
   padding: 4px;
-  position: absolute;
-  top: calc(100% + 6px);
+  position: fixed;
   z-index: 60;
 }
 
