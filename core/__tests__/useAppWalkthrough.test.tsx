@@ -6,6 +6,7 @@ import { act } from 'react';
 import { expect, test, vi } from 'vite-plus/test';
 import { useAppWalkthrough } from '../app/hooks/useAppWalkthrough.ts';
 import { createDefaultConfig } from '../config/defaults.ts';
+import { walkthroughModelFromV4 } from '../lib/narrative-walkthrough-schema.ts';
 import type {
   GitSha,
   NarrativeWalkthrough,
@@ -125,7 +126,7 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
     getController().changeSidebarMode('walkthrough');
   });
   await waitFor(() => {
-    expect(getController().narrativeWalkthrough).toEqual(walkthrough);
+    expect(getController().narrativeWalkthrough).toEqual(walkthroughModelFromV4(walkthrough));
     expect(getController().walkthroughLoading).toBe(false);
   });
   expect(getNarrativeWalkthrough).toHaveBeenCalledWith(walkthrough.source, undefined);

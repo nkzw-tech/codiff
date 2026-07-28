@@ -23,7 +23,7 @@ import {
   type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, NarrativeWalkthrough, WalkthroughHunkGroup } from '../../../types.ts';
+import type { ChangedFile, WalkthroughHunkGroup, WalkthroughModel } from '../../../types.ts';
 import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import {
   CommitView,
@@ -156,7 +156,6 @@ function StopHeader({ current, stop }: { current: boolean; stop: WalkthroughStop
     </div>
   );
 }
-
 function SupportHeader({ current }: { current: boolean }) {
   return (
     <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
@@ -520,7 +519,7 @@ export function NarrativeWalkthroughView({
   renderDiffBlocks: RenderWalkthroughDiffBlocks;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
-  walkthrough: NarrativeWalkthrough;
+  walkthrough: WalkthroughModel;
 }) {
   const { walkthroughView } = navigation;
   const committable = allowCommit && isWalkthroughCommittable(walkthrough);

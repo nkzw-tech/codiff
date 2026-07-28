@@ -6,6 +6,7 @@ import { act } from 'react';
 import { expect, test } from 'vite-plus/test';
 import type { NarrativeNavigation } from '../app/components/walkthrough/useNarrativeNavigation.ts';
 import { useNarrativeNavigation } from '../app/components/walkthrough/useNarrativeNavigation.ts';
+import { walkthroughModelFromV4 } from '../lib/narrative-walkthrough-schema.ts';
 import type { NarrativeWalkthrough, WalkthroughStop } from '../types.ts';
 import { renderReact } from './helpers/react.tsx';
 
@@ -20,7 +21,7 @@ const stop = (id: string): WalkthroughStop => ({
   title: id,
 });
 
-const walkthrough: NarrativeWalkthrough = {
+const walkthrough = walkthroughModelFromV4({
   agent: 'codex',
   chapters: [
     {
@@ -39,7 +40,7 @@ const walkthrough: NarrativeWalkthrough = {
   support: [],
   title: 'Walkthrough',
   version: 4,
-};
+} satisfies NarrativeWalkthrough);
 
 function NavigationHarness({
   onNavigation,

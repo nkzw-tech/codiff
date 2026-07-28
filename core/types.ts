@@ -5,6 +5,10 @@ export type * from './types/review-comments.ts';
 export type * from './types/review-history.ts';
 export type * from './types/review-identity.ts';
 export type * from './types/walkthrough.ts';
+export {
+  hasCapturedContextCapability,
+  hasGenerationRequestCapability,
+} from './types/walkthrough.ts';
 
 export type CodiffFeatureFlags = {
   planSharing: boolean;
