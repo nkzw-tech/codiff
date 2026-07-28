@@ -174,6 +174,9 @@ const createUpdater = ({
       );
     } catch (error) {
       logError(`Update check failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (force) {
+        throw error;
+      }
     }
 
     return { ...setStatus(statusFromState()) };
