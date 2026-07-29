@@ -31,6 +31,10 @@ is_newer_version() {
   set -- $1 -- $2
   IFS="$old_ifs"
   [ "$#" -eq 7 ] && [ "$4" = "--" ] || return 1
+  # sh integer tests overflow beyond int64; nothing that large is a release.
+  for version_component in "$1" "$2" "$3" "$5" "$6" "$7"; do
+    [ "${#version_component}" -le 9 ] || return 1
+  done
   latest_major="$1" latest_minor="$2" latest_patch="$3"
   current_major="$5" current_minor="$6" current_patch="$7"
   if [ "$latest_major" -ne "$current_major" ]; then
@@ -45,16 +49,29 @@ is_newer_version() {
 }
 
 # Mirror of bin/update-notice.js for the wrapper-owned code paths: read the
-# state cached by the app's daily check and never touch the network.
+# state cached by the app's daily check and never touch the network. The
+# notice is best effort: a missing, unreadable, or corrupt cache must stay
+# silent and must never change the wrapped command's exit status.
 print_update_notice() {
+  [ -n "${HOME:-}" ] || return 0
   state_file="$HOME/.codiff/update-state.json"
-  [ -f "$state_file" ] || return 0
-  latest="$(sed -n 's/.*"latestVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" | head -n 1)"
-  dismissed="$(sed -n 's/.*"dismissedVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" | head -n 1)"
+  [ -f "$state_file" ] && [ -r "$state_file" ] || return 0
+  # tail -n 1 mirrors JSON duplicate-key last-wins resolution.
+  checked_at="$(sed -n 's/.*"lastCheckedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | tail -n 1)"
+  latest="$(sed -n 's/.*"latestVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | tail -n 1)"
+  dismissed="$(sed -n 's/.*"dismissedVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | tail -n 1)"
+  # The Node notice only trusts a state whose lastCheckedAt parses as a
+  # date; require the ISO timestamp shape the app writes.
+  case "$checked_at" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*) ;;
+    *) return 0 ;;
+  esac
   [ -n "$latest" ] || return 0
   [ "$latest" = "$dismissed" ] && return 0
   current="$(codiff_version)"
   is_newer_version "$latest" "$current" || return 0
+  # The backticks are literal command quoting, not a missed expansion.
+  # shellcheck disable=SC2016
   printf 'A new version of Codiff is available (v%s -> v%s). Run `codiff update` to update.\n' \
     "$current" "$latest" >&2
 }
