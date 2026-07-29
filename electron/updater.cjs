@@ -323,6 +323,12 @@ const createUpdater = ({
       return { ...setError(error instanceof Error ? error.message : String(error)) };
     }
 
+    // A newer applyLatest request is pending; let it own the apply so the
+    // freshest release wins.
+    if (applyLatestId !== applyLatestSequence) {
+      return { ...status };
+    }
+
     return checked.phase === 'available' ? applyUpdate() : checked;
   };
 
