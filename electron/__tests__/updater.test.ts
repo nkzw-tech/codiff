@@ -90,6 +90,16 @@ const writeState = async (
 
 const recentCheck = () => new Date().toISOString();
 
+const waitFor = async (condition: () => boolean) => {
+  const deadline = Date.now() + 2000;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error('Timed out waiting for condition.');
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 5));
+  }
+};
+
 test('resolveUpdateStrategy uses Squirrel on macOS and Squirrel-installed Windows', () => {
   expect(resolveUpdateStrategy({ hasSquirrelUpdateExe: false, platform: 'darwin' })).toBe(
     'squirrel',
@@ -662,6 +672,91 @@ test('a forced check clears the dismissal and resurfaces the update', async () =
     await readFile(join(directory.path, 'update-state.json'), 'utf8'),
   ) as { dismissedVersion?: string };
   expect(persisted.dismissedVersion).toBeUndefined();
+});
+
+test('a stale check completion cannot clobber a newer result', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: '2026-01-01T00:00:00.000Z',
+    latestVersion: '1.9.2',
+  });
+
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const scheduled = updater.checkForUpdates();
+  await waitFor(() => pending.length === 1);
+  const forced = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 2);
+
+  pending[1]('1.9.4');
+  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.4' });
+
+  pending[0]('1.9.3');
+  await scheduled;
+
+  expect(updater.getStatus()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    version: '1.9.4',
+  });
+
+  const persisted = JSON.parse(
+    await readFile(join(directory.path, 'update-state.json'), 'utf8'),
+  ) as { latestVersion: string };
+  expect(persisted.latestVersion).toBe('1.9.4');
+});
+
+test('a forced check keeps a dismissal made while it was in flight', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const forced = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 1);
+  updater.dismissUpdate();
+  pending[0]('1.9.4');
+  await forced;
+
+  const persisted = JSON.parse(
+    await readFile(join(directory.path, 'update-state.json'), 'utf8'),
+  ) as { dismissedVersion?: string };
+  expect(persisted.dismissedVersion).toBe('1.9.3');
 });
 
 test('applyUpdate is a no-op unless an update is available', async () => {
