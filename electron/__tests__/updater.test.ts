@@ -1304,6 +1304,52 @@ test('an older failed applyLatest defers to a newer successful one', async () =>
   expect(autoUpdater.checkForUpdatesCalls).toBe(1);
 });
 
+test('a newer applyLatest owns the apply over an older successful one', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const first = updater.applyLatest();
+  await waitFor(() => pending.length === 1);
+  const second = updater.applyLatest();
+
+  pending[0]('1.9.3');
+  await first;
+  await waitFor(() => pending.length === 2);
+  pending[1]('1.9.4');
+  const status = await second;
+
+  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'updating', version: '1.9.4' });
+  expect(updater.getStatus()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'updating',
+    version: '1.9.4',
+  });
+  expect(autoUpdater.checkForUpdatesCalls).toBe(1);
+});
+
 test('applyUpdate is a no-op unless an update is available', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
 
