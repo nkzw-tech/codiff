@@ -65,7 +65,9 @@
 /* The update pill is desktop-only chrome, so its styles live here instead of
    the shared App.css that ships to the web app. */
 :root {
-  --update-accent: rgb(92 119 197);
+  /* One step darker than the VS Code / Codex update blue so 12px white text
+     clears the WCAG AA 4.5:1 contrast ratio. */
+  --update-accent: rgb(89 115 191);
   --update-accent-contrast: #ffffff;
 }
 
@@ -90,7 +92,7 @@
 }
 
 .update-pill.codiff-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--update-accent) 88%, #ffffff);
+  background: color-mix(in srgb, var(--update-accent) 90%, #000000);
 }
 
 .update-pill.codiff-button:disabled {
@@ -109,7 +111,7 @@
 }
 
 .update-pill.codiff-button.error:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 74%, #ffffff);
+  background: color-mix(in srgb, var(--danger) 78%, #000000);
 }
 
 .update-pill-spinner {
