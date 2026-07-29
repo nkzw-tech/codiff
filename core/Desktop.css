@@ -61,3 +61,83 @@
   height: 1px;
   margin: 3px 6px;
 }
+
+/* The update pill is desktop-only chrome, so its styles live here instead of
+   the shared App.css that ships to the web app. */
+:root {
+  --update-accent: rgb(93 120 199);
+  --update-accent-contrast: #ffffff;
+}
+
+.update-pill-anchor {
+  -webkit-app-region: no-drag;
+  border-top: 1px solid var(--sidebar-border);
+  display: flex;
+  flex: none;
+  justify-content: center;
+  padding: 8px;
+  position: relative;
+}
+
+/* The pill is a regular .codiff-button; these rules only give it the accent
+   fill, so the chained selectors must outrank the shared button defaults. */
+.update-pill.codiff-button {
+  animation: update-pill-in 360ms cubic-bezier(0.2, 0.82, 0.22, 1) both;
+  background: var(--update-accent);
+  border-color: color-mix(in srgb, var(--update-accent) 60%, var(--text) 14%);
+  color: var(--update-accent-contrast);
+  max-width: 100%;
+}
+
+.update-pill.codiff-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--update-accent) 88%, #ffffff);
+}
+
+.update-pill.codiff-button:disabled {
+  cursor: default;
+}
+
+.update-pill.codiff-button.available {
+  animation:
+    update-pill-in 360ms cubic-bezier(0.2, 0.82, 0.22, 1) both,
+    update-pill-glow 2.6s ease-in-out 460ms 3;
+}
+
+.update-pill.codiff-button.error {
+  background: color-mix(in srgb, var(--danger) 82%, var(--text) 6%);
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--text) 14%);
+}
+
+.update-pill.codiff-button.error:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 74%, #ffffff);
+}
+
+.update-pill-spinner {
+  animation: update-pill-spin 900ms linear infinite;
+}
+
+@keyframes update-pill-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes update-pill-glow {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--update-accent) 16%, transparent);
+  }
+}
+
+@keyframes update-pill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-pill,
+  .update-pill-spinner {
+    animation: none;
+  }
+}
