@@ -417,6 +417,7 @@ export type WalkthroughContext = {
 
 export type CodiffLaunchOptions = {
   agentBackend?: 'codex' | 'claude' | 'opencode' | 'pi';
+  applyUpdate?: boolean;
   claudeSessionId?: string;
   codexSessionId?: string;
   opencodeSessionId?: string;

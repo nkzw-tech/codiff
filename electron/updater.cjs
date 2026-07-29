@@ -301,6 +301,11 @@ const createUpdater = ({
     };
   };
 
+  const applyLatest = async () => {
+    const checked = await checkForUpdates({ force: true });
+    return checked.phase === 'available' ? applyUpdate() : checked;
+  };
+
   const dismissUpdate = () => {
     actionGeneration++;
     const state = readUpdateState(configDir);
@@ -312,6 +317,7 @@ const createUpdater = ({
   };
 
   return {
+    applyLatest,
     applyUpdate,
     checkForUpdates,
     dismissUpdate,
