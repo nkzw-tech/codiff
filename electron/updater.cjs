@@ -190,10 +190,22 @@ const createUpdater = ({
         configDir,
       );
     } catch (error) {
+      // A newer check already completed; its outcome stands and a stale
+      // failure must not surface an error for it.
+      if (checkId !== checkSequence) {
+        return { ...status };
+      }
+
       logError(`Update check failed: ${error instanceof Error ? error.message : String(error)}`);
       if (force) {
         throw error;
       }
+    }
+
+    // An apply started while the check was in flight; do not yank its phase
+    // out from under the auto-updater events or the handed-off installer.
+    if (status.phase === 'updating' || status.phase === 'installerReady') {
+      return { ...status };
     }
 
     return { ...setStatus(statusFromState()) };
