@@ -59,6 +59,15 @@ test('shows a single Update button when an update is available', async () => {
   expect(view.container.querySelector('.update-popover')).toBeNull();
 });
 
+test('does not promise a restart the download strategy cannot deliver', async () => {
+  await using view = await renderPill(
+    <UpdatePill onApply={noop} status={status({ phase: 'available', version: '1.9.3' })} />,
+  );
+
+  expect(pill(view)?.title).toContain('Downloads and installs');
+  expect(pill(view)?.title).not.toContain('restarts');
+});
+
 test('applies the update with a single click', async () => {
   let applied = 0;
   await using view = await renderPill(
