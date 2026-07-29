@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -110,14 +110,6 @@ const buildWalkthroughGuide = () => {
 const runCodiffUpdate = () => {
   const appBundleMatch = process.platform === 'darwin' ? root.match(/^(.*\.app)\//) : null;
   return runUpdateCommand({
-    brewOwnsCask: () => {
-      try {
-        execFileSync('brew', ['list', '--cask', 'codiff'], { stdio: 'ignore' });
-        return true;
-      } catch {
-        return false;
-      }
-    },
     currentVersion: packageJson.version,
     isSourceCheckout: existsSync(resolve(root, '.git')),
     log: (line) => process.stdout.write(`${line}\n`),
@@ -129,15 +121,6 @@ const runCodiffUpdate = () => {
           }).unref();
         }
       : null,
-    runBrewUpgrade: () => {
-      try {
-        execFileSync('brew', ['upgrade', '--cask', 'codiff'], { stdio: 'inherit' });
-        return 0;
-      } catch (error) {
-        const status = /** @type {{ status?: unknown }} */ (error)?.status;
-        return typeof status === 'number' ? status : 1;
-      }
-    },
   });
 };
 

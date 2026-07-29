@@ -10,30 +10,24 @@ const {
 /**
  * Decide what `codiff update` should do for this install.
  *
+ * Homebrew-owned installs are not special-cased: the cask is marked
+ * auto_updates, so the app updating itself in place is the supported path and
+ * stays ahead of a tap that may lag behind the newest release.
+ *
  * @param {{
- *   brewOwnsCask?: () => boolean;
  *   currentVersion: string;
  *   isSourceCheckout: boolean;
  *   latestVersion: string;
  * }} options
- * @returns {{ kind: 'up-to-date' } | { kind: 'brew-upgrade' | 'open-app' | 'source-checkout'; version: string }}
+ * @returns {{ kind: 'up-to-date' } | { kind: 'open-app' | 'source-checkout'; version: string }}
  */
-export function resolveUpdateAction({
-  brewOwnsCask,
-  currentVersion,
-  isSourceCheckout,
-  latestVersion,
-}) {
+export function resolveUpdateAction({ currentVersion, isSourceCheckout, latestVersion }) {
   if (!isNewerVersion(latestVersion, currentVersion)) {
     return { kind: 'up-to-date' };
   }
 
-  if (isSourceCheckout) {
-    return { kind: 'source-checkout', version: latestVersion };
-  }
-
-  return /** @type {() => boolean} */ (brewOwnsCask)()
-    ? { kind: 'brew-upgrade', version: latestVersion }
+  return isSourceCheckout
+    ? { kind: 'source-checkout', version: latestVersion }
     : { kind: 'open-app', version: latestVersion };
 }
 
@@ -41,24 +35,20 @@ export function resolveUpdateAction({
  * Check GitHub Releases and perform the platform-appropriate update.
  *
  * @param {{
- *   brewOwnsCask?: () => boolean;
  *   currentVersion: string;
  *   isSourceCheckout: boolean;
  *   log: (line: string) => void;
  *   openApp: (() => void) | null;
  *   releaseUrl?: string;
- *   runBrewUpgrade?: () => number;
  * }} options
  * @returns {Promise<number>}
  */
 export async function runUpdateCommand({
-  brewOwnsCask,
   currentVersion,
   isSourceCheckout,
   log,
   openApp,
   releaseUrl,
-  runBrewUpgrade,
 }) {
   let latestVersion;
   try {
@@ -72,12 +62,7 @@ export async function runUpdateCommand({
     return 1;
   }
 
-  const action = resolveUpdateAction({
-    brewOwnsCask,
-    currentVersion,
-    isSourceCheckout,
-    latestVersion,
-  });
+  const action = resolveUpdateAction({ currentVersion, isSourceCheckout, latestVersion });
 
   switch (action.kind) {
     case 'up-to-date':
@@ -88,9 +73,6 @@ export async function runUpdateCommand({
         `Codiff v${action.version} is available, but this is a source checkout. Run git pull and rebuild instead.`,
       );
       return 0;
-    case 'brew-upgrade':
-      log(`Updating Codiff v${currentVersion} -> v${action.version} via Homebrew…`);
-      return /** @type {() => number} */ (runBrewUpgrade)();
     case 'open-app':
       if (openApp) {
         log(`Opening Codiff to install v${action.version}…`);
