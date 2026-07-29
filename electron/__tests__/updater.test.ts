@@ -834,6 +834,54 @@ test('applyLatest supersedes a pending manual hand-off', async () => {
   expect(updater.getStatus().version).toBe('1.9.4');
 });
 
+test('a dismissal during a queued manual hand-off wins', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(releaseJson('1.9.4'));
+  });
+
+  const openedUrls: Array<string> = [];
+  let rejectFirstOpen: (error: Error) => void = () => {};
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: (url) => {
+      openedUrls.push(url);
+      return openedUrls.length === 1
+        ? new Promise((_resolveOpened, rejectOpened) => {
+            rejectFirstOpen = rejectOpened;
+          })
+        : Promise.reject(new Error('No browser is available.'));
+    },
+    platform: 'win32',
+    releaseUrl: `${origin}/`,
+    strategy: 'manual',
+  });
+
+  const pending = updater.applyUpdate();
+  const latest = updater.applyLatest();
+  await waitFor(() => updater.getStatus().version === '1.9.4');
+
+  // The dismissal arrives while the 1.9.4 hand-off is still queued behind the
+  // hanging 1.9.3 open; it must win over both once they settle.
+  updater.dismissUpdate();
+  rejectFirstOpen(new Error('No browser is available.'));
+
+  const [first, second] = await Promise.all([pending, latest]);
+
+  expect(openedUrls).toEqual(['https://github.com/nkzw-tech/codiff/releases/tag/v1.9.3']);
+  expect(first.phase).toBe('idle');
+  expect(second.phase).toBe('idle');
+  expect(updater.getStatus().phase).toBe('idle');
+});
+
 test('a dismissal wins over a pending manual failure', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await writeState(directory.path, {
