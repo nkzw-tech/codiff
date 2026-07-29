@@ -1130,39 +1130,37 @@ a.review-top-bar-source:focus-visible {
 
 .update-pill-anchor {
   -webkit-app-region: no-drag;
-  bottom: 16px;
-  left: 16px;
-  position: fixed;
-  z-index: 23;
+  border-top: 1px solid var(--sidebar-border);
+  flex: none;
+  padding: 8px;
+  position: relative;
 }
 
 .update-pill {
   align-items: center;
   animation: update-pill-in 360ms cubic-bezier(0.2, 0.82, 0.22, 1) both;
-  backdrop-filter: blur(22px) saturate(1.35);
-  background: color-mix(in srgb, var(--update-accent) 14%, var(--code-bg));
-  border: 1px solid color-mix(in srgb, var(--update-accent) 42%, transparent);
-  border-radius: 15px;
-  box-shadow: 0 12px 34px -18px color-mix(in srgb, var(--update-accent) 70%, rgb(0 0 0));
+  background: color-mix(in srgb, var(--update-accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--update-accent) 36%, transparent);
+  border-radius: 10px;
   color: color-mix(in srgb, var(--update-accent) 68%, var(--text));
   corner-shape: squircle;
   cursor: pointer;
-  display: inline-flex;
+  display: flex;
   font: inherit;
   font-size: 12.5px;
   font-weight: 700;
   gap: 6px;
   line-height: 1;
-  padding: 8px 12px;
+  padding: 7px 10px;
   transition:
     background 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+    border-color 160ms ease;
+  width: 100%;
 }
 
 .update-pill:hover {
-  background: color-mix(in srgb, var(--update-accent) 22%, var(--code-bg));
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--update-accent) 21%, transparent);
+  border-color: color-mix(in srgb, var(--update-accent) 52%, transparent);
 }
 
 .update-pill.available {
@@ -1172,9 +1170,8 @@ a.review-top-bar-source:focus-visible {
 }
 
 .update-pill.error {
-  background: color-mix(in srgb, var(--danger) 14%, var(--code-bg));
-  border-color: color-mix(in srgb, var(--danger) 42%, transparent);
-  box-shadow: 0 12px 34px -18px color-mix(in srgb, var(--danger) 70%, rgb(0 0 0));
+  background: color-mix(in srgb, var(--danger) 13%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 36%, transparent);
   color: color-mix(in srgb, var(--danger) 62%, var(--text));
 }
 
@@ -1185,15 +1182,13 @@ a.review-top-bar-source:focus-visible {
 @keyframes update-pill-in {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.96);
+    transform: translateY(8px);
   }
 }
 
 @keyframes update-pill-glow {
   50% {
-    box-shadow:
-      0 12px 34px -18px color-mix(in srgb, var(--update-accent) 70%, rgb(0 0 0)),
-      0 0 0 6px color-mix(in srgb, var(--update-accent) 18%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--update-accent) 16%, transparent);
   }
 }
 
@@ -1209,7 +1204,7 @@ a.review-top-bar-source:focus-visible {
   background: color-mix(in srgb, var(--code-bg) 82%, transparent);
   border: 1px solid var(--file-border);
   border-radius: 14px;
-  bottom: calc(100% + 10px);
+  bottom: calc(100% + 8px);
   box-shadow: 0 18px 58px -30px rgb(0 0 0 / 0.7);
   color: var(--text);
   corner-shape: squircle;
@@ -1217,11 +1212,12 @@ a.review-top-bar-source:focus-visible {
   flex-direction: column;
   font-size: 13px;
   gap: 10px;
-  left: 0;
+  left: 8px;
   line-height: 1.4;
   padding: 12px 14px;
   position: absolute;
-  width: min(320px, calc(100vw - 32px));
+  width: min(320px, calc(100cqw - 16px));
+  z-index: 6;
 }
 
 @keyframes update-popover-in {

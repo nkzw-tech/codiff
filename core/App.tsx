@@ -1861,20 +1861,6 @@ export default function App() {
         onDismiss={() => setWalkthroughFileError(null)}
         reason={walkthroughFileError?.reason ?? null}
       />
-      {updateStatus ? (
-        <UpdatePill
-          onApply={() => {
-            window.codiff.applyUpdate().then(setUpdateStatus, () => {});
-          }}
-          onDismiss={() => {
-            window.codiff.dismissUpdate().then(setUpdateStatus, () => {});
-          }}
-          onOpenReleasePage={() => {
-            window.codiff.openReleasePage().catch(() => {});
-          }}
-          status={updateStatus}
-        />
-      ) : null}
       <DiffSearchPanel
         activeIndex={effectiveActiveDiffSearchMatchIndex}
         focusRequest={diffSearchFocusRequest}
@@ -1957,6 +1943,20 @@ export default function App() {
           walkthroughLoading={walkthroughLoading}
           walkthroughProgress={walkthroughProgress}
         />
+        {updateStatus ? (
+          <UpdatePill
+            onApply={() => {
+              window.codiff.applyUpdate().then(setUpdateStatus, () => {});
+            }}
+            onDismiss={() => {
+              window.codiff.dismissUpdate().then(setUpdateStatus, () => {});
+            }}
+            onOpenReleasePage={() => {
+              window.codiff.openReleasePage().catch(() => {});
+            }}
+            status={updateStatus}
+          />
+        ) : null}
       </aside>
       <div aria-hidden className="sidebar-resizer" onPointerDown={resizeSidebar} />
       <main className="review">
