@@ -43,7 +43,7 @@
     --text: #111111;
     --tree-selection-bg: #c2e8ff50;
     --tree-selection-focus: #3d87f5;
-    --update-accent: rgb(8 145 178);
+    --update-accent: rgb(14 116 144);
     --update-accent-contrast: #ffffff;
     --viewed: rgb(31 122 68);
     --font-mono: var(--codiff-font-mono);
@@ -105,7 +105,7 @@
     --text: #111111;
     --tree-selection-bg: #c2e8ff50;
     --tree-selection-focus: #3d87f5;
-    --update-accent: rgb(8 145 178);
+    --update-accent: rgb(14 116 144);
     --update-accent-contrast: #ffffff;
     --viewed: rgb(31 122 68);
     color-scheme: light;
