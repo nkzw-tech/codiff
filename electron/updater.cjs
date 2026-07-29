@@ -367,8 +367,9 @@ const createUpdater = ({
         version ? releasePageUrl(version) : 'https://github.com/nkzw-tech/codiff/releases',
       );
       // Nothing was installed; the update stays available until the user
-      // replaces the app themselves.
-      return { ...status };
+      // replaces the app themselves. Recomputing from state also clears a
+      // previous open failure once a retry reaches the release page.
+      return setStatus(statusFromState());
     } catch (error) {
       return setError(error instanceof Error ? error.message : String(error), version);
     }
