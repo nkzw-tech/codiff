@@ -164,11 +164,15 @@ const createUpdater = ({
 
     try {
       const release = await fetchLatestRelease(releaseUrl);
+      // Re-read after the network round trip: a dismissal may have been
+      // persisted while the request was in flight. A forced check is explicit
+      // user intent to see updates again, so it drops the dismissal.
+      const dismissedVersion = force ? undefined : readUpdateState(configDir)?.dismissedVersion;
       writeUpdateState(
         {
           lastCheckedAt: new Date().toISOString(),
           latestVersion: release.version,
-          ...(state?.dismissedVersion ? { dismissedVersion: state.dismissedVersion } : {}),
+          ...(dismissedVersion ? { dismissedVersion } : {}),
         },
         configDir,
       );
@@ -201,6 +205,9 @@ const createUpdater = ({
 
   const applyDownloadUpdate = async () => {
     const version = status.version;
+    // Enter the updating phase before any await so a concurrent applyUpdate
+    // call sees it and becomes a no-op instead of downloading twice.
+    setStatus({ currentVersion, phase: 'updating', version });
 
     try {
       const release = await fetchLatestRelease(releaseUrl);
@@ -210,8 +217,6 @@ const createUpdater = ({
         return setError('No download is available for this platform.', version);
       }
 
-      setStatus({ currentVersion, phase: 'updating', version: release.version });
-
       const response = await fetch(asset.url);
       if (!response.ok) {
         throw new Error(`Downloading the update failed with status ${response.status}.`);
@@ -219,7 +224,10 @@ const createUpdater = ({
 
       const path = join(downloadDirectory, asset.name);
       writeFileSync(path, Buffer.from(await response.arrayBuffer()));
-      await openPath(path);
+      const openError = await openPath(path);
+      if (openError) {
+        throw new Error(openError);
+      }
 
       return setStatus({ currentVersion, phase: 'installerReady', version: release.version });
     } catch (error) {
