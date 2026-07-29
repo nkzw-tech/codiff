@@ -118,6 +118,10 @@ import {
   buildSourceDescriptionModel,
   type SourceDescriptionAuthor,
 } from '../../lib/source-description.ts';
+import {
+  getThreadAssessmentDisplay,
+  type ThreadAssessmentComponent,
+} from '../../lib/walkthrough-assessment-display.ts';
 import { applyWalkthroughRegionHighlights } from '../../lib/walkthrough-region-highlights.ts';
 import type {
   ChangedFile,
@@ -127,6 +131,7 @@ import type {
   DiffImageContentResult,
   DiffSection,
   GitIdentity,
+  LiveReviewState,
   PullRequestCodeQualityFinding,
   PullRequestExistingReviewComment,
   ReviewContextResolver,
@@ -1912,6 +1917,14 @@ const groupReviewCommentsByThread = (comments: ReadonlyArray<ReviewComment>) => 
 
 const noopResolveThread = () => {};
 
+const assessmentDispositionLabel = {
+  addressed: 'Addressed',
+  'no-longer-applicable': 'No longer applicable',
+  'partially-addressed': 'Partially addressed',
+  'still-applies': 'Still applies',
+  unclear: 'Unclear',
+} as const;
+
 // The CodeView header host is measured by a ResizeObserver, so no manual
 // layout pass is needed when the description body settles.
 const noopLayoutReady = () => {};
@@ -1919,11 +1932,13 @@ const noopLayoutReady = () => {};
 function ReviewCommentThreadGroup({
   agentId,
   agentLabel,
+  assessmentComponent,
   comments,
   focusCommentId,
   focusEditorRef,
   identity,
   keymap,
+  liveReviewState,
   onAskCodex,
   onCommentBlur,
   onCommentDraftChange,
@@ -1938,11 +1953,13 @@ function ReviewCommentThreadGroup({
 }: {
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
+  assessmentComponent?: ThreadAssessmentComponent;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
   focusEditorRef: (node: MarkdownEditorHandle | null) => void;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
+  liveReviewState?: LiveReviewState;
   onAskCodex?: (comment: ReviewComment) => void;
   onCommentBlur: (comment: ReviewComment, body: string) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
@@ -1977,6 +1994,9 @@ function ReviewCommentThreadGroup({
   const hasThreadActions = canReplyToThread || canResolveThread;
   const resolving = resolveState.threadId === threadId && resolveState.submitting;
   const resolveError = resolveState.threadId === threadId ? resolveState.error : null;
+  const assessmentDisplay = getThreadAssessmentDisplay(assessmentComponent, liveReviewState);
+  const assessmentPending =
+    threadId != null && liveReviewState?.pendingAssessmentThreadIds?.has(threadId) === true;
 
   const handleReply = useCallback(() => {
     if (!threadId || !lastComment) {
@@ -2031,6 +2051,39 @@ function ReviewCommentThreadGroup({
           />
         );
       })}
+      {assessmentDisplay || assessmentPending ? (
+        <div
+          className={`review-comment-assessment${assessmentPending ? ' pending' : ''}`}
+          role="status"
+        >
+          <div className="review-comment-assessment-header">
+            <strong>{assessmentPending ? 'Assessing' : 'Assessment'}</strong>
+            {assessmentDisplay?.component.outcome.status === 'ready' ? (
+              <span className="review-comment-assessment-disposition">
+                {assessmentDispositionLabel[assessmentDisplay.component.outcome.result.disposition]}
+              </span>
+            ) : null}
+            {assessmentDisplay?.currentStateLabel ? (
+              <span className="review-comment-assessment-current-state">
+                {assessmentDisplay.currentStateLabel}
+              </span>
+            ) : null}
+          </div>
+          {assessmentDisplay?.component.outcome.status === 'ready' ? (
+            <ReadOnlyMarkdownView
+              ariaLabel="Review comment assessment"
+              className="review-comment-assessment-markdown"
+              contentClassName="review-comment-assessment-content"
+              value={assessmentDisplay.component.outcome.result.explanation}
+              variant="embedded"
+            />
+          ) : assessmentDisplay?.component.outcome.status === 'failed' ? (
+            <div className="review-comment-assessment-error">
+              Failed to assess comment: {assessmentDisplay.component.outcome.error}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {hasThreadActions ? (
         <div className="review-comment-thread-footer">
           {resolveError ? (
@@ -2063,11 +2116,13 @@ function ReviewAnnotation({
   agentId,
   agentLabel,
   annotation,
+  assessmentComponents,
   comments,
   focusCommentId,
   focusCommentRequest,
   identity,
   keymap,
+  liveReviewState,
   onAskCodex,
   onCommentBlur,
   onCommentDraftChange,
@@ -2084,11 +2139,13 @@ function ReviewAnnotation({
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
   annotation: DiffLineAnnotation<ReviewCommentAnnotationMetadata>;
+  assessmentComponents?: ReadonlyMap<string, ThreadAssessmentComponent>;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
   focusCommentRequest: number;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
+  liveReviewState?: LiveReviewState;
   onAskCodex?: (comment: ReviewComment) => void;
   onCommentBlur: (comment: ReviewComment, body: string) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
@@ -2155,12 +2212,16 @@ function ReviewAnnotation({
         <ReviewCommentThreadGroup
           agentId={agentId}
           agentLabel={agentLabel}
+          assessmentComponent={assessmentComponents?.get(
+            group.comments[0]?.threadId ?? group.comments[0]?.id ?? '',
+          )}
           comments={group.comments}
           focusCommentId={focusCommentId}
           focusEditorRef={setFocusEditorRef}
           identity={identity}
           key={group.key}
           keymap={keymap}
+          liveReviewState={liveReviewState}
           onAskCodex={onAskCodex}
           onCommentBlur={onCommentBlur}
           onCommentDraftChange={onCommentDraftChange}
@@ -2578,6 +2639,7 @@ export function ReviewCodeView({
   agentId,
   agentLabel,
   allowViewedToggle = false,
+  assessmentComponents,
   blocks,
   bottomInset = codeViewLayout.paddingBottom,
   codeQualityFindings = [],
@@ -2598,6 +2660,7 @@ export function ReviewCodeView({
   isReadOnly = false,
   itemVersionByKey,
   keymap,
+  liveReviewState,
   loadingSectionIds,
   onActiveBlockChange,
   onAskCodex,
@@ -2642,6 +2705,7 @@ export function ReviewCodeView({
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
   allowViewedToggle?: boolean;
+  assessmentComponents?: ReadonlyMap<string, ThreadAssessmentComponent>;
   blocks?: ReadonlyArray<ReviewDiffBlock>;
   bottomInset?: number;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
@@ -2662,6 +2726,7 @@ export function ReviewCodeView({
   isReadOnly?: boolean;
   itemVersionByKey: Readonly<Record<string, number>>;
   keymap: CodiffKeymap;
+  liveReviewState?: LiveReviewState;
   loadingSectionIds: ReadonlySet<string>;
   onActiveBlockChange?: (blockId: string) => void;
   onAskCodex?: (comment: ReviewComment) => void;
@@ -4350,11 +4415,13 @@ export function ReviewCodeView({
           agentId={agentId}
           agentLabel={agentLabel}
           annotation={annotation as DiffLineAnnotation<ReviewCommentAnnotationMetadata>}
+          assessmentComponents={assessmentComponents}
           comments={renderComments}
           focusCommentId={focusCommentId}
           focusCommentRequest={focusCommentRequest}
           identity={gitIdentity}
           keymap={keymap}
+          liveReviewState={liveReviewState}
           onAskCodex={onAskCodex}
           onCommentBlur={blurComment}
           onCommentDraftChange={onCommentDraftChange}
@@ -4373,6 +4440,7 @@ export function ReviewCodeView({
     [
       agentId,
       agentLabel,
+      assessmentComponents,
       blurComment,
       deleteComment,
       focusCommentId,
@@ -4381,6 +4449,7 @@ export function ReviewCodeView({
       gitIdentity,
       itemMetadata,
       keymap,
+      liveReviewState,
       markMarkdownPreviewLayoutReady,
       markImagePreviewLayoutReady,
       markCommentLayoutChanged,

@@ -12,6 +12,7 @@ import {
 } from '../lib/review-identity.ts';
 import { applyWalkthroughRegionHighlights } from '../lib/walkthrough-region-highlights.ts';
 import type {
+  AssessmentComponent,
   ChangedFile,
   DiffSection,
   GitSha,
@@ -28,6 +29,21 @@ import {
 } from './helpers/review-code-view.tsx';
 
 const gitSha = (value: string) => value as GitSha;
+const createAssessment = (
+  threadId: string,
+  outcome: AssessmentComponent['outcome'],
+): AssessmentComponent => ({
+  capturedPresentationState: { threadState: 'open' },
+  identity: { codeScope: { type: 'single-diff' }, threadId },
+  input: {
+    codeScope: { type: 'single-diff' },
+    thread: {
+      comments: [{ author: { login: 'reviewer' }, body: 'Question', id: threadId }],
+      id: threadId,
+    },
+  },
+  outcome,
+});
 
 const markdownEditorMock = vi.hoisted(() => ({
   flush: vi.fn<() => Promise<boolean>>(async () => true),
@@ -588,6 +604,103 @@ test('walkthrough region navigation scrolls to the exact diff range', async () =
         }),
       );
     });
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('renders ready, failed, and pending assessments beside matching threads', async () => {
+  const file = createChangedFileWithPatch(
+    'src/assessment.ts',
+    'diff --git a/src/assessment.ts b/src/assessment.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+  const comments = [
+    {
+      author: { login: 'reviewer' },
+      body: 'Does this still apply?',
+      destination: 'provider' as const,
+      filePath: file.path,
+      id: 'comment-ready',
+      isReadOnly: true,
+      kind: 'submitted-comment' as const,
+      lineNumber: 1,
+      resolvedSectionId: file.sections[0]!.id,
+      side: 'additions' as const,
+      threadId: 'thread-ready',
+    },
+    {
+      author: { login: 'reviewer' },
+      body: 'Check the failure path.',
+      destination: 'provider' as const,
+      filePath: file.path,
+      id: 'comment-failed',
+      isReadOnly: true,
+      kind: 'submitted-comment' as const,
+      lineNumber: 1,
+      resolvedSectionId: file.sections[0]!.id,
+      side: 'additions' as const,
+      threadId: 'thread-failed',
+    },
+    {
+      author: { login: 'reviewer' },
+      body: 'Check this while assessment runs.',
+      destination: 'provider' as const,
+      filePath: file.path,
+      id: 'comment-pending',
+      isReadOnly: true,
+      kind: 'submitted-comment' as const,
+      lineNumber: 1,
+      resolvedSectionId: file.sections[0]!.id,
+      side: 'additions' as const,
+      threadId: 'thread-pending',
+    },
+  ] satisfies ReadonlyArray<ReviewComment>;
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      assessmentComponents={
+        new Map([
+          [
+            'thread-ready',
+            createAssessment('thread-ready', {
+              generationMetadata: {
+                agent: 'codex',
+                generatedAt: '2026-01-01T00:00:00.000Z',
+                model: 'gpt-5',
+                profile: {
+                  agent: 'codex',
+                  authoringVersion: 'walkthrough-assessment-1',
+                  modelCandidates: ['gpt-5'],
+                  settings: {},
+                },
+              },
+              result: { disposition: 'still-applies', explanation: 'The branch is unchanged.' },
+              status: 'ready',
+            }),
+          ],
+          [
+            'thread-failed',
+            createAssessment('thread-failed', {
+              error: 'The model timed out.',
+              status: 'failed',
+            }),
+          ],
+        ])
+      }
+      comments={comments}
+      files={[file]}
+      liveReviewState={{
+        currentThreadStateById: new Map([['thread-ready', 'resolved']]),
+        pendingAssessmentThreadIds: new Set(['thread-pending']),
+      }}
+    />,
+  );
+
+  try {
+    expect(view.container.textContent).toContain('Still applies');
+    expect(view.container.textContent).toContain('The branch is unchanged.');
+    expect(view.container.textContent).toContain('Currently resolved');
+    expect(view.container.textContent).toContain('Failed to assess comment: The model timed out.');
+    expect(view.container.textContent).toContain('Assessing');
   } finally {
     await view.cleanup();
   }

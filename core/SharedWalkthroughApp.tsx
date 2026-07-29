@@ -132,6 +132,10 @@ import {
   getSourceKey,
   supportsDiffSearchContentPreload,
 } from './lib/source.ts';
+import {
+  assessmentComponentByThreadId,
+  currentThreadStateById,
+} from './lib/walkthrough-assessment-display.ts';
 import type {
   ChangedFile,
   DiffImageContentRequest,
@@ -446,6 +450,7 @@ type ReviewSurfaceBaseProps = {
   keymap?: CodiffKeymap;
   onCommandBridgeChange?: (bridge: ReviewSurfaceCommandBridge | null) => void;
   onDeleteShare?: () => Promise<void> | void;
+  pendingAssessmentThreadIds?: ReadonlySet<string>;
   providerLabel?: string;
   repositoryUrl?: string;
   settingsBar?: ReactNode;
@@ -476,6 +481,7 @@ export function ReviewSurface({
   keymap: keymapProp,
   onCommandBridgeChange,
   onDeleteShare,
+  pendingAssessmentThreadIds,
   providerLabel = 'provider',
   repositoryUrl,
   settingsBar,
@@ -733,6 +739,17 @@ export function ReviewSurface({
         (comment) => isReviewDraft(comment) || comment.resolvedSectionId != null,
       ),
     [reviewComments],
+  );
+  const assessmentComponents = useMemo(
+    () => assessmentComponentByThreadId(sharedWalkthrough),
+    [sharedWalkthrough],
+  );
+  const liveReviewState = useMemo(
+    () => ({
+      currentThreadStateById: currentThreadStateById(visibleSnapshotReviewComments),
+      pendingAssessmentThreadIds,
+    }),
+    [pendingAssessmentThreadIds, visibleSnapshotReviewComments],
   );
   const {
     activeReviewCommentDraftRef,
@@ -1602,6 +1619,7 @@ export function ReviewSurface({
     activeSearchMatch: activeDiffSearchMatch,
     agentId: sharedWalkthrough.agent,
     agentLabel: getAgentLabel(sharedWalkthrough.agent),
+    assessmentComponents,
     codeQualityFindings: snapshot.codeQualityFindings,
     collapsed,
     comments: renderableReviewComments,
@@ -1618,6 +1636,7 @@ export function ReviewSurface({
     isReadOnly: !canComment,
     itemVersionByKey,
     keymap,
+    liveReviewState,
     loadingSectionIds: content?.loadingSectionIds ?? new Set<string>(),
     onAskCodex:
       localReviewNotes?.onAsk || providerComments?.authoring.onAsk || shareComments?.authoring.onAsk
@@ -2169,7 +2188,7 @@ export function ReviewSurface({
               <div className="empty-panel squircle">
                 {agentUnavailable ? (
                   <AgentUnavailablePanel
-                    agentLabel={getAgentLabel(snapshot.walkthrough.agent)}
+                    agentLabel={getAgentLabel(sharedWalkthrough.agent)}
                     onShowFiles={() => changeSidebarMode('tree')}
                     reason={walkthroughStatusDescription ?? undefined}
                   />

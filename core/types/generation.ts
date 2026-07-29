@@ -42,7 +42,12 @@ export type WalkthroughProgressEvent = {
 };
 
 export type NarrativeWalkthroughResult =
-  | { status: 'ready'; walkthrough: PersistedWalkthrough }
+  | {
+      cacheKey?: string;
+      pendingAssessmentThreadIds?: ReadonlyArray<string>;
+      status: 'ready';
+      walkthrough: PersistedWalkthrough;
+    }
   | {
       code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'OPENCODE_NOT_FOUND' | 'PI_NOT_FOUND';
       reason: string;

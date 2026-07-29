@@ -75,7 +75,10 @@ const renderWalkthroughController = async ({
   codiff: Partial<Window['codiff']>;
   state?: RepositoryState;
 }) => {
-  window.codiff = codiff as Window['codiff'];
+  window.codiff = {
+    onNarrativeWalkthroughUpdated: vi.fn(() => () => {}),
+    ...codiff,
+  } as Window['codiff'];
   const stateRef = { current: state };
   const stateGenerationRef = { current: 0 };
   const preferencesRef = {

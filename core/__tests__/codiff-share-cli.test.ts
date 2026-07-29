@@ -171,8 +171,9 @@ test('headless share uploads the canonical snapshot and prints its URL', async (
     version: 1,
     walkthrough: {
       narrative: {
-        content: { agent: 'codex', title: 'Example update' },
+        agent: 'codex',
         structure: 'single-diff',
+        title: 'Example update',
       },
       version: 5,
     },
@@ -458,8 +459,9 @@ exit 1
   });
   expect(body.snapshot.walkthrough).toMatchObject({
     narrative: {
-      content: { agent: 'codex', title: 'Example update' },
+      agent: 'codex',
       structure: 'single-diff',
+      title: 'Example update',
     },
     version: 5,
   });

@@ -16,6 +16,7 @@ import type {
   GitIdentity,
   NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
+  NarrativeWalkthroughUpdate,
   OpenReviewSourceKind,
   PlanHandoffStatus,
   PlanReview,
@@ -103,6 +104,9 @@ declare global {
             | { deleted: true; id: string }
             | { deleted: false; document: CodiffMarkdownDocument; id: string },
         ) => void,
+      ) => () => void;
+      onNarrativeWalkthroughUpdated: (
+        callback: (update: NarrativeWalkthroughUpdate) => void,
       ) => () => void;
       onOpenReviewSource: (callback: (kind: OpenReviewSourceKind) => void) => () => void;
       onPlanCloseRequested: (callback: () => void) => () => void;

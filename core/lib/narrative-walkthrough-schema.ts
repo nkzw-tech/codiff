@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   literal,
+  maxLength,
   minLength,
   null_,
   number,
@@ -19,6 +20,8 @@ import {
   variant,
 } from 'valibot';
 import type {
+  AssessmentCodeScope,
+  AssessmentThreadAnchor,
   ChangedFile,
   DiffRange,
   NarrativeWalkthroughV4,
@@ -336,6 +339,62 @@ const generationMetadataSchema = strictObject({
   model: string(),
   profile: generationProfileSchema,
 });
+const assessmentCodeScopeSchema = strictObject({ type: literal('single-diff') });
+const assessmentThreadAnchorSchema = strictObject({
+  filePath: string(),
+  lineNumber: optional(number()),
+  position: optional(strictObject({ range: diffRangeSchema })),
+  side: optional(picklist(['additions', 'deletions'])),
+  startLineNumber: optional(number()),
+  startSide: optional(picklist(['additions', 'deletions'])),
+});
+const assessmentInputSchema = strictObject({
+  codeScope: assessmentCodeScopeSchema,
+  thread: strictObject({
+    comments: pipe(
+      array(
+        strictObject({
+          anchor: optional(assessmentThreadAnchorSchema),
+          author: strictObject({ login: string(), name: optional(string()) }),
+          body: string(),
+          id: string(),
+          submittedAt: optional(string()),
+        }),
+      ),
+      minLength(1),
+    ),
+    id: string(),
+  }),
+});
+const assessmentIdentitySchema = strictObject({
+  codeScope: assessmentCodeScopeSchema,
+  threadId: string(),
+});
+const assessmentResultSchema = strictObject({
+  disposition: picklist([
+    'addressed',
+    'partially-addressed',
+    'still-applies',
+    'no-longer-applicable',
+    'unclear',
+  ]),
+  explanation: pipe(string(), minLength(1), maxLength(2000)),
+});
+const assessmentOutcomeSchema = variant('status', [
+  strictObject({
+    generationMetadata: generationMetadataSchema,
+    result: assessmentResultSchema,
+    status: literal('ready'),
+  }),
+  strictObject({ error: pipe(string(), minLength(1), maxLength(500)), status: literal('failed') }),
+]);
+const assessmentComponentSchema = strictObject({
+  capturedPresentationState: strictObject({ threadState: picklist(['open', 'resolved']) }),
+  identity: assessmentIdentitySchema,
+  input: assessmentInputSchema,
+  outcome: assessmentOutcomeSchema,
+});
+const assessmentCollectionSchema = strictObject({ items: array(assessmentComponentSchema) });
 const generationRequestSchema = strictObject({
   customInstructions: optional(string()),
   review: strictObject({ relation: literal('single-diff'), structure: literal('single-diff') }),
@@ -365,6 +424,7 @@ export const narrativeWalkthroughV4Schema = strictObject({
 
 /** Strict single-call V5 envelope with captured inputs and generation provenance. */
 export const walkthroughArtifactV5Schema = strictObject({
+  assessments: optional(assessmentCollectionSchema),
   capturedContext: capturedContextSchema,
   generationRequest: generationRequestSchema,
   narrative: strictObject({
@@ -389,8 +449,85 @@ export const parseNarrativeWalkthroughV4 = (value: unknown): NarrativeWalkthroug
 export const safeParseNarrativeWalkthroughV4 = (value: unknown) =>
   safeParse(narrativeWalkthroughV4Schema, value);
 
+const stableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(stableValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, stableValue(child)]),
+    );
+  }
+  return value;
+};
+
+const valuesEqual = (left: unknown, right: unknown) =>
+  JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+
+const assessmentScopeResolves = (artifact: WalkthroughArtifactV5, scope: AssessmentCodeScope) =>
+  scope.type === 'single-diff' &&
+  artifact.generationRequest.review.relation === 'single-diff' &&
+  artifact.narrative.structure === 'single-diff';
+
+const assessmentAnchorMatchesScope = (
+  artifact: WalkthroughArtifactV5,
+  anchor: AssessmentThreadAnchor,
+) =>
+  !anchor.position ||
+  artifact.capturedContext.files.some(
+    (file) =>
+      (file.path === anchor.filePath || file.oldPath === anchor.filePath) &&
+      file.sections.some(
+        (section) => section.range != null && valuesEqual(section.range, anchor.position?.range),
+      ),
+  );
+
+const validateAssessmentCollection = (artifact: WalkthroughArtifactV5) => {
+  if (!artifact.assessments) {
+    return artifact;
+  }
+  const paths = new Set(
+    artifact.capturedContext.files.flatMap((file) =>
+      file.oldPath ? [file.path, file.oldPath] : [file.path],
+    ),
+  );
+  const identities = new Set<string>();
+  for (const component of artifact.assessments.items) {
+    if (
+      component.identity.threadId !== component.input.thread.id ||
+      !valuesEqual(component.identity.codeScope, component.input.codeScope)
+    ) {
+      throw new Error('Assessment identity does not match its authoritative input.');
+    }
+    if (!assessmentScopeResolves(artifact, component.identity.codeScope)) {
+      throw new Error('Assessment code scope does not resolve against this artifact.');
+    }
+    const identity = JSON.stringify(stableValue(component.identity));
+    if (identities.has(identity)) {
+      throw new Error('Assessment identities must be unique.');
+    }
+    identities.add(identity);
+    const commentIds = new Set<string>();
+    for (const comment of component.input.thread.comments) {
+      if (commentIds.has(comment.id)) {
+        throw new Error('Assessment thread comment references must be unique.');
+      }
+      commentIds.add(comment.id);
+      if (comment.anchor && !paths.has(comment.anchor.filePath)) {
+        throw new Error('Assessment thread anchor references unknown captured code.');
+      }
+      if (comment.anchor && !assessmentAnchorMatchesScope(artifact, comment.anchor)) {
+        throw new Error('Assessment thread anchor does not match the captured single diff.');
+      }
+    }
+  }
+  return artifact;
+};
+
 export const parseWalkthroughArtifactV5 = (value: unknown): WalkthroughArtifactV5 =>
-  parse(walkthroughArtifactV5Schema, value) as WalkthroughArtifactV5;
+  validateAssessmentCollection(parse(walkthroughArtifactV5Schema, value) as WalkthroughArtifactV5);
 
 const modelFromV4 = (walkthrough: NarrativeWalkthroughV4): WalkthroughModel => {
   const { version: _version, ...narrative } = walkthrough;
@@ -415,9 +552,10 @@ export const parseWalkthroughModel = (value: unknown): WalkthroughModel => {
     return modelFromV4(persisted as NarrativeWalkthroughV4);
   }
 
-  const artifact = persisted as WalkthroughArtifactV5;
+  const artifact = validateAssessmentCollection(persisted as WalkthroughArtifactV5);
   return {
     ...artifact.narrative,
+    ...(artifact.assessments ? { assessments: artifact.assessments } : {}),
     capturedContext: artifact.capturedContext,
     generationRequest: artifact.generationRequest,
     repo: { branch: artifact.narrative.repo.branch, root: '' },

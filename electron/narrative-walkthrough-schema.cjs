@@ -229,6 +229,25 @@ const narrativeWalkthroughResponseSchema = strictResponseSchema(
   narrativeWalkthroughGenerationSchema,
 );
 
+const walkthroughAssessmentResponseSchema = {
+  additionalProperties: false,
+  properties: {
+    disposition: {
+      enum: [
+        'addressed',
+        'partially-addressed',
+        'still-applies',
+        'no-longer-applicable',
+        'unclear',
+      ],
+      type: 'string',
+    },
+    explanation: { type: 'string' },
+  },
+  required: ['disposition', 'explanation'],
+  type: 'object',
+};
+
 module.exports = {
   AGENTS,
   CHANGE_TYPES,
@@ -239,4 +258,5 @@ module.exports = {
   MAX_HUNKS_PER_WALKTHROUGH_GROUP,
   narrativeWalkthroughResponseSchema,
   narrativeWalkthroughSchema,
+  walkthroughAssessmentResponseSchema,
 };

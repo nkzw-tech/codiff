@@ -61,6 +61,9 @@ choose.
 
 - Do not provide `added`, `deleted`, `path`, `oldPath`, `status`, `anchor`, `repo`, `source`,
   `generatedAt`, `agent`, or `meta`. Codiff computes those from the live diff.
+- Do not provide review threads or assessments. Narrative authoring is thread-free; when supported,
+  Codiff schedules each applicable provider-thread assessment independently against its exact code
+  scope and stores those components beside the narrative.
 - Every changed hunk should appear at most once in either a stop or support. Codiff adds omitted
   live-diff hunks to support, but a clean document reads better.
 - Order stops by review leverage, not by file path.
