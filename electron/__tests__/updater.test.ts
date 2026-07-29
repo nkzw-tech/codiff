@@ -1216,6 +1216,46 @@ test('applyLatest surfaces a failed check as an error status', async () => {
   expect(autoUpdater.checkForUpdatesCalls).toBe(0);
 });
 
+test('a failed applyLatest check does not cancel an apply started meanwhile', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<() => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push(() => {
+      response.statusCode = 500;
+      response.end('nope');
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    log: () => {},
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const latest = updater.applyLatest();
+  await waitFor(() => pending.length === 1);
+  await updater.applyUpdate();
+  pending[0]();
+  await latest;
+
+  expect(updater.getStatus().phase).toBe('updating');
+
+  autoUpdater.emit('update-downloaded');
+  expect(autoUpdater.quitAndInstallCalls).toBe(1);
+});
+
 test('applyUpdate is a no-op unless an update is available', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
 
