@@ -4,8 +4,10 @@ import { CaretUpIcon as CaretUp } from '@phosphor-icons/react/CaretUp';
 import { ChatCircleIcon as ChatCircle } from '@phosphor-icons/react/ChatCircle';
 import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { CheckCircleIcon as CheckCircle } from '@phosphor-icons/react/CheckCircle';
+import { CircleNotchIcon as CircleNotch } from '@phosphor-icons/react/CircleNotch';
 import { PowerIcon as Power } from '@phosphor-icons/react/Power';
 import { SealQuestionIcon as SealQuestion } from '@phosphor-icons/react/SealQuestion';
+import { SparkleIcon as Sparkle } from '@phosphor-icons/react/Sparkle';
 import { WarningOctagonIcon as WarningOctagon } from '@phosphor-icons/react/WarningOctagon';
 import { XIcon as X } from '@phosphor-icons/react/X';
 import { Copy as LucideCopy } from 'lucide-react';
@@ -24,6 +26,7 @@ import type { RepositoryLoadError, ReviewComment } from '../../lib/app-types.ts'
 import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
 import type {
   ChangedFile,
+  CodiffUpdateStatus,
   PullRequestMergeOptions,
   PullRequestMergeState,
   PullRequestReviewEvent,
@@ -85,16 +88,7 @@ export function RepositoryChangeBanner({
 
 export type { CodiffUpdateStatus as UpdateStatus } from '../../types.ts';
 
-export function UpdatePill(_props: {
-  onApply: () => void;
-  onDismiss: () => void;
-  onOpenReleasePage: () => void;
-  status: import('../../types.ts').CodiffUpdateStatus;
-}) {
-  return null;
-}
-
-export function UpdateBanner({
+export function UpdatePill({
   onApply,
   onDismiss,
   onOpenReleasePage,
@@ -103,48 +97,157 @@ export function UpdateBanner({
   onApply: () => void;
   onDismiss: () => void;
   onOpenReleasePage: () => void;
-  status: import('../../types.ts').CodiffUpdateStatus;
+  status: CodiffUpdateStatus;
 }) {
-  const { message, phase, version } = status;
-  const isVisible = phase !== 'idle';
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const { currentVersion, message, phase, version } = status;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      // oxlint-disable-next-line @nkzw/no-instanceof
+      if (event.target instanceof Node && !anchorRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [open]);
+
+  if (phase === 'idle') {
+    // Close the leftover popover so it does not flash open on the next update.
+    if (open) {
+      setOpen(false);
+    }
+    return null;
+  }
 
   return (
-    <div aria-live="polite" className={`update-banner${isVisible ? ' visible' : ''}`} role="status">
-      <span className="update-banner-content">
-        {phase === 'available' ? (
-          <>
-            <span>{`Codiff ${version} is available,`}</span>
-            <button className="update-banner-action" onClick={onApply} type="button">
-              update now.
-            </button>
-          </>
-        ) : phase === 'updating' ? (
-          <span>{version ? `Updating to Codiff ${version}…` : 'Updating Codiff…'}</span>
-        ) : phase === 'installerReady' ? (
-          <span>The installer was downloaded and opened. Quit Codiff to finish updating.</span>
+    <div aria-live="polite" className="update-pill-anchor" ref={anchorRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={`update-pill ${phase === 'installerReady' ? 'installer-ready' : phase}`}
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        {phase === 'updating' ? (
+          <CircleNotch aria-hidden className="update-pill-spinner" size={14} weight="bold" />
         ) : phase === 'error' ? (
-          <>
-            <span>{`Update failed${message ? `: ${message}` : '.'}`}</span>
-            <button className="update-banner-action" onClick={onApply} type="button">
-              Try again
-            </button>
-            <span>or</span>
-            <button className="update-banner-manual" onClick={onOpenReleasePage} type="button">
-              download it manually.
-            </button>
-          </>
-        ) : null}
-      </span>
-      {phase === 'available' || phase === 'error' ? (
-        <button
-          aria-label="Dismiss update notification"
-          className="repository-change-dismiss"
-          onClick={onDismiss}
-          title="Dismiss"
-          type="button"
-        >
-          <X aria-hidden className="diff-search-icon" size={15} weight="bold" />
-        </button>
+          <WarningOctagon aria-hidden size={14} weight="bold" />
+        ) : (
+          <Sparkle aria-hidden size={14} weight="fill" />
+        )}
+        <span>
+          {phase === 'available'
+            ? 'Update available'
+            : phase === 'updating'
+              ? 'Updating…'
+              : phase === 'installerReady'
+                ? 'Quit to finish update'
+                : 'Update failed'}
+        </span>
+      </button>
+      {open ? (
+        <div aria-label="Codiff update" className="update-popover" role="dialog">
+          {phase === 'available' ? (
+            <>
+              <div className="update-popover-header">
+                <Sparkle aria-hidden className="update-popover-sparkle" size={16} weight="fill" />
+                <strong>Update available!</strong>
+              </div>
+              <div className="update-popover-meta">
+                {version ? <span>{`v${currentVersion} -> v${version}`}</span> : null}
+                <button
+                  className="update-popover-release-notes"
+                  onClick={onOpenReleasePage}
+                  type="button"
+                >
+                  Release notes
+                </button>
+              </div>
+              <div className="update-popover-actions">
+                <button className="update-popover-primary" onClick={onApply} type="button">
+                  Update now
+                </button>
+                <button
+                  className="update-popover-later"
+                  onClick={() => setOpen(false)}
+                  type="button"
+                >
+                  Later
+                </button>
+                <button className="update-popover-skip" onClick={onDismiss} type="button">
+                  Skip this version
+                </button>
+              </div>
+            </>
+          ) : phase === 'updating' ? (
+            <>
+              <div className="update-popover-header">
+                <CircleNotch
+                  aria-hidden
+                  className="update-pill-spinner update-popover-sparkle"
+                  size={16}
+                  weight="bold"
+                />
+                <strong>{version ? `Updating to Codiff ${version}…` : 'Updating Codiff…'}</strong>
+              </div>
+              <p className="update-popover-body">
+                Downloading the update, this only takes a moment.
+              </p>
+            </>
+          ) : phase === 'installerReady' ? (
+            <>
+              <div className="update-popover-header">
+                <Sparkle aria-hidden className="update-popover-sparkle" size={16} weight="fill" />
+                <strong>Almost there</strong>
+              </div>
+              <p className="update-popover-body">
+                The installer was downloaded and opened. Quit Codiff to finish updating.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="update-popover-header">
+                <WarningOctagon
+                  aria-hidden
+                  className="update-popover-danger"
+                  size={16}
+                  weight="bold"
+                />
+                <strong>Update failed</strong>
+              </div>
+              <p className="update-popover-body">
+                {message ?? 'Something went wrong while updating.'}
+              </p>
+              <div className="update-popover-actions">
+                <button className="update-popover-primary" onClick={onApply} type="button">
+                  Try again
+                </button>
+                <button className="update-popover-manual" onClick={onOpenReleasePage} type="button">
+                  Download manually
+                </button>
+                <button className="update-popover-skip" onClick={onDismiss} type="button">
+                  Dismiss
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       ) : null}
     </div>
   );

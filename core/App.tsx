@@ -18,7 +18,7 @@ import {
   RepositoryChangeBanner,
   RepositoryLoadErrorPanel,
   ReviewSourceLoading,
-  UpdateBanner,
+  UpdatePill,
   WalkthroughOutdatedBanner,
 } from './app/components/Panels.tsx';
 import { PlanEditorView } from './app/components/PlanEditorView.tsx';
@@ -1862,7 +1862,7 @@ export default function App() {
         reason={walkthroughFileError?.reason ?? null}
       />
       {updateStatus ? (
-        <UpdateBanner
+        <UpdatePill
           onApply={() => {
             window.codiff.applyUpdate().then(setUpdateStatus, () => {});
           }}
