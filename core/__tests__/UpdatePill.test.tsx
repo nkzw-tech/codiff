@@ -178,6 +178,26 @@ test('opens the release notes from the popover', async () => {
   expect(opened).toBe(1);
 });
 
+test('closes the popover through the corner close button without dismissing', async () => {
+  let dismissed = 0;
+  await using view = await renderPill(
+    <UpdatePill
+      onApply={noop}
+      onDismiss={() => dismissed++}
+      onOpenReleasePage={noop}
+      status={status({ phase: 'available', version: '1.9.3' })}
+    />,
+  );
+
+  expect(await openPopover(view)).not.toBeNull();
+  const close = view.container.querySelector<HTMLButtonElement>('.update-popover-close');
+  await act(async () => close?.click());
+
+  expect(popover(view)).toBeNull();
+  expect(pill(view)).not.toBeNull();
+  expect(dismissed).toBe(0);
+});
+
 test('closes the popover with Escape', async () => {
   await using view = await renderPill(
     <UpdatePill
