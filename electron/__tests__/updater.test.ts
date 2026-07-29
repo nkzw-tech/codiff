@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -25,7 +27,7 @@ type Updater = {
   getStatus: () => UpdateStatus;
 };
 
-type ReleaseAsset = { name: string; url: string };
+type ReleaseAsset = { digest?: string; name: string; url: string };
 
 const require = createRequire(import.meta.url);
 const { createUpdater, pickReleaseAsset, resolveUpdateStrategy } = require('../updater.cjs') as {
@@ -92,6 +94,8 @@ const writeState = async (
 ) => writeFile(join(configDir, 'update-state.json'), JSON.stringify(state));
 
 const recentCheck = () => new Date().toISOString();
+
+const sha256 = (data: string) => `sha256:${createHash('sha256').update(data).digest('hex')}`;
 
 const waitFor = async (condition: () => boolean) => {
   const deadline = Date.now() + 2000;
@@ -562,6 +566,7 @@ test('applyUpdate downloads and opens the installer for download installs', asyn
       releaseJson('1.9.3', [
         {
           browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
           name: 'codiff_1.9.3_amd64.deb',
         },
       ]),
@@ -702,7 +707,11 @@ test('concurrent applyUpdate calls download the installer only once', async () =
     response.setHeader('content-type', 'application/json');
     response.end(
       releaseJson('1.9.3', [
-        { browser_download_url: `${origin}/asset.deb`, name: 'codiff_1.9.3_amd64.deb' },
+        {
+          browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
+          name: 'codiff_1.9.3_amd64.deb',
+        },
       ]),
     );
   });
@@ -730,7 +739,58 @@ test('concurrent applyUpdate calls download the installer only once', async () =
   expect(opened.length).toBe(1);
 });
 
-test('applyUpdate reports an error when the installer cannot be opened', async () => {
+test('applyUpdate refuses an installer that fails its integrity check', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await using downloads = await createTemporaryDirectory('codiff-downloads-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const { disposable: _server, origin } = await startReleaseServer((request, response) => {
+    if (request.url === '/asset.deb') {
+      response.end('tampered-bytes');
+      return;
+    }
+
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      releaseJson('1.9.3', [
+        {
+          browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
+          name: 'codiff_1.9.3_amd64.deb',
+        },
+      ]),
+    );
+  });
+
+  const opened: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    downloadDirectory: downloads.path,
+    isPackaged: true,
+    linuxFlavor: 'deb',
+    openPath: async (path) => {
+      opened.push(path);
+      return '';
+    },
+    platform: 'linux',
+    releaseUrl: `${origin}/`,
+    strategy: 'download',
+  });
+
+  const status = await updater.applyUpdate();
+
+  expect(status.phase).toBe('error');
+  expect(status.message).toContain('integrity check');
+  expect(opened).toEqual([]);
+  expect(existsSync(join(downloads.path, 'codiff_1.9.3_amd64.deb'))).toBe(false);
+});
+
+test('applyUpdate refuses an installer without a published checksum', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await using downloads = await createTemporaryDirectory('codiff-downloads-');
   await writeState(directory.path, {
@@ -748,6 +808,56 @@ test('applyUpdate reports an error when the installer cannot be opened', async (
     response.end(
       releaseJson('1.9.3', [
         { browser_download_url: `${origin}/asset.deb`, name: 'codiff_1.9.3_amd64.deb' },
+      ]),
+    );
+  });
+
+  const opened: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    downloadDirectory: downloads.path,
+    isPackaged: true,
+    linuxFlavor: 'deb',
+    openPath: async (path) => {
+      opened.push(path);
+      return '';
+    },
+    platform: 'linux',
+    releaseUrl: `${origin}/`,
+    strategy: 'download',
+  });
+
+  const status = await updater.applyUpdate();
+
+  expect(status.phase).toBe('error');
+  expect(status.message).toContain('checksum');
+  expect(opened).toEqual([]);
+});
+
+test('applyUpdate reports an error when the installer cannot be opened', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await using downloads = await createTemporaryDirectory('codiff-downloads-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const { disposable: _server, origin } = await startReleaseServer((request, response) => {
+    if (request.url === '/asset.deb') {
+      response.end('deb-bytes');
+      return;
+    }
+
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      releaseJson('1.9.3', [
+        {
+          browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
+          name: 'codiff_1.9.3_amd64.deb',
+        },
       ]),
     );
   });
@@ -1267,7 +1377,11 @@ test('checks leave a handed-off installer alone until relaunch', async () => {
     response.setHeader('content-type', 'application/json');
     response.end(
       releaseJson('1.9.3', [
-        { browser_download_url: `${origin}/asset.deb`, name: 'codiff_1.9.3_amd64.deb' },
+        {
+          browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
+          name: 'codiff_1.9.3_amd64.deb',
+        },
       ]),
     );
   });

@@ -197,6 +197,7 @@ test('fetchLatestRelease parses the release and sends a User-Agent', async () =>
           {
             browser_download_url:
               'https://github.com/nkzw-tech/codiff/releases/download/v1.9.3/Codiff-darwin-arm64-1.9.3.zip',
+            digest: 'sha256:4db4acfef44780957e2801700008c94399f57d84f7971a948a3e2851c1366175',
             name: 'Codiff-darwin-arm64-1.9.3.zip',
           },
         ],
@@ -212,6 +213,7 @@ test('fetchLatestRelease parses the release and sends a User-Agent', async () =>
   expect(release.version).toBe('1.9.3');
   expect(release.assets).toEqual([
     {
+      digest: 'sha256:4db4acfef44780957e2801700008c94399f57d84f7971a948a3e2851c1366175',
       name: 'Codiff-darwin-arm64-1.9.3.zip',
       url: 'https://github.com/nkzw-tech/codiff/releases/download/v1.9.3/Codiff-darwin-arm64-1.9.3.zip',
     },
