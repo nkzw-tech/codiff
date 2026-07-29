@@ -107,7 +107,9 @@ export function UpdatePill({
       ? 'Downloads the update and restarts the app.'
       : strategy === 'download'
         ? 'Downloads and opens the update. Quit Codiff to finish installing.'
-        : 'Downloads the update.';
+        : strategy === 'manual'
+          ? 'Opens the download page for the new version.'
+          : 'Downloads the update.';
   const title =
     phase === 'available'
       ? `Update Codiff${version ? ` v${currentVersion} -> v${version}` : ''}. ${applyEffect}`

@@ -6,6 +6,7 @@ const {
   fetchLatestRelease,
   getAvailableUpdate,
   readUpdateState,
+  releasePageUrl,
   shouldCheckForUpdates,
   updateFeedUrl,
   writeUpdateState,
@@ -15,11 +16,12 @@ const {
  * @typedef {import('./update-check.cjs').UpdateState} UpdateState
  * @typedef {{ name: string; url: string }} ReleaseAsset
  * @typedef {'available' | 'error' | 'idle' | 'installerReady' | 'updating'} UpdatePhase
+ * @typedef {'download' | 'manual' | 'squirrel'} UpdateStrategy
  * @typedef {{
  *   currentVersion: string;
  *   message?: string;
  *   phase: UpdatePhase;
- *   strategy?: 'download' | 'squirrel';
+ *   strategy?: UpdateStrategy;
  *   version?: string;
  * }} UpdateStatus
  * @typedef {{
@@ -32,10 +34,16 @@ const {
 
 /**
  * @param {{ hasSquirrelUpdateExe: boolean; platform: string }} options
- * @returns {'download' | 'squirrel'}
+ * @returns {UpdateStrategy}
  */
 const resolveUpdateStrategy = ({ hasSquirrelUpdateExe, platform }) =>
-  platform === 'darwin' || (platform === 'win32' && hasSquirrelUpdateExe) ? 'squirrel' : 'download';
+  platform === 'darwin' || (platform === 'win32' && hasSquirrelUpdateExe)
+    ? 'squirrel'
+    : platform === 'win32'
+      ? // Windows releases ship only a ZIP; downloading it cannot replace the
+        // installed app, so the update hands off to the release page instead.
+        'manual'
+      : 'download';
 
 // Linux packages spell architectures differently per format: Debian uses
 // amd64/arm64 while RPM uses x86_64/aarch64. Node's process.arch is the key.
@@ -96,10 +104,11 @@ const pickReleaseAsset = (assets, { arch, linuxFlavor, platform }) => {
  *   linuxFlavor?: 'deb' | 'rpm' | null;
  *   log?: (message: string) => void;
  *   onStatusChange?: (status: UpdateStatus) => void;
+ *   openExternal?: (url: string) => Promise<void>;
  *   openPath?: (path: string) => Promise<string>;
  *   platform: string;
  *   releaseUrl?: string;
- *   strategy: 'download' | 'squirrel';
+ *   strategy: UpdateStrategy;
  * }} options
  */
 const createUpdater = ({
@@ -112,6 +121,7 @@ const createUpdater = ({
   linuxFlavor,
   log,
   onStatusChange,
+  openExternal,
   openPath,
   platform,
   releaseUrl,
@@ -313,6 +323,24 @@ const createUpdater = ({
     }
   };
 
+  const applyManualUpdate = async () => {
+    const version = status.version;
+    if (!openExternal) {
+      return setError('The updater is unavailable in this build.', version);
+    }
+
+    try {
+      await openExternal(
+        version ? releasePageUrl(version) : 'https://github.com/nkzw-tech/codiff/releases',
+      );
+      // Nothing was installed; the update stays available until the user
+      // replaces the app themselves.
+      return { ...status };
+    } catch (error) {
+      return setError(error instanceof Error ? error.message : String(error), version);
+    }
+  };
+
   const applyUpdate = async () => {
     if (status.phase !== 'available' && status.phase !== 'error') {
       return { ...status };
@@ -320,7 +348,11 @@ const createUpdater = ({
 
     actionGeneration++;
     return {
-      ...(strategy === 'squirrel' ? applySquirrelUpdate() : await applyDownloadUpdate()),
+      ...(strategy === 'squirrel'
+        ? applySquirrelUpdate()
+        : strategy === 'manual'
+          ? await applyManualUpdate()
+          : await applyDownloadUpdate()),
     };
   };
 

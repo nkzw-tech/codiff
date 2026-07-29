@@ -1235,6 +1235,7 @@ const initUpdater = () => {
     isPackaged: app.isPackaged,
     linuxFlavor: process.platform === 'linux' ? detectLinuxPackageFlavor() : null,
     onStatusChange: sendUpdateStatusChanged,
+    openExternal: (url) => shell.openExternal(url),
     openPath: (path) => shell.openPath(path),
     platform: process.platform,
     strategy: resolveUpdateStrategy({
