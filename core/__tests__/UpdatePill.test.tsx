@@ -40,259 +40,99 @@ const status = (partial: Partial<UpdateStatus>): UpdateStatus => ({
 const pill = (view: { container: HTMLElement }) =>
   view.container.querySelector<HTMLButtonElement>('.update-pill');
 
-const popover = (view: { container: HTMLElement }) =>
-  view.container.querySelector<HTMLElement>('.update-popover');
-
-const openPopover = async (view: { container: HTMLElement }) => {
-  await act(async () => pill(view)?.click());
-  return popover(view);
-};
-
 test('renders nothing while no update is available', async () => {
   await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'idle' })}
-    />,
+    <UpdatePill onApply={noop} status={status({ phase: 'idle' })} />,
   );
 
   expect(pill(view)).toBeNull();
 });
 
-test('shows a compact pill when an update is available', async () => {
+test('shows a single Update button when an update is available', async () => {
   await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'available', version: '1.9.3' })}
-    />,
+    <UpdatePill onApply={noop} status={status({ phase: 'available', version: '1.9.3' })} />,
   );
 
-  expect(pill(view)?.textContent).toContain('Update available');
-  expect(pill(view)?.getAttribute('aria-expanded')).toBe('false');
-  expect(popover(view)).toBeNull();
+  expect(pill(view)?.textContent).toContain('Update');
+  expect(pill(view)?.title).toContain('1.9.2');
+  expect(pill(view)?.title).toContain('1.9.3');
+  expect(view.container.querySelector('.update-popover')).toBeNull();
 });
 
-test('opens the details popover with the version delta and actions', async () => {
-  await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'available', version: '1.9.3' })}
-    />,
-  );
-
-  const details = await openPopover(view);
-
-  expect(pill(view)?.getAttribute('aria-expanded')).toBe('true');
-  expect(details?.textContent).toContain('v1.9.2');
-  expect(details?.textContent).toContain('v1.9.3');
-  expect(view.container.querySelector('.update-popover-primary')?.textContent).toContain(
-    'Update now',
-  );
-  expect(view.container.querySelector('.update-popover-later')?.textContent).toContain('Later');
-  expect(view.container.querySelector('.update-popover-skip')?.textContent).toContain(
-    'Skip this version',
-  );
-  expect(view.container.querySelector('.update-popover-release-notes')?.textContent).toContain(
-    'Release notes',
-  );
-});
-
-test('applies the update from the popover and keeps it open', async () => {
+test('applies the update with a single click', async () => {
   let applied = 0;
   await using view = await renderPill(
     <UpdatePill
       onApply={() => applied++}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
       status={status({ phase: 'available', version: '1.9.3' })}
     />,
   );
 
-  await openPopover(view);
-  const update = view.container.querySelector<HTMLButtonElement>('.update-popover-primary');
-  await act(async () => update?.click());
+  await act(async () => pill(view)?.click());
 
   expect(applied).toBe(1);
-  expect(popover(view)).not.toBeNull();
+  expect(view.container.querySelector('.update-popover')).toBeNull();
 });
 
-test('closes the popover through Later without dismissing the version', async () => {
-  let dismissed = 0;
+test('shows progress while updating and ignores clicks', async () => {
+  let applied = 0;
   await using view = await renderPill(
     <UpdatePill
-      onApply={noop}
-      onDismiss={() => dismissed++}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'available', version: '1.9.3' })}
-    />,
-  );
-
-  await openPopover(view);
-  const later = view.container.querySelector<HTMLButtonElement>('.update-popover-later');
-  await act(async () => later?.click());
-
-  expect(popover(view)).toBeNull();
-  expect(pill(view)).not.toBeNull();
-  expect(dismissed).toBe(0);
-});
-
-test('skips the offered version from the popover', async () => {
-  let dismissed = 0;
-  await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={() => dismissed++}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'available', version: '1.9.3' })}
-    />,
-  );
-
-  await openPopover(view);
-  const skip = view.container.querySelector<HTMLButtonElement>('.update-popover-skip');
-  await act(async () => skip?.click());
-
-  expect(dismissed).toBe(1);
-});
-
-test('opens the release notes from the popover', async () => {
-  let opened = 0;
-  await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={() => opened++}
-      status={status({ phase: 'available', version: '1.9.3' })}
-    />,
-  );
-
-  await openPopover(view);
-  const notes = view.container.querySelector<HTMLButtonElement>('.update-popover-release-notes');
-  await act(async () => notes?.click());
-
-  expect(opened).toBe(1);
-});
-
-test('closes the popover through the corner close button without dismissing', async () => {
-  let dismissed = 0;
-  await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={() => dismissed++}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'available', version: '1.9.3' })}
-    />,
-  );
-
-  expect(await openPopover(view)).not.toBeNull();
-  const close = view.container.querySelector<HTMLButtonElement>('.update-popover-close');
-  await act(async () => close?.click());
-
-  expect(popover(view)).toBeNull();
-  expect(pill(view)).not.toBeNull();
-  expect(dismissed).toBe(0);
-});
-
-test('closes the popover with Escape', async () => {
-  await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'available', version: '1.9.3' })}
-    />,
-  );
-
-  expect(await openPopover(view)).not.toBeNull();
-  await act(async () =>
-    document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })),
-  );
-
-  expect(popover(view)).toBeNull();
-});
-
-test('shows progress while updating without offering actions', async () => {
-  await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
+      onApply={() => applied++}
       status={status({ phase: 'updating', version: '1.9.3' })}
     />,
   );
 
   expect(pill(view)?.textContent).toContain('Updating');
+  expect(pill(view)?.disabled).toBe(true);
 
-  await openPopover(view);
+  await act(async () => pill(view)?.click());
 
-  expect(popover(view)?.textContent).toContain('1.9.3');
-  expect(view.container.querySelector('.update-popover-primary')).toBeNull();
-  expect(view.container.querySelector('.update-popover-skip')).toBeNull();
+  expect(applied).toBe(0);
 });
 
 test('shows progress without a version after an error retry', async () => {
   await using view = await renderPill(
-    <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
-      status={status({ phase: 'updating' })}
-    />,
+    <UpdatePill onApply={noop} status={status({ phase: 'updating' })} />,
   );
 
   expect(pill(view)?.textContent).toContain('Updating');
   expect(pill(view)?.textContent).not.toContain('undefined');
-
-  await openPopover(view);
-
-  expect(popover(view)?.textContent).not.toContain('undefined');
+  expect(pill(view)?.title).not.toContain('undefined');
 });
 
 test('tells the user to finish a handed-off install', async () => {
+  let applied = 0;
   await using view = await renderPill(
     <UpdatePill
-      onApply={noop}
-      onDismiss={noop}
-      onOpenReleasePage={noop}
+      onApply={() => applied++}
       status={status({ phase: 'installerReady', version: '1.9.3' })}
     />,
   );
 
   expect(pill(view)?.textContent).toContain('Quit to finish update');
+  expect(pill(view)?.title).toContain('installer');
+  expect(pill(view)?.disabled).toBe(true);
 
-  await openPopover(view);
+  await act(async () => pill(view)?.click());
 
-  expect(popover(view)?.textContent).toContain('installer');
+  expect(applied).toBe(0);
 });
 
-test('offers retry and manual download after a failure', async () => {
+test('retries a failed update with a single click', async () => {
   let applied = 0;
-  let opened = 0;
   await using view = await renderPill(
     <UpdatePill
       onApply={() => applied++}
-      onDismiss={noop}
-      onOpenReleasePage={() => opened++}
       status={status({ message: 'feed unreachable', phase: 'error', version: '1.9.3' })}
     />,
   );
 
   expect(pill(view)?.textContent).toContain('Update failed');
+  expect(pill(view)?.textContent).toContain('Try again');
+  expect(pill(view)?.title).toContain('feed unreachable');
 
-  await openPopover(view);
+  await act(async () => pill(view)?.click());
 
-  expect(popover(view)?.textContent).toContain('feed unreachable');
-
-  const retry = view.container.querySelector<HTMLButtonElement>('.update-popover-primary');
-  await act(async () => retry?.click());
   expect(applied).toBe(1);
-
-  const manual = view.container.querySelector<HTMLButtonElement>('.update-popover-manual');
-  await act(async () => manual?.click());
-  expect(opened).toBe(1);
 });

@@ -95,8 +95,8 @@ export function UpdatePill({
   status,
 }: {
   onApply: () => void;
-  onDismiss: () => void;
-  onOpenReleasePage: () => void;
+  onDismiss?: () => void;
+  onOpenReleasePage?: () => void;
   status: CodiffUpdateStatus;
 }) {
   const [open, setOpen] = useState(false);
