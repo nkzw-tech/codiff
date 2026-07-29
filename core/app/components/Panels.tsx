@@ -163,6 +163,14 @@ export function UpdatePill({
       </button>
       {open ? (
         <div aria-label="Codiff update" className="update-popover" role="dialog">
+          <button
+            aria-label="Close update details"
+            className="update-popover-close"
+            onClick={() => setOpen(false)}
+            type="button"
+          >
+            <X aria-hidden size={13} weight="bold" />
+          </button>
           {phase === 'available' ? (
             <>
               <div className="update-popover-header">

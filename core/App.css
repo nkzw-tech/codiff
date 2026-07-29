@@ -1232,6 +1232,29 @@ a.review-top-bar-source:focus-visible {
   display: flex;
   font-size: 13.5px;
   gap: 7px;
+  padding-right: 22px;
+}
+
+.update-popover-close {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 22px;
+}
+
+.update-popover-close:hover {
+  background: var(--hover-wash);
+  color: var(--text);
 }
 
 .update-popover-sparkle {
