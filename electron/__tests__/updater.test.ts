@@ -674,7 +674,7 @@ test('a forced check clears the dismissal and resurfaces the update', async () =
   expect(persisted.dismissedVersion).toBeUndefined();
 });
 
-test('a stale check completion cannot clobber a newer result', async () => {
+test('concurrent checks run one at a time and the newest result wins', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   const pending: Array<(version: string) => void> = [];
   const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
@@ -702,19 +702,20 @@ test('a stale check completion cannot clobber a newer result', async () => {
   const scheduled = updater.checkForUpdates();
   await waitFor(() => pending.length === 1);
   const forced = updater.checkForUpdates({ force: true });
-  await waitFor(() => pending.length === 2);
 
-  pending[1]('1.9.4');
-  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.4' });
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  expect(pending.length).toBe(1);
 
   pending[0]('1.9.3');
-  await scheduled;
-
-  expect(updater.getStatus()).toEqual({
+  expect(await scheduled).toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
-    version: '1.9.4',
+    version: '1.9.3',
   });
+
+  await waitFor(() => pending.length === 2);
+  pending[1]('1.9.4');
+  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.4' });
 
   const persisted = JSON.parse(
     await readFile(join(directory.path, 'update-state.json'), 'utf8'),
@@ -798,7 +799,7 @@ test('a check completion does not cancel an active Squirrel update', async () =>
   expect(autoUpdater.quitAndInstallCalls).toBe(1);
 });
 
-test('a stale failed check does not reject after a newer check succeeded', async () => {
+test('a forced check failure belongs only to its own caller', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   const pending: Array<(respond: { status?: number; version?: string }) => void> = [];
   const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
@@ -833,22 +834,64 @@ test('a stale failed check does not reject after a newer check succeeded', async
   const first = updater.checkForUpdates({ force: true });
   await waitFor(() => pending.length === 1);
   const second = updater.checkForUpdates({ force: true });
-  await waitFor(() => pending.length === 2);
 
+  pending[0]({ status: 500 });
+  await expect(first).rejects.toThrow();
+
+  await waitFor(() => pending.length === 2);
   pending[1]({ version: '1.9.4' });
   await expect(second).resolves.toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
     version: '1.9.4',
   });
+  expect(log.length).toBe(1);
+});
 
-  pending[0]({ status: 500 });
-  await expect(first).resolves.toEqual({
+test('a queued check cannot discard a successful forced result', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: '2026-01-01T00:00:00.000Z',
+    latestVersion: '1.9.2',
+  });
+
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const forced = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 1);
+  const scheduled = updater.checkForUpdates();
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+
+  pending[0]('1.9.4');
+
+  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.4' });
+  expect(await scheduled).toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
     version: '1.9.4',
   });
-  expect(log).toEqual([]);
+  expect(pending.length).toBe(1);
+
+  const persisted = JSON.parse(
+    await readFile(join(directory.path, 'update-state.json'), 'utf8'),
+  ) as { latestVersion: string };
+  expect(persisted.latestVersion).toBe('1.9.4');
 });
 
 test('a check completion does not erase an apply failure', async () => {
