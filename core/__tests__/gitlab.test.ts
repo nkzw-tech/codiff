@@ -118,6 +118,7 @@ process.stdin.on('end', () => {
   await using _environment = createTemporaryEnvironment({
     CODIFF_GLAB_PATH: fakeGlabPath,
     CODIFF_GLAB_TEST_CALLS: callsPath,
+    SHELL: undefined,
   });
 
   await callback(repo, async () =>
@@ -419,6 +420,112 @@ describe('GitLab merge requests', () => {
       );
       expect(call.args).toContain('Content-Type: application/json');
       expect(JSON.parse(call.input)).toEqual({ body: 'Reply in the existing discussion.' });
+    });
+  });
+
+  test('authenticates glab from the login shell environment when the app inherited none', async () => {
+    await using directory = await createTemporaryDirectory('codiff-glab-login-env-');
+    const repo = join(directory.path, 'repo');
+    const fakeGlab = join(directory.path, 'glab');
+    const fakeShell = join(directory.path, 'fake-login-shell');
+
+    await execFileAsync('git', ['init', repo]);
+    await execFileAsync('git', [
+      '-C',
+      repo,
+      'remote',
+      'add',
+      'origin',
+      'ssh://git@gitlab.example.com/group/project.git',
+    ]);
+
+    // A GUI-launched Codiff keeps launchd's minimal environment: no
+    // GITLAB_TOKEN, even when the user's login shell exports one. This glab
+    // fails auth exactly the way the real one does when the token never
+    // reaches it.
+    await writeFile(
+      fakeShell,
+      `#!/bin/sh
+GITLAB_TOKEN='from-login-shell' exec /bin/sh -c "$4"
+`,
+    );
+    await writeFile(
+      fakeGlab,
+      `#!/bin/sh
+if [ "$GITLAB_TOKEN" != 'from-login-shell' ]; then
+  echo 'To get started with GitLab CLI, please run:  glab auth login.' >&2
+  exit 4
+fi
+printf '%s' '{}'
+`,
+    );
+    await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);
+
+    await using _environment = createTemporaryEnvironment({
+      CODIFF_GLAB_PATH: fakeGlab,
+      GITLAB_TOKEN: undefined,
+      SHELL: fakeShell,
+    });
+
+    await submitMergeRequestReview(repo, {
+      comments: [],
+      event: 'REQUEST_CHANGES',
+      source: {
+        provider: 'gitlab',
+        type: 'pull-request',
+        url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+      },
+    });
+  });
+
+  test('prefers the process environment over the login shell for glab', async () => {
+    await using directory = await createTemporaryDirectory('codiff-glab-env-precedence-');
+    const repo = join(directory.path, 'repo');
+    const fakeGlab = join(directory.path, 'glab');
+    const fakeShell = join(directory.path, 'fake-login-shell');
+
+    await execFileAsync('git', ['init', repo]);
+    await execFileAsync('git', [
+      '-C',
+      repo,
+      'remote',
+      'add',
+      'origin',
+      'ssh://git@gitlab.example.com/group/project.git',
+    ]);
+
+    await writeFile(
+      fakeShell,
+      `#!/bin/sh
+GITLAB_TOKEN='from-login-shell' exec /bin/sh -c "$4"
+`,
+    );
+    await writeFile(
+      fakeGlab,
+      `#!/bin/sh
+if [ "$GITLAB_TOKEN" != 'from-process' ]; then
+  echo 'Expected the process GITLAB_TOKEN to win, got:' "$GITLAB_TOKEN" >&2
+  exit 4
+fi
+printf '%s' '{}'
+`,
+    );
+    await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);
+
+    await using _environment = createTemporaryEnvironment({
+      CODIFF_GLAB_PATH: fakeGlab,
+      GITLAB_TOKEN: 'from-process',
+      SHELL: fakeShell,
+    });
+
+    await submitMergeRequestReview(repo, {
+      comments: [],
+      event: 'REQUEST_CHANGES',
+      source: {
+        provider: 'gitlab',
+        type: 'pull-request',
+        url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+      },
     });
   });
 });
