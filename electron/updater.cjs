@@ -302,7 +302,16 @@ const createUpdater = ({
   };
 
   const applyLatest = async () => {
-    const checked = await checkForUpdates({ force: true });
+    let checked;
+    try {
+      checked = await checkForUpdates({ force: true });
+    } catch (error) {
+      // The caller asked for an update, so a failed check is an update
+      // failure; surface it in the banner instead of rejecting into a void.
+      actionGeneration++;
+      return { ...setError(error instanceof Error ? error.message : String(error)) };
+    }
+
     return checked.phase === 'available' ? applyUpdate() : checked;
   };
 

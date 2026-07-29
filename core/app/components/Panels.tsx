@@ -110,7 +110,7 @@ export function UpdateBanner({
             </button>
           </>
         ) : phase === 'updating' ? (
-          <span>{`Updating to Codiff ${version}…`}</span>
+          <span>{version ? `Updating to Codiff ${version}…` : 'Updating Codiff…'}</span>
         ) : phase === 'installerReady' ? (
           <span>The installer was downloaded and opened. Quit Codiff to finish updating.</span>
         ) : phase === 'error' ? (
