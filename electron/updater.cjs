@@ -107,6 +107,8 @@ const createUpdater = ({
   /** @type {UpdateStatus} */
   let status = statusFromState();
 
+  let statusGeneration = 0;
+
   /** @param {UpdateStatus} next */
   const setStatus = (next) => {
     if (
@@ -117,6 +119,7 @@ const createUpdater = ({
       return status;
     }
 
+    statusGeneration++;
     status = next;
     onStatusChange?.({ ...status });
     return status;
@@ -165,6 +168,7 @@ const createUpdater = ({
     }
 
     const checkId = ++checkSequence;
+    const generationAtStart = statusGeneration;
     const dismissedBefore = state?.dismissedVersion;
 
     try {
@@ -202,9 +206,10 @@ const createUpdater = ({
       }
     }
 
-    // An apply started while the check was in flight; do not yank its phase
-    // out from under the auto-updater events or the handed-off installer.
-    if (status.phase === 'updating' || status.phase === 'installerReady') {
+    // The status moved while the check was in flight (an apply started,
+    // failed, or handed off; or the user dismissed). That transition is newer
+    // information than this check; do not overwrite it.
+    if (statusGeneration !== generationAtStart) {
       return { ...status };
     }
 
