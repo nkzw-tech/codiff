@@ -529,9 +529,10 @@ export function RepositoryReviewHost({
     mainModeRef,
     narrativeNavigation,
     narrativeWalkthrough,
-    narrativeWalkthroughFiles,
     narrativeWalkthroughRef,
     openCommitView,
+    pendingAssessmentThreadIds,
+    persistedNarrativeWalkthrough,
     persistedNarrativeWalkthroughRef,
     plainCommitModel,
     refreshWalkthroughForState,
@@ -1637,7 +1638,7 @@ export function RepositoryReviewHost({
       state,
       title,
       walkthrough:
-        persistedNarrativeWalkthroughRef.current ??
+        persistedNarrativeWalkthrough ??
         createPlaceholderWalkthrough(state, title, walkthroughAgent),
     }),
     ...(source.type === 'pull-request'
@@ -1870,6 +1871,7 @@ export function RepositoryReviewHost({
       key={getSourceRevisionKey(source)}
       keymap={config.keymap}
       onCommandBridgeChange={updateSurfaceCommandBridge}
+      pendingAssessmentThreadIds={pendingAssessmentThreadIds}
       providerLabel={
         source.type === 'pull-request' && source.provider === 'gitlab' ? 'GitLab' : 'GitHub'
       }

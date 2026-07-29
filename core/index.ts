@@ -68,12 +68,60 @@ export {
   type WalkthroughGenerationTask,
 } from './lib/walkthrough-generation-tasks.ts';
 export {
+  eligibleWalkthroughAssessmentCandidates,
+  selectWalkthroughAssessmentCandidates,
+  type AssessmentChangedRange,
+  type AssessmentRoutingAnchor,
+  type AssessmentRoutingContext,
+  type AssessmentSelection,
+  type AssessmentThreadCandidate,
+} from './lib/walkthrough-assessment-relevance.ts';
+export {
+  assessmentValuesEqual,
+  reconcileWalkthroughAssessments,
+  type AssessmentDemand,
+  type AssessmentReconciliation,
+} from './lib/walkthrough-assessment-cache.ts';
+export {
+  buildWalkthroughAssessmentPrompt,
+  createAssessmentDemand,
+  createAssessmentDemandsFromSelections,
+  createAssessmentGenerationProfile,
+  generateAssessmentCollection,
+  generateAssessmentComponent,
+  normalizeAssessmentInput,
+  normalizeThreadAssessmentResult,
+  sanitizeAssessmentError,
+  walkthroughAssessmentAuthoringVersion,
+  type AssessmentModelResult,
+  type RunAssessmentModel,
+} from './lib/walkthrough-assessments.ts';
+export {
+  assessmentComponentByThreadId,
+  buildAssessmentDestinationIndex,
+  currentThreadStateById,
+  findPendingAssessmentDestination,
+  getThreadAssessmentDisplay,
+  type AssessmentDestination,
+  type ThreadAssessmentComponent,
+  type ThreadAssessmentDisplay,
+} from './lib/walkthrough-assessment-display.ts';
+export {
   parsePlanShareManifest,
   parsePlanShareUpload,
   type PlanShareManifestV1,
   type ShareUploader,
 } from './share.ts';
 export type {
+  AssessmentCapturedPresentationState,
+  AssessmentCodeScope,
+  AssessmentCollection,
+  AssessmentComponent,
+  AssessmentIdentity,
+  AssessmentInput,
+  AssessmentOutcome,
+  AssessmentThreadAnchor,
+  AssessmentThreadComment,
   ChangedFile,
   CodiffFeatureFlags,
   CodiffPreferences,
@@ -84,7 +132,9 @@ export type {
   GenerationSettings,
   GitIdentity,
   GitSha,
+  LiveReviewState,
   NarrativeWalkthrough,
+  NarrativeWalkthroughUpdate,
   NarrativeWalkthroughV4,
   PersistedWalkthrough,
   PlanCommentThread,
@@ -119,6 +169,7 @@ export type {
   SharedWalkthroughSnapshot,
   SubmittedReviewComment,
   SubmitPullRequestReviewResult,
+  ThreadAssessmentResult,
   WalkthroughShareManifestV1,
   WalkthroughHunk,
   WalkthroughArtifactV5,

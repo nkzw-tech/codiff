@@ -4,6 +4,7 @@ import type {
   PlanCommentThread,
   PullRequestExistingReviewComment,
   PullRequestGeneralCommentThread,
+  ReviewCommentPosition,
 } from './review-comments.ts';
 import type { CommitMetadata, PullRequestCodeQualityFinding } from './review-history.ts';
 import type {
@@ -220,6 +221,75 @@ export type WalkthroughGenerationRequest = {
   };
 };
 
+/** The complete captured diff used by the current-review walkthrough. */
+export type AssessmentCodeScope = { type: 'single-diff' };
+
+export type AssessmentThreadAnchor = {
+  filePath: string;
+  lineNumber?: number;
+  position?: ReviewCommentPosition;
+  side?: 'additions' | 'deletions';
+  startLineNumber?: number;
+  startSide?: 'additions' | 'deletions';
+};
+
+export type AssessmentThreadComment = {
+  anchor?: AssessmentThreadAnchor;
+  author: { login: string; name?: string };
+  body: string;
+  id: string;
+  submittedAt?: string;
+};
+
+/** Provider-neutral semantic input for exactly one current-review thread. */
+export type AssessmentInput = {
+  codeScope: AssessmentCodeScope;
+  thread: {
+    comments: ReadonlyArray<AssessmentThreadComment>;
+    id: string;
+  };
+};
+
+export type AssessmentIdentity = {
+  codeScope: AssessmentCodeScope;
+  threadId: string;
+};
+
+export type AssessmentCapturedPresentationState = {
+  threadState: 'open' | 'resolved';
+};
+
+export type ThreadAssessmentResult = {
+  disposition:
+    | 'addressed'
+    | 'partially-addressed'
+    | 'still-applies'
+    | 'no-longer-applicable'
+    | 'unclear';
+  explanation: string;
+};
+
+export type AssessmentOutcome =
+  | {
+      generationMetadata: GenerationMetadata;
+      result: ThreadAssessmentResult;
+      status: 'ready';
+    }
+  | { error: string; status: 'failed' };
+
+/** One independently replaceable thread assessment. */
+export type AssessmentComponent = {
+  capturedPresentationState: AssessmentCapturedPresentationState;
+  identity: AssessmentIdentity;
+  input: AssessmentInput;
+  outcome: AssessmentOutcome;
+};
+
+/** Absence means assessment was not requested; an empty list means none were eligible. */
+export type AssessmentCollection = {
+  items: ReadonlyArray<AssessmentComponent>;
+};
+
 /** The initial single-call narrative stored inside a V5 artifact envelope. */
 export type WalkthroughNarrativeV5 = Omit<
   NarrativeWalkthroughV4,
@@ -243,6 +313,8 @@ export type WalkthroughNarrativeV5 = Omit<
  * later authoring revisions can populate without changing frozen V4 storage.
  */
 export type WalkthroughArtifactV5 = {
+  /** Background-generated components stored independently from narrative content. */
+  assessments?: AssessmentCollection;
   /** Sanitized, host-neutral context captured before prompt projection. */
   capturedContext: WalkthroughCapturedContext;
   /** Resolved review selection and authoring choices for this artifact. */
@@ -270,6 +342,8 @@ type Immutable<T> = T extends (...arguments_: Array<never>) => unknown
  * separate from this captured model.
  */
 export type WalkthroughModel = Immutable<Omit<NarrativeWalkthroughV4, 'chapters' | 'version'>> & {
+  /** Present only when the artifact included current-review assessments. */
+  readonly assessments?: Immutable<AssessmentCollection>;
   /** Present only when the source artifact supplied captured-context capability. */
   readonly capturedContext?: Immutable<WalkthroughArtifactV5['capturedContext']>;
   readonly chapters: Immutable<WalkthroughNarrativeV5['chapters']>;
@@ -281,6 +355,18 @@ export type WalkthroughModel = Immutable<Omit<NarrativeWalkthroughV4, 'chapters'
   readonly sourceVersion: 4 | 5;
   /** Present only for V5; later revisions extend the structure union. */
   readonly structure?: 'single-diff';
+};
+
+/** Transient provider state joined only for live assessment presentation. */
+export type LiveReviewState = {
+  currentThreadStateById?: ReadonlyMap<string, 'open' | 'resolved'>;
+  pendingAssessmentThreadIds?: ReadonlySet<string>;
+};
+
+export type NarrativeWalkthroughUpdate = {
+  cacheKey: string;
+  pendingAssessmentThreadIds: ReadonlyArray<string>;
+  walkthrough: WalkthroughArtifactV5;
 };
 
 /** Frozen name retained for V4-producing hosts until their explicit V5 integration. */

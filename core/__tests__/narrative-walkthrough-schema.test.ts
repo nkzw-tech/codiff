@@ -318,6 +318,95 @@ test('accepts grounded regions only in V5 narrative content', () => {
   expect(parsed.narrative.chapters[0]?.stops[0]?.regions).toHaveLength(1);
 });
 
+test('parses independently replaceable single-diff assessments outside narrative content', () => {
+  const artifact = v5();
+  const parsed = parseWalkthroughArtifactV5({
+    ...artifact,
+    assessments: {
+      items: [
+        {
+          capturedPresentationState: { threadState: 'open' },
+          identity: { codeScope: { type: 'single-diff' }, threadId: 'thread-1' },
+          input: {
+            codeScope: { type: 'single-diff' },
+            thread: {
+              comments: [
+                {
+                  author: { login: 'reviewer' },
+                  body: 'Keep the compatibility boundary.',
+                  id: 'comment-1',
+                },
+              ],
+              id: 'thread-1',
+            },
+          },
+          outcome: {
+            generationMetadata: {
+              ...generationMetadata(),
+              profile: {
+                ...generationMetadata().profile,
+                authoringVersion: 'walkthrough-assessment-1',
+              },
+            },
+            result: {
+              disposition: 'still-applies',
+              explanation: 'The compatibility boundary is still present.',
+            },
+            status: 'ready',
+          },
+        },
+      ],
+    },
+  });
+  const model = parseWalkthroughModel(parsed);
+
+  expect(model.assessments?.items[0]?.identity.threadId).toBe('thread-1');
+  expect(model.chapters).toEqual(artifact.narrative.chapters);
+});
+
+test('rejects mismatched assessment identities and unknown captured anchors', () => {
+  const artifact = v5();
+  const component = {
+    capturedPresentationState: { threadState: 'open' },
+    identity: { codeScope: { type: 'single-diff' }, threadId: 'thread-1' },
+    input: {
+      codeScope: { type: 'single-diff' },
+      thread: {
+        comments: [
+          {
+            anchor: { filePath: 'src/missing.ts', lineNumber: 1, side: 'additions' },
+            author: { login: 'reviewer' },
+            body: 'Check this.',
+            id: 'comment-1',
+          },
+        ],
+        id: 'thread-2',
+      },
+    },
+    outcome: { error: 'Unavailable.', status: 'failed' },
+  };
+
+  expect(() =>
+    parseWalkthroughArtifactV5({
+      ...artifact,
+      assessments: { items: [component] },
+    }),
+  ).toThrow(/identity does not match/);
+  expect(() =>
+    parseWalkthroughArtifactV5({
+      ...artifact,
+      assessments: {
+        items: [
+          {
+            ...component,
+            input: { ...component.input, thread: { ...component.input.thread, id: 'thread-1' } },
+          },
+        ],
+      },
+    }),
+  ).toThrow(/unknown captured code/);
+});
+
 test('round trips the initial composite V5 artifact without changing its shape', () => {
   const artifact = v5();
   const persistedV4 = v4();

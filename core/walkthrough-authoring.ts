@@ -28,3 +28,31 @@ export {
   type WalkthroughDraft,
   type WalkthroughPromptOptions,
 } from './lib/walkthrough-authoring.ts';
+
+export {
+  buildWalkthroughAssessmentPrompt,
+  createAssessmentDemand,
+  createAssessmentDemandsFromSelections,
+  createAssessmentGenerationProfile,
+  generateAssessmentCollection,
+  generateAssessmentComponent,
+  normalizeAssessmentInput,
+  normalizeThreadAssessmentResult,
+  sanitizeAssessmentError,
+  walkthroughAssessmentAuthoringVersion,
+  type AssessmentModelResult,
+  type RunAssessmentModel,
+} from './lib/walkthrough-assessments.ts';
+export {
+  assessmentValuesEqual,
+  reconcileWalkthroughAssessments,
+  type AssessmentDemand,
+  type AssessmentReconciliation,
+} from './lib/walkthrough-assessment-cache.ts';
+export {
+  eligibleWalkthroughAssessmentCandidates,
+  selectWalkthroughAssessmentCandidates,
+  type AssessmentRoutingContext,
+  type AssessmentSelection,
+  type AssessmentThreadCandidate,
+} from './lib/walkthrough-assessment-relevance.ts';
