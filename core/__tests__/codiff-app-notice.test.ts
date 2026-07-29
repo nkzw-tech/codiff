@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
@@ -18,9 +18,11 @@ const runVersion = async (home: string) =>
 const writeState = async (
   home: string,
   state: { dismissedVersion?: string; lastCheckedAt: string; latestVersion: string },
-) => {
+) => writeStateContents(home, JSON.stringify(state, null, 2));
+
+const writeStateContents = async (home: string, contents: string) => {
   await mkdir(join(home, '.codiff'), { recursive: true });
-  await writeFile(join(home, '.codiff', 'update-state.json'), JSON.stringify(state, null, 2));
+  await writeFile(join(home, '.codiff', 'update-state.json'), contents);
 };
 
 test('prints no notice without cached update state', async () => {
@@ -73,6 +75,72 @@ test('ignores malformed cached versions', async () => {
     lastCheckedAt: '2026-07-29T00:00:00.000Z',
     latestVersion: 'not-a-version',
   });
+
+  expect((await runVersion(home.path)).stderr).toBe('');
+});
+
+test('succeeds without a notice when HOME is unset', async () => {
+  const env = { ...process.env };
+  delete env.HOME;
+
+  const { stderr, stdout } = await execFileAsync('sh', [wrapperPath, '--version'], {
+    encoding: 'utf8',
+    env,
+  });
+
+  expect(stdout).toContain('codiff v');
+  expect(stderr).toBe('');
+});
+
+test('stays silent when the state file is unreadable', async () => {
+  await using home = await createTemporaryDirectory('codiff-app-home-');
+  await writeState(home.path, {
+    lastCheckedAt: '2026-07-29T00:00:00.000Z',
+    latestVersion: '99.0.0',
+  });
+  const stateFile = join(home.path, '.codiff', 'update-state.json');
+  await chmod(stateFile, 0o000);
+
+  try {
+    expect((await runVersion(home.path)).stderr).toBe('');
+  } finally {
+    await chmod(stateFile, 0o644);
+  }
+});
+
+test('stays silent for version components beyond the shell integer range', async () => {
+  await using home = await createTemporaryDirectory('codiff-app-home-');
+  await writeState(home.path, {
+    lastCheckedAt: '2026-07-29T00:00:00.000Z',
+    latestVersion: '99999999999999999999.0.0',
+  });
+
+  expect((await runVersion(home.path)).stderr).toBe('');
+});
+
+test('stays silent when lastCheckedAt is missing', async () => {
+  await using home = await createTemporaryDirectory('codiff-app-home-');
+  await writeStateContents(home.path, JSON.stringify({ latestVersion: '99.0.0' }));
+
+  expect((await runVersion(home.path)).stderr).toBe('');
+});
+
+test('stays silent for invalid JSON with an unparseable lastCheckedAt', async () => {
+  await using home = await createTemporaryDirectory('codiff-app-home-');
+  await writeStateContents(
+    home.path,
+    '{\n  "lastCheckedAt": "nope",\n  "latestVersion": "99.0.0"\n',
+  );
+
+  expect((await runVersion(home.path)).stderr).toBe('');
+});
+
+test('resolves duplicate keys last-wins like JSON parsing does', async () => {
+  await using home = await createTemporaryDirectory('codiff-app-home-');
+  await writeStateContents(
+    home.path,
+    '{\n  "lastCheckedAt": "2026-07-29T00:00:00.000Z",\n  "latestVersion": "99.0.0",\n  "latestVersion": "0.0.1"\n}',
+  );
 
   expect((await runVersion(home.path)).stderr).toBe('');
 });
