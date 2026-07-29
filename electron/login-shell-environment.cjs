@@ -13,6 +13,19 @@ const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const cache = new Map();
 
 /**
+ * Environment for spawning CLIs on the user's behalf: the login shell fills
+ * variables a GUI launch never inherited, such as `GH_TOKEN` or
+ * `ANTHROPIC_API_KEY`, and the process environment wins for anything it
+ * already defines.
+ *
+ * @returns {Promise<Record<string, string | undefined>>}
+ */
+const getCommandEnvironment = async () => ({
+  ...(await getLoginShellEnvironment()),
+  ...process.env,
+});
+
+/**
  * The environment of the user's interactive login shell, resolved once per
  * shell and cached. GUI launches inherit launchd's minimal environment, so variables
  * like `GH_TOKEN` may only exist in the login shell; resolving them lets CLI
@@ -91,6 +104,7 @@ const parseEnvironment = (output) => {
 };
 
 module.exports = {
+  getCommandEnvironment,
   getLoginShellEnvironment,
   resolveLoginShellEnvironment,
 };

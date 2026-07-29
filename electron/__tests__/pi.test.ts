@@ -1,11 +1,14 @@
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { expect, test } from 'vite-plus/test';
+import { beforeEach, expect, test } from 'vite-plus/test';
 import {
   createTemporaryDirectory,
   createTemporaryEnvironment,
 } from '../../core/__tests__/helpers/resources.ts';
+import { createCommandTransport } from './helpers/command-transport.ts';
+
+type CommandTransport = ReturnType<typeof createCommandTransport>['transport'];
 
 const require = createRequire(import.meta.url);
 const {
@@ -31,9 +34,23 @@ const {
     schema: unknown,
     outputName?: string,
     timeoutMessage?: string,
-    options?: { model?: string },
+    options?: { commandTransport?: CommandTransport; model?: string },
   ) => Promise<string>;
 };
+
+// Spawning Pi resolves the login shell environment, so tests either provide
+// their own fake shell or run without one.
+beforeEach(() => {
+  const shell = process.env.SHELL;
+  delete process.env.SHELL;
+  return () => {
+    if (shell === undefined) {
+      delete process.env.SHELL;
+    } else {
+      process.env.SHELL = shell;
+    }
+  };
+});
 
 test('exposes the Pi default model identifier', () => {
   expect(DEFAULT_PI_MODEL).toBe('pi-default');
@@ -116,4 +133,43 @@ process.stdin.on('end', () => {
   const stdin = await readFile(stdinPath, 'utf8');
   expect(stdin).toContain('prompt');
   expect(stdin).toContain('Follow this JSON Schema exactly');
+});
+
+test('authenticates Pi from the login shell environment when the app inherited none', async () => {
+  await using directory = await createTemporaryDirectory('codiff-pi-login-env-');
+  const fakeShell = join(directory.path, 'fake-login-shell');
+  // A GUI-launched Codiff keeps launchd's minimal environment: no
+  // ANTHROPIC_API_KEY, even when the user's login shell exports one.
+  await writeFile(
+    fakeShell,
+    `#!/bin/sh
+ANTHROPIC_API_KEY='from-login-shell' exec /bin/sh -c "$4"
+`,
+  );
+  await chmod(fakeShell, 0o755);
+  await using _environment = createTemporaryEnvironment({
+    ANTHROPIC_API_KEY: undefined,
+    SHELL: fakeShell,
+  });
+  const { calls, transport } = createCommandTransport(({ close, stdin, stdout }) => {
+    stdin.on('finish', () => {
+      stdout('{"version":1}');
+      close();
+    });
+  });
+
+  await expect(
+    runPi(
+      '/repo',
+      'prompt',
+      { required: ['version'], type: 'object' },
+      'walkthrough.json',
+      undefined,
+      {
+        commandTransport: transport,
+      },
+    ),
+  ).resolves.toBe('{"version":1}');
+
+  expect(calls[0].options.env?.ANTHROPIC_API_KEY).toBe('from-login-shell');
 });

@@ -5,6 +5,7 @@ const { spawn } = require('node:child_process');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
+const { getCommandEnvironment } = require('../login-shell-environment.cjs');
 const {
   getFingerprint,
   git,
@@ -100,8 +101,9 @@ const createGlabApiArgs = (mergeRequest, args, input) => [
  * @param {ReadonlyArray<string>} args
  * @param {unknown} [input]
  */
-const glabApi = (repoRoot, mergeRequest, args, input) =>
-  new Promise((resolve, reject) => {
+const glabApi = async (repoRoot, mergeRequest, args, input) => {
+  const environment = await getCommandEnvironment();
+  return new Promise((resolve, reject) => {
     let command;
     try {
       command = getGlabCommand();
@@ -112,6 +114,7 @@ const glabApi = (repoRoot, mergeRequest, args, input) =>
 
     const child = spawn(command, createGlabApiArgs(mergeRequest, args, input), {
       cwd: repoRoot,
+      env: environment,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const stdout = [];
@@ -134,6 +137,7 @@ const glabApi = (repoRoot, mergeRequest, args, input) =>
     });
     child.stdin.end(input == null ? undefined : JSON.stringify(input));
   });
+};
 
 /** @param {string} value */
 const parseGlabJsonPages = (value) => {

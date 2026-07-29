@@ -3,6 +3,7 @@
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { resolveAgentCommandTransport } = require('./agent-command.cjs');
+const { getCommandEnvironment } = require('./login-shell-environment.cjs');
 const {
   buildSchemaReminder,
   findExecutableOnPath,
@@ -125,6 +126,7 @@ const runPi = async (
   const model = normalizePiModel(options.model);
   const timeoutMs = options.timeoutMs ?? PI_TIMEOUT_MS;
   const effectivePrompt = `${prompt}${buildSchemaReminder(schema)}`;
+  const environment = await getCommandEnvironment();
 
   return await /** @type {Promise<string>} */ (
     new Promise((resolve, reject) => {
@@ -147,7 +149,7 @@ const runPi = async (
       ];
       const child = commandTransport.spawn(commandTransport.command, piArgs, {
         cwd: repoRoot,
-        env: process.env,
+        env: environment,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 

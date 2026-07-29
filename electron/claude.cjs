@@ -3,6 +3,7 @@
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { resolveAgentCommandTransport } = require('./agent-command.cjs');
+const { getCommandEnvironment } = require('./login-shell-environment.cjs');
 const {
   findExecutableOnPath,
   isExecutableFile,
@@ -234,8 +235,9 @@ const runClaude = async (
   const timeoutMs = options.timeoutMs ?? CLAUDE_TIMEOUT_MS;
 
   /** @param {string} claudeModel @returns {Promise<string>} */
-  const invokeClaude = async (claudeModel) =>
-    /** @type {Promise<string>} */ (
+  const invokeClaude = async (claudeModel) => {
+    const environment = await getCommandEnvironment();
+    return /** @type {Promise<string>} */ (
       new Promise((resolve, reject) => {
         let stderr = '';
         /** @type {Error | null} */
@@ -267,7 +269,7 @@ const runClaude = async (
         ];
         const child = commandTransport.spawn(commandTransport.command, claudeArgs, {
           cwd: repoRoot,
-          env: process.env,
+          env: environment,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         const streamParser = streamProgress ? createClaudeStreamParser(options.onProgress) : null;
@@ -349,6 +351,7 @@ const runClaude = async (
         child.stdin.end(prompt, () => {});
       })
     );
+  };
 
   try {
     return await invokeClaude(model);

@@ -4,6 +4,7 @@ const { createServer } = require('node:net');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { resolveAgentCommandTransport } = require('./agent-command.cjs');
+const { getCommandEnvironment } = require('./login-shell-environment.cjs');
 const {
   buildSchemaReminder,
   findExecutableOnPath,
@@ -343,8 +344,9 @@ const runOpenCode = async (
   const effectivePrompt = `${prompt}${buildSchemaReminder(schema)}`;
 
   /** @param {string} openCodeModel */
-  const invokeOpenCodeCli = (openCodeModel) =>
-    /** @type {Promise<string>} */ (
+  const invokeOpenCodeCli = async (openCodeModel) => {
+    const environment = await getCommandEnvironment();
+    return /** @type {Promise<string>} */ (
       new Promise((resolve, reject) => {
         let stderr = '';
         /** @type {Error | null} */
@@ -370,7 +372,7 @@ const runOpenCode = async (
         const child = commandTransport.spawn(commandTransport.command, opencodeArgs, {
           cwd: repoRoot,
           env: {
-            ...process.env,
+            ...environment,
             OPENCODE_PERMISSION: JSON.stringify({ '*': 'deny' }),
           },
           stdio: ['pipe', 'pipe', 'pipe'],
@@ -430,6 +432,7 @@ const runOpenCode = async (
         child.stdin.end(effectivePrompt, () => {});
       })
     );
+  };
 
   /** @param {string} openCodeModel */
   const invokeOpenCodeServer = async (openCodeModel) => {
@@ -438,13 +441,14 @@ const runOpenCode = async (
       getOpenCodeCommand,
     );
     const port = await reserveOpenCodePort();
+    const environment = await getCommandEnvironment();
     const child = commandTransport.spawn(
       commandTransport.command,
       ['serve', '--pure', '--hostname=127.0.0.1', `--port=${port}`],
       {
         cwd: repoRoot,
         env: {
-          ...process.env,
+          ...environment,
           OPENCODE_PERMISSION: JSON.stringify({ '*': 'deny' }),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
