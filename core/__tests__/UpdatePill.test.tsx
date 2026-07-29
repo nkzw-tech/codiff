@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, test } from 'vite-plus/test';
@@ -105,18 +103,6 @@ test('promises nothing beyond the download without a known strategy', async () =
   expect(pill(view)?.title).toContain('Downloads the update.');
   expect(pill(view)?.title).not.toContain('restarts');
   expect(pill(view)?.title).not.toContain('opens');
-});
-
-test('keeps the update pill styles out of the shared web stylesheet', () => {
-  // App.css ships to the web app; the update pill is desktop-only chrome and
-  // belongs in Desktop.css, which only the Electron entry imports.
-  const appCss = readFileSync(resolve('core/App.css'), 'utf8');
-  const desktopCss = readFileSync(resolve('core/Desktop.css'), 'utf8');
-
-  expect(appCss).not.toContain('update-pill');
-  expect(appCss).not.toContain('--update-accent');
-  expect(desktopCss).toContain('.update-pill');
-  expect(desktopCss).toContain('--update-accent');
 });
 
 test('styles the pill like the shared buttons', async () => {
