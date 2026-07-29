@@ -1296,6 +1296,9 @@ if (squirrelStartup || !lock) {
       getInitialRepositoryPath(launchPath, launchOptions, config.settings.lastRepositoryPath),
       launchOptions,
     );
+    if (launchOptions.applyUpdate) {
+      void updater?.applyLatest().catch(() => {});
+    }
   });
 
   app.on('ready', () => {
@@ -1333,6 +1336,9 @@ if (squirrelStartup || !lock) {
       getInitialRepositoryPath(getLaunchPath(), launchOptions, config.settings.lastRepositoryPath),
       launchOptions,
     );
+    if (launchOptions.applyUpdate) {
+      void updater?.applyLatest().catch(() => {});
+    }
 
     watchConfig((nextConfig) => {
       config = {
