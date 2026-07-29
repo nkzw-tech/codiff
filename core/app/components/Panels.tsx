@@ -95,16 +95,22 @@ export function UpdatePill({
   onApply: () => void;
   status: CodiffUpdateStatus;
 }) {
-  const { currentVersion, message, phase, version } = status;
+  const { currentVersion, message, phase, strategy, version } = status;
 
   if (phase === 'idle') {
     return null;
   }
 
   const actionable = phase === 'available' || phase === 'error';
+  const applyEffect =
+    strategy === 'squirrel'
+      ? 'Downloads the update and restarts the app.'
+      : strategy === 'download'
+        ? 'Downloads and opens the update. Quit Codiff to finish installing.'
+        : 'Downloads the update.';
   const title =
     phase === 'available'
-      ? `Update Codiff${version ? ` v${currentVersion} -> v${version}` : ''}. Downloads and installs the update.`
+      ? `Update Codiff${version ? ` v${currentVersion} -> v${version}` : ''}. ${applyEffect}`
       : phase === 'updating'
         ? version
           ? `Updating to Codiff ${version}…`

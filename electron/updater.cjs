@@ -19,6 +19,7 @@ const {
  *   currentVersion: string;
  *   message?: string;
  *   phase: UpdatePhase;
+ *   strategy?: 'download' | 'squirrel';
  *   version?: string;
  * }} UpdateStatus
  * @typedef {{
@@ -100,8 +101,8 @@ const createUpdater = ({
   const statusFromState = () => {
     const update = getAvailableUpdate(readUpdateState(configDir), currentVersion);
     return update
-      ? { currentVersion, phase: 'available', version: update.version }
-      : { currentVersion, phase: 'idle' };
+      ? { currentVersion, phase: 'available', strategy, version: update.version }
+      : { currentVersion, phase: 'idle', strategy };
   };
 
   /** @type {UpdateStatus} */
@@ -124,7 +125,7 @@ const createUpdater = ({
       return status;
     }
 
-    status = next;
+    status = { ...next, strategy };
     onStatusChange?.({ ...status });
     return status;
   };

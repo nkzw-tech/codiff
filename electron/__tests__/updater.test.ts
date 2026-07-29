@@ -157,6 +157,7 @@ test('starts from the cached state without hitting the network', async () => {
   expect(updater.getStatus()).toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
+    strategy: 'squirrel',
     version: '1.9.3',
   });
 });
@@ -211,7 +212,12 @@ test('checkForUpdates fetches, persists state and reports an available update', 
 
   const status = await updater.checkForUpdates();
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.3' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.3',
+  });
   expect(notifications).toEqual([status]);
 
   const persisted = JSON.parse(
@@ -237,7 +243,11 @@ test('checkForUpdates stays idle when already up to date', async () => {
     strategy: 'squirrel',
   });
 
-  expect(await updater.checkForUpdates()).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
+  expect(await updater.checkForUpdates()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'idle',
+    strategy: 'squirrel',
+  });
 });
 
 test('checkForUpdates honors the throttle and force bypasses it', async () => {
@@ -266,11 +276,21 @@ test('checkForUpdates honors the throttle and force bypasses it', async () => {
 
   const throttled = await updater.checkForUpdates();
   expect(requests).toBe(0);
-  expect(throttled).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.3' });
+  expect(throttled).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.3',
+  });
 
   const forced = await updater.checkForUpdates({ force: true });
   expect(requests).toBe(1);
-  expect(forced).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.4' });
+  expect(forced).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.4',
+  });
 });
 
 test('checkForUpdates swallows network failures and keeps the cached state', async () => {
@@ -300,7 +320,12 @@ test('checkForUpdates swallows network failures and keeps the cached state', asy
 
   const status = await updater.checkForUpdates();
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.3' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.3',
+  });
   expect(log.length).toBe(1);
 
   const persisted = JSON.parse(
@@ -330,6 +355,7 @@ test('checkForUpdates rejects on failure only when forced', async () => {
   await expect(updater.checkForUpdates()).resolves.toEqual({
     currentVersion: '1.9.2',
     phase: 'idle',
+    strategy: 'squirrel',
   });
   await expect(updater.checkForUpdates({ force: true })).rejects.toThrow();
 });
@@ -352,7 +378,11 @@ test('checkForUpdates does nothing for unpackaged builds', async () => {
     strategy: 'squirrel',
   });
 
-  expect(await updater.checkForUpdates()).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
+  expect(await updater.checkForUpdates()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'idle',
+    strategy: 'squirrel',
+  });
   expect(requests).toBe(0);
 });
 
@@ -374,8 +404,12 @@ test('dismissUpdate persists the dismissal and hides the update', async () => {
     strategy: 'squirrel',
   });
 
-  expect(updater.dismissUpdate()).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
-  expect(notifications).toEqual([{ currentVersion: '1.9.2', phase: 'idle' }]);
+  expect(updater.dismissUpdate()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'idle',
+    strategy: 'squirrel',
+  });
+  expect(notifications).toEqual([{ currentVersion: '1.9.2', phase: 'idle', strategy: 'squirrel' }]);
 
   const persisted = JSON.parse(
     await readFile(join(directory.path, 'update-state.json'), 'utf8'),
@@ -405,7 +439,12 @@ test('applyUpdate drives Squirrel through download and restart', async () => {
 
   const status = await updater.applyUpdate();
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'updating', version: '1.9.3' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'updating',
+    strategy: 'squirrel',
+    version: '1.9.3',
+  });
   expect(autoUpdater.feedURL).toEqual({
     url: 'https://update.electronjs.org/nkzw-tech/codiff/darwin-arm64/1.9.2',
   });
@@ -512,7 +551,12 @@ test('applyUpdate downloads and opens the installer for download installs', asyn
 
   const status = await updater.applyUpdate();
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'installerReady', version: '1.9.3' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'installerReady',
+    strategy: 'download',
+    version: '1.9.3',
+  });
   expect(opened).toEqual([join(downloads.path, 'codiff_1.9.3_amd64.deb')]);
   expect(await readFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'utf8')).toBe('deb-bytes');
 });
@@ -664,7 +708,7 @@ test('a dismissal during an in-flight check is not erased', async () => {
   releaseResponse();
   const status = await check;
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
+  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'idle', strategy: 'squirrel' });
 
   const persisted = JSON.parse(
     await readFile(join(directory.path, 'update-state.json'), 'utf8'),
@@ -697,7 +741,12 @@ test('a forced check clears the dismissal and resurfaces the update', async () =
 
   const status = await updater.checkForUpdates({ force: true });
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.3' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.3',
+  });
 
   const persisted = JSON.parse(
     await readFile(join(directory.path, 'update-state.json'), 'utf8'),
@@ -741,12 +790,18 @@ test('concurrent checks run one at a time and the newest result wins', async () 
   expect(await scheduled).toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
+    strategy: 'squirrel',
     version: '1.9.3',
   });
 
   await waitFor(() => pending.length === 2);
   pending[1]('1.9.4');
-  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.4' });
+  expect(await forced).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.4',
+  });
 
   const persisted = JSON.parse(
     await readFile(join(directory.path, 'update-state.json'), 'utf8'),
@@ -874,6 +929,7 @@ test('a forced check failure belongs only to its own caller', async () => {
   await expect(second).resolves.toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
+    strategy: 'squirrel',
     version: '1.9.4',
   });
   expect(log.length).toBe(1);
@@ -911,10 +967,16 @@ test('a queued check cannot discard a successful forced result', async () => {
 
   pending[0]('1.9.4');
 
-  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'available', version: '1.9.4' });
+  expect(await forced).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.4',
+  });
   expect(await scheduled).toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
+    strategy: 'squirrel',
     version: '1.9.4',
   });
   expect(pending.length).toBe(1);
@@ -1042,7 +1104,7 @@ test('a dismissal made after a forced check was queued survives it', async () =>
   await waitFor(() => pending.length === 2);
   pending[1]('1.9.3');
 
-  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
+  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'idle', strategy: 'squirrel' });
 
   const persisted = JSON.parse(
     await readFile(join(directory.path, 'update-state.json'), 'utf8'),
@@ -1187,7 +1249,12 @@ test('applyLatest force-checks and applies in one step', async () => {
 
   const status = await updater.applyLatest();
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'updating', version: '1.9.3' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'updating',
+    strategy: 'squirrel',
+    version: '1.9.3',
+  });
   expect(autoUpdater.feedURL).toEqual({
     url: 'https://update.electronjs.org/nkzw-tech/codiff/darwin-arm64/1.9.2',
   });
@@ -1213,7 +1280,11 @@ test('applyLatest stays idle when already up to date', async () => {
     strategy: 'squirrel',
   });
 
-  expect(await updater.applyLatest()).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
+  expect(await updater.applyLatest()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'idle',
+    strategy: 'squirrel',
+  });
   expect(autoUpdater.feedURL).toBeNull();
   expect(autoUpdater.checkForUpdatesCalls).toBe(0);
 });
@@ -1329,7 +1400,12 @@ test('an older failed applyLatest defers to a newer successful one', async () =>
   pending[1]({ version: '1.9.4' });
   const status = await second;
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'updating', version: '1.9.4' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'updating',
+    strategy: 'squirrel',
+    version: '1.9.4',
+  });
   expect(updater.getStatus().phase).toBe('updating');
   expect(autoUpdater.checkForUpdatesCalls).toBe(1);
 });
@@ -1371,10 +1447,16 @@ test('a newer applyLatest owns the apply over an older successful one', async ()
   pending[1]('1.9.4');
   const status = await second;
 
-  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'updating', version: '1.9.4' });
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'updating',
+    strategy: 'squirrel',
+    version: '1.9.4',
+  });
   expect(updater.getStatus()).toEqual({
     currentVersion: '1.9.2',
     phase: 'updating',
+    strategy: 'squirrel',
     version: '1.9.4',
   });
   expect(autoUpdater.checkForUpdatesCalls).toBe(1);
