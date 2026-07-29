@@ -356,27 +356,40 @@ const createUpdater = ({
     }
   };
 
+  // The manual strategy never leaves the available phase, so the phase guard
+  // in applyUpdate cannot serialize it; this latch keeps a double click from
+  // opening the release page twice while the first open is still in flight.
+  let manualOpenInFlight = false;
+
   const applyManualUpdate = async () => {
     const version = status.version;
     if (!openExternal) {
       return setError('The updater is unavailable in this build.', version);
     }
 
+    manualOpenInFlight = true;
+    const generationAtStart = actionGeneration;
     try {
       await openExternal(
         version ? releasePageUrl(version) : 'https://github.com/nkzw-tech/codiff/releases',
       );
       // Nothing was installed; the update stays available until the user
       // replaces the app themselves. Recomputing from state also clears a
-      // previous open failure once a retry reaches the release page.
-      return setStatus(statusFromState());
+      // previous open failure once a retry reaches the release page. An
+      // action taken while the browser was opening is newer information and
+      // owns the status instead.
+      return actionGeneration === generationAtStart ? setStatus(statusFromState()) : { ...status };
     } catch (error) {
-      return setError(error instanceof Error ? error.message : String(error), version);
+      return actionGeneration === generationAtStart
+        ? setError(error instanceof Error ? error.message : String(error), version)
+        : { ...status };
+    } finally {
+      manualOpenInFlight = false;
     }
   };
 
   const applyUpdate = async () => {
-    if (status.phase !== 'available' && status.phase !== 'error') {
+    if (manualOpenInFlight || (status.phase !== 'available' && status.phase !== 'error')) {
       return { ...status };
     }
 
