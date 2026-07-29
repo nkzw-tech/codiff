@@ -20,6 +20,45 @@ codiff_version() {
   sed -n 's/^  "version": "\([^"]*\)".*/\1/p' "$script_dir/../package.json"
 }
 
+# major.minor.patch integer compare; any other shape is "not newer".
+is_newer_version() {
+  case "$1$2" in *[!0-9.]*|'') return 1 ;; esac
+  case ".$1." in *..*) return 1 ;; esac
+  case ".$2." in *..*) return 1 ;; esac
+  old_ifs="$IFS"
+  IFS=.
+  # shellcheck disable=SC2086
+  set -- $1 -- $2
+  IFS="$old_ifs"
+  [ "$#" -eq 7 ] && [ "$4" = "--" ] || return 1
+  latest_major="$1" latest_minor="$2" latest_patch="$3"
+  current_major="$5" current_minor="$6" current_patch="$7"
+  if [ "$latest_major" -ne "$current_major" ]; then
+    [ "$latest_major" -gt "$current_major" ]
+    return $?
+  fi
+  if [ "$latest_minor" -ne "$current_minor" ]; then
+    [ "$latest_minor" -gt "$current_minor" ]
+    return $?
+  fi
+  [ "$latest_patch" -gt "$current_patch" ]
+}
+
+# Mirror of bin/update-notice.js for the wrapper-owned code paths: read the
+# state cached by the app's daily check and never touch the network.
+print_update_notice() {
+  state_file="$HOME/.codiff/update-state.json"
+  [ -f "$state_file" ] || return 0
+  latest="$(sed -n 's/.*"latestVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" | head -n 1)"
+  dismissed="$(sed -n 's/.*"dismissedVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" | head -n 1)"
+  [ -n "$latest" ] || return 0
+  [ "$latest" = "$dismissed" ] && return 0
+  current="$(codiff_version)"
+  is_newer_version "$latest" "$current" || return 0
+  printf 'A new version of Codiff is available (v%s -> v%s). Run `codiff update` to update.\n' \
+    "$current" "$latest" >&2
+}
+
 show_help() {
   version="$(codiff_version)"
   blue_bold="$(printf '\033[1;34m')"
@@ -272,6 +311,7 @@ for arg in "$@"; do
       ;;
     --version|-v)
       printf 'codiff v%s\n' "$(codiff_version)"
+      print_update_notice
       exit 0
       ;;
     --walkthrough-guide)
@@ -499,6 +539,8 @@ open_codiff() {
 
   open -n "$app_path" --args "$@"
 }
+
+print_update_notice
 
 if [ -n "$plan_file_path" ]; then
   if [ -z "$plan_result_file_path" ]; then

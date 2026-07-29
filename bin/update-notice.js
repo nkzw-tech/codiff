@@ -13,6 +13,6 @@ const { getAvailableUpdate, readUpdateState } = require('../electron/update-chec
 export function getUpdateNotice({ configDir, currentVersion }) {
   const update = getAvailableUpdate(readUpdateState(configDir), currentVersion);
   return update
-    ? `A new version of Codiff is available (v${currentVersion} -> v${update.version}). Open the app to update.`
+    ? `A new version of Codiff is available (v${currentVersion} -> v${update.version}). Run \`codiff update\` to update.`
     : null;
 }
