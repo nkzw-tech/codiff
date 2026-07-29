@@ -890,6 +890,49 @@ test('a check completion does not erase an apply failure', async () => {
   expect(updater.getStatus().phase).toBe('error');
 });
 
+test('a retry that fails identically still outlives a completing check', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  autoUpdater.setFeedURL = () => {
+    throw new Error('Could not set the update feed.');
+  };
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  await updater.applyUpdate();
+  expect(updater.getStatus().phase).toBe('error');
+
+  const check = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 1);
+  await updater.applyUpdate();
+  pending[0]('1.9.3');
+  await check;
+
+  expect(updater.getStatus().phase).toBe('error');
+  expect(updater.getStatus().message).toContain('Could not set the update feed.');
+});
+
 test('applyUpdate is a no-op unless an update is available', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
 
