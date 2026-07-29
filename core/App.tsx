@@ -1948,12 +1948,6 @@ export default function App() {
             onApply={() => {
               window.codiff.applyUpdate().then(setUpdateStatus, () => {});
             }}
-            onDismiss={() => {
-              window.codiff.dismissUpdate().then(setUpdateStatus, () => {});
-            }}
-            onOpenReleasePage={() => {
-              window.codiff.openReleasePage().catch(() => {});
-            }}
             status={updateStatus}
           />
         ) : null}
