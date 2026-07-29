@@ -103,6 +103,20 @@ test('shows progress while updating without actions', async () => {
   expect(view.container.querySelector('.repository-change-dismiss')).toBeNull();
 });
 
+test('shows progress without a version after an error retry', async () => {
+  await using view = await renderBanner(
+    <UpdateBanner
+      onApply={noop}
+      onDismiss={noop}
+      onOpenReleasePage={noop}
+      status={status({ phase: 'updating' })}
+    />,
+  );
+
+  expect(banner(view)?.textContent).toContain('Updating Codiff');
+  expect(banner(view)?.textContent).not.toContain('undefined');
+});
+
 test('tells the user to finish a handed-off install', async () => {
   await using view = await renderBanner(
     <UpdateBanner

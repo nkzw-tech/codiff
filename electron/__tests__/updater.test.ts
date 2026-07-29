@@ -1188,6 +1188,34 @@ test('applyLatest stays idle when already up to date', async () => {
   expect(autoUpdater.checkForUpdatesCalls).toBe(0);
 });
 
+test('applyLatest surfaces a failed check as an error status', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.statusCode = 500;
+    response.end('nope');
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    log: () => {},
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const status = await updater.applyLatest();
+
+  expect(status.phase).toBe('error');
+  expect(status.message).toBeTruthy();
+  expect(updater.getStatus().phase).toBe('error');
+  expect(autoUpdater.checkForUpdatesCalls).toBe(0);
+});
+
 test('applyUpdate is a no-op unless an update is available', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
 
