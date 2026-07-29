@@ -14,14 +14,9 @@ const startReleaseServer = async (version: string, statusCode = 200) => {
   return { disposable, url: `http://127.0.0.1:${port}/` };
 };
 
-const brewOwnsCask = () => {
-  throw new Error('Must not probe brew when up to date.');
-};
-
 test('resolveUpdateAction reports up to date for equal or older releases', () => {
   expect(
     resolveUpdateAction({
-      brewOwnsCask,
       currentVersion: '1.9.2',
       isSourceCheckout: false,
       latestVersion: '1.9.2',
@@ -29,7 +24,6 @@ test('resolveUpdateAction reports up to date for equal or older releases', () =>
   ).toEqual({ kind: 'up-to-date' });
   expect(
     resolveUpdateAction({
-      brewOwnsCask,
       currentVersion: '2.0.0',
       isSourceCheckout: false,
       latestVersion: '1.9.2',
@@ -40,7 +34,6 @@ test('resolveUpdateAction reports up to date for equal or older releases', () =>
 test('resolveUpdateAction prefers source-checkout guidance over everything', () => {
   expect(
     resolveUpdateAction({
-      brewOwnsCask: () => true,
       currentVersion: '1.9.2',
       isSourceCheckout: true,
       latestVersion: '1.9.3',
@@ -48,21 +41,11 @@ test('resolveUpdateAction prefers source-checkout guidance over everything', () 
   ).toEqual({ kind: 'source-checkout', version: '1.9.3' });
 });
 
-test('resolveUpdateAction upgrades brew-owned installs through brew', () => {
+test('resolveUpdateAction hands every packaged install to the app self-updater', () => {
+  // Homebrew installs included: the cask is marked auto_updates, so the app
+  // updating itself in place is the supported path and brew is never probed.
   expect(
     resolveUpdateAction({
-      brewOwnsCask: () => true,
-      currentVersion: '1.9.2',
-      isSourceCheckout: false,
-      latestVersion: '1.9.3',
-    }),
-  ).toEqual({ kind: 'brew-upgrade', version: '1.9.3' });
-});
-
-test('resolveUpdateAction hands other installs to the app', () => {
-  expect(
-    resolveUpdateAction({
-      brewOwnsCask: () => false,
       currentVersion: '1.9.2',
       isSourceCheckout: false,
       latestVersion: '1.9.3',
@@ -75,7 +58,6 @@ test('runUpdateCommand reports up to date without touching brew or the app', asy
   const lines: Array<string> = [];
 
   const exitCode = await runUpdateCommand({
-    brewOwnsCask: () => false,
     currentVersion: '1.9.2',
     isSourceCheckout: false,
     log: (line) => lines.push(line),
@@ -83,34 +65,10 @@ test('runUpdateCommand reports up to date without touching brew or the app', asy
       throw new Error('Must not open the app.');
     },
     releaseUrl: url,
-    runBrewUpgrade: () => {
-      throw new Error('Must not run brew.');
-    },
   });
 
   expect(exitCode).toBe(0);
   expect(lines.join('\n')).toContain('up to date');
-});
-
-test('runUpdateCommand runs brew for brew-owned installs and returns its exit code', async () => {
-  const { disposable: _server, url } = await startReleaseServer('1.9.3');
-  let upgrades = 0;
-
-  const exitCode = await runUpdateCommand({
-    brewOwnsCask: () => true,
-    currentVersion: '1.9.2',
-    isSourceCheckout: false,
-    log: () => {},
-    openApp: () => {},
-    releaseUrl: url,
-    runBrewUpgrade: () => {
-      upgrades++;
-      return 0;
-    },
-  });
-
-  expect(exitCode).toBe(0);
-  expect(upgrades).toBe(1);
 });
 
 test('runUpdateCommand opens the app for non-brew installs', async () => {
@@ -119,7 +77,6 @@ test('runUpdateCommand opens the app for non-brew installs', async () => {
   const lines: Array<string> = [];
 
   const exitCode = await runUpdateCommand({
-    brewOwnsCask: () => false,
     currentVersion: '1.9.2',
     isSourceCheckout: false,
     log: (line) => lines.push(line),
@@ -127,7 +84,6 @@ test('runUpdateCommand opens the app for non-brew installs', async () => {
       opened++;
     },
     releaseUrl: url,
-    runBrewUpgrade: () => 1,
   });
 
   expect(exitCode).toBe(0);
@@ -140,13 +96,11 @@ test('runUpdateCommand prints manual guidance when the app cannot be opened', as
   const lines: Array<string> = [];
 
   const exitCode = await runUpdateCommand({
-    brewOwnsCask: () => false,
     currentVersion: '1.9.2',
     isSourceCheckout: false,
     log: (line) => lines.push(line),
     openApp: null,
     releaseUrl: url,
-    runBrewUpgrade: () => 1,
   });
 
   expect(exitCode).toBe(1);
@@ -158,7 +112,6 @@ test('runUpdateCommand guides source checkouts instead of updating', async () =>
   const lines: Array<string> = [];
 
   const exitCode = await runUpdateCommand({
-    brewOwnsCask: () => true,
     currentVersion: '1.9.2',
     isSourceCheckout: true,
     log: (line) => lines.push(line),
@@ -166,9 +119,6 @@ test('runUpdateCommand guides source checkouts instead of updating', async () =>
       throw new Error('Must not open the app.');
     },
     releaseUrl: url,
-    runBrewUpgrade: () => {
-      throw new Error('Must not run brew.');
-    },
   });
 
   expect(exitCode).toBe(0);
@@ -180,13 +130,11 @@ test('runUpdateCommand fails cleanly when the release check fails', async () => 
   const lines: Array<string> = [];
 
   const exitCode = await runUpdateCommand({
-    brewOwnsCask: () => false,
     currentVersion: '1.9.2',
     isSourceCheckout: false,
     log: (line) => lines.push(line),
     openApp: () => {},
     releaseUrl: url,
-    runBrewUpgrade: () => 1,
   });
 
   expect(exitCode).toBe(1);

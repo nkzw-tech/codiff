@@ -11,7 +11,7 @@ const {
  * Decide what `codiff update` should do for this install.
  *
  * @param {{
- *   brewOwnsCask: () => boolean;
+ *   brewOwnsCask?: () => boolean;
  *   currentVersion: string;
  *   isSourceCheckout: boolean;
  *   latestVersion: string;
@@ -32,7 +32,7 @@ export function resolveUpdateAction({
     return { kind: 'source-checkout', version: latestVersion };
   }
 
-  return brewOwnsCask()
+  return /** @type {() => boolean} */ (brewOwnsCask)()
     ? { kind: 'brew-upgrade', version: latestVersion }
     : { kind: 'open-app', version: latestVersion };
 }
@@ -41,13 +41,13 @@ export function resolveUpdateAction({
  * Check GitHub Releases and perform the platform-appropriate update.
  *
  * @param {{
- *   brewOwnsCask: () => boolean;
+ *   brewOwnsCask?: () => boolean;
  *   currentVersion: string;
  *   isSourceCheckout: boolean;
  *   log: (line: string) => void;
  *   openApp: (() => void) | null;
  *   releaseUrl?: string;
- *   runBrewUpgrade: () => number;
+ *   runBrewUpgrade?: () => number;
  * }} options
  * @returns {Promise<number>}
  */
@@ -90,7 +90,7 @@ export async function runUpdateCommand({
       return 0;
     case 'brew-upgrade':
       log(`Updating Codiff v${currentVersion} -> v${action.version} via Homebrew…`);
-      return runBrewUpgrade();
+      return /** @type {() => number} */ (runBrewUpgrade)();
     case 'open-app':
       if (openApp) {
         log(`Opening Codiff to install v${action.version}…`);
