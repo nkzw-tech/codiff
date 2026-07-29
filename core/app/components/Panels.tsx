@@ -85,6 +85,15 @@ export function RepositoryChangeBanner({
 
 export type { CodiffUpdateStatus as UpdateStatus } from '../../types.ts';
 
+export function UpdatePill(_props: {
+  onApply: () => void;
+  onDismiss: () => void;
+  onOpenReleasePage: () => void;
+  status: import('../../types.ts').CodiffUpdateStatus;
+}) {
+  return null;
+}
+
 export function UpdateBanner({
   onApply,
   onDismiss,
