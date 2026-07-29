@@ -123,7 +123,7 @@ export function UpdatePill({
 
   return (
     <div aria-live="polite" className="update-pill-anchor">
-      <button
+      <Button
         className={`update-pill ${phase === 'installerReady' ? 'installer-ready' : phase}`}
         disabled={!actionable}
         onClick={onApply}
@@ -146,7 +146,7 @@ export function UpdatePill({
                 ? 'Quit to finish update'
                 : 'Update failed. Try again'}
         </span>
-      </button>
+      </Button>
     </div>
   );
 }
