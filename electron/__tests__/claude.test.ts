@@ -1,7 +1,7 @@
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { expect, test, vi } from 'vite-plus/test';
+import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import {
   createTemporaryDirectory,
   createTemporaryEnvironment,
@@ -36,6 +36,20 @@ const {
     },
   ) => Promise<string>;
 };
+
+// Spawning Claude resolves the login shell environment, so tests either
+// provide their own fake shell or run without one.
+beforeEach(() => {
+  const shell = process.env.SHELL;
+  delete process.env.SHELL;
+  return () => {
+    if (shell === undefined) {
+      delete process.env.SHELL;
+    } else {
+      process.env.SHELL = shell;
+    }
+  };
+});
 
 test('normalizes Claude Code model preferences to known models', () => {
   expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8');
@@ -239,4 +253,78 @@ test('surfaces a helpful message when Claude Code is not logged in', async () =>
       commandTransport: transport,
     }),
   ).rejects.toThrow(/not logged in/i);
+});
+
+test('authenticates Claude Code from the login shell environment when the app inherited none', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-login-env-');
+  const fakeShell = join(directory.path, 'fake-login-shell');
+  // A GUI-launched Codiff keeps launchd's minimal environment: no
+  // ANTHROPIC_API_KEY, even when the user's login shell exports one.
+  await writeFile(
+    fakeShell,
+    `#!/bin/sh
+ANTHROPIC_API_KEY='from-login-shell' exec /bin/sh -c "$4"
+`,
+  );
+  await chmod(fakeShell, 0o755);
+  await using _environment = createTemporaryEnvironment({
+    ANTHROPIC_API_KEY: undefined,
+    SHELL: fakeShell,
+  });
+  const { calls, transport } = createCommandTransport(({ close, stdin, stdout }) => {
+    stdin.on('finish', () => {
+      stdout(
+        JSON.stringify({
+          is_error: false,
+          result: '{"version":1}',
+          structured_output: { version: 1 },
+        }),
+      );
+      close();
+    });
+  });
+
+  await expect(
+    runClaude('/repo', 'prompt', { type: 'object' }, 'walkthrough.json', 'Timed out.', {
+      commandTransport: transport,
+    }),
+  ).resolves.toBe('{"version":1}');
+
+  expect(calls[0].options.env?.ANTHROPIC_API_KEY).toBe('from-login-shell');
+});
+
+test('prefers the process environment over the login shell for Claude Code', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-env-precedence-');
+  const fakeShell = join(directory.path, 'fake-login-shell');
+  await writeFile(
+    fakeShell,
+    `#!/bin/sh
+ANTHROPIC_API_KEY='from-login-shell' exec /bin/sh -c "$4"
+`,
+  );
+  await chmod(fakeShell, 0o755);
+  await using _environment = createTemporaryEnvironment({
+    ANTHROPIC_API_KEY: 'from-process',
+    SHELL: fakeShell,
+  });
+  const { calls, transport } = createCommandTransport(({ close, stdin, stdout }) => {
+    stdin.on('finish', () => {
+      stdout(
+        JSON.stringify({
+          is_error: false,
+          result: '{"version":1}',
+          structured_output: { version: 1 },
+        }),
+      );
+      close();
+    });
+  });
+
+  await expect(
+    runClaude('/repo', 'prompt', { type: 'object' }, 'walkthrough.json', 'Timed out.', {
+      commandTransport: transport,
+    }),
+  ).resolves.toBe('{"version":1}');
+
+  expect(calls[0].options.env?.ANTHROPIC_API_KEY).toBe('from-process');
 });

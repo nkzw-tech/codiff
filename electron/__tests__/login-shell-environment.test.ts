@@ -8,8 +8,9 @@ import {
 } from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
-const { getLoginShellEnvironment, resolveLoginShellEnvironment } =
+const { getCommandEnvironment, getLoginShellEnvironment, resolveLoginShellEnvironment } =
   require('../login-shell-environment.cjs') as {
+    getCommandEnvironment: () => Promise<Record<string, string | undefined>>;
     getLoginShellEnvironment: () => Promise<Readonly<Record<string, string>>>;
     resolveLoginShellEnvironment: (
       shell: string,
@@ -117,6 +118,25 @@ CODIFF_FAKE_TOKEN='from-login-shell' exec /bin/sh -c "$4"
   expect(second).toBe(first);
   expect(third).toBe(first);
   expect((await readFile(runsPath, 'utf8')).trim().split('\n')).toHaveLength(1);
+});
+
+test('builds command environments where the process wins over the login shell', async () => {
+  await using directory = await createTemporaryDirectory('codiff-login-shell-');
+  const shell = await createFakeLoginShell(
+    directory.path,
+    `CODIFF_FAKE_TOKEN='from-login-shell' CODIFF_FAKE_SHARED='from-login-shell' exec /bin/sh -c "$4"
+`,
+  );
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_FAKE_SHARED: 'from-process',
+    CODIFF_FAKE_TOKEN: undefined,
+    SHELL: shell,
+  });
+
+  const environment = await getCommandEnvironment();
+
+  expect(environment.CODIFF_FAKE_TOKEN).toBe('from-login-shell');
+  expect(environment.CODIFF_FAKE_SHARED).toBe('from-process');
 });
 
 test('salvages a clean environment dump when a background child holds stdout open', async () => {

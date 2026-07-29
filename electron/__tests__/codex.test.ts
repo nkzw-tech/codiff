@@ -1,7 +1,7 @@
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { expect, test } from 'vite-plus/test';
+import { beforeEach, expect, test } from 'vite-plus/test';
 import {
   createTemporaryDirectory,
   createTemporaryEnvironment,
@@ -70,6 +70,20 @@ const completeCodexExec = async (
   }
   commandProcess.close();
 };
+
+// Spawning Codex resolves the login shell environment, so tests either
+// provide their own fake shell or run without one.
+beforeEach(() => {
+  const shell = process.env.SHELL;
+  delete process.env.SHELL;
+  return () => {
+    if (shell === undefined) {
+      delete process.env.SHELL;
+    } else {
+      process.env.SHELL = shell;
+    }
+  };
+});
 
 test('normalizes OpenAI model preferences to known models', () => {
   expect(normalizeOpenAIModel('gpt-5.6-sol')).toBe('gpt-5.6-sol');
@@ -404,4 +418,46 @@ test('surfaces structured Codex CLI errors without the full prompt stream', asyn
 
   expect(message).toContain('Invalid schema for response_format.');
   expect(message).not.toContain('very long prompt');
+});
+
+test('authenticates Codex from the login shell environment when the app inherited none', async () => {
+  await using directory = await createTemporaryDirectory('codiff-codex-login-env-');
+  const fakeShell = join(directory.path, 'fake-login-shell');
+  // A GUI-launched Codiff keeps launchd's minimal environment: no
+  // OPENAI_API_KEY, even when the user's login shell exports one. Both the
+  // app-server and exec transports must receive the login shell variables.
+  await writeFile(
+    fakeShell,
+    `#!/bin/sh
+OPENAI_API_KEY='from-login-shell' exec /bin/sh -c "$4"
+`,
+  );
+  await chmod(fakeShell, 0o755);
+  await using _environment = createTemporaryEnvironment({
+    OPENAI_API_KEY: undefined,
+    SHELL: fakeShell,
+  });
+  const { calls, transport } = createCommandTransport((commandProcess) => {
+    if (commandProcess.args[0] === 'app-server') {
+      queueMicrotask(() => {
+        commandProcess.stderr("error: unrecognized subcommand 'app-server'");
+        commandProcess.close(2);
+      });
+      return;
+    }
+    commandProcess.stdin.on('finish', () => void completeCodexExec(commandProcess));
+  });
+
+  await expect(
+    runCodex('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.', {
+      commandTransport: transport,
+      onProgress: () => {},
+    }),
+  ).resolves.toBe('{"version":1}');
+
+  expect(calls[0].args[0]).toBe('app-server');
+  expect(calls).toHaveLength(2);
+  for (const call of calls) {
+    expect(call.options.env?.OPENAI_API_KEY).toBe('from-login-shell');
+  }
 });

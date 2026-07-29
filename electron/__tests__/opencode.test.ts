@@ -1,7 +1,7 @@
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { expect, test } from 'vite-plus/test';
+import { beforeEach, expect, test } from 'vite-plus/test';
 import {
   createTemporaryDirectory,
   createTemporaryEnvironment,
@@ -47,6 +47,20 @@ const {
     },
   ) => Promise<string>;
 };
+
+// Spawning OpenCode resolves the login shell environment, so tests either
+// provide their own fake shell or run without one.
+beforeEach(() => {
+  const shell = process.env.SHELL;
+  delete process.env.SHELL;
+  return () => {
+    if (shell === undefined) {
+      delete process.env.SHELL;
+    } else {
+      process.env.SHELL = shell;
+    }
+  };
+});
 
 test('exposes selectable OpenCode models while keeping its configured default', () => {
   expect(DEFAULT_OPENCODE_MODEL).toBe('opencode-default');
@@ -355,4 +369,63 @@ test('passes explicit models to OpenCode and falls back when they are unavailabl
   expect(calls[0].args).toContain('anthropic/claude-sonnet-4-6');
   expect(calls[1].args).not.toContain('--model');
   expect(fallbacks).toEqual([[DEFAULT_OPENCODE_MODEL, 'anthropic/claude-sonnet-4-6']]);
+});
+
+test('authenticates OpenCode from the login shell environment when the app inherited none', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-login-env-');
+  const fakeShell = join(directory.path, 'fake-login-shell');
+  // A GUI-launched Codiff keeps launchd's minimal environment: no
+  // OPENAI_API_KEY, even when the user's login shell exports one. Both the
+  // event server and the CLI fallback must receive the login shell variables
+  // without losing the permission overrides.
+  await writeFile(
+    fakeShell,
+    `#!/bin/sh
+OPENAI_API_KEY='from-login-shell' exec /bin/sh -c "$4"
+`,
+  );
+  await chmod(fakeShell, 0o755);
+  await using _environment = createTemporaryEnvironment({
+    OPENAI_API_KEY: undefined,
+    SHELL: fakeShell,
+  });
+  const { calls, transport } = createCommandTransport((commandProcess) => {
+    if (commandProcess.args[0] === 'serve') {
+      queueMicrotask(() => {
+        commandProcess.stderr('unknown command: serve');
+        commandProcess.close(1);
+      });
+      return;
+    }
+    commandProcess.stdin.on('finish', () => {
+      commandProcess.stdout(
+        `${JSON.stringify({
+          part: { id: 'answer', text: '{"version":1}' },
+          type: 'text',
+        })}\n`,
+      );
+      commandProcess.close();
+    });
+  });
+
+  await expect(
+    runOpenCode(
+      '/repo',
+      'prompt',
+      { required: ['version'], type: 'object' },
+      undefined,
+      undefined,
+      {
+        commandTransport: transport,
+        onProgress: () => {},
+      },
+    ),
+  ).resolves.toBe('{"version":1}');
+
+  expect(calls[0].args[0]).toBe('serve');
+  expect(calls).toHaveLength(2);
+  for (const call of calls) {
+    expect(call.options.env?.OPENAI_API_KEY).toBe('from-login-shell');
+    expect(JSON.parse(String(call.options.env?.OPENCODE_PERMISSION))).toEqual({ '*': 'deny' });
+  }
 });
