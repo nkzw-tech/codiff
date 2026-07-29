@@ -759,6 +759,98 @@ test('a forced check keeps a dismissal made while it was in flight', async () =>
   expect(persisted.dismissedVersion).toBe('1.9.3');
 });
 
+test('a check completion does not cancel an active Squirrel update', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const check = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 1);
+  await updater.applyUpdate();
+  pending[0]('1.9.3');
+  await check;
+
+  expect(updater.getStatus().phase).toBe('updating');
+
+  autoUpdater.emit('update-downloaded');
+  expect(autoUpdater.quitAndInstallCalls).toBe(1);
+});
+
+test('a stale failed check does not reject after a newer check succeeded', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(respond: { status?: number; version?: string }) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push(({ status: statusCode, version }) => {
+      if (statusCode) {
+        response.statusCode = statusCode;
+        response.end('nope');
+        return;
+      }
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version ?? '0.0.1'));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: '2026-01-01T00:00:00.000Z',
+    latestVersion: '1.9.2',
+  });
+
+  const log: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    log: (message) => log.push(message),
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const first = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 1);
+  const second = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 2);
+
+  pending[1]({ version: '1.9.4' });
+  await expect(second).resolves.toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    version: '1.9.4',
+  });
+
+  pending[0]({ status: 500 });
+  await expect(first).resolves.toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    version: '1.9.4',
+  });
+  expect(log).toEqual([]);
+});
+
 test('applyUpdate is a no-op unless an update is available', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
 
