@@ -104,7 +104,7 @@ export function UpdatePill({
   const actionable = phase === 'available' || phase === 'error';
   const title =
     phase === 'available'
-      ? `Update Codiff${version ? ` v${currentVersion} -> v${version}` : ''}. Downloads the update and restarts the app.`
+      ? `Update Codiff${version ? ` v${currentVersion} -> v${version}` : ''}. Downloads and installs the update.`
       : phase === 'updating'
         ? version
           ? `Updating to Codiff ${version}…`
