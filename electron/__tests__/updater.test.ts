@@ -773,6 +773,67 @@ test('concurrent manual applies open the release page only once', async () => {
   expect(updater.getStatus().phase).toBe('available');
 });
 
+test('applyLatest supersedes a pending manual hand-off', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(releaseJson('1.9.4'));
+  });
+
+  const openedUrls: Array<string> = [];
+  let rejectFirstOpen: (error: Error) => void = () => {};
+  let resolveSecondOpen = () => {};
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: (url) => {
+      openedUrls.push(url);
+      return new Promise((resolveOpened, rejectOpened) => {
+        if (openedUrls.length === 1) {
+          rejectFirstOpen = rejectOpened;
+        } else {
+          resolveSecondOpen = resolveOpened;
+        }
+      });
+    },
+    platform: 'win32',
+    releaseUrl: `${origin}/`,
+    strategy: 'manual',
+  });
+
+  const pending = updater.applyUpdate();
+  const latest = updater.applyLatest();
+
+  // The forced check discovers 1.9.4 while the 1.9.3 hand-off is still
+  // opening; the newer request must supersede it, not become a no-op.
+  await waitFor(() => updater.getStatus().version === '1.9.4');
+  rejectFirstOpen(new Error('No browser is available.'));
+  await waitFor(() => openedUrls.length === 2);
+  resolveSecondOpen();
+
+  const [first, second] = await Promise.all([pending, latest]);
+
+  expect(openedUrls).toEqual([
+    'https://github.com/nkzw-tech/codiff/releases/tag/v1.9.3',
+    'https://github.com/nkzw-tech/codiff/releases/tag/v1.9.4',
+  ]);
+  expect(first.phase).toBe('available');
+  expect(second).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'manual',
+    version: '1.9.4',
+  });
+  expect(updater.getStatus().phase).toBe('available');
+  expect(updater.getStatus().version).toBe('1.9.4');
+});
+
 test('a dismissal wins over a pending manual failure', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await writeState(directory.path, {
