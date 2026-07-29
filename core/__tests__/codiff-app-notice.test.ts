@@ -135,6 +135,20 @@ test('stays silent for invalid JSON with an unparseable lastCheckedAt', async ()
   expect((await runVersion(home.path)).stderr).toBe('');
 });
 
+test('stays silent when lastCheckedAt does not parse as a date', async () => {
+  await using home = await createTemporaryDirectory('codiff-app-home-');
+
+  for (const lastCheckedAt of [
+    '2026-07-29Tgarbage',
+    '2026-99-99T99:99:99.999Z',
+    '2026-07-29T10:00:00garbage',
+  ]) {
+    await writeState(home.path, { lastCheckedAt, latestVersion: '99.0.0' });
+
+    expect((await runVersion(home.path)).stderr, lastCheckedAt).toBe('');
+  }
+});
+
 test('resolves duplicate keys last-wins like JSON parsing does', async () => {
   await using home = await createTemporaryDirectory('codiff-app-home-');
   await writeStateContents(
