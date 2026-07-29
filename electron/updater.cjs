@@ -37,6 +37,13 @@ const {
 const resolveUpdateStrategy = ({ hasSquirrelUpdateExe, platform }) =>
   platform === 'darwin' || (platform === 'win32' && hasSquirrelUpdateExe) ? 'squirrel' : 'download';
 
+// Linux packages spell architectures differently per format: Debian uses
+// amd64/arm64 while RPM uses x86_64/aarch64. Node's process.arch is the key.
+const LINUX_ARCH_ALIASES = /** @type {Record<string, ReadonlyArray<string>>} */ ({
+  arm64: ['arm64', 'aarch64'],
+  x64: ['x64', 'amd64', 'x86_64'],
+});
+
 /**
  * @param {ReadonlyArray<ReleaseAsset>} assets
  * @param {{ arch: string; linuxFlavor?: 'deb' | 'rpm' | null; platform: string }} options
@@ -57,7 +64,22 @@ const pickReleaseAsset = (assets, { arch, linuxFlavor, platform }) => {
   }
 
   if (platform === 'linux' && linuxFlavor) {
-    return find(({ name }) => name.endsWith(`.${linuxFlavor}`));
+    const aliases = LINUX_ARCH_ALIASES[arch] ?? [arch];
+    const otherAliases = Object.values(LINUX_ARCH_ALIASES)
+      .flat()
+      .filter((alias) => !aliases.includes(alias));
+    return (
+      find(
+        ({ name }) =>
+          name.endsWith(`.${linuxFlavor}`) && aliases.some((alias) => name.includes(alias)),
+      ) ??
+      // An installer with no architecture marker predates multi-architecture
+      // releases; one marked for another architecture would not run here.
+      find(
+        ({ name }) =>
+          name.endsWith(`.${linuxFlavor}`) && !otherAliases.some((alias) => name.includes(alias)),
+      )
+    );
   }
 
   return null;
