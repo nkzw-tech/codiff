@@ -48,6 +48,28 @@ is_newer_version() {
   [ "$latest_patch" -gt "$current_patch" ]
 }
 
+# Mirror of the Node notice's Date.parse gate, restricted to the ISO shape
+# the app writes: YYYY-MM-DDTHH:MM:SS with in-range components, optionally
+# followed by a .mmm fraction and Z. Anything else, including timezone
+# offsets and day-in-month overflow the ranges cannot catch, stays silent.
+is_iso_timestamp() {
+  case "$1" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-5][0-9]:[0-5][0-9]*) ;;
+    *) return 1 ;;
+  esac
+  iso_month="${1#????-}"
+  iso_month="${iso_month%%-*}"
+  iso_day="${1#????-??-}"
+  iso_day="${iso_day%%T*}"
+  iso_hour="${1#????-??-??T}"
+  iso_hour="${iso_hour%%:*}"
+  iso_tail="${1#????-??-??T??:??:??}"
+  case "$iso_month" in 0[1-9]|1[0-2]) ;; *) return 1 ;; esac
+  case "$iso_day" in 0[1-9]|[12][0-9]|3[01]) ;; *) return 1 ;; esac
+  case "$iso_hour" in [01][0-9]|2[0-3]) ;; *) return 1 ;; esac
+  case "$iso_tail" in ''|Z|.[0-9][0-9][0-9]|.[0-9][0-9][0-9]Z) ;; *) return 1 ;; esac
+}
+
 # Mirror of bin/update-notice.js for the wrapper-owned code paths: read the
 # state cached by the app's daily check and never touch the network. The
 # notice is best effort: a missing, unreadable, or corrupt cache must stay
@@ -60,12 +82,7 @@ print_update_notice() {
   checked_at="$(sed -n 's/.*"lastCheckedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | tail -n 1)"
   latest="$(sed -n 's/.*"latestVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | tail -n 1)"
   dismissed="$(sed -n 's/.*"dismissedVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | tail -n 1)"
-  # The Node notice only trusts a state whose lastCheckedAt parses as a
-  # date; require the ISO timestamp shape the app writes.
-  case "$checked_at" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*) ;;
-    *) return 0 ;;
-  esac
+  is_iso_timestamp "$checked_at" || return 0
   [ -n "$latest" ] || return 0
   [ "$latest" = "$dismissed" ] && return 0
   current="$(codiff_version)"
