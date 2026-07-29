@@ -739,6 +739,36 @@ test('concurrent applyUpdate calls download the installer only once', async () =
   expect(opened.length).toBe(1);
 });
 
+test('a manual retry clears the error once the release page opens', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  let attempts = 0;
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: async () => {
+      if (++attempts === 1) {
+        throw new Error('No browser is available.');
+      }
+    },
+    platform: 'win32',
+    strategy: 'manual',
+  });
+
+  expect((await updater.applyUpdate()).phase).toBe('error');
+
+  const status = await updater.applyUpdate();
+
+  expect(status.phase).toBe('available');
+  expect(status.version).toBe('1.9.3');
+});
+
 test('applyUpdate refuses an installer that fails its integrity check', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await using downloads = await createTemporaryDirectory('codiff-downloads-');
