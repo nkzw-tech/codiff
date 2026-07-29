@@ -169,9 +169,8 @@ const createUpdater = ({
   const performCheck = async (force, generationAtStart, dismissedBefore) => {
     const state = readUpdateState(configDir);
     if (!force && !shouldCheckForUpdates(state, Date.now())) {
-      return actionGeneration !== generationAtStart
-        ? { ...status }
-        : { ...setStatus(statusFromState()) };
+      // A throttled check brings no new information; never move the status.
+      return { ...status };
     }
 
     try {
@@ -217,7 +216,9 @@ const createUpdater = ({
   let pendingCheck = Promise.resolve();
 
   const checkForUpdates = ({ force = false } = {}) => {
-    if (!isPackaged || status.phase === 'updating') {
+    // installerReady is terminal until relaunch: the user already has the new
+    // installer open, so checking again can only produce confusing states.
+    if (!isPackaged || status.phase === 'updating' || status.phase === 'installerReady') {
       return Promise.resolve({ ...status });
     }
 
