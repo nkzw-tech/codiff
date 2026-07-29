@@ -976,6 +976,91 @@ test('a retry that fails identically still outlives a completing check', async (
   expect(updater.getStatus().message).toContain('Could not set the update feed.');
 });
 
+test('a dismissal made after a forced check was queued survives it', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: '2026-01-01T00:00:00.000Z',
+    latestVersion: '1.9.3',
+  });
+
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const scheduled = updater.checkForUpdates();
+  await waitFor(() => pending.length === 1);
+  const forced = updater.checkForUpdates({ force: true });
+  updater.dismissUpdate();
+
+  pending[0]('1.9.3');
+  await scheduled;
+  await waitFor(() => pending.length === 2);
+  pending[1]('1.9.3');
+
+  expect(await forced).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
+
+  const persisted = JSON.parse(
+    await readFile(join(directory.path, 'update-state.json'), 'utf8'),
+  ) as { dismissedVersion?: string };
+  expect(persisted.dismissedVersion).toBe('1.9.3');
+});
+
+test('an apply failure after a check was queued survives its completion', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const pending: Array<(version: string) => void> = [];
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    pending.push((version) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(releaseJson(version));
+    });
+  });
+
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const forced = updater.checkForUpdates({ force: true });
+  await waitFor(() => pending.length === 1);
+  const scheduled = updater.checkForUpdates();
+
+  await updater.applyUpdate();
+  autoUpdater.emit('error', new Error('Squirrel download failed'));
+
+  pending[0]('1.9.3');
+  await forced;
+  await scheduled;
+
+  expect(updater.getStatus().phase).toBe('error');
+  expect(updater.getStatus().message).toContain('Squirrel download failed');
+});
+
 test('applyUpdate is a no-op unless an update is available', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
 
