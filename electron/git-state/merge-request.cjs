@@ -5,7 +5,7 @@ const { spawn } = require('node:child_process');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
-const { getLoginShellEnvironment } = require('../login-shell-environment.cjs');
+const { getCommandEnvironment } = require('../login-shell-environment.cjs');
 const {
   getFingerprint,
   git,
@@ -102,9 +102,7 @@ const createGlabApiArgs = (mergeRequest, args, input) => [
  * @param {unknown} [input]
  */
 const glabApi = async (repoRoot, mergeRequest, args, input) => {
-  // GUI launches miss login shell variables like GITLAB_TOKEN, so fill the
-  // gaps; the process environment wins for anything it already defines.
-  const environment = { ...(await getLoginShellEnvironment()), ...process.env };
+  const environment = await getCommandEnvironment();
   return new Promise((resolve, reject) => {
     let command;
     try {
