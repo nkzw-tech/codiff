@@ -17,6 +17,7 @@ type UpdateStatus = {
 };
 
 type Updater = {
+  applyLatest: () => Promise<UpdateStatus>;
   applyUpdate: () => Promise<UpdateStatus>;
   checkForUpdates: (options?: { force?: boolean }) => Promise<UpdateStatus>;
   dismissUpdate: () => UpdateStatus;
@@ -1133,6 +1134,58 @@ test('a throttled check does not erase an apply failure', async () => {
 
   expect(status.phase).toBe('error');
   expect(status.message).toContain('Squirrel download failed');
+});
+
+test('applyLatest force-checks and applies in one step', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(releaseJson('1.9.3'));
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  const status = await updater.applyLatest();
+
+  expect(status).toEqual({ currentVersion: '1.9.2', phase: 'updating', version: '1.9.3' });
+  expect(autoUpdater.feedURL).toEqual({
+    url: 'https://update.electronjs.org/nkzw-tech/codiff/darwin-arm64/1.9.2',
+  });
+  expect(autoUpdater.checkForUpdatesCalls).toBe(1);
+});
+
+test('applyLatest stays idle when already up to date', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(releaseJson('1.9.2'));
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+  });
+
+  expect(await updater.applyLatest()).toEqual({ currentVersion: '1.9.2', phase: 'idle' });
+  expect(autoUpdater.feedURL).toBeNull();
+  expect(autoUpdater.checkForUpdatesCalls).toBe(0);
 });
 
 test('applyUpdate is a no-op unless an update is available', async () => {
