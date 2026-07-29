@@ -105,6 +105,14 @@ test('promises nothing beyond the download without a known strategy', async () =
   expect(pill(view)?.title).not.toContain('opens');
 });
 
+test('styles the pill like the shared buttons', async () => {
+  await using view = await renderPill(
+    <UpdatePill onApply={noop} status={status({ phase: 'available', version: '1.9.3' })} />,
+  );
+
+  expect(pill(view)?.className).toContain('codiff-button');
+});
+
 test('applies the update with a single click', async () => {
   let applied = 0;
   await using view = await renderPill(
