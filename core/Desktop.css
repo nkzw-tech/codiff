@@ -65,7 +65,7 @@
 /* The update pill is desktop-only chrome, so its styles live here instead of
    the shared App.css that ships to the web app. */
 :root {
-  --update-accent: rgb(93 120 199);
+  --update-accent: rgb(92 119 197);
   --update-accent-contrast: #ffffff;
 }
 
