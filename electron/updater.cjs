@@ -155,29 +155,17 @@ const createUpdater = ({
     });
   }
 
-  let checkSequence = 0;
-
-  const checkForUpdates = async ({ force = false } = {}) => {
-    if (!isPackaged || status.phase === 'updating') {
-      return { ...status };
-    }
-
+  const performCheck = async (force) => {
     const state = readUpdateState(configDir);
     if (!force && !shouldCheckForUpdates(state, Date.now())) {
       return { ...setStatus(statusFromState()) };
     }
 
-    const checkId = ++checkSequence;
     const generationAtStart = statusGeneration;
     const dismissedBefore = state?.dismissedVersion;
 
     try {
       const release = await fetchLatestRelease(releaseUrl);
-
-      // A newer check started while this one was in flight; its result wins.
-      if (checkId !== checkSequence) {
-        return { ...status };
-      }
 
       // Re-read after the network round trip: a dismissal may have been
       // persisted while the request was in flight and must survive. A forced
@@ -194,12 +182,6 @@ const createUpdater = ({
         configDir,
       );
     } catch (error) {
-      // A newer check already completed; its outcome stands and a stale
-      // failure must not surface an error for it.
-      if (checkId !== checkSequence) {
-        return { ...status };
-      }
-
       logError(`Update check failed: ${error instanceof Error ? error.message : String(error)}`);
       if (force) {
         throw error;
@@ -214,6 +196,27 @@ const createUpdater = ({
     }
 
     return { ...setStatus(statusFromState()) };
+  };
+
+  // Checks are serialized: only one release request is ever in flight, and a
+  // queued check runs against the state its predecessor persisted (usually
+  // resolving from the fresh cache without another request). This makes
+  // out-of-order completions impossible and keeps every failure owned by the
+  // caller that triggered it.
+  /** @type {Promise<unknown>} */
+  let pendingCheck = Promise.resolve();
+
+  const checkForUpdates = ({ force = false } = {}) => {
+    if (!isPackaged || status.phase === 'updating') {
+      return Promise.resolve({ ...status });
+    }
+
+    const current = pendingCheck.then(() => performCheck(force));
+    pendingCheck = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    return current;
   };
 
   const applySquirrelUpdate = () => {
