@@ -25,6 +25,7 @@ test('announces a newer cached version with both versions', async () => {
 
   expect(notice).toContain('1.9.2');
   expect(notice).toContain('1.9.3');
+  expect(notice).toContain('codiff update');
 });
 
 test('returns null when up to date or ahead', async () => {
