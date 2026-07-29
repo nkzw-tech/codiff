@@ -7,7 +7,6 @@ import { CheckCircleIcon as CheckCircle } from '@phosphor-icons/react/CheckCircl
 import { CircleNotchIcon as CircleNotch } from '@phosphor-icons/react/CircleNotch';
 import { PowerIcon as Power } from '@phosphor-icons/react/Power';
 import { SealQuestionIcon as SealQuestion } from '@phosphor-icons/react/SealQuestion';
-import { SparkleIcon as Sparkle } from '@phosphor-icons/react/Sparkle';
 import { WarningOctagonIcon as WarningOctagon } from '@phosphor-icons/react/WarningOctagon';
 import { XIcon as X } from '@phosphor-icons/react/X';
 import { Copy as LucideCopy } from 'lucide-react';
@@ -134,9 +133,7 @@ export function UpdatePill({
           <CircleNotch aria-hidden className="update-pill-spinner" size={14} weight="bold" />
         ) : phase === 'error' ? (
           <WarningOctagon aria-hidden size={14} weight="bold" />
-        ) : (
-          <Sparkle aria-hidden size={14} weight="fill" />
-        )}
+        ) : null}
         <span>
           {phase === 'available'
             ? 'Update'
