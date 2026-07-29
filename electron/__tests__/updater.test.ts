@@ -138,6 +138,43 @@ test('pickReleaseAsset matches the platform-specific artifact', () => {
   expect(pickReleaseAsset(assets, { arch: 'x64', platform: 'freebsd' })).toBeNull();
 });
 
+test('pickReleaseAsset matches the Linux installer for the running architecture', () => {
+  const assets = [
+    { name: 'codiff_1.9.3_amd64.deb', url: 'https://example.com/amd64.deb' },
+    { name: 'codiff_1.9.3_arm64.deb', url: 'https://example.com/arm64.deb' },
+    { name: 'codiff-1.9.3-1.x86_64.rpm', url: 'https://example.com/x86_64.rpm' },
+    { name: 'codiff-1.9.3-1.aarch64.rpm', url: 'https://example.com/aarch64.rpm' },
+  ];
+
+  expect(
+    pickReleaseAsset(assets, { arch: 'x64', linuxFlavor: 'deb', platform: 'linux' })?.name,
+  ).toBe('codiff_1.9.3_amd64.deb');
+  expect(
+    pickReleaseAsset(assets, { arch: 'arm64', linuxFlavor: 'deb', platform: 'linux' })?.name,
+  ).toBe('codiff_1.9.3_arm64.deb');
+  expect(
+    pickReleaseAsset(assets, { arch: 'x64', linuxFlavor: 'rpm', platform: 'linux' })?.name,
+  ).toBe('codiff-1.9.3-1.x86_64.rpm');
+  expect(
+    pickReleaseAsset(assets, { arch: 'arm64', linuxFlavor: 'rpm', platform: 'linux' })?.name,
+  ).toBe('codiff-1.9.3-1.aarch64.rpm');
+});
+
+test('pickReleaseAsset refuses a Linux installer built for another architecture', () => {
+  const amd64Only = [{ name: 'codiff_1.9.3_amd64.deb', url: 'https://example.com/amd64.deb' }];
+
+  expect(
+    pickReleaseAsset(amd64Only, { arch: 'arm64', linuxFlavor: 'deb', platform: 'linux' }),
+  ).toBeNull();
+  expect(
+    pickReleaseAsset([{ name: 'codiff_1.9.3.deb', url: 'https://example.com/codiff.deb' }], {
+      arch: 'arm64',
+      linuxFlavor: 'deb',
+      platform: 'linux',
+    })?.name,
+  ).toBe('codiff_1.9.3.deb');
+});
+
 test('starts from the cached state without hitting the network', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await writeState(directory.path, {
