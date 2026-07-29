@@ -361,7 +361,7 @@ const createUpdater = ({
   // its URL: a repeat click for the same page shares the pending outcome
   // (one browser tab, one result), while a request for a different page, such
   // as applyLatest discovering a newer version, supersedes it.
-  /** @type {{ promise: Promise<UpdateStatus>; url: string } | null} */
+  /** @type {{ generation: number; promise: Promise<UpdateStatus>; url: string } | null} */
   let manualOpen = null;
 
   const manualUpdateUrl = () =>
@@ -377,11 +377,11 @@ const createUpdater = ({
     }
 
     const superseded = manualOpen;
+    // Captured before waiting on the older hand-off: an action that lands
+    // during that wait (a dismissal, another apply) owns the status, and
+    // opening the page for this stale request would resurrect it.
+    const generationAtStart = actionGeneration;
     const attempt = (async () => {
-      // Captured before waiting on the older hand-off: an action that lands
-      // during that wait (a dismissal, another apply) owns the status, and
-      // opening the page for this stale request would resurrect it.
-      const generationAtStart = actionGeneration;
       if (superseded) {
         // Let the older hand-off settle first; its completion yields to this
         // newer action through the generation check below.
@@ -408,7 +408,7 @@ const createUpdater = ({
       }
     })();
 
-    manualOpen = { promise: attempt, url };
+    manualOpen = { generation: generationAtStart, promise: attempt, url };
     try {
       return await attempt;
     } finally {
@@ -424,8 +424,16 @@ const createUpdater = ({
     }
 
     // A repeat click while the same hand-off is still opening is not a new
-    // action; share the pending outcome instead of opening a second tab.
-    if (strategy === 'manual' && manualOpen?.url === manualUpdateUrl()) {
+    // action; share the pending outcome instead of opening a second tab. The
+    // generation must still match: an action since the hand-off was queued
+    // (a dismissal, then a fresh request) means it will yield without ever
+    // opening, so a new request must queue its own hand-off instead.
+    if (
+      strategy === 'manual' &&
+      manualOpen &&
+      manualOpen.url === manualUpdateUrl() &&
+      manualOpen.generation === actionGeneration
+    ) {
       return { ...(await manualOpen.promise) };
     }
 
