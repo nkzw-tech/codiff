@@ -4,6 +4,7 @@ const { promises: fs } = require('node:fs');
 const { homedir, tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { resolveAgentCommandTransport } = require('./agent-command.cjs');
+const { getCommandEnvironment } = require('./login-shell-environment.cjs');
 const {
   cleanText,
   findExecutableOnPath,
@@ -386,6 +387,7 @@ const runCodex = async (
     const outputPath = join(directory, outputName);
     const schemaPath = join(directory, 'schema.json');
     await fs.writeFile(schemaPath, JSON.stringify(schema), 'utf8');
+    const environment = await getCommandEnvironment();
 
     return await /** @type {Promise<string>} */ (
       new Promise((resolve, reject) => {
@@ -421,7 +423,7 @@ const runCodex = async (
           '-',
         ];
         const child = commandTransport.spawn(commandTransport.command, codexArgs, {
-          env: process.env,
+          env: environment,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         const eventParser = createCodexEventParser(options.onProgress);
@@ -498,8 +500,9 @@ const runCodex = async (
    * @param {string} codexModel
    * @returns {Promise<string>}
    */
-  const invokeCodexAppServer = (codexModel) => {
+  const invokeCodexAppServer = async (codexModel) => {
     const reasoningEffort = getOpenAIModelReasoningEffort(codexModel, options.reasoningEffort);
+    const environment = await getCommandEnvironment();
     return new Promise((resolve, reject) => {
       const commandTransport = resolveAgentCommandTransport(
         options.commandTransport,
@@ -510,7 +513,7 @@ const runCodex = async (
         ['app-server', '--stdio', '-c', `model_reasoning_effort="${reasoningEffort}"`],
         {
           cwd: repoRoot,
-          env: process.env,
+          env: environment,
           stdio: ['pipe', 'pipe', 'pipe'],
         },
       );
