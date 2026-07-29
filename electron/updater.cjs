@@ -378,13 +378,19 @@ const createUpdater = ({
 
     const superseded = manualOpen;
     const attempt = (async () => {
+      // Captured before waiting on the older hand-off: an action that lands
+      // during that wait (a dismissal, another apply) owns the status, and
+      // opening the page for this stale request would resurrect it.
+      const generationAtStart = actionGeneration;
       if (superseded) {
         // Let the older hand-off settle first; its completion yields to this
         // newer action through the generation check below.
         await superseded.promise;
+        if (actionGeneration !== generationAtStart) {
+          return { ...status };
+        }
       }
 
-      const generationAtStart = actionGeneration;
       try {
         await openExternal(url);
         // Nothing was installed; the update stays available until the user
