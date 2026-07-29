@@ -13,6 +13,7 @@ type UpdateStatus = {
   currentVersion: string;
   message?: string;
   phase: 'available' | 'error' | 'idle' | 'installerReady' | 'updating';
+  strategy?: 'download' | 'squirrel';
   version?: string;
 };
 
@@ -158,6 +159,35 @@ test('starts from the cached state without hitting the network', async () => {
     phase: 'available',
     version: '1.9.3',
   });
+});
+
+test('reports the strategy that will apply the update', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const squirrelUpdater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    strategy: 'squirrel',
+  });
+  const downloadUpdater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    linuxFlavor: 'deb',
+    platform: 'linux',
+    strategy: 'download',
+  });
+
+  expect(squirrelUpdater.getStatus().strategy).toBe('squirrel');
+  expect(downloadUpdater.getStatus().strategy).toBe('download');
 });
 
 test('checkForUpdates fetches, persists state and reports an available update', async () => {

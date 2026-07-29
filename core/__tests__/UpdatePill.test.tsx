@@ -59,13 +59,37 @@ test('shows a single Update button when an update is available', async () => {
   expect(view.container.querySelector('.update-popover')).toBeNull();
 });
 
-test('does not promise a restart the download strategy cannot deliver', async () => {
+test('promises a restart only when Squirrel will deliver one', async () => {
+  await using view = await renderPill(
+    <UpdatePill
+      onApply={noop}
+      status={status({ phase: 'available', strategy: 'squirrel', version: '1.9.3' })}
+    />,
+  );
+
+  expect(pill(view)?.title).toContain('restarts the app');
+});
+
+test('describes the hand-off for the download strategy', async () => {
+  await using view = await renderPill(
+    <UpdatePill
+      onApply={noop}
+      status={status({ phase: 'available', strategy: 'download', version: '1.9.3' })}
+    />,
+  );
+
+  expect(pill(view)?.title).toContain('opens the update');
+  expect(pill(view)?.title).not.toContain('restarts');
+});
+
+test('promises nothing beyond the download without a known strategy', async () => {
   await using view = await renderPill(
     <UpdatePill onApply={noop} status={status({ phase: 'available', version: '1.9.3' })} />,
   );
 
-  expect(pill(view)?.title).toContain('Downloads and installs');
+  expect(pill(view)?.title).toContain('Downloads the update.');
   expect(pill(view)?.title).not.toContain('restarts');
+  expect(pill(view)?.title).not.toContain('opens');
 });
 
 test('applies the update with a single click', async () => {
