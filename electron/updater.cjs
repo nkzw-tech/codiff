@@ -152,6 +152,8 @@ const createUpdater = ({
     });
   }
 
+  let checkSequence = 0;
+
   const checkForUpdates = async ({ force = false } = {}) => {
     if (!isPackaged || status.phase === 'updating') {
       return { ...status };
@@ -162,12 +164,23 @@ const createUpdater = ({
       return { ...setStatus(statusFromState()) };
     }
 
+    const checkId = ++checkSequence;
+    const dismissedBefore = state?.dismissedVersion;
+
     try {
       const release = await fetchLatestRelease(releaseUrl);
+
+      // A newer check started while this one was in flight; its result wins.
+      if (checkId !== checkSequence) {
+        return { ...status };
+      }
+
       // Re-read after the network round trip: a dismissal may have been
-      // persisted while the request was in flight. A forced check is explicit
-      // user intent to see updates again, so it drops the dismissal.
-      const dismissedVersion = force ? undefined : readUpdateState(configDir)?.dismissedVersion;
+      // persisted while the request was in flight and must survive. A forced
+      // check is explicit user intent to see updates again, so it drops the
+      // dismissal it started with, but never one made after it started.
+      const dismissedNow = readUpdateState(configDir)?.dismissedVersion;
+      const dismissedVersion = force && dismissedNow === dismissedBefore ? undefined : dismissedNow;
       writeUpdateState(
         {
           lastCheckedAt: new Date().toISOString(),
