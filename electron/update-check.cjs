@@ -16,7 +16,7 @@ const getDefaultConfigDir = () => join(homedir(), '.codiff');
  *   latestVersion: string;
  *   dismissedVersion?: string;
  * }} UpdateState
- * @typedef {{ name: string; url: string }} ReleaseAsset
+ * @typedef {{ digest?: string; name: string; url: string }} ReleaseAsset
  */
 
 /**
@@ -178,7 +178,13 @@ const fetchLatestRelease = async (url) => {
         asset !== null &&
         typeof asset.name === 'string' &&
         typeof asset.browser_download_url === 'string'
-          ? [{ name: asset.name, url: asset.browser_download_url }]
+          ? [
+              {
+                ...(typeof asset.digest === 'string' ? { digest: asset.digest } : {}),
+                name: asset.name,
+                url: asset.browser_download_url,
+              },
+            ]
           : [],
       )
     : [];

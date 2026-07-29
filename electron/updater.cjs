@@ -1,7 +1,11 @@
 // @ts-check
 
-const { writeFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const { createWriteStream } = require('node:fs');
+const { rm } = require('node:fs/promises');
 const { join } = require('node:path');
+const { Readable, Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const {
   fetchLatestRelease,
   getAvailableUpdate,
@@ -305,13 +309,42 @@ const createUpdater = ({
         return setError('No download is available for this platform.', version);
       }
 
+      // Installers are only opened after their bytes match the checksum the
+      // release published; a download nobody can verify is not an update.
+      const expectedDigest = asset.digest?.startsWith('sha256:')
+        ? asset.digest.slice('sha256:'.length)
+        : null;
+      if (!expectedDigest) {
+        throw new Error('The release does not publish a SHA-256 checksum for this download.');
+      }
+
       const response = await fetch(asset.url);
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         throw new Error(`Downloading the update failed with status ${response.status}.`);
       }
 
       const path = join(downloadDirectory, asset.name);
-      writeFileSync(path, Buffer.from(await response.arrayBuffer()));
+      const hash = createHash('sha256');
+      try {
+        await pipeline(
+          Readable.fromWeb(/** @type {import('node:stream/web').ReadableStream} */ (response.body)),
+          new Transform({
+            transform(chunk, _encoding, callback) {
+              hash.update(chunk);
+              callback(null, chunk);
+            },
+          }),
+          createWriteStream(path),
+        );
+
+        if (hash.digest('hex') !== expectedDigest.toLowerCase()) {
+          throw new Error('The downloaded update failed its integrity check. Try again later.');
+        }
+      } catch (error) {
+        await rm(path, { force: true });
+        throw error;
+      }
+
       const openError = await openPath(path);
       if (openError) {
         throw new Error(openError);
