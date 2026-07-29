@@ -302,10 +302,17 @@ const createUpdater = ({
   };
 
   const applyLatest = async () => {
+    const generationAtStart = actionGeneration;
     let checked;
     try {
       checked = await checkForUpdates({ force: true });
     } catch (error) {
+      // An apply or dismissal that started while the check was pending is
+      // newer information than this failure; leave its status alone.
+      if (actionGeneration !== generationAtStart) {
+        return { ...status };
+      }
+
       // The caller asked for an update, so a failed check is an update
       // failure; surface it in the banner instead of rejecting into a void.
       actionGeneration++;
