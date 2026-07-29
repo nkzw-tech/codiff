@@ -51,7 +51,8 @@ is_newer_version() {
 # Mirror of the Node notice's Date.parse gate, restricted to the ISO shape
 # the app writes: YYYY-MM-DDTHH:MM:SS with in-range components, optionally
 # followed by a .mmm fraction and Z. Anything else, including timezone
-# offsets and day-in-month overflow the ranges cannot catch, stays silent.
+# offsets Date.parse would accept, stays silent. Day-in-month overflow such
+# as February 30th passes, matching the Date.parse rollover behavior.
 is_iso_timestamp() {
   case "$1" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-5][0-9]:[0-5][0-9]*) ;;
