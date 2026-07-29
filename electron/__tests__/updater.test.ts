@@ -1061,6 +1061,80 @@ test('an apply failure after a check was queued survives its completion', async 
   expect(updater.getStatus().message).toContain('Squirrel download failed');
 });
 
+test('checks leave a handed-off installer alone until relaunch', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await using downloads = await createTemporaryDirectory('codiff-downloads-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  let requests = 0;
+  const { disposable: _server, origin } = await startReleaseServer((request, response) => {
+    if (request.url === '/asset.deb') {
+      response.end('deb-bytes');
+      return;
+    }
+
+    requests++;
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      releaseJson('1.9.3', [
+        { browser_download_url: `${origin}/asset.deb`, name: 'codiff_1.9.3_amd64.deb' },
+      ]),
+    );
+  });
+
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    downloadDirectory: downloads.path,
+    isPackaged: true,
+    linuxFlavor: 'deb',
+    openPath: async () => '',
+    platform: 'linux',
+    releaseUrl: `${origin}/`,
+    strategy: 'download',
+  });
+
+  await updater.applyUpdate();
+  expect(updater.getStatus().phase).toBe('installerReady');
+  const requestsAfterApply = requests;
+
+  expect((await updater.checkForUpdates()).phase).toBe('installerReady');
+  expect((await updater.checkForUpdates({ force: true })).phase).toBe('installerReady');
+  expect(requests).toBe(requestsAfterApply);
+});
+
+test('a throttled check does not erase an apply failure', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const autoUpdater = new FakeAutoUpdater();
+  const updater = createUpdater({
+    arch: 'arm64',
+    autoUpdater,
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    strategy: 'squirrel',
+  });
+
+  await updater.applyUpdate();
+  autoUpdater.emit('error', new Error('Squirrel download failed'));
+  expect(updater.getStatus().phase).toBe('error');
+
+  const status = await updater.checkForUpdates();
+
+  expect(status.phase).toBe('error');
+  expect(status.message).toContain('Squirrel download failed');
+});
+
 test('applyUpdate is a no-op unless an update is available', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
 
