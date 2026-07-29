@@ -222,13 +222,16 @@ const createUpdater = ({
     }
 
     const version = status.version;
+    // Enter the updating phase before setFeedURL so even a retry that fails
+    // with an identical error produces status transitions; otherwise a check
+    // completing mid-retry could overwrite the fresh failure.
+    const next = setStatus({ currentVersion, phase: 'updating', version });
     try {
       autoUpdater.setFeedURL({ url: updateFeedUrl(platform, arch, currentVersion) });
     } catch (error) {
       return setError(error instanceof Error ? error.message : String(error), version);
     }
 
-    const next = setStatus({ currentVersion, phase: 'updating', version });
     autoUpdater.checkForUpdates();
     return next;
   };
