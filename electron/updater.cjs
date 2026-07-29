@@ -107,7 +107,12 @@ const createUpdater = ({
   /** @type {UpdateStatus} */
   let status = statusFromState();
 
-  let statusGeneration = 0;
+  // Counts user and auto-updater actions (apply attempts, their outcomes,
+  // dismissals). Checks snapshot it when they are requested and refuse to
+  // overwrite the status once it moved: the action happened after the caller
+  // asked for the check, so it is newer information. Check-driven transitions
+  // deliberately do not count; a queued check may build on its predecessor.
+  let actionGeneration = 0;
 
   /** @param {UpdateStatus} next */
   const setStatus = (next) => {
@@ -119,7 +124,6 @@ const createUpdater = ({
       return status;
     }
 
-    statusGeneration++;
     status = next;
     onStatusChange?.({ ...status });
     return status;
@@ -145,24 +149,30 @@ const createUpdater = ({
     });
     autoUpdater.on('update-not-available', () => {
       if (status.phase === 'updating') {
+        actionGeneration++;
         setError('The update is not available for download yet. Try again later.', status.version);
       }
     });
     autoUpdater.on('error', (error) => {
       if (status.phase === 'updating') {
+        actionGeneration++;
         setError(error instanceof Error ? error.message : String(error), status.version);
       }
     });
   }
 
-  const performCheck = async (force) => {
+  /**
+   * @param {boolean} force
+   * @param {number} generationAtStart
+   * @param {string | undefined} dismissedBefore
+   */
+  const performCheck = async (force, generationAtStart, dismissedBefore) => {
     const state = readUpdateState(configDir);
     if (!force && !shouldCheckForUpdates(state, Date.now())) {
-      return { ...setStatus(statusFromState()) };
+      return actionGeneration !== generationAtStart
+        ? { ...status }
+        : { ...setStatus(statusFromState()) };
     }
-
-    const generationAtStart = statusGeneration;
-    const dismissedBefore = state?.dismissedVersion;
 
     try {
       const release = await fetchLatestRelease(releaseUrl);
@@ -188,10 +198,10 @@ const createUpdater = ({
       }
     }
 
-    // The status moved while the check was in flight (an apply started,
-    // failed, or handed off; or the user dismissed). That transition is newer
+    // An action happened after this check was requested (an apply started,
+    // failed, or handed off; or the user dismissed). That is newer
     // information than this check; do not overwrite it.
-    if (statusGeneration !== generationAtStart) {
+    if (actionGeneration !== generationAtStart) {
       return { ...status };
     }
 
@@ -211,7 +221,15 @@ const createUpdater = ({
       return Promise.resolve({ ...status });
     }
 
-    const current = pendingCheck.then(() => performCheck(force));
+    // Snapshot the caller's context now, not when the queued check finally
+    // runs: a dismissal or apply transition made while this check waits in
+    // the queue happened after the caller acted and must win over it.
+    const generationAtStart = actionGeneration;
+    const dismissedBefore = readUpdateState(configDir)?.dismissedVersion;
+
+    const current = pendingCheck.then(() =>
+      performCheck(force, generationAtStart, dismissedBefore),
+    );
     pendingCheck = current.then(
       () => undefined,
       () => undefined,
@@ -276,12 +294,14 @@ const createUpdater = ({
       return { ...status };
     }
 
+    actionGeneration++;
     return {
       ...(strategy === 'squirrel' ? applySquirrelUpdate() : await applyDownloadUpdate()),
     };
   };
 
   const dismissUpdate = () => {
+    actionGeneration++;
     const state = readUpdateState(configDir);
     if (state) {
       writeUpdateState({ ...state, dismissedVersion: state.latestVersion }, configDir);
