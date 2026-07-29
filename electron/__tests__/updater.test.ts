@@ -882,6 +882,69 @@ test('a dismissal during a queued manual hand-off wins', async () => {
   expect(updater.getStatus().phase).toBe('idle');
 });
 
+test('a fresh request after a dismissal does not share a dead hand-off', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(releaseJson('1.9.4'));
+  });
+
+  const openedUrls: Array<string> = [];
+  let rejectFirstOpen: (error: Error) => void = () => {};
+  let resolveSecondOpen = () => {};
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: (url) => {
+      openedUrls.push(url);
+      return new Promise((resolveOpened, rejectOpened) => {
+        if (openedUrls.length === 1) {
+          rejectFirstOpen = rejectOpened;
+        } else {
+          resolveSecondOpen = resolveOpened;
+        }
+      });
+    },
+    platform: 'win32',
+    releaseUrl: `${origin}/`,
+    strategy: 'manual',
+  });
+
+  const pending = updater.applyUpdate();
+  const invalidated = updater.applyLatest();
+  await waitFor(() => updater.getStatus().version === '1.9.4');
+  updater.dismissUpdate();
+
+  // The dismissal killed the queued 1.9.4 hand-off; a fresh request for the
+  // same version must queue its own hand-off instead of sharing the dead one.
+  const fresh = updater.applyLatest();
+  await waitFor(() => updater.getStatus().phase === 'available');
+  rejectFirstOpen(new Error('No browser is available.'));
+  await waitFor(() => openedUrls.length === 2);
+  resolveSecondOpen();
+
+  const [, , freshStatus] = await Promise.all([pending, invalidated, fresh]);
+
+  expect(openedUrls).toEqual([
+    'https://github.com/nkzw-tech/codiff/releases/tag/v1.9.3',
+    'https://github.com/nkzw-tech/codiff/releases/tag/v1.9.4',
+  ]);
+  expect(freshStatus).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'manual',
+    version: '1.9.4',
+  });
+  expect(updater.getStatus().phase).toBe('available');
+  expect(updater.getStatus().version).toBe('1.9.4');
+});
+
 test('a dismissal wins over a pending manual failure', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await writeState(directory.path, {
