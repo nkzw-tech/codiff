@@ -357,40 +357,70 @@ const createUpdater = ({
   };
 
   // The manual strategy never leaves the available phase, so the phase guard
-  // in applyUpdate cannot serialize it; this latch keeps a double click from
-  // opening the release page twice while the first open is still in flight.
-  let manualOpenInFlight = false;
+  // in applyUpdate cannot serialize it. The in-flight hand-off is tracked by
+  // its URL: a repeat click for the same page shares the pending outcome
+  // (one browser tab, one result), while a request for a different page, such
+  // as applyLatest discovering a newer version, supersedes it.
+  /** @type {{ promise: Promise<UpdateStatus>; url: string } | null} */
+  let manualOpen = null;
+
+  const manualUpdateUrl = () =>
+    status.version
+      ? releasePageUrl(status.version)
+      : 'https://github.com/nkzw-tech/codiff/releases';
 
   const applyManualUpdate = async () => {
     const version = status.version;
+    const url = manualUpdateUrl();
     if (!openExternal) {
       return setError('The updater is unavailable in this build.', version);
     }
 
-    manualOpenInFlight = true;
-    const generationAtStart = actionGeneration;
+    const superseded = manualOpen;
+    const attempt = (async () => {
+      if (superseded) {
+        // Let the older hand-off settle first; its completion yields to this
+        // newer action through the generation check below.
+        await superseded.promise;
+      }
+
+      const generationAtStart = actionGeneration;
+      try {
+        await openExternal(url);
+        // Nothing was installed; the update stays available until the user
+        // replaces the app themselves. Recomputing from state also clears a
+        // previous open failure once a retry reaches the release page. An
+        // action taken while the browser was opening is newer information
+        // and owns the status instead.
+        return actionGeneration === generationAtStart
+          ? setStatus(statusFromState())
+          : { ...status };
+      } catch (error) {
+        return actionGeneration === generationAtStart
+          ? setError(error instanceof Error ? error.message : String(error), version)
+          : { ...status };
+      }
+    })();
+
+    manualOpen = { promise: attempt, url };
     try {
-      await openExternal(
-        version ? releasePageUrl(version) : 'https://github.com/nkzw-tech/codiff/releases',
-      );
-      // Nothing was installed; the update stays available until the user
-      // replaces the app themselves. Recomputing from state also clears a
-      // previous open failure once a retry reaches the release page. An
-      // action taken while the browser was opening is newer information and
-      // owns the status instead.
-      return actionGeneration === generationAtStart ? setStatus(statusFromState()) : { ...status };
-    } catch (error) {
-      return actionGeneration === generationAtStart
-        ? setError(error instanceof Error ? error.message : String(error), version)
-        : { ...status };
+      return await attempt;
     } finally {
-      manualOpenInFlight = false;
+      if (manualOpen?.promise === attempt) {
+        manualOpen = null;
+      }
     }
   };
 
   const applyUpdate = async () => {
-    if (manualOpenInFlight || (status.phase !== 'available' && status.phase !== 'error')) {
+    if (status.phase !== 'available' && status.phase !== 'error') {
       return { ...status };
+    }
+
+    // A repeat click while the same hand-off is still opening is not a new
+    // action; share the pending outcome instead of opening a second tab.
+    if (strategy === 'manual' && manualOpen?.url === manualUpdateUrl()) {
+      return { ...(await manualOpen.promise) };
     }
 
     actionGeneration++;
