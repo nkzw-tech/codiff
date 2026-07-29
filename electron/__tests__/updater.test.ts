@@ -739,6 +739,71 @@ test('concurrent applyUpdate calls download the installer only once', async () =
   expect(opened.length).toBe(1);
 });
 
+test('concurrent manual applies open the release page only once', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  let resolveOpen = () => {};
+  const openedUrls: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: (url) => {
+      openedUrls.push(url);
+      return new Promise((resolveOpened) => {
+        resolveOpen = resolveOpened;
+      });
+    },
+    platform: 'win32',
+    strategy: 'manual',
+  });
+
+  const first = updater.applyUpdate();
+  const second = updater.applyUpdate();
+  resolveOpen();
+
+  await Promise.all([first, second]);
+
+  expect(openedUrls.length).toBe(1);
+  expect(updater.getStatus().phase).toBe('available');
+});
+
+test('a dismissal wins over a pending manual failure', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  let rejectOpen: (error: Error) => void = () => {};
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: () =>
+      new Promise((_resolveOpened, rejectOpened) => {
+        rejectOpen = rejectOpened;
+      }),
+    platform: 'win32',
+    strategy: 'manual',
+  });
+
+  const pending = updater.applyUpdate();
+  updater.dismissUpdate();
+  rejectOpen(new Error('No browser is available.'));
+
+  const result = await pending;
+
+  expect(result.phase).toBe('idle');
+  expect(updater.getStatus().phase).toBe('idle');
+});
+
 test('a manual retry clears the error once the release page opens', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await writeState(directory.path, {
