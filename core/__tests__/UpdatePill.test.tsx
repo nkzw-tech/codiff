@@ -82,6 +82,19 @@ test('describes the hand-off for the download strategy', async () => {
   expect(pill(view)?.title).not.toContain('restarts');
 });
 
+test('sends the user to the download page for the manual strategy', async () => {
+  await using view = await renderPill(
+    <UpdatePill
+      onApply={noop}
+      status={status({ phase: 'available', strategy: 'manual', version: '1.9.3' })}
+    />,
+  );
+
+  expect(pill(view)?.title).toContain('download page');
+  expect(pill(view)?.title).not.toContain('restarts');
+  expect(pill(view)?.title).not.toContain('Downloads');
+});
+
 test('promises nothing beyond the download without a known strategy', async () => {
   await using view = await renderPill(
     <UpdatePill onApply={noop} status={status({ phase: 'available', version: '1.9.3' })} />,

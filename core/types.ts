@@ -769,7 +769,7 @@ export type CodiffUpdateStatus = {
   currentVersion: string;
   message?: string;
   phase: CodiffUpdatePhase;
-  strategy?: 'download' | 'squirrel';
+  strategy?: 'download' | 'manual' | 'squirrel';
   version?: string;
 };
 

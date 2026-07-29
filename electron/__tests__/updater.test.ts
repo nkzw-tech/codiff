@@ -13,7 +13,7 @@ type UpdateStatus = {
   currentVersion: string;
   message?: string;
   phase: 'available' | 'error' | 'idle' | 'installerReady' | 'updating';
-  strategy?: 'download' | 'squirrel';
+  strategy?: 'download' | 'manual' | 'squirrel';
   version?: string;
 };
 
@@ -39,10 +39,11 @@ const { createUpdater, pickReleaseAsset, resolveUpdateStrategy } = require('../u
     linuxFlavor?: 'deb' | 'rpm' | null;
     log?: (message: string) => void;
     onStatusChange?: (status: UpdateStatus) => void;
+    openExternal?: (url: string) => Promise<void>;
     openPath?: (path: string) => Promise<string>;
     platform: string;
     releaseUrl?: string;
-    strategy: 'download' | 'squirrel';
+    strategy: 'download' | 'manual' | 'squirrel';
   }) => Updater;
   pickReleaseAsset: (
     assets: ReadonlyArray<ReleaseAsset>,
@@ -51,7 +52,7 @@ const { createUpdater, pickReleaseAsset, resolveUpdateStrategy } = require('../u
   resolveUpdateStrategy: (options: {
     hasSquirrelUpdateExe: boolean;
     platform: string;
-  }) => 'download' | 'squirrel';
+  }) => 'download' | 'manual' | 'squirrel';
 };
 
 class FakeAutoUpdater extends EventEmitter {
@@ -107,9 +108,7 @@ test('resolveUpdateStrategy uses Squirrel on macOS and Squirrel-installed Window
     'squirrel',
   );
   expect(resolveUpdateStrategy({ hasSquirrelUpdateExe: true, platform: 'win32' })).toBe('squirrel');
-  expect(resolveUpdateStrategy({ hasSquirrelUpdateExe: false, platform: 'win32' })).toBe(
-    'download',
-  );
+  expect(resolveUpdateStrategy({ hasSquirrelUpdateExe: false, platform: 'win32' })).toBe('manual');
   expect(resolveUpdateStrategy({ hasSquirrelUpdateExe: false, platform: 'linux' })).toBe(
     'download',
   );
@@ -596,6 +595,64 @@ test('applyUpdate downloads and opens the installer for download installs', asyn
   });
   expect(opened).toEqual([join(downloads.path, 'codiff_1.9.3_amd64.deb')]);
   expect(await readFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'utf8')).toBe('deb-bytes');
+});
+
+test('applyUpdate opens the release page for manual installs', async () => {
+  // A plain Windows ZIP install has no Squirrel and opening a downloaded ZIP
+  // would not replace the app, so the update hands off to the release page.
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const openedUrls: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: async (url) => {
+      openedUrls.push(url);
+    },
+    platform: 'win32',
+    strategy: 'manual',
+  });
+
+  const status = await updater.applyUpdate();
+
+  expect(openedUrls).toEqual(['https://github.com/nkzw-tech/codiff/releases/tag/v1.9.3']);
+  expect(status).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'manual',
+    version: '1.9.3',
+  });
+});
+
+test('applyUpdate reports an error when the release page cannot be opened', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    openExternal: async () => {
+      throw new Error('No browser is available.');
+    },
+    platform: 'win32',
+    strategy: 'manual',
+  });
+
+  const status = await updater.applyUpdate();
+
+  expect(status.phase).toBe('error');
+  expect(status.message).toContain('No browser is available.');
 });
 
 test('applyUpdate reports an error when no matching asset exists', async () => {
