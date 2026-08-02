@@ -2,7 +2,7 @@
 
 const { createHash } = require('node:crypto');
 const { createWriteStream } = require('node:fs');
-const { rm } = require('node:fs/promises');
+const { link, mkdtemp, rm } = require('node:fs/promises');
 const { join } = require('node:path');
 const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
@@ -97,6 +97,37 @@ const pickReleaseAsset = (assets, { arch, linuxFlavor, platform }) => {
   return null;
 };
 
+// A verified installer enters the download folder through an exclusive hard
+// link: it fails on a name that already exists instead of replacing the file
+// behind it, so a user's same-named file survives and the installer shows up
+// beside it under the next free name.
+/**
+ * @param {string} stagedPath
+ * @param {string} directory
+ * @param {string} name
+ */
+const exposeVerifiedDownload = async (stagedPath, directory, name) => {
+  const dot = name.lastIndexOf('.');
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const extension = dot > 0 ? name.slice(dot) : '';
+  for (let counter = 0; counter < 100; counter++) {
+    const candidate = join(directory, counter ? `${base} (${counter})${extension}` : name);
+    try {
+      await link(stagedPath, candidate);
+      return candidate;
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        /** @type {NodeJS.ErrnoException} */ (error).code !== 'EEXIST'
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error(`The download folder already has too many files named ${name}.`);
+};
+
 /**
  * @param {{
  *   arch: string;
@@ -113,6 +144,7 @@ const pickReleaseAsset = (assets, { arch, linuxFlavor, platform }) => {
  *   platform: string;
  *   releaseUrl?: string;
  *   strategy: UpdateStrategy;
+ *   updatesEnabled?: boolean;
  * }} options
  */
 const createUpdater = ({
@@ -130,6 +162,7 @@ const createUpdater = ({
   platform,
   releaseUrl,
   strategy,
+  updatesEnabled = true,
 }) => {
   const logError = log ?? ((/** @type {string} */ message) => console.error(message));
 
@@ -141,8 +174,11 @@ const createUpdater = ({
       : { currentVersion, phase: 'idle', strategy };
   };
 
+  // The setting promises no update notifications, so a launch never surfaces
+  // an update remembered from before it was turned off. Checks the user asks
+  // for explicitly still report; only the cache stays silent.
   /** @type {UpdateStatus} */
-  let status = statusFromState();
+  let status = updatesEnabled ? statusFromState() : { currentVersion, phase: 'idle', strategy };
 
   // Counts user and auto-updater actions (apply attempts, their outcomes,
   // dismissals). Checks snapshot it when they are requested and refuse to
@@ -323,9 +359,15 @@ const createUpdater = ({
         throw new Error(`Downloading the update failed with status ${response.status}.`);
       }
 
-      const path = join(downloadDirectory, asset.name);
-      const hash = createHash('sha256');
+      // The download only ever writes inside a directory created for it, so
+      // no user file is a write target and a failure can only delete the
+      // staging copy. The installer reaches the download folder itself after
+      // its bytes match the published checksum.
+      const stagingDirectory = await mkdtemp(join(downloadDirectory, '.codiff-update-'));
+      let path;
       try {
+        const stagedPath = join(stagingDirectory, asset.name);
+        const hash = createHash('sha256');
         await pipeline(
           Readable.fromWeb(/** @type {import('node:stream/web').ReadableStream} */ (response.body)),
           new Transform({
@@ -334,15 +376,16 @@ const createUpdater = ({
               callback(null, chunk);
             },
           }),
-          createWriteStream(path),
+          createWriteStream(stagedPath),
         );
 
         if (hash.digest('hex') !== expectedDigest.toLowerCase()) {
           throw new Error('The downloaded update failed its integrity check. Try again later.');
         }
-      } catch (error) {
-        await rm(path, { force: true });
-        throw error;
+
+        path = await exposeVerifiedDownload(stagedPath, downloadDirectory, asset.name);
+      } finally {
+        await rm(stagingDirectory, { force: true, recursive: true });
       }
 
       const openError = await openPath(path);

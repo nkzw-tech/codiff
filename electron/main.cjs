@@ -1242,6 +1242,7 @@ const initUpdater = () => {
       hasSquirrelUpdateExe: hasSquirrelUpdateExe(),
       platform: process.platform,
     }),
+    updatesEnabled: config.settings.checkForUpdates,
   });
 };
 
