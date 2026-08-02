@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -46,6 +46,7 @@ const { createUpdater, pickReleaseAsset, resolveUpdateStrategy } = require('../u
     platform: string;
     releaseUrl?: string;
     strategy: 'download' | 'manual' | 'squirrel';
+    updatesEnabled?: boolean;
   }) => Updater;
   pickReleaseAsset: (
     assets: ReadonlyArray<ReleaseAsset>,
@@ -195,6 +196,58 @@ test('starts from the cached state without hitting the network', async () => {
   });
 
   expect(updater.getStatus()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'available',
+    strategy: 'squirrel',
+    version: '1.9.3',
+  });
+});
+
+test('a cached update stays hidden when update checks are disabled', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    strategy: 'squirrel',
+    updatesEnabled: false,
+  });
+
+  expect(updater.getStatus()).toEqual({
+    currentVersion: '1.9.2',
+    phase: 'idle',
+    strategy: 'squirrel',
+  });
+});
+
+test('an explicit check still reports updates when automatic checks are disabled', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  const { disposable: _server, origin } = await startReleaseServer((_request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(releaseJson('1.9.3'));
+  });
+
+  const updater = createUpdater({
+    arch: 'arm64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    isPackaged: true,
+    platform: 'darwin',
+    releaseUrl: `${origin}/`,
+    strategy: 'squirrel',
+    updatesEnabled: false,
+  });
+
+  const status = await updater.checkForUpdates({ force: true });
+
+  expect(status).toEqual({
     currentVersion: '1.9.2',
     phase: 'available',
     strategy: 'squirrel',
@@ -1101,6 +1154,121 @@ test('applyUpdate refuses an installer without a published checksum', async () =
   expect(status.phase).toBe('error');
   expect(status.message).toContain('checksum');
   expect(opened).toEqual([]);
+});
+
+test('a failed download never touches an existing file with the installer name', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await using downloads = await createTemporaryDirectory('codiff-downloads-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+  await writeFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'unrelated user file');
+
+  const { disposable: _server, origin } = await startReleaseServer((request, response) => {
+    if (request.url === '/asset.deb') {
+      response.end('tampered-bytes');
+      return;
+    }
+
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      releaseJson('1.9.3', [
+        {
+          browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
+          name: 'codiff_1.9.3_amd64.deb',
+        },
+      ]),
+    );
+  });
+
+  const opened: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    downloadDirectory: downloads.path,
+    isPackaged: true,
+    linuxFlavor: 'deb',
+    openPath: async (path) => {
+      opened.push(path);
+      return '';
+    },
+    platform: 'linux',
+    releaseUrl: `${origin}/`,
+    strategy: 'download',
+  });
+
+  const status = await updater.applyUpdate();
+
+  expect(status.phase).toBe('error');
+  expect(opened).toEqual([]);
+  expect(await readFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'utf8')).toBe(
+    'unrelated user file',
+  );
+  expect(await readdir(downloads.path)).toEqual(['codiff_1.9.3_amd64.deb']);
+});
+
+test('a verified installer lands next to an existing file with its name', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await using downloads = await createTemporaryDirectory('codiff-downloads-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+  await writeFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'unrelated user file');
+
+  const { disposable: _server, origin } = await startReleaseServer((request, response) => {
+    if (request.url === '/asset.deb') {
+      response.setHeader('content-type', 'application/octet-stream');
+      response.end('deb-bytes');
+      return;
+    }
+
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      releaseJson('1.9.3', [
+        {
+          browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
+          name: 'codiff_1.9.3_amd64.deb',
+        },
+      ]),
+    );
+  });
+
+  const opened: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    downloadDirectory: downloads.path,
+    isPackaged: true,
+    linuxFlavor: 'deb',
+    openPath: async (path) => {
+      opened.push(path);
+      return '';
+    },
+    platform: 'linux',
+    releaseUrl: `${origin}/`,
+    strategy: 'download',
+  });
+
+  const status = await updater.applyUpdate();
+
+  expect(status.phase).toBe('installerReady');
+  expect(opened).toEqual([join(downloads.path, 'codiff_1.9.3_amd64 (1).deb')]);
+  expect(await readFile(join(downloads.path, 'codiff_1.9.3_amd64 (1).deb'), 'utf8')).toBe(
+    'deb-bytes',
+  );
+  expect(await readFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'utf8')).toBe(
+    'unrelated user file',
+  );
+  expect((await readdir(downloads.path)).sort()).toEqual([
+    'codiff_1.9.3_amd64 (1).deb',
+    'codiff_1.9.3_amd64.deb',
+  ]);
 });
 
 test('applyUpdate reports an error when the installer cannot be opened', async () => {
