@@ -3,7 +3,7 @@
 const { createHash } = require('node:crypto');
 const { createWriteStream } = require('node:fs');
 const { link, mkdtemp, rm } = require('node:fs/promises');
-const { join } = require('node:path');
+const { basename, join } = require('node:path');
 const { Readable, Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const {
@@ -62,8 +62,20 @@ const LINUX_ARCH_ALIASES = /** @type {Record<string, ReadonlyArray<string>>} */ 
  * @returns {ReleaseAsset | null}
  */
 const pickReleaseAsset = (assets, { arch, linuxFlavor, platform }) => {
+  // The asset name becomes a path on the user's disk. A name that is not a
+  // plain file name, such as one smuggling in a path separator or '..', is
+  // an attack on where the download lands, not an installer.
+  /** @param {string} name */
+  const isPlainFileName = (name) =>
+    name.length > 0 &&
+    name !== '.' &&
+    name !== '..' &&
+    !name.includes('\\') &&
+    basename(name) === name;
+
   /** @param {(asset: ReleaseAsset) => boolean} predicate */
-  const find = (predicate) => assets.find(predicate) ?? null;
+  const find = (predicate) =>
+    assets.find((asset) => isPlainFileName(asset.name) && predicate(asset)) ?? null;
 
   if (platform === 'darwin') {
     return find(({ name }) => name.includes(`darwin-${arch}`) && name.endsWith('.zip'));
