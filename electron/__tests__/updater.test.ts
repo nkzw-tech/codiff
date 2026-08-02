@@ -179,6 +179,76 @@ test('pickReleaseAsset refuses a Linux installer built for another architecture'
   ).toBe('codiff_1.9.3.deb');
 });
 
+test('pickReleaseAsset refuses an asset whose name is not a plain file name', () => {
+  const traversal = [
+    { name: '../codiff_1.9.3_amd64.deb', url: 'https://example.com/traversal.deb' },
+  ];
+
+  expect(
+    pickReleaseAsset(traversal, { arch: 'x64', linuxFlavor: 'deb', platform: 'linux' }),
+  ).toBeNull();
+  expect(
+    pickReleaseAsset([{ name: 'darwin-arm64/../evil.zip', url: 'https://example.com/evil.zip' }], {
+      arch: 'arm64',
+      platform: 'darwin',
+    }),
+  ).toBeNull();
+});
+
+test('a traversal asset name cannot reach files outside the staging area', async () => {
+  await using directory = await createTemporaryDirectory('codiff-updater-');
+  await using downloads = await createTemporaryDirectory('codiff-downloads-');
+  await writeState(directory.path, {
+    lastCheckedAt: recentCheck(),
+    latestVersion: '1.9.3',
+  });
+  await writeFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'unrelated user file');
+
+  const { disposable: _server, origin } = await startReleaseServer((request, response) => {
+    if (request.url === '/asset.deb') {
+      response.end('tampered-bytes');
+      return;
+    }
+
+    response.setHeader('content-type', 'application/json');
+    response.end(
+      releaseJson('1.9.3', [
+        {
+          browser_download_url: `${origin}/asset.deb`,
+          digest: sha256('deb-bytes'),
+          name: '../codiff_1.9.3_amd64.deb',
+        },
+      ]),
+    );
+  });
+
+  const opened: Array<string> = [];
+  const updater = createUpdater({
+    arch: 'x64',
+    configDir: directory.path,
+    currentVersion: '1.9.2',
+    downloadDirectory: downloads.path,
+    isPackaged: true,
+    linuxFlavor: 'deb',
+    openPath: async (path) => {
+      opened.push(path);
+      return '';
+    },
+    platform: 'linux',
+    releaseUrl: `${origin}/`,
+    strategy: 'download',
+  });
+
+  const status = await updater.applyUpdate();
+
+  expect(status.phase).toBe('error');
+  expect(opened).toEqual([]);
+  expect(await readFile(join(downloads.path, 'codiff_1.9.3_amd64.deb'), 'utf8')).toBe(
+    'unrelated user file',
+  );
+  expect(await readdir(downloads.path)).toEqual(['codiff_1.9.3_amd64.deb']);
+});
+
 test('starts from the cached state without hitting the network', async () => {
   await using directory = await createTemporaryDirectory('codiff-updater-');
   await writeState(directory.path, {
