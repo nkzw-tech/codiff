@@ -1710,6 +1710,56 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding-top: 6px;
 }
 
+.sidebar-comment-section {
+  border-bottom: 1px solid var(--sidebar-border);
+  min-width: 0;
+}
+
+.sidebar-comment-section-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar-comment-section-toggle > span {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sidebar-comment-section-toggle strong {
+  font: 700 11px/1.25 var(--font-sans);
+  text-transform: uppercase;
+}
+
+.sidebar-comment-section-toggle small {
+  color: var(--muted);
+  font: 11px/1.25 var(--font-mono);
+}
+
+.sidebar-comment-section-toggle svg {
+  color: var(--muted);
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.sidebar-comment-section-toggle svg.collapsed {
+  transform: rotate(-90deg);
+}
+
+.sidebar-comment-section-body {
+  min-width: 0;
+}
+
 .sidebar-comment-entry.history-entry {
   grid-template-columns: 34px minmax(0, 1fr);
 }
@@ -3442,6 +3492,26 @@ diffs-container .review-comment-thread {
 .review-comment-header span {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-comment-header a {
+  align-items: center;
+  color: inherit;
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.review-comment-header a:hover {
+  color: var(--text);
+}
+
+.review-comment-header .review-comment-permalink {
+  flex: none;
+  margin-left: auto;
+  overflow: visible;
   white-space: nowrap;
 }
 
