@@ -130,21 +130,25 @@ const gitSync = (repoPath, args, options = {}) => {
 };
 
 /**
+ * Run one Git command with stdin while draining stdout incrementally. Callers
+ * can stop retaining output after their byte budget without blocking Git on a
+ * full pipe.
+ *
  * @param {string} repoPath
  * @param {ReadonlyArray<string>} args
  * @param {string | Buffer} input
- * @param {{env?: NodeJS.ProcessEnv, signal?: AbortSignal}} [options]
- * @returns {Promise<Buffer>}
+ * @param {{env?: NodeJS.ProcessEnv, maxStderrBytes?: number, onStdout?: (chunk: Buffer) => void, signal?: AbortSignal}} [options]
+ * @returns {Promise<void>}
  */
-const gitBufferWithInput = (repoPath, args, input, options = {}) =>
+const gitStreamWithInput = (repoPath, args, input, options = {}) =>
   new Promise((resolve, reject) => {
     const commandArgs = ['-C', repoPath, ...args];
     const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
+    const maxStderrBytes = options.maxStderrBytes ?? 1024 * 1024;
     const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
     /** @type {Array<Buffer>} */
-    const stdout = [];
-    /** @type {Array<Buffer>} */
     const stderr = [];
+    let stderrBytes = 0;
     let settled = false;
 
     /** @param {unknown} reason @param {{canceled?: boolean, exitCode?: number | null, signal?: string | null}} [result] */
@@ -177,8 +181,22 @@ const gitBufferWithInput = (repoPath, args, input, options = {}) =>
       return;
     }
 
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.stdout.on('data', (value) => {
+      if (settled) return;
+      try {
+        options.onStdout?.(Buffer.isBuffer(value) ? value : Buffer.from(value));
+      } catch (error) {
+        fail(error, { canceled: signal?.aborted });
+        child.kill();
+      }
+    });
+    child.stderr.on('data', (value) => {
+      if (stderrBytes >= maxStderrBytes) return;
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      const retained = chunk.subarray(0, maxStderrBytes - stderrBytes);
+      stderr.push(retained);
+      stderrBytes += retained.length;
+    });
     child.stdin.on('error', (error) => {
       if (!settled && /** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE') {
         fail(error, { canceled: signal?.aborted });
@@ -197,7 +215,7 @@ const gitBufferWithInput = (repoPath, args, input, options = {}) =>
       if (code === 0) {
         settled = true;
         timing.finish({ exitCode: code });
-        resolve(Buffer.concat(stdout));
+        resolve();
       } else {
         const error = new Error(
           Buffer.concat(stderr).toString('utf8') || `git exited with status ${code}`,
@@ -213,6 +231,36 @@ const gitBufferWithInput = (repoPath, args, input, options = {}) =>
       child.kill();
     }
   });
+
+/**
+ * @param {string} repoPath
+ * @param {ReadonlyArray<string>} args
+ * @param {string | Buffer} input
+ * @param {{env?: NodeJS.ProcessEnv, maxOutputBytes?: number, signal?: AbortSignal}} [options]
+ * @returns {Promise<Buffer>}
+ */
+const gitBufferWithInput = async (repoPath, args, input, options = {}) => {
+  const maxOutputBytes = options.maxOutputBytes ?? 1024 * 1024 * 64;
+  let outputBytes = 0;
+  /** @type {Array<Buffer>} */
+  const stdout = [];
+  await gitStreamWithInput(repoPath, args, input, {
+    env: options.env,
+    onStdout: (chunk) => {
+      if (outputBytes + chunk.length > maxOutputBytes) {
+        const error = new Error(
+          `Git command output exceeded the ${maxOutputBytes}-byte safety limit.`,
+        );
+        error.name = 'GitOutputLimitError';
+        throw error;
+      }
+      outputBytes += chunk.length;
+      stdout.push(chunk);
+    },
+    signal: options.signal,
+  });
+  return Buffer.concat(stdout);
+};
 
 const EAGER_TEXT_FILE_LIMIT = 1024 * 1024;
 const MANUAL_TEXT_FILE_LIMIT = 2 * 1024 * 1024;
@@ -1012,6 +1060,7 @@ module.exports = {
   getWhitespaceDiffArgs,
   git,
   gitBufferWithInput,
+  gitStreamWithInput,
   gitOrEmpty,
   gitSync,
   normalizeStatus,
