@@ -1,8 +1,8 @@
 // @ts-check
 
-const { execFileSync } = require('node:child_process');
 const { realpathSync } = require('node:fs');
 const { dirname, resolve } = require('node:path');
+const { gitSync } = require('./git-state/common.cjs');
 const { parseReviewUrl } = require('./review-source.cjs');
 
 /**
@@ -26,11 +26,7 @@ const resolveRepositoryRoot = (repositoryPath) => {
   const resolvedPath = resolve(repositoryPath);
 
   try {
-    return getRealPath(
-      execFileSync('git', ['-C', resolvedPath, 'rev-parse', '--show-toplevel'], {
-        encoding: 'utf8',
-      }).trim(),
-    );
+    return getRealPath(gitSync(resolvedPath, ['rev-parse', '--show-toplevel']).trim());
   } catch {
     return getRealPath(resolvedPath);
   }
@@ -39,9 +35,7 @@ const resolveRepositoryRoot = (repositoryPath) => {
 /** @param {string} repositoryRoot @param {string} ref */
 const resolveCommitRef = (repositoryRoot, ref) => {
   try {
-    return execFileSync('git', ['-C', repositoryRoot, 'rev-parse', '--verify', `${ref}^{commit}`], {
-      encoding: 'utf8',
-    })
+    return gitSync(repositoryRoot, ['rev-parse', '--verify', `${ref}^{commit}`])
       .trim()
       .toLowerCase();
   } catch {
@@ -53,11 +47,7 @@ const resolveCommitRef = (repositoryRoot, ref) => {
 const hasWorkingTreeChanges = (repositoryRoot) => {
   try {
     return Boolean(
-      execFileSync(
-        'git',
-        ['-C', repositoryRoot, 'status', '--porcelain=v1', '-z', '--untracked-files=normal'],
-        { encoding: 'utf8' },
-      ),
+      gitSync(repositoryRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=normal']),
     );
   } catch {
     return false;
@@ -67,11 +57,7 @@ const hasWorkingTreeChanges = (repositoryRoot) => {
 /** @param {string} repositoryRoot @param {string} baseRef @param {string} headRef */
 const resolveMergeBase = (repositoryRoot, baseRef, headRef) => {
   try {
-    return execFileSync('git', ['-C', repositoryRoot, 'merge-base', baseRef, headRef], {
-      encoding: 'utf8',
-    })
-      .trim()
-      .toLowerCase();
+    return gitSync(repositoryRoot, ['merge-base', baseRef, headRef]).trim().toLowerCase();
   } catch {
     return null;
   }
