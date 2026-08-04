@@ -159,6 +159,22 @@ export type ReviewArtifactRunDiagnostics = {
     commits: number;
     stackAndRanges: number;
   };
+  execution: {
+    /** Bytes returned by successful Blob Artifact source reads in this run. */
+    blobBytesRead: number;
+    /** Elapsed monotonic time from run construction to diagnostics collection. */
+    elapsedMs: number;
+    /** Greatest number of source calls active at the same time in this run. */
+    peakSourceReads: number;
+    /** Sum of elapsed source-read time by immutable artifact class. */
+    sourceElapsedMs: {
+      blobs: number;
+      commits: number;
+      stackAndRanges: number;
+    };
+    /** True when a caller or the run itself aborted the shared controller. */
+    wasCanceled: boolean;
+  };
   sourceCalls: {
     blobs: number;
     commits: number;
@@ -326,9 +342,11 @@ const fileBlobCacheKey = (key: string, request: FileBlobArtifactRequest) =>
  */
 export const createReviewArtifactRun = (
   source: ReviewArtifactSource,
-  options: { controller?: AbortController; signal?: AbortSignal } = {},
+  options: { controller?: AbortController; now?: () => number; signal?: AbortSignal } = {},
 ): ReviewArtifactRun => {
   const controller = options.controller ?? new AbortController();
+  const now = options.now ?? (() => globalThis.performance.now());
+  const startedAt = now();
   const boundSignals = new WeakSet<AbortSignal>();
   const commitValues = new Map<CommitArtifactRequestKey, CommitArtifact | null>();
   const commitPending = new Map<CommitArtifactRequestKey, Promise<CommitArtifact | null>>();
@@ -345,6 +363,29 @@ export const createReviewArtifactRun = (
   };
   const cacheHits = { blobs: 0, commits: 0, stackAndRanges: 0 };
   const sourceCalls = { blobs: 0, commits: 0, stackAndRanges: 0 };
+  const sourceElapsedMs = { blobs: 0, commits: 0, stackAndRanges: 0 };
+  let activeSourceReads = 0;
+  let blobBytesRead = 0;
+  let peakSourceReads = 0;
+
+  const trackSourceRead = <Value>(
+    kind: keyof typeof sourceElapsedMs,
+    read: () => Promise<Value>,
+  ): Promise<Value> => {
+    const readStartedAt = now();
+    activeSourceReads += 1;
+    peakSourceReads = Math.max(peakSourceReads, activeSourceReads);
+    const finish = () => {
+      sourceElapsedMs[kind] += Math.max(0, now() - readStartedAt);
+      activeSourceReads -= 1;
+    };
+    try {
+      return read().finally(finish);
+    } catch (error) {
+      finish();
+      return Promise.reject(error);
+    }
+  };
 
   const bindSignal = (signal?: AbortSignal) => {
     if (!signal || signal === controller.signal || boundSignals.has(signal)) {
@@ -383,22 +424,22 @@ export const createReviewArtifactRun = (
         increment(acquired.commits, key);
       }
       const requestedBatchKeys = new Set(misses.map(([key]) => key));
-      const batch = source
-        .readCommitArtifacts(
+      const batch = trackSourceRead('commits', () =>
+        source.readCommitArtifacts(
           misses.map(([, commit]) => commit),
           controller.signal,
-        )
-        .then((artifacts) => {
-          for (const [key, artifact] of artifacts) {
-            if (!requestedBatchKeys.has(key)) {
-              throw new Error(`Artifact Source returned unrequested commit coordinate ${key}.`);
-            }
-            if (createCommitArtifactRequestKey(artifact) !== key) {
-              throw new Error(`Artifact Source returned different coordinates for ${key}.`);
-            }
+        ),
+      ).then((artifacts) => {
+        for (const [key, artifact] of artifacts) {
+          if (!requestedBatchKeys.has(key)) {
+            throw new Error(`Artifact Source returned unrequested commit coordinate ${key}.`);
           }
-          return artifacts;
-        });
+          if (createCommitArtifactRequestKey(artifact) !== key) {
+            throw new Error(`Artifact Source returned different coordinates for ${key}.`);
+          }
+        }
+        return artifacts;
+      });
       for (const [key, commit] of misses) {
         const pending = batch
           .then((artifacts) => {
@@ -455,7 +496,14 @@ export const createReviewArtifactRun = (
       for (const objectId of misses) {
         increment(acquired.blobs, objectId);
       }
-      const batch = source.readBlobs(misses, controller.signal);
+      const batch = trackSourceRead('blobs', () =>
+        source.readBlobs(misses, controller.signal),
+      ).then((blobs) => {
+        for (const blob of blobs.values()) {
+          blobBytesRead += blob.bytes.byteLength;
+        }
+        return blobs;
+      });
       for (const objectId of misses) {
         const pending = batch
           .then((blobs) => {
@@ -525,10 +573,17 @@ export const createReviewArtifactRun = (
       for (const [key] of misses) {
         increment(acquired.blobs, `file:${key}`);
       }
-      const batch = source.readFileBlobs!(
-        misses.map(([, request]) => request),
-        controller.signal,
-      );
+      const batch = trackSourceRead('blobs', () =>
+        source.readFileBlobs!(
+          misses.map(([, request]) => request),
+          controller.signal,
+        ),
+      ).then((blobs) => {
+        for (const blob of blobs.values()) {
+          blobBytesRead += blob.bytes.byteLength;
+        }
+        return blobs;
+      });
       for (const [key, request] of misses) {
         const keyWithLimit = fileBlobCacheKey(key, request);
         const pending = batch
@@ -592,8 +647,9 @@ export const createReviewArtifactRun = (
     }
     sourceCalls.stackAndRanges += 1;
     increment(acquired.stackAndRanges, key);
-    const pending = source
-      .readStackAndRange(request, controller.signal)
+    const pending = trackSourceRead('stackAndRanges', () =>
+      source.readStackAndRange(request, controller.signal),
+    )
       .then((value) => {
         controller.signal.throwIfAborted();
         return validateReviewArtifactRangeResult(request, value);
@@ -620,6 +676,13 @@ export const createReviewArtifactRun = (
         stackAndRanges: countRecord(acquired.stackAndRanges),
       },
       cacheHits: { ...cacheHits },
+      execution: {
+        blobBytesRead,
+        elapsedMs: Math.max(0, now() - startedAt),
+        peakSourceReads,
+        sourceElapsedMs: { ...sourceElapsedMs },
+        wasCanceled: controller.signal.aborted,
+      },
       sourceCalls: { ...sourceCalls },
     }),
     readBlobs,

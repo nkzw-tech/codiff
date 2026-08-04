@@ -1,18 +1,27 @@
 // @ts-check
 
 const { StringDecoder } = require('node:string_decoder');
-const { git, gitBufferWithInput, gitStreamWithInput, normalizeStatus } = require('./common.cjs');
+const {
+  getFingerprint,
+  git,
+  gitBufferWithInput,
+  gitStreamWithInput,
+  normalizeStatus,
+} = require('./common.cjs');
 
 /** @typedef {import('../../core/lib/review-artifacts.ts').ArtifactFile} ArtifactFile */
 /** @typedef {import('../../core/lib/review-artifacts.ts').CommitArtifact} CommitArtifact */
 /** @typedef {import('../../core/lib/review-artifacts.ts').CommitArtifactRequest} CommitArtifactRequest */
 /** @typedef {import('../../core/lib/review-artifacts.ts').ReviewArtifactProject} ReviewArtifactProject */
 /** @typedef {import('../../core/lib/review-artifacts.ts').ReviewArtifactProvenance} ReviewArtifactProvenance */
+/** @typedef {import('../../core/types.ts').ChangedFile} ChangedFile */
 /** @typedef {import('../../core/types.ts').GitSha} GitSha */
 
+const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const MAX_COMMIT_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const MAX_RANGE_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const MAX_BLOB_ARTIFACT_BYTES = 8 * 1024 * 1024;
+const MAX_BLOB_ENDPOINT_LOOKUP_BYTES = 1024 * 1024;
 const MAX_BLOB_HEADER_BYTES = 1024;
 
 const COMMIT_LINE =
@@ -615,6 +624,130 @@ const readBlobArtifacts = async (repoRoot, objectIds, options) => {
   return parser.finish();
 };
 
+/** @param {{path: string, ref: string}} request */
+const blobRequestKey = (request) => `${request.ref}:${request.path}`;
+/** @param {{commitSha: string, parentSha: string | null}} request */
+const commitRequestKey = (request) => `${request.commitSha}:${request.parentSha ?? 'root'}`;
+
+/**
+ * Parse one `git cat-file --batch-check` stream while retaining just the
+ * bounded response lines needed to map replay endpoints to immutable object
+ * IDs. A truncated tail intentionally leaves later endpoints unresolved.
+ *
+ * @param {ReadonlyArray<{path: string, ref: string}>} requests
+ * @param {number} maxBytes
+ */
+const createBoundedBlobObjectIdParser = (requests, maxBytes) => {
+  const decoder = new StringDecoder('utf8');
+  const limit = Math.max(0, Math.floor(maxBytes));
+  const resolved = new Map();
+  let nextRequest = 0;
+  let pendingLine = '';
+  let retainedBytes = 0;
+  let truncated = false;
+
+  /** @param {string} line */
+  const consumeLine = (line) => {
+    const request = requests[nextRequest++];
+    if (!request) return;
+    const [objectId, type] = line.split(' ');
+    if (/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(objectId || '') && type === 'blob') {
+      resolved.set(blobRequestKey(request), objectId);
+    }
+  };
+
+  /** @param {string} text */
+  const consumeText = (text) => {
+    let remaining = pendingLine + text;
+    let newline = remaining.indexOf('\n');
+    while (newline !== -1) {
+      consumeLine(remaining.slice(0, newline));
+      remaining = remaining.slice(newline + 1);
+      newline = remaining.indexOf('\n');
+    }
+    pendingLine = remaining;
+  };
+
+  return {
+    /** @param {Buffer} value */
+    write(value) {
+      if (truncated || value.length === 0) return;
+      const remaining = limit - retainedBytes;
+      if (value.length <= remaining) {
+        retainedBytes += value.length;
+        consumeText(decoder.write(value));
+        return;
+      }
+      if (remaining > 0) {
+        retainedBytes += remaining;
+        consumeText(decoder.write(value.subarray(0, remaining)));
+      }
+      pendingLine = '';
+      truncated = true;
+    },
+    finish() {
+      if (!truncated) {
+        consumeText(decoder.end());
+        if (pendingLine) {
+          consumeLine(pendingLine);
+          pendingLine = '';
+        }
+      }
+      return resolved;
+    },
+  };
+};
+
+/**
+ * Resolve endpoint paths that were not already named by an Artifact's raw
+ * records. This remains one native Git process for the whole proof batch;
+ * callers then pass the resolved immutable IDs to the Artifact Run's cached
+ * `readBlobs` method.
+ *
+ * Newlines cannot be represented safely by Git's line-oriented batch input,
+ * so those unusual paths are deliberately left unresolved and become explicit
+ * incomplete replay evidence instead of being probed serially.
+ *
+ * @param {string} repoRoot
+ * @param {ReadonlyArray<{path: string, ref: string}>} requests
+ * @param {{maxBytes?: number, signal?: AbortSignal, runGit?: typeof gitBufferWithInput, runGitStream?: typeof gitStreamWithInput}} [options]
+ * @returns {Promise<ReadonlyMap<string, string>>}
+ */
+const readBlobObjectIds = async (repoRoot, requests, options = {}) => {
+  const pending = [
+    ...new Map(
+      requests
+        .filter(({ path }) => !path.includes('\n') && !path.includes('\0'))
+        .map((request) => [blobRequestKey(request), request]),
+    ).values(),
+  ];
+  if (pending.length === 0) {
+    return new Map();
+  }
+  for (const { ref } of pending) {
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(ref)) {
+      throw new Error(`Invalid Git ref for blob endpoint resolution: ${ref}`);
+    }
+  }
+  options.signal?.throwIfAborted();
+  const parser = createBoundedBlobObjectIdParser(
+    pending,
+    options.maxBytes ?? MAX_BLOB_ENDPOINT_LOOKUP_BYTES,
+  );
+  const args = ['cat-file', '--batch-check=%(objectname) %(objecttype)'];
+  const input = `${pending.map(({ path, ref }) => `${ref}:${path}`).join('\n')}\n`;
+  if (options.runGit) {
+    parser.write(await options.runGit(repoRoot, args, input, { signal: options.signal }));
+  } else {
+    await (options.runGitStream || gitStreamWithInput)(repoRoot, args, input, {
+      onStdout: (chunk) => parser.write(chunk),
+      signal: options.signal,
+    });
+  }
+  options.signal?.throwIfAborted();
+  return parser.finish();
+};
+
 /**
  * Native-Git backend used by one Core Review Artifact Run.
  * Stack/range acquisition is supplied by provider history adapters; this
@@ -636,6 +769,39 @@ const createNativeCommitArtifactSource = (repoRoot, project, options = {}) => {
         ...(options.runGitStream ? { runGitStream: options.runGitStream } : {}),
         signal,
       }),
+    /** @param {ReadonlyArray<import('../../core/lib/review-artifacts.ts').FileBlobArtifactRequest>} requests @param {AbortSignal} signal */
+    async readFileBlobs(requests, signal) {
+      const unique = [
+        ...new Map(requests.map((request) => [blobRequestKey(request), request])).values(),
+      ];
+      const objectIds = await readBlobObjectIds(repoRoot, unique, {
+        ...(options.runGitWithInput ? { runGit: runGitWithInput } : {}),
+        ...(options.runGitStream ? { runGitStream: options.runGitStream } : {}),
+        signal,
+      });
+      const defaultLimit = options.maxBlobArtifactBytes ?? MAX_BLOB_ARTIFACT_BYTES;
+      const batchLimit = unique.reduce(
+        (total, request) => total + (request.maxBytes ?? defaultLimit) + MAX_BLOB_HEADER_BYTES + 1,
+        0,
+      );
+      const blobs = await readBlobArtifacts(repoRoot, [...new Set(objectIds.values())], {
+        maxBytes: batchLimit,
+        provenance,
+        ...(options.runGitWithInput ? { runGit: runGitWithInput } : {}),
+        ...(options.runGitStream ? { runGitStream: options.runGitStream } : {}),
+        signal,
+      });
+      return new Map(
+        unique.flatMap((request) => {
+          const key = blobRequestKey(request);
+          const objectId = objectIds.get(key);
+          const blob = objectId ? blobs.get(objectId) : null;
+          return blob && blob.bytes.byteLength <= (request.maxBytes ?? defaultLimit)
+            ? [[key, blob]]
+            : [];
+        }),
+      );
+    },
     async readCommitArtifacts(requests, signal) {
       const artifacts = await readCommitArtifacts(
         repoRoot,
@@ -650,23 +816,23 @@ const createNativeCommitArtifactSource = (repoRoot, project, options = {}) => {
         },
       );
       return new Map(
-        requests.flatMap(({ commitSha, parentSha }) => {
-          const artifact = artifacts.get(commitSha);
+        requests.flatMap((request) => {
+          const artifact = artifacts.get(request.commitSha);
           if (!artifact) {
             return [];
           }
           return [
             [
-              commitSha,
-              artifact.parentSha === parentSha
+              commitRequestKey(request),
+              artifact.parentSha === request.parentSha
                 ? artifact
-                : { ...artifact, coverage: 'truncated', parentSha },
+                : { ...artifact, coverage: 'truncated', parentSha: request.parentSha },
             ],
           ];
         }),
       );
     },
-    async readStackAndRange(baseSha, headSha, signal) {
+    async readStackAndRange({ headSha, requestedBaseSha: baseSha }, signal) {
       if (baseSha === headSha) {
         return {
           range: { baseSha, coverage: 'complete', files: [], headSha, provenance },
@@ -709,16 +875,127 @@ const createNativeCommitArtifactSource = (repoRoot, project, options = {}) => {
   };
 };
 
+/** @param {string} patch */
+const invertPatch = (patch) =>
+  patch
+    .replace(/^--- (.*)\n\+\+\+ (.*)$/gm, '--- $2\n+++ $1')
+    .replace(/^index ([0-9a-f]+)\.\.([0-9a-f]+)(.*)$/gm, 'index $2..$1$3')
+    .split('\n')
+    .map((line) => {
+      const hunk = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/);
+      if (hunk) {
+        const [, oldStart, oldCount, newStart, newCount, suffix] = hunk;
+        return `@@ -${newStart}${newCount == null ? '' : `,${newCount}`} +${oldStart}${
+          oldCount == null ? '' : `,${oldCount}`
+        } @@${suffix}`;
+      }
+      if (line.startsWith('+') && !line.startsWith('+++')) {
+        return `-${line.slice(1)}`;
+      }
+      if (line.startsWith('-') && !line.startsWith('---')) {
+        return `+${line.slice(1)}`;
+      }
+      return line;
+    })
+    .join('\n');
+
+/** @param {ChangedFile['status']} status */
+const reverseStatus = (status) =>
+  status === 'added' ? 'deleted' : status === 'deleted' ? 'added' : status;
+
+/**
+ * Project cached artifact files into the renderer's patch-only shape.
+ * @param {{coverage: import('../../core/lib/review-artifacts.ts').ArtifactCoverage, files: ReadonlyArray<ArtifactFile>}} artifact
+ * @param {{baseSha: GitSha, headSha: GitSha, identity: string, reverse?: boolean}} options
+ * @returns {ReadonlyArray<ChangedFile>}
+ */
+const artifactFilesToChangedFiles = (artifact, options) => {
+  const reverse = options.reverse === true;
+  const baseSha = reverse ? options.headSha : options.baseSha;
+  const headSha = reverse ? options.baseSha : options.headSha;
+  return artifact.files.map((file, index) => {
+    const path = reverse ? file.oldPath || file.path : file.path;
+    const oldPath = reverse && file.oldPath ? file.path : !reverse ? file.oldPath : undefined;
+    const status = reverse ? reverseStatus(file.status) : file.status;
+    const patch = reverse ? invertPatch(file.patch || '') : file.patch || '';
+    const binary = !patch && Boolean(file.oldObjectId || file.newObjectId);
+    const patchUnavailable = file.coverage !== 'complete' && !patch && !binary;
+    return {
+      fingerprint: getFingerprint(`${options.identity}:${index}:${reverse}:${file.path}:${patch}`),
+      ...(oldPath && oldPath !== path ? { oldPath } : {}),
+      path,
+      sections: [
+        {
+          binary,
+          id: `${path}:artifact:${options.identity}:${reverse ? 'reverse' : 'forward'}`,
+          kind: 'commit',
+          loadState: patchUnavailable ? 'error' : binary ? 'binary' : 'ready',
+          patch,
+          range: {
+            base: { label: { kind: 'commit', text: baseSha.slice(0, 7) }, sha: baseSha },
+            head: { label: { kind: 'commit', text: headSha.slice(0, 7) }, sha: headSha },
+          },
+          ...(patchUnavailable
+            ? {
+                summary: {
+                  reason: 'Codiff could not load a complete patch for this file.',
+                },
+              }
+            : file.coverage !== 'complete' && patch
+              ? {
+                  summary: {
+                    reason: 'Showing the available patch; some change data may be incomplete.',
+                  },
+                }
+              : {}),
+        },
+      ],
+      status,
+    };
+  });
+};
+
+/**
+ * Project a cached Commit Artifact into the renderer's patch-only shape.
+ * @param {CommitArtifact} artifact
+ * @param {{reverse?: boolean}} [options]
+ * @returns {ReadonlyArray<ChangedFile>}
+ */
+const artifactToChangedFiles = (artifact, options = {}) =>
+  artifactFilesToChangedFiles(artifact, {
+    baseSha: artifact.parentSha || EMPTY_TREE_SHA,
+    headSha: artifact.commitSha,
+    identity: `${artifact.parentSha || 'root'}:${artifact.commitSha}`,
+    reverse: options.reverse,
+  });
+
+/**
+ * Project a cached Range Artifact into the renderer's patch-only shape.
+ * @param {import('../../core/lib/review-artifacts.ts').RangeArtifact} artifact
+ * @returns {ReadonlyArray<ChangedFile>}
+ */
+const rangeArtifactToChangedFiles = (artifact) =>
+  artifactFilesToChangedFiles(artifact, {
+    baseSha: artifact.baseSha,
+    headSha: artifact.headSha,
+    identity: `${artifact.baseSha}:${artifact.headSha}`,
+  });
+
 module.exports = {
+  artifactToChangedFiles,
   MAX_BLOB_ARTIFACT_BYTES,
+  MAX_BLOB_ENDPOINT_LOOKUP_BYTES,
   MAX_COMMIT_ARTIFACT_BYTES,
   MAX_RANGE_ARTIFACT_BYTES,
   createBoundedBlobArtifactParser,
+  createBoundedBlobObjectIdParser,
   createNativeCommitArtifactSource,
   createBoundedCommitArtifactParser,
   createBoundedRangeArtifactParser,
   parseCommitArtifactOutput,
+  rangeArtifactToChangedFiles,
   readBlobArtifacts,
+  readBlobObjectIds,
   readCommitArtifacts,
   readRangeArtifact,
 };
