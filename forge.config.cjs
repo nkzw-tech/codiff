@@ -1,7 +1,7 @@
 // @ts-check
 
 /* eslint-disable @typescript-eslint/no-require-imports, no-undef */
-const { copyFile, mkdir } = require('node:fs/promises');
+const { cp, mkdir } = require('node:fs/promises');
 const { existsSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 
@@ -16,7 +16,11 @@ const macAssetCatalogPath = existsSync(join(__dirname, 'electron/icons/Assets.ca
   : undefined;
 const linuxIconPath = './electron/icons/icon.png';
 const windowsIconPath = './electron/icons/icon.ico';
-const walkthroughDiffRuntimePath = 'core/lib/narrative-walkthrough-diff.cjs';
+const runtimeCopies = [
+  ['core/lib/narrative-walkthrough-diff.cjs', 'core/lib/narrative-walkthrough-diff.cjs'],
+  ['github/dist', 'github/dist'],
+  ['gitlab/dist', 'gitlab/dist'],
+];
 const skipSquirrel = process.env.CODIFF_SKIP_SQUIRREL === '1';
 const osxNotarize =
   process.env.APPLE_ID && process.env.APPLE_PASSWORD && process.env.APPLE_TEAM_ID
@@ -53,11 +57,12 @@ const osxNotarize =
 module.exports = {
   hooks: {
     packageAfterCopy: async (_forgeConfig, buildPath) => {
-      const source = join(__dirname, walkthroughDiffRuntimePath);
-      const destination = join(buildPath, walkthroughDiffRuntimePath);
-
-      await mkdir(dirname(destination), { recursive: true });
-      await copyFile(source, destination);
+      for (const [sourcePath, destinationPath] of runtimeCopies) {
+        const source = join(__dirname, sourcePath);
+        const destination = join(buildPath, destinationPath);
+        await mkdir(dirname(destination), { recursive: true });
+        await cp(source, destination, { recursive: true });
+      }
     },
     prePackage: async (forgeConfig, platform) => {
       if (platform !== 'darwin' || !macAssetCatalogPath) {
@@ -130,6 +135,8 @@ module.exports = {
       /^\/coverage(?:$|\/)/,
       /^\/docs(?:$|\/)/,
       /^\/forge\.config\.cjs$/,
+      /^\/github(?:$|\/)/,
+      /^\/gitlab(?:$|\/)/,
       /^\/index\.html$/,
       /^\/out(?:$|\/)/,
       /^\/pnpm-workspace\.yaml$/,

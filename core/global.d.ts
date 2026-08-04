@@ -11,6 +11,8 @@ import type {
   DiffImageContentResult,
   DiffSection,
   DiffSectionContentRequest,
+  DiffSectionsContentRequest,
+  DiffSectionsContentResult,
   GitIdentity,
   NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
@@ -56,6 +58,9 @@ declare global {
       getConfig: () => Promise<CodiffConfig>;
       getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
       getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
+      getDiffSectionsContent: (
+        request: DiffSectionsContentRequest,
+      ) => Promise<DiffSectionsContentResult>;
       getFeatureFlags: () => Promise<CodiffFeatureFlags>;
       getGitIdentity: () => Promise<GitIdentity>;
       getKeyboardLayout: () => Promise<NativeKeyboardLayout | null>;
@@ -72,6 +77,9 @@ declare global {
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
+      getReviewComments: (
+        source: Extract<ReviewSource, { type: 'pull-request' }>,
+      ) => Promise<ReadonlyArray<PullRequestExistingReviewComment>>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;

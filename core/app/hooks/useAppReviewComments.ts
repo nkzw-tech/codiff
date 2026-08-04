@@ -172,6 +172,7 @@ export function useAppReviewComments({
                     ...(submittedComment.side ? { side: submittedComment.side } : {}),
                     ...getReviewCommentRangeProps(submittedComment),
                     submittedAt: submittedComment.submittedAt,
+                    ...(submittedComment.threadId ? { threadId: submittedComment.threadId } : {}),
                     url: submittedComment.url,
                   }
                 : candidate,

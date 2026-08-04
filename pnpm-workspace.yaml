@@ -1,5 +1,7 @@
 packages:
   - core
+  - gitlab
+  - github
   - service
   - web
 

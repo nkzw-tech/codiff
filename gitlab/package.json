@@ -1,0 +1,36 @@
+{
+  "name": "@nkzw/codiff-gitlab",
+  "version": "0.1.0",
+  "description": "Host-injected GitLab transport for Codiff.",
+  "license": "MIT",
+  "author": {
+    "name": "Christoph Nakazawa",
+    "email": "christoph.pojer@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nkzw-tech/codiff.git",
+    "directory": "gitlab"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "@nkzw/codiff-source": "./src/index.ts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && vp pack -d dist --target=node24 src/index.ts && vp exec tsc -p tsconfig.build.json",
+    "typecheck": "vp exec tsc --noEmit -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@nkzw/codiff-core": "workspace:*"
+  }
+}

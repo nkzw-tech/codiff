@@ -26,6 +26,7 @@ const codiff = {
   getConfig: () => ipcRenderer.invoke('codiff:getConfig'),
   decreaseCodeFontSize: () => ipcRenderer.invoke('codiff:decreaseCodeFontSize'),
   getDiffSectionContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionContent', request),
+  getDiffSectionsContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionsContent', request),
   getFeatureFlags: () => ipcRenderer.invoke('codiff:getFeatureFlags'),
   getDiffImageContent: (request) => ipcRenderer.invoke('codiff:getDiffImageContent', request),
   getGitIdentity: () => ipcRenderer.invoke('codiff:getGitIdentity'),
@@ -37,6 +38,7 @@ const codiff = {
   getRepositoryHistory: (limit, source) =>
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
+  getReviewComments: (source) => ipcRenderer.invoke('codiff:getReviewComments', source),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getUpdateStatus: () => ipcRenderer.invoke('codiff:getUpdateStatus'),
   getNarrativeWalkthrough: (source, options) =>
