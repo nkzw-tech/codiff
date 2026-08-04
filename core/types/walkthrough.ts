@@ -9,6 +9,7 @@ import type {
 import type {
   CommitMetadata,
   PullRequestCodeQualityFinding,
+  ReviewCommitSummary,
   TargetComparisonReviewStructure,
 } from './review-history.ts';
 import type {
@@ -216,17 +217,26 @@ export type WalkthroughCapturedContext = {
       };
 };
 
-/** Authoritative choices for the initial single-call V5 authoring path. */
+/** Resolved review selection and user-authored choices retained with the artifact. */
 export type WalkthroughGenerationRequest = {
   customInstructions?: string;
-  review: {
-    relation: 'single-diff';
-    structure: 'single-diff';
-  };
+  review:
+    | {
+        relation: 'single-diff';
+        structure: 'single-diff';
+      }
+    | {
+        range: DiffRange;
+        relation: 'target-comparison';
+        structure: TargetComparisonReviewStructure;
+      };
 };
 
-/** The complete captured diff used by the current-review walkthrough. */
-export type AssessmentCodeScope = { type: 'single-diff' };
+/** Exact code identity against which one review thread is assessed. */
+export type AssessmentCodeScope =
+  | { type: 'single-diff' }
+  | { range: DiffRange; type: 'target-comparison' }
+  | { sha: GitSha; type: 'commit' };
 
 export type AssessmentThreadAnchor = {
   filePath: string;
@@ -294,27 +304,49 @@ export type AssessmentCollection = {
   items: ReadonlyArray<AssessmentComponent>;
 };
 
-/** The initial single-call narrative stored inside a V5 artifact envelope. */
-export type WalkthroughNarrativeV5 = Omit<
+/** Model-authored content produced by one successful narrative call. */
+export type WalkthroughNarrativeContentV5 = Omit<
   NarrativeWalkthroughV4,
   'chapters' | 'repo' | 'source' | 'version'
 > & {
   chapters: ReadonlyArray<
     Omit<WalkthroughChapter, 'stops'> & { stops: ReadonlyArray<WalkthroughStopV5> }
   >;
-  generationMetadata: GenerationMetadata;
   /** Display identity only; persisted V5 never contains a checkout-local root. */
   repo: { branch: string | null };
   source: WalkthroughCapturedContext['source'];
-  structure: 'single-diff';
 };
 
+/** One successful aggregate narrative call. */
+export type WalkthroughSingleCallNarrativeV5 = {
+  content: WalkthroughNarrativeContentV5;
+  generationMetadata: GenerationMetadata;
+  structure: 'net-change' | 'single-diff';
+};
+
+/** One independently reusable commit narrative call. */
+export type WalkthroughCommitNarrativeUnitV5 = {
+  /** Canonical display metadata. Older stored V5 artifacts may omit it. */
+  commit?: ReviewCommitSummary;
+  content: WalkthroughNarrativeContentV5;
+  generationMetadata: GenerationMetadata;
+  sha: GitSha;
+};
+
+/** Persisted V5 topology for aggregate or commit-by-commit target reviews. */
+export type WalkthroughNarrativeV5 =
+  | WalkthroughSingleCallNarrativeV5
+  | {
+      structure: 'commit-by-commit';
+      units: ReadonlyArray<WalkthroughCommitNarrativeUnitV5>;
+    };
+
 /**
- * The initial persisted V5 artifact boundary.
+ * The persisted V5 artifact boundary.
  *
- * The narrative deliberately starts with V4-equivalent behavior. Captured
- * context and generation request are artifact-owned capability positions that
- * later authoring revisions can populate without changing frozen V4 storage.
+ * Captured context and the resolved generation request stay artifact-owned,
+ * while each narrative component records the metadata for its own successful
+ * model call. Frozen V4 storage remains a separate read-only contract.
  */
 export type WalkthroughArtifactV5 = {
   /** Background-generated components stored independently from narrative content. */
@@ -328,13 +360,15 @@ export type WalkthroughArtifactV5 = {
   version: 5;
 };
 
-type Immutable<T> = T extends (...arguments_: Array<never>) => unknown
+type Immutable<T> = T extends string | number | boolean | bigint | symbol | null | undefined
   ? T
-  : T extends ReadonlyArray<infer Item>
-    ? ReadonlyArray<Immutable<Item>>
-    : T extends object
-      ? { readonly [Key in keyof T]: Immutable<T[Key]> }
-      : T;
+  : T extends (...arguments_: Array<never>) => unknown
+    ? T
+    : T extends ReadonlyArray<infer Item>
+      ? ReadonlyArray<Immutable<Item>>
+      : T extends object
+        ? { readonly [Key in keyof T]: Immutable<T[Key]> }
+        : T;
 
 /**
  * Core's immutable, document-derived rendering and navigation representation.
@@ -350,15 +384,22 @@ export type WalkthroughModel = Immutable<Omit<NarrativeWalkthroughV4, 'chapters'
   readonly assessments?: Immutable<AssessmentCollection>;
   /** Present only when the source artifact supplied captured-context capability. */
   readonly capturedContext?: Immutable<WalkthroughArtifactV5['capturedContext']>;
-  readonly chapters: Immutable<WalkthroughNarrativeV5['chapters']>;
-  /** Present only for V5 model-produced narrative content. */
+  readonly chapters: Immutable<WalkthroughNarrativeContentV5['chapters']>;
+  /** Present only when one call produced the complete narrative. */
   readonly generationMetadata?: Immutable<GenerationMetadata>;
   /** Present only when the source artifact supplied generation-request capability. */
   readonly generationRequest?: Immutable<WalkthroughArtifactV5['generationRequest']>;
   /** Informational persisted document version; never a capability gate. */
   readonly sourceVersion: 4 | 5;
-  /** Present only for V5; later revisions extend the structure union. */
-  readonly structure?: 'single-diff';
+  /** Present only for V5 and derived from the persisted narrative discriminator. */
+  readonly structure?: WalkthroughNarrativeV5['structure'];
+  /** Preserved commit ownership after chapter and support IDs are namespaced. */
+  readonly units?: ReadonlyArray<{
+    readonly chapterIds: ReadonlyArray<string>;
+    readonly commit?: Immutable<ReviewCommitSummary>;
+    readonly identity: { readonly kind: 'commit'; readonly sha: GitSha };
+    readonly supportIds: ReadonlyArray<string>;
+  }>;
 };
 
 /** Transient provider state joined only for live assessment presentation. */

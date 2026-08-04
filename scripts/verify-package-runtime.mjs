@@ -18,6 +18,7 @@ const runtimeFiles = [
   'gitlab/dist/index.mjs',
 ];
 const runtimeDirectories = ['core/dist', 'github/dist', 'gitlab/dist'];
+const runtimeDependencies = ['valibot'];
 const builtin = new Set([...builtinModules, ...builtinModules.map((name) => `node:${name}`)]);
 
 const run = (command, args) =>
@@ -111,6 +112,11 @@ try {
     const destination = join(directory, path);
     await mkdir(dirname(destination), { recursive: true });
     await cp(join(root, path), destination, { recursive: true });
+  }
+  for (const dependency of runtimeDependencies) {
+    const destination = join(directory, 'node_modules', dependency);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(root, 'node_modules', dependency), destination, { recursive: true });
   }
   const require = createRequire(join(directory, 'package.json'));
   const [{ loadGitHubHistory }, { loadGitLabHistory }, { loadWalkthroughGeneration }] = [

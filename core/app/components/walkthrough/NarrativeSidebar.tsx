@@ -12,6 +12,7 @@ import {
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { ChangedFile, WalkthroughModel } from '../../../types.ts';
+import { CommitRefTooltip } from '../CommitRefTooltip.tsx';
 import { ChapterIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
@@ -189,6 +190,9 @@ export function NarrativeSidebar({
                 <ChapterIcon icon={chapter.icon} size={15} />
               </span>
               <span className="wt-toc-chapter-title">{chapter.title}</span>
+              {chapter.boundary ? (
+                <CommitRefTooltip className="wt-unit-commit-ref" commit={chapter.boundary.commit} />
+              ) : null}
             </div>
             <div className="wt-toc-stops">
               {chapter.stops.map((stop) => (

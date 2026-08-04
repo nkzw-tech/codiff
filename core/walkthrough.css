@@ -63,6 +63,11 @@
   text-transform: uppercase;
   white-space: nowrap;
 }
+.wt-unit-commit-ref {
+  color: var(--tree-selection-focus);
+  font: 600 10px/1 var(--font-mono);
+  text-transform: none;
+}
 .wt-toc-stops {
   display: flex;
   flex-direction: column;
@@ -450,6 +455,9 @@
   text-transform: uppercase;
   white-space: nowrap;
 }
+.wt-arc-chapter-label .wt-unit-commit-ref {
+  margin-inline-start: 2px;
+}
 .wt-arc-chapter-label.muted {
   color: color-mix(in srgb, var(--muted) 85%, transparent);
 }
@@ -560,6 +568,16 @@
 }
 .wt-stop-block-header.current {
   box-shadow: inset 3px 0 0 var(--tree-selection-focus);
+}
+.wt-unit-boundary {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font: 700 10px/1.2 var(--font-sans);
+  gap: 6px;
+  letter-spacing: 0.04em;
+  margin-block-end: 10px;
+  text-transform: uppercase;
 }
 .wt-code-unavailable {
   align-items: flex-start;

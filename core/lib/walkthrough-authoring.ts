@@ -39,6 +39,7 @@ import type {
   WalkthroughCapturedContext,
   WalkthroughGenerationRequest,
   WalkthroughHunk,
+  WalkthroughNarrativeContentV5,
   WalkthroughNarrativeV5,
   WalkthroughRegion,
 } from '../types.ts';
@@ -475,7 +476,7 @@ export const normalizeWalkthroughDraft = (
   value: unknown,
   state: RepositoryState,
   generationMetadata: GenerationMetadata,
-): WalkthroughNarrativeV5 => {
+): WalkthroughNarrativeContentV5 => {
   const authored = parseWalkthroughDraft(value);
   const index = indexWalkthroughHunks(state.files);
   const used = new Set<string>();
@@ -645,12 +646,10 @@ export const normalizeWalkthroughDraft = (
     chapters,
     focus: clean(authored.focus, 'Walk through the merge request.'),
     generatedAt: generationMetadata.generatedAt,
-    generationMetadata,
     kind: 'narrative',
     meta: `${stopCount} stops · ${chapters.length} chapters`,
     repo: { branch: state.branch },
     source: captureWalkthroughSource(state.source),
-    structure: 'single-diff',
     support,
     title: clean(authored.title, 'Merge request walkthrough'),
   };
@@ -719,7 +718,7 @@ export const createWalkthroughGenerationRequest = (
   review,
 });
 
-/** Persist a complete single-call V5 narrative with its authoritative inputs. */
+/** Persist a structurally complete V5 narrative with its authoritative inputs. */
 export const createWalkthroughArtifactV5 = (
   narrative: WalkthroughNarrativeV5,
   capturedContext: WalkthroughCapturedContext,
@@ -733,8 +732,9 @@ export const authorWalkthroughArtifactV5 = (input: {
   response: unknown;
   state: RepositoryState;
 }): WalkthroughArtifactV5 => {
-  if (input.generationRequest.review.structure !== 'single-diff') {
-    throw new Error('This authoring revision supports only single-diff V5 narratives.');
+  const { structure } = input.generationRequest.review;
+  if (structure === 'commit-by-commit') {
+    throw new Error('Multi-unit V5 narratives must be composed by the generation orchestrator.');
   }
   if (input.generationMetadata.profile.authoringVersion !== walkthroughAuthoringVersion) {
     throw new Error('Generation metadata must use the current walkthrough authoring version.');
@@ -743,7 +743,11 @@ export const authorWalkthroughArtifactV5 = (input: {
     throw new Error('The successful model must belong to the requested fallback chain.');
   }
   return createWalkthroughArtifactV5(
-    normalizeWalkthroughDraft(input.response, input.state, input.generationMetadata),
+    {
+      content: normalizeWalkthroughDraft(input.response, input.state, input.generationMetadata),
+      generationMetadata: input.generationMetadata,
+      structure,
+    },
     captureWalkthroughContext(input.state),
     input.generationRequest,
   );
@@ -800,7 +804,10 @@ type WalkthroughSize = {
   hunkCount: number;
 };
 
-const buildWalkthroughSizingGuidance = ({ fileCount, hunkCount }: WalkthroughSize) => {
+const buildWalkthroughSizingGuidance = (
+  { fileCount, hunkCount }: WalkthroughSize,
+  { independentCommit = false }: { independentCommit?: boolean } = {},
+) => {
   const targetStops =
     fileCount <= 2
       ? hunkCount <= 4
@@ -819,7 +826,11 @@ const buildWalkthroughSizingGuidance = ({ fileCount, hunkCount }: WalkthroughSiz
 - The digest has ${fileCount} files and ${hunkCount} reviewable hunks. Put only the highest-leverage review path in chapters[]; Codiff preserves everything else as support.
 - Digest hunk ids are compact request-local aliases like h1 and h2. Return those aliases exactly; Codiff maps them back to stable live-diff ids.
 - Define chapters[] and stops[] in display order. Use stable stop ids like s1, s2, and never invent hunk ids.
-- Target ${targetStops} main-path stops and at most ${maxWalkthroughStops}. Use ${targetChapters} conceptual chapters.
+${
+  independentCommit
+    ? '- Choose as many conceptual chapters as this commit needs. Do not collapse distinct review ideas into one chapter.'
+    : `- Target ${targetStops} main-path stops and at most ${maxWalkthroughStops}. Use ${targetChapters} conceptual chapters.`
+}
 - Chapter titles render in a compact top bar: keep each title to 1-2 short words and at most 16 characters.
 - Default to one review idea per stop. Group multiple hunkIds when they implement the same invariant, behavior, or repeated pattern.
 - Every stop must have a concise semantic title that names the review idea in roughly 2-6 words, e.g. "Prevent duplicate payments" or "Preserve offline drafts". Never use a filename or path as a stop title.
@@ -829,8 +840,12 @@ const buildWalkthroughSizingGuidance = ({ fileCount, hunkCount }: WalkthroughSiz
 - Do not provide support, added/deleted counts, status, paths, section ids, repo, source, generatedAt, agent, meta, notes, changeType, summary, or commitNote for stops; Codiff computes display metadata from the live diff.`;
 };
 
-/** Reserved for future prompt projections; W02 authors one complete diff per call. */
-export type WalkthroughPromptOptions = Record<never, never>;
+export type WalkthroughPromptOptions = {
+  /** When set, the digest contains exactly one commit and is authored independently. */
+  commitContext?: { sha: GitSha; subject: string } | null;
+  /** Exact narrative unit identity; aggregate calls omit this field. */
+  scope?: { kind: 'commit'; sha: GitSha } | null;
+};
 
 const sourceDescription = (source: ResolvedReviewSource | ReviewSource) => {
   if (source.type === 'pull-request') {
@@ -869,6 +884,7 @@ ${trimmed}`
 export const buildWalkthroughPromptInput = (
   capturedContext: WalkthroughCapturedContext,
   generationRequest: WalkthroughGenerationRequest,
+  options: WalkthroughPromptOptions = {},
 ) => {
   const index = indexWalkthroughHunks(capturedContext.files);
   const patchBudgets = getPromptPatchBudgets(capturedContext.files.length);
@@ -876,9 +892,26 @@ export const buildWalkthroughPromptInput = (
     fileCount: capturedContext.files.length,
     hunkCount: index.hunks.length,
   };
+  const promptSource = (() => {
+    if (options.commitContext && capturedContext.source.type === 'pull-request') {
+      const { description: _description, ...source } = capturedContext.source;
+      return { ...source, title: options.commitContext.subject };
+    }
+    if (
+      capturedContext.source.type === 'pull-request' &&
+      typeof capturedContext.source.description === 'string'
+    ) {
+      return {
+        ...capturedContext.source,
+        description: truncate(capturedContext.source.description, maxProseChars),
+      };
+    }
+    return capturedContext.source;
+  })();
   let remainingPatchBudget = patchBudgets.total;
   const digest = {
     branch: capturedContext.branch,
+    commitContext: options.commitContext ?? null,
     files: capturedContext.files.map((file) => ({
       ...(isGeneratedWalkthroughPath(file.path)
         ? {
@@ -906,14 +939,8 @@ export const buildWalkthroughPromptInput = (
       }),
       status: file.status,
     })),
-    source:
-      capturedContext.source.type === 'pull-request' &&
-      typeof capturedContext.source.description === 'string'
-        ? {
-            ...capturedContext.source,
-            description: truncate(capturedContext.source.description, maxProseChars),
-          }
-        : capturedContext.source,
+    scope: options.scope ?? null,
+    source: promptSource,
     walkthroughRequest: generationRequest.review,
   };
   return { digest, patchBudgets, size };
@@ -922,13 +949,14 @@ export const buildWalkthroughPromptInput = (
 export const buildWalkthroughPrompt = (
   capturedContext: WalkthroughCapturedContext,
   generationRequest: WalkthroughGenerationRequest,
+  options: WalkthroughPromptOptions = {},
 ) => {
-  const { digest, size } = buildWalkthroughPromptInput(capturedContext, generationRequest);
+  const { digest, size } = buildWalkthroughPromptInput(capturedContext, generationRequest, options);
   return `Author a Codiff narrative walkthrough for this ${sourceDescription(capturedContext.source)}.
 
 Use only the supplied digest. Return the required structured object. If source.description is present, treat it as author-written intent and orientation, not proof of behavior; patches and hunk data remain the source of truth.
 
-${buildWalkthroughSizingGuidance(size)}
+${buildWalkthroughSizingGuidance(size, { independentCommit: Boolean(options.commitContext) })}
 
 Product rules:
 - Write all user-visible text in English.
@@ -942,7 +970,15 @@ Product rules:
 - Return regions[] for every stop. For a substantive line-local implementation claim, include one or two precise regions. Use an empty array only when every supplied hunk is synthetic or the explanation is inherently structural, cross-file, or whole-file. Never add more than four.
 - Each region must stay inside one supplied hunk and one side, and stop prose must reference it as [phrase](#region-id). Region titles are short labels. Tooltips use safe inline Markdown only, no links or block elements, and explain why the selected range matters. Do not add regions that merely cover a whole hunk without added precision.
 - Do not claim tests, risks, or behavior that the diff does not support.
-- Prefer conceptual chapters across the complete diff.
+${
+  options.commitContext
+    ? `- This is an independent walkthrough for commit ${options.commitContext.sha}: ${options.commitContext.subject}.
+- Explain only the changes introduced by this commit. Do not summarize the merge request as a whole.
+- Never refer to earlier or later commits, the commit stack, a rebase, or cumulative merge-request history.
+- Do not infer behavior from code outside this commit's supplied diff.
+- Build the best reviewer path through this commit's own diff.`
+    : '- Prefer conceptual chapters across the complete diff.'
+}
 ${buildCustomInstructionsGuidance(generationRequest.customInstructions)}
 
 Repository digest:

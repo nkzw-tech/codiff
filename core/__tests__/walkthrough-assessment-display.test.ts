@@ -3,7 +3,7 @@ import {
   buildAssessmentDestinationIndex,
   getThreadAssessmentDisplay,
 } from '../lib/walkthrough-assessment-display.ts';
-import type { AssessmentComponent, WalkthroughModel } from '../types.ts';
+import type { AssessmentComponent, GitSha, WalkthroughModel } from '../types.ts';
 
 const component = (threadState: 'open' | 'resolved'): AssessmentComponent => ({
   capturedPresentationState: { threadState },
@@ -120,4 +120,53 @@ test('rejects a generated assessment without a walkthrough destination', () => {
       walkthroughWithAssessment({ filePath: 'src/missing.ts', lineNumber: 4 }),
     ),
   ).toThrow(/does not map to a walkthrough stop or Support block/);
+});
+
+test('uses commit ownership to disambiguate repeated per-commit code locations', () => {
+  const firstSha = '1'.repeat(40) as GitSha;
+  const secondSha = '2'.repeat(40) as GitSha;
+  const base = walkthroughWithAssessment({
+    filePath: 'src/app.ts',
+    lineNumber: 12,
+    side: 'additions',
+  });
+  const firstChapter = base.chapters[0]!;
+  const secondChapter = {
+    ...firstChapter,
+    id: 'chapter-2',
+    stops: firstChapter.stops.map((stop) => ({ ...stop, id: 'stop-2' })),
+  };
+  const codeScope = { sha: secondSha, type: 'commit' as const };
+  const assessment = base.assessments!.items[0]!;
+  const walkthrough = {
+    ...base,
+    assessments: {
+      items: [
+        {
+          ...assessment,
+          identity: { codeScope, threadId: assessment.identity.threadId },
+          input: { ...assessment.input, codeScope },
+        },
+      ],
+    },
+    chapters: [firstChapter, secondChapter],
+    units: [
+      {
+        chapterIds: [firstChapter.id],
+        identity: { kind: 'commit' as const, sha: firstSha },
+        supportIds: [],
+      },
+      {
+        chapterIds: [secondChapter.id],
+        identity: { kind: 'commit' as const, sha: secondSha },
+        supportIds: [],
+      },
+    ],
+  } satisfies WalkthroughModel;
+
+  expect(buildAssessmentDestinationIndex(walkthrough).get('thread-1')).toEqual({
+    kind: 'stop',
+    stopId: 'stop-2',
+    stopIndex: 1,
+  });
 });

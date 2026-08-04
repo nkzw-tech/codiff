@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { act } from 'react';
+import { act, isValidElement } from 'react';
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import type { CodiffConfig } from '../config/types.ts';
 import { parseWalkthroughModel } from '../lib/narrative-walkthrough-schema.ts';
@@ -1074,15 +1074,30 @@ test('cancels active walkthrough work when History switches sources', async () =
       void getSurfaceProps().capabilities?.walkthrough?.onGenerate?.();
       await Promise.resolve();
     });
-    expect(api.getNarrativeWalkthrough).toHaveBeenCalledWith({ type: 'working-tree' }, undefined);
-    await act(async () =>
-      walkthroughProgress()?.({
-        generation: { phase: 'generating', summary: 'Source A progress.' },
-      }),
+    expect(api.getNarrativeWalkthrough).toHaveBeenCalledWith({
+      kind: 'single-diff',
+      source: { type: 'working-tree' },
+    });
+    const generationProgress = {
+      completed: 0,
+      phase: 'generating-units' as const,
+      summary: 'Source A progress.',
+      total: 2,
+      units: [
+        { id: 'first', label: 'First unit', status: 'generating' as const },
+        { id: 'second', label: 'Second unit', status: 'pending' as const },
+      ],
+    };
+    await act(async () => walkthroughProgress()?.({ generation: generationProgress }));
+    expect(getSurfaceProps().capabilities?.walkthrough?.generationProgress).toEqual(
+      generationProgress,
     );
-    expect(getSurfaceProps().capabilities?.walkthrough?.generationProgress?.summary).toBe(
-      'Source A progress.',
-    );
+    const renderedProgress = getSurfaceProps().capabilities?.walkthrough?.progress;
+    expect(isValidElement(renderedProgress)).toBe(true);
+    if (!isValidElement<{ progress?: typeof generationProgress }>(renderedProgress)) {
+      throw new Error('Expected walkthrough progress element.');
+    }
+    expect(renderedProgress.props.progress).toEqual(generationProgress);
 
     await act(async () => getSurfaceProps().capabilities?.history?.onSelectSource(sourceBRequest));
     expect(api.cancelNarrativeWalkthrough).toHaveBeenCalledOnce();

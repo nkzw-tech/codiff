@@ -16,12 +16,18 @@ const {
  *     'assessmentValuesEqual' | 'createAssessmentDemandsFromSelections' |
  *     'normalizeAssessmentInput' | 'reconcileWalkthroughAssessments' |
  *     'selectWalkthroughAssessmentCandidates'>,
+ *   byCommitSha?: Readonly<Record<string, import('../core/types.ts').RepositoryState>>,
  *   comments: ReadonlyArray<import('../core/types.ts').PullRequestExistingReviewComment>,
  *   profile: import('../core/types.ts').GenerationProfile,
+ *   units?: ReadonlyArray<import('../core/types.ts').ReviewCommitUnit>,
  * }} input
  */
 const buildWalkthroughAssessmentPlan = (input) => {
-  const codeScope = { type: 'single-diff' };
+  const review = input.artifact.generationRequest.review;
+  const codeScope =
+    review.relation === 'target-comparison'
+      ? { range: review.range, type: 'target-comparison' }
+      : { type: 'single-diff' };
   const candidates = toAssessmentThreadCandidates(
     input.comments,
     codeScope,
@@ -30,6 +36,21 @@ const buildWalkthroughAssessmentPlan = (input) => {
   const selections = input.authoring.selectWalkthroughAssessmentCandidates(candidates, {
     changedRanges: toAssessmentChangedRanges(input.artifact.capturedContext.files),
     codeScope,
+    ...(review.structure === 'commit-by-commit'
+      ? {
+          unitRoutes: (input.units ?? []).flatMap((unit) => {
+            const unitState = input.byCommitSha?.[unit.commit.sha];
+            return unitState
+              ? [
+                  {
+                    changedRanges: toAssessmentChangedRanges(unitState.files),
+                    codeScope: { sha: unit.commit.sha, type: 'commit' },
+                  },
+                ]
+              : [];
+          }),
+        }
+      : {}),
   });
   const demands = input.authoring.createAssessmentDemandsFromSelections({
     capturedThreadStateById: capturedThreadStateById(input.comments),

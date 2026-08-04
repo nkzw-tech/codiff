@@ -143,7 +143,10 @@ export default function App() {
             setRepositoryBootstrap(bootstrap);
             setLoadError(null);
 
-            if (!options.walkthrough && !options.walkthroughFile) {
+            if (
+              (!options.walkthrough && !options.walkthroughFile) ||
+              (state.source.type === 'pull-request' && !options.walkthroughFile)
+            ) {
               setWalkthroughLoading(false);
               setWalkthroughResult(undefined);
               setWalkthroughFileError(null);
@@ -152,10 +155,11 @@ export default function App() {
 
             setWalkthroughLoading(true);
             void window.codiff
-              .getNarrativeWalkthrough(
-                state.source,
-                bootstrap.forceInitialWalkthrough ? { force: true } : undefined,
-              )
+              .getNarrativeWalkthrough({
+                ...(bootstrap.forceInitialWalkthrough ? { force: true } : {}),
+                kind: 'single-diff',
+                source: state.source,
+              })
               .catch(
                 (error: unknown): NarrativeWalkthroughResult => ({
                   reason: error instanceof Error ? error.message : String(error),

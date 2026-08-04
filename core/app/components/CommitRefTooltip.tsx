@@ -7,7 +7,7 @@ export type CommitRefSummary = {
   authoredAt?: number | string | null;
   authorName?: string;
   deletions?: number;
-  diffStat?: { additions: number; deletions: number; filesChanged: number };
+  diffStat?: Readonly<{ additions: number; deletions: number; filesChanged: number }>;
   sha: string;
   shortSha: string;
   subject?: string;

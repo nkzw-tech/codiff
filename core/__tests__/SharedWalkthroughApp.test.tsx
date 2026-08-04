@@ -9,6 +9,7 @@ import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
 import { createDefaultConfig } from '../config/defaults.ts';
 import { ReviewSurface } from '../SharedWalkthroughApp.tsx';
 import type {
+  GitSha,
   NarrativeWalkthrough,
   SharedWalkthroughSnapshot,
   WalkthroughArtifactV5,
@@ -634,42 +635,49 @@ test('cached V5 walkthroughs explain unresolved authored code instead of omittin
     },
     generationRequest: { review: { relation: 'single-diff', structure: 'single-diff' } },
     narrative: {
-      agent: 'codex',
-      chapters: [
-        {
-          blurb: 'Review the missing evidence.',
-          icon: 'path',
-          id: 'implementation',
-          stops: [
-            {
-              added: 1,
-              deleted: 1,
-              hunkIds: [missingHunkId],
-              hunks: [
-                {
-                  added: 1,
-                  anchor: {
-                    display: 'src/missing.ts:1',
-                    sectionId: 'src/missing.ts:unstaged',
-                    side: 'both',
+      content: {
+        agent: 'codex',
+        chapters: [
+          {
+            blurb: 'Review the missing evidence.',
+            icon: 'path',
+            id: 'implementation',
+            stops: [
+              {
+                added: 1,
+                deleted: 1,
+                hunkIds: [missingHunkId],
+                hunks: [
+                  {
+                    added: 1,
+                    anchor: {
+                      display: 'src/missing.ts:1',
+                      sectionId: 'src/missing.ts:unstaged',
+                      side: 'both',
+                    },
+                    deleted: 1,
+                    id: missingHunkId,
+                    path: 'src/missing.ts',
+                    status: 'modified',
                   },
-                  deleted: 1,
-                  id: missingHunkId,
-                  path: 'src/missing.ts',
-                  status: 'modified',
-                },
-              ],
-              id: 'missing-code',
-              importance: 'critical',
-              prose: 'This step must not appear to have loaded its code successfully.',
-              title: 'Missing code',
-            },
-          ],
-          title: 'Implementation',
-        },
-      ],
-      focus: 'Review the captured implementation.',
-      generatedAt: '2026-07-29T12:00:00.000Z',
+                ],
+                id: 'missing-code',
+                importance: 'critical',
+                prose: 'This step must not appear to have loaded its code successfully.',
+                title: 'Missing code',
+              },
+            ],
+            title: 'Implementation',
+          },
+        ],
+        focus: 'Review the captured implementation.',
+        generatedAt: '2026-07-29T12:00:00.000Z',
+        kind: 'narrative',
+        repo: { branch: 'feature' },
+        source,
+        support: [],
+        title: 'Cached walkthrough',
+      },
       generationMetadata: {
         agent: 'codex',
         generatedAt: '2026-07-29T12:00:00.000Z',
@@ -680,12 +688,7 @@ test('cached V5 walkthroughs explain unresolved authored code instead of omittin
           modelCandidates: ['example-model'],
         },
       },
-      kind: 'narrative',
-      repo: { branch: 'feature' },
-      source,
       structure: 'single-diff',
-      support: [],
-      title: 'Cached walkthrough',
     },
     version: 5,
   } satisfies WalkthroughArtifactV5;
@@ -729,6 +732,165 @@ test('cached V5 walkthroughs explain unresolved authored code instead of omittin
     expect(diagnostic?.textContent).toContain('captured file is missing');
     expect(diagnostic?.textContent).toContain(missingHunkId);
   });
+});
+
+test('commit walkthroughs render canonical boundaries and switch structure explicitly', async () => {
+  const file = createChangedFile('src/commit.ts', { kind: 'commit' });
+  const source = {
+    headSha: 'b'.repeat(40) as GitSha,
+    number: 31,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/31',
+  } as const;
+  const commitSha = '1'.repeat(40) as GitSha;
+  const content = {
+    agent: 'codex' as const,
+    chapters: [
+      {
+        blurb: 'Review this commit.',
+        icon: 'gear' as const,
+        id: 'implementation',
+        stops: [
+          {
+            added: 1,
+            deleted: 1,
+            hunkIds: ['src/commit.ts:commit:h1'],
+            hunks: [
+              {
+                added: 1,
+                anchor: {
+                  display: 'src/commit.ts:1',
+                  sectionId: 'src/commit.ts:commit',
+                  side: 'both' as const,
+                },
+                deleted: 1,
+                id: 'src/commit.ts:commit:h1',
+                path: 'src/commit.ts',
+                status: 'modified' as const,
+              },
+            ],
+            id: 'commit-change',
+            importance: 'critical' as const,
+            prose: 'Review the commit behavior.',
+            title: 'Commit behavior',
+          },
+        ],
+        title: 'Commit',
+      },
+    ],
+    focus: 'Review each commit independently.',
+    generatedAt: '2026-08-04T12:00:00.000Z',
+    kind: 'narrative' as const,
+    repo: { branch: 'feature' },
+    source,
+    support: [],
+    title: 'Commit walkthrough',
+  };
+  const walkthrough = {
+    capturedContext: { branch: 'feature', files: [file], source },
+    generationRequest: {
+      review: {
+        range: {
+          base: {
+            label: { kind: 'commit' as const, text: 'base' },
+            sha: 'a'.repeat(40) as GitSha,
+          },
+          head: { label: { kind: 'commit' as const, text: 'head' }, sha: source.headSha },
+        },
+        relation: 'target-comparison' as const,
+        structure: 'commit-by-commit' as const,
+      },
+    },
+    narrative: {
+      structure: 'commit-by-commit' as const,
+      units: [
+        {
+          commit: {
+            authoredAt: '2026-08-04T11:00:00.000Z',
+            authorName: 'Ada',
+            parentShas: ['a'.repeat(40) as GitSha],
+            sha: commitSha,
+            shortSha: commitSha.slice(0, 8),
+            subject: 'Add commit walkthrough',
+          },
+          content,
+          generationMetadata: {
+            agent: 'codex' as const,
+            generatedAt: '2026-08-04T12:00:00.000Z',
+            model: 'model-a',
+            profile: {
+              agent: 'codex' as const,
+              authoringVersion: 'walkthrough-v5-single-diff-1',
+              modelCandidates: ['model-a'],
+            },
+          },
+          sha: commitSha,
+        },
+      ],
+    },
+    version: 5 as const,
+  } satisfies WalkthroughArtifactV5;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: '1.9.1',
+    exportedAt: '2026-08-04T12:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source },
+    reviewScope: { kind: 'merge-request', structure: 'commit-by-commit' },
+    version: 1,
+    walkthrough,
+  } satisfies SharedWalkthroughSnapshot;
+  const onGenerateWalkthrough = vi.fn();
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            walkthrough: {
+              onGenerate: onGenerateWalkthrough,
+              status: 'ready',
+            },
+          }}
+          initialMode="walkthrough"
+          snapshot={snapshot}
+        />,
+      );
+    });
+
+    expect(container.querySelector('.walkthrough-structure-controls')?.textContent).toContain(
+      'Structured by commits',
+    );
+    expect(container.querySelector('.wt-unit-commit-ref')?.textContent).toContain(
+      commitSha.slice(0, 8),
+    );
+    const switchButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'Use net change',
+    );
+    await act(async () => switchButton?.click());
+    await waitFor(() =>
+      expect(onGenerateWalkthrough).toHaveBeenCalledWith({
+        force: true,
+        reviewStructure: 'net-change',
+      }),
+    );
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });
 
 test('shared walkthroughs initially preview Markdown when other files are generated', async () => {

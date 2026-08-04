@@ -132,7 +132,10 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
     expect(getController().narrativeWalkthrough).toEqual(walkthroughModelFromV4(walkthrough));
     expect(getController().walkthroughLoading).toBe(false);
   });
-  expect(getNarrativeWalkthrough).toHaveBeenCalledWith(walkthrough.source, undefined);
+  expect(getNarrativeWalkthrough).toHaveBeenCalledWith({
+    kind: 'single-diff',
+    source: walkthrough.source,
+  });
   expect(getController().sidebarMode).toBe('walkthrough');
   expect(getController().walkthroughProgress.responseLabelIndex).toBe(0);
   const refreshedState = {
@@ -147,9 +150,11 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
   await waitFor(() => {
     expect(getNarrativeWalkthrough).toHaveBeenCalledTimes(2);
   });
-  expect(getNarrativeWalkthrough).toHaveBeenLastCalledWith(walkthrough.source, {
+  expect(getNarrativeWalkthrough).toHaveBeenLastCalledWith({
     force: true,
+    kind: 'single-diff',
     previousWalkthrough: walkthrough,
+    source: walkthrough.source,
   });
   await act(async () => {
     getController().openCommitView();

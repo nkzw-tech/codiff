@@ -295,6 +295,47 @@ test('first-run classification does not wait for or get replaced by ancillary fa
   expect(view.container.textContent).not.toContain('Features unavailable.');
 });
 
+test('does not start a pull-request walkthrough before history classifies its structure', async () => {
+  const baseSha = gitSha('a');
+  const headSha = gitSha('b');
+  const file = createChangedFile('src/review.ts', { kind: 'pull-request' });
+  const pullRequestState = {
+    ...repositoryState,
+    files: [
+      {
+        ...file,
+        sections: file.sections.map((section) => ({
+          ...section,
+          range: {
+            base: { label: { kind: 'commit' as const, text: 'main' }, sha: baseSha },
+            head: { label: { kind: 'commit' as const, text: 'Head' }, sha: headSha },
+          },
+        })),
+      },
+    ],
+    source: {
+      headSha,
+      number: 42,
+      provider: 'github' as const,
+      type: 'pull-request' as const,
+      url: 'https://github.com/example/repo/pull/42',
+    },
+  } satisfies RepositoryState;
+  const history = deferred<Awaited<ReturnType<Window['codiff']['getRepositoryHistory']>>>();
+  const api = createAppApi({
+    getLaunchOptions: vi.fn(async () => ({ repositoryPathProvided: true, walkthrough: true })),
+    getRepositoryHistory: vi.fn(() => history.promise),
+    getRepositoryState: vi.fn(async () => pullRequestState),
+  });
+  window.codiff = api as unknown as Window['codiff'];
+
+  await using view = await renderReact(<App />);
+  await waitFor(() => expect(view.container.querySelector('main.review')).not.toBeNull());
+  await waitFor(() => expect(api.getRepositoryHistory).toHaveBeenCalledOnce());
+  await act(async () => {});
+  expect(api.getNarrativeWalkthrough).not.toHaveBeenCalled();
+});
+
 test('an asynchronous walkthrough-file failure switches the controlled mode to History', async () => {
   const walkthrough = deferred<NarrativeWalkthroughResult>();
   const api = createAppApi({
@@ -321,7 +362,7 @@ test('an asynchronous walkthrough-file failure switches the controlled mode to H
     view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
   ).find((button) => button.textContent?.includes('History'));
   await waitFor(() => expect(historyTab?.getAttribute('aria-selected')).toBe('true'));
-  expect(view.container.querySelector('.sidebar-walkthrough-status')).toBeNull();
+  expect(api.getNarrativeWalkthrough).toHaveBeenCalledTimes(1);
 });
 
 test('waits for Git identity resolution before reporting deferred completion', async () => {

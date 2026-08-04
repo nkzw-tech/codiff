@@ -669,6 +669,52 @@ test('resolveWalkthroughHunkFile requires exact anchor section', () => {
   expect(resolveWalkthroughHunkFile(testHunk, files)).toBeNull();
 });
 
+test('resolveWalkthroughHunkFile finds the exact section across duplicate commit files', () => {
+  const path = 'core/types.ts';
+  const targetSectionId = `${path}:d06447f0`;
+  const files: ReadonlyArray<ChangedFile> = [
+    {
+      fingerprint: 'earlier-commit',
+      path,
+      sections: [
+        {
+          binary: false,
+          id: `${path}:bee6b2ee`,
+          kind: 'commit',
+          patch: '@@ -1 +1 @@\n-a\n+b\n',
+        },
+      ],
+      status: 'modified',
+    },
+    {
+      fingerprint: 'target-commit',
+      path,
+      sections: [
+        {
+          binary: false,
+          id: targetSectionId,
+          kind: 'commit',
+          patch: '@@ -1 +1 @@\n-old\n+new\n',
+        },
+      ],
+      status: 'modified',
+    },
+  ];
+
+  const resolved = resolveWalkthroughHunkFile(
+    {
+      ...appHunk,
+      anchor: { ...appHunk.anchor, sectionId: targetSectionId },
+      id: `${targetSectionId}:h1`,
+      path,
+    },
+    files,
+  );
+
+  expect(resolved?.file.fingerprint).toBe('target-commit');
+  expect(resolved?.section.id).toBe(targetSectionId);
+});
+
 const multiHunkFile = (): ChangedFile => ({
   fingerprint: 'database-search',
   path: 'database_search.py',

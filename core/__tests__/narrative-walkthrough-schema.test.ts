@@ -113,10 +113,12 @@ const v5 = (): WalkthroughArtifactV5 => {
     },
     generationRequest: { review: { relation: 'single-diff', structure: 'single-diff' } },
     narrative: {
-      ...narrative,
+      content: {
+        ...narrative,
+        repo: { branch: repo.branch },
+        source: { sha: gitSha('0123456789abcdef0123456789abcdef01234567'), type: 'commit' },
+      },
       generationMetadata: generationMetadata(),
-      repo: { branch: repo.branch },
-      source: { sha: gitSha('0123456789abcdef0123456789abcdef01234567'), type: 'commit' },
       structure: 'single-diff',
     },
     version: 5,
@@ -286,36 +288,44 @@ test('rejects invalid documents and fields owned by later revisions', () => {
 
 test('accepts grounded regions only in V5 narrative content', () => {
   const artifact = v5();
-  const stop = artifact.narrative.chapters[0]!.stops[0]!;
+  if (!('content' in artifact.narrative)) {
+    throw new Error('Expected a single-call artifact.');
+  }
+  const stop = artifact.narrative.content.chapters[0]!.stops[0]!;
   const parsed = parseWalkthroughArtifactV5({
     ...artifact,
     narrative: {
       ...artifact.narrative,
-      chapters: [
-        {
-          ...artifact.narrative.chapters[0]!,
-          stops: [
-            {
-              ...stop,
-              regions: [
-                {
-                  endLine: 4,
-                  hunkId: stop.hunkIds[0]!,
-                  id: 'compatibility-boundary',
-                  side: 'additions',
-                  startLine: 3,
-                  title: 'Compatibility boundary',
-                  tooltip: 'This range preserves the persisted boundary.',
-                },
-              ],
-            },
-          ],
-        },
-      ],
+      content: {
+        ...artifact.narrative.content,
+        chapters: [
+          {
+            ...artifact.narrative.content.chapters[0]!,
+            stops: [
+              {
+                ...stop,
+                regions: [
+                  {
+                    endLine: 4,
+                    hunkId: stop.hunkIds[0]!,
+                    id: 'compatibility-boundary',
+                    side: 'additions',
+                    startLine: 3,
+                    title: 'Compatibility boundary',
+                    tooltip: 'This range preserves the persisted boundary.',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
     },
   });
 
-  expect(parsed.narrative.chapters[0]?.stops[0]?.regions).toHaveLength(1);
+  expect(
+    'content' in parsed.narrative && parsed.narrative.content.chapters[0]?.stops[0]?.regions,
+  ).toHaveLength(1);
 });
 
 test('parses independently replaceable single-diff assessments outside narrative content', () => {
@@ -361,7 +371,9 @@ test('parses independently replaceable single-diff assessments outside narrative
   const model = parseWalkthroughModel(parsed);
 
   expect(model.assessments?.items[0]?.identity.threadId).toBe('thread-1');
-  expect(model.chapters).toEqual(artifact.narrative.chapters);
+  expect(model.chapters).toEqual(
+    'content' in artifact.narrative ? artifact.narrative.content.chapters : [],
+  );
 });
 
 test('rejects mismatched assessment identities and unknown captured anchors', () => {
@@ -405,6 +417,240 @@ test('rejects mismatched assessment identities and unknown captured anchors', ()
       },
     }),
   ).toThrow(/unknown captured code/);
+});
+
+test('namespaces duplicate chapters, stops, support, regions, and prose anchors by commit', () => {
+  const artifact = v5();
+  if (!('content' in artifact.narrative)) {
+    throw new Error('Expected a single-call artifact.');
+  }
+  const stop = artifact.narrative.content.chapters[0]!.stops[0]!;
+  const content = {
+    ...artifact.narrative.content,
+    chapters: [
+      {
+        ...artifact.narrative.content.chapters[0]!,
+        stops: [
+          {
+            ...stop,
+            prose: 'Inspect the [compatibility boundary](#region-1).',
+            regions: [
+              {
+                endLine: 4,
+                hunkId: stop.hunkIds[0]!,
+                id: 'region-1',
+                side: 'additions' as const,
+                startLine: 3,
+                title: 'Compatibility boundary',
+                tooltip: 'This range preserves compatibility.',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    support: [
+      {
+        added: stop.added,
+        deleted: stop.deleted,
+        hunkIds: stop.hunkIds,
+        hunks: stop.hunks,
+        id: 'support-1',
+        reason: 'Generated support',
+        title: 'Support file',
+      },
+    ],
+  };
+  const firstSha = gitSha('1111111111111111111111111111111111111111');
+  const secondSha = gitSha('2222222222222222222222222222222222222222');
+  const persisted: WalkthroughArtifactV5 = {
+    ...artifact,
+    generationRequest: {
+      review: {
+        range: {
+          base: { label: { kind: 'commit', text: 'base' }, sha: gitSha('a'.repeat(40)) },
+          head: { label: { kind: 'commit', text: 'head' }, sha: gitSha('b'.repeat(40)) },
+        },
+        relation: 'target-comparison',
+        structure: 'commit-by-commit',
+      },
+    },
+    narrative: {
+      structure: 'commit-by-commit',
+      units: [firstSha, secondSha].map((sha) => ({
+        content,
+        generationMetadata: generationMetadata(),
+        sha,
+      })),
+    },
+  };
+
+  const model = parseWalkthroughModel(persisted);
+  const chapters = model.chapters;
+  const stops = chapters.flatMap((chapter) => chapter.stops);
+
+  expect(chapters.map((chapter) => chapter.id)).toEqual([`${firstSha}:main`, `${secondSha}:main`]);
+  expect(stops.map((candidate) => candidate.id)).toEqual([
+    `${firstSha}:stop-1`,
+    `${secondSha}:stop-1`,
+  ]);
+  expect(stops.map((candidate) => candidate.regions?.[0]?.id)).toEqual([
+    `${firstSha}:region-1`,
+    `${secondSha}:region-1`,
+  ]);
+  expect(stops.map((candidate) => candidate.prose)).toEqual([
+    `Inspect the [compatibility boundary](#${firstSha}:region-1).`,
+    `Inspect the [compatibility boundary](#${secondSha}:region-1).`,
+  ]);
+  expect(model.support.map((group) => group.id)).toEqual([
+    `${firstSha}:support-1`,
+    `${secondSha}:support-1`,
+  ]);
+});
+
+test('preserves canonical commit ownership as walkthrough chapter boundaries', () => {
+  const artifact = v5();
+  if (!('content' in artifact.narrative)) {
+    throw new Error('Expected a single-call artifact.');
+  }
+  const content = artifact.narrative.content;
+  const firstSha = gitSha('1111111111111111111111111111111111111111');
+  const secondSha = gitSha('2222222222222222222222222222222222222222');
+  const persisted: WalkthroughArtifactV5 = {
+    ...artifact,
+    generationRequest: {
+      review: {
+        range: {
+          base: { label: { kind: 'commit', text: 'base' }, sha: gitSha('a'.repeat(40)) },
+          head: { label: { kind: 'commit', text: 'head' }, sha: gitSha('b'.repeat(40)) },
+        },
+        relation: 'target-comparison',
+        structure: 'commit-by-commit',
+      },
+    },
+    narrative: {
+      structure: 'commit-by-commit',
+      units: [firstSha, secondSha].map((sha, index) => ({
+        commit: {
+          authoredAt: '2026-01-01T00:00:00.000Z',
+          authorName: 'Ada',
+          parentShas: [],
+          sha,
+          shortSha: sha.slice(0, 8),
+          subject: `Commit ${index + 1}`,
+        },
+        content,
+        generationMetadata: generationMetadata(),
+        sha,
+      })),
+    },
+  };
+
+  const model = parseWalkthroughModel(persisted);
+  const view = buildWalkthroughView(model)!;
+
+  expect(model.units?.map((unit) => unit.identity)).toEqual([
+    { kind: 'commit', sha: firstSha },
+    { kind: 'commit', sha: secondSha },
+  ]);
+  expect(view.chapters.map((chapter) => chapter.boundary?.commit.shortSha)).toEqual([
+    firstSha.slice(0, 8),
+    secondSha.slice(0, 8),
+  ]);
+});
+
+test('rejects empty or incomplete commit narrative collections', () => {
+  const artifact = v5();
+  if (!('content' in artifact.narrative)) {
+    throw new Error('Expected a single-call artifact.');
+  }
+  for (const narrative of [
+    { structure: 'commit-by-commit', units: [] },
+    {
+      structure: 'commit-by-commit',
+      units: [
+        {
+          content: artifact.narrative.content,
+          generationMetadata: generationMetadata(),
+        },
+      ],
+    },
+  ]) {
+    expect(() => parseWalkthroughArtifactV5({ ...artifact, narrative })).toThrow();
+  }
+});
+
+test('rejects mismatched structures and non-canonical commit unit identities', () => {
+  const artifact = v5();
+  if (!('content' in artifact.narrative)) {
+    throw new Error('Expected a single-call artifact.');
+  }
+  const unitSha = gitSha('1'.repeat(40));
+  const otherSha = gitSha('2'.repeat(40));
+  const unit = {
+    commit: {
+      authoredAt: '2026-01-01T00:00:00.000Z',
+      authorName: 'Ada',
+      parentShas: [],
+      sha: unitSha,
+      shortSha: unitSha.slice(0, 8),
+      subject: 'Add walkthrough units',
+    },
+    content: artifact.narrative.content,
+    generationMetadata: generationMetadata(),
+    sha: unitSha,
+  };
+
+  expect(() =>
+    parseWalkthroughArtifactV5({
+      ...artifact,
+      generationRequest: {
+        review: {
+          range: {
+            base: { label: { kind: 'commit', text: 'base' }, sha: gitSha('a'.repeat(40)) },
+            head: { label: { kind: 'commit', text: 'head' }, sha: gitSha('b'.repeat(40)) },
+          },
+          relation: 'target-comparison',
+          structure: 'net-change',
+        },
+      },
+    }),
+  ).toThrow(/does not match/);
+  expect(() =>
+    parseWalkthroughArtifactV5({
+      ...artifact,
+      generationRequest: {
+        review: {
+          range: {
+            base: { label: { kind: 'commit', text: 'base' }, sha: gitSha('a'.repeat(40)) },
+            head: { label: { kind: 'commit', text: 'head' }, sha: gitSha('b'.repeat(40)) },
+          },
+          relation: 'target-comparison',
+          structure: 'commit-by-commit',
+        },
+      },
+      narrative: { structure: 'commit-by-commit', units: [unit, unit] },
+    }),
+  ).toThrow(/identities must be unique/);
+  expect(() =>
+    parseWalkthroughArtifactV5({
+      ...artifact,
+      generationRequest: {
+        review: {
+          range: {
+            base: { label: { kind: 'commit', text: 'base' }, sha: gitSha('a'.repeat(40)) },
+            head: { label: { kind: 'commit', text: 'head' }, sha: gitSha('b'.repeat(40)) },
+          },
+          relation: 'target-comparison',
+          structure: 'commit-by-commit',
+        },
+      },
+      narrative: {
+        structure: 'commit-by-commit',
+        units: [{ ...unit, commit: { ...unit.commit, sha: otherSha } }],
+      },
+    }),
+  ).toThrow(/metadata must match/);
 });
 
 test('round trips the initial composite V5 artifact without changing its shape', () => {

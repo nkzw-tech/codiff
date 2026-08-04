@@ -27,8 +27,14 @@ export type WalkthroughStopView = WalkthroughModel['chapters'][number]['stops'][
   index: number;
 };
 
+export type WalkthroughUnitBoundary = {
+  commit: NonNullable<NonNullable<WalkthroughModel['units']>[number]['commit']>;
+  identity: NonNullable<WalkthroughModel['units']>[number]['identity'];
+};
+
 /** A chapter with indexed stops. */
 type WalkthroughChapterView = Omit<WalkthroughModel['chapters'][number], 'stops'> & {
+  boundary?: WalkthroughUnitBoundary;
   stops: ReadonlyArray<WalkthroughStopView>;
 };
 
@@ -298,6 +304,16 @@ export const buildWalkthroughView = (walkthrough: WalkthroughModel): Walkthrough
     return null;
   }
 
+  const boundaryByChapterId = new Map<string, WalkthroughUnitBoundary>();
+  for (const unit of walkthrough.units ?? []) {
+    const firstChapterId = unit.chapterIds[0];
+    if (firstChapterId && unit.commit) {
+      boundaryByChapterId.set(firstChapterId, {
+        commit: unit.commit,
+        identity: unit.identity,
+      });
+    }
+  }
   const sequence: Array<WalkthroughStopView> = [];
   const chapters = walkthrough.chapters.map((chapter) => {
     const stops = chapter.stops.map((stop) => {
@@ -305,7 +321,8 @@ export const buildWalkthroughView = (walkthrough: WalkthroughModel): Walkthrough
       sequence.push(view);
       return view;
     });
-    return { ...chapter, stops };
+    const boundary = boundaryByChapterId.get(chapter.id);
+    return { ...chapter, ...(boundary ? { boundary } : {}), stops };
   });
 
   if (sequence.length === 0) {
@@ -337,19 +354,22 @@ export const resolveWalkthroughHunkFile = (
   hunk: WalkthroughHunk,
   files: ReadonlyArray<ChangedFile>,
 ): ResolvedWalkthroughHunkFile | null => {
-  const file = files.find((candidate) => candidate.path === hunk.path);
-  if (!file) {
+  const sectionId = hunk.anchor.sectionId;
+  if (!sectionId) {
     return null;
   }
 
-  const section = hunk.anchor.sectionId
-    ? file.sections.find((candidate) => candidate.id === hunk.anchor.sectionId)
-    : undefined;
-  if (!section) {
-    return null;
+  for (const file of files) {
+    if (file.path !== hunk.path) {
+      continue;
+    }
+    const section = file.sections.find((candidate) => candidate.id === sectionId);
+    if (section) {
+      return { file, section };
+    }
   }
 
-  return { file, section };
+  return null;
 };
 
 const walkthroughHunkRunKey = (item: WalkthroughHunkGroup, hunks: ReadonlyArray<WalkthroughHunk>) =>

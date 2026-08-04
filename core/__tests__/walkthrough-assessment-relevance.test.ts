@@ -5,6 +5,9 @@ import {
   type AssessmentRoutingContext,
   type AssessmentThreadCandidate,
 } from '../lib/walkthrough-assessment-relevance.ts';
+import type { GitSha } from '../types.ts';
+
+const gitSha = (value: string) => value as GitSha;
 
 const candidate = (threadId: string): AssessmentThreadCandidate => ({
   anchor: {
@@ -65,4 +68,55 @@ test('keeps unanchored and non-overlapping threads out of assessment demand', ()
   expect(
     selections.map((selection) => ('reason' in selection ? selection.reason : 'eligible')),
   ).toEqual(['no-code-scope', 'missing-anchor', 'missing-anchor']);
+});
+
+test('routes a thread to the only commit that owns its changed range', () => {
+  const selections = selectWalkthroughAssessmentCandidates([candidate('thread-1')], {
+    ...context(),
+    codeScope: {
+      range: {
+        base: { label: { kind: 'commit', text: 'base' }, sha: gitSha('a'.repeat(40)) },
+        head: { label: { kind: 'commit', text: 'head' }, sha: gitSha('b'.repeat(40)) },
+      },
+      type: 'target-comparison',
+    },
+    unitRoutes: [
+      {
+        changedRanges: [{ endLine: 20, path: 'src/router.ts', side: 'additions', startLine: 5 }],
+        codeScope: { sha: gitSha('1'.repeat(40)), type: 'commit' },
+      },
+      {
+        changedRanges: [{ endLine: 20, path: 'src/other.ts', side: 'additions', startLine: 5 }],
+        codeScope: { sha: gitSha('2'.repeat(40)), type: 'commit' },
+      },
+    ],
+  });
+
+  expect(selections[0]).toMatchObject({
+    codeScope: { sha: '1'.repeat(40), type: 'commit' },
+    kind: 'eligible',
+  });
+});
+
+test('falls back to aggregate scope when multiple commits own a changed range', () => {
+  const codeScope = {
+    range: {
+      base: { label: { kind: 'commit' as const, text: 'base' }, sha: gitSha('a'.repeat(40)) },
+      head: { label: { kind: 'commit' as const, text: 'head' }, sha: gitSha('b'.repeat(40)) },
+    },
+    type: 'target-comparison' as const,
+  };
+  const changedRanges = [
+    { endLine: 20, path: 'src/router.ts', side: 'additions' as const, startLine: 5 },
+  ];
+  const selections = selectWalkthroughAssessmentCandidates([candidate('thread-1')], {
+    ...context(),
+    codeScope,
+    unitRoutes: [
+      { changedRanges, codeScope: { sha: gitSha('1'.repeat(40)), type: 'commit' } },
+      { changedRanges, codeScope: { sha: gitSha('2'.repeat(40)), type: 'commit' } },
+    ],
+  });
+
+  expect(selections[0]).toMatchObject({ codeScope, kind: 'eligible' });
 });
