@@ -1,0 +1,58 @@
+diff --git a/test/preferences-audit.test.ts b/test/preferences-audit.test.ts
+new file mode 100644
+--- /dev/null
++++ b/test/preferences-audit.test.ts
+@@ -0,0 +1,32 @@
++import { updatePreferences } from '../src/application/update-preferences.ts';
++import { createMemoryPreferenceAudit } from '../src/infrastructure/preference-audit.ts';
++import { createMemoryPreferencesRepository } from '../src/infrastructure/preferences-repository.ts';
++
++const repository = createMemoryPreferencesRepository();
++const audit = createMemoryPreferenceAudit();
++
++const updated = await updatePreferences(
++  repository,
++  'ada',
++  0,
++  [{ category: 'marketing', channel: 'email', enabled: true }],
++  audit,
++);
++
++if (updated.revision !== 1) {
++  throw new Error('Expected preference revision to advance.');
++}
++
++const records = await audit.list('ada');
++if (records.length !== 1 || records[0]?.changes[0]?.channel !== 'email') {
++  throw new Error('Expected audit record for preference update.');
++}
++
++try {
++  await updatePreferences(repository, 'ada', 0, [], audit);
++  throw new Error('Expected stale preference revision to fail.');
++} catch (error) {
++  if (!(error instanceof Error)) {
++    throw error;
++  }
++}
+diff --git a/src/api/preferences-handler.ts b/src/api/preferences-handler.ts
+--- a/src/api/preferences-handler.ts
++++ b/src/api/preferences-handler.ts
+@@ -21,5 +21,6 @@ export const handleUpdatePreferences = async (
+     request.expectedRevision,
+     request.changes,
+     audit,
+   );
++  // SMOKE: updated-intentional-response
+   return {
+     revision: preferences.revision,
+     values: preferences.values,
+diff --git a/test/delivery-schedule.test.ts b/test/delivery-schedule.test.ts
+--- a/test/delivery-schedule.test.ts
++++ b/test/delivery-schedule.test.ts
+@@ -13,6 +13,7 @@ const scheduled = scheduleDelivery(
+ 
+ if (!scheduled || scheduled.reason !== 'quiet-hours') {
+   throw new Error('Expected product push delivery to respect quiet hours.');
++  // SMOKE: updated-intentional-schedule
+ }

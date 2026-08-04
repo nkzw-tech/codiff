@@ -1,0 +1,213 @@
+diff --git a/src/domain/preferences.ts b/src/domain/preferences.ts
+new file mode 100644
+--- /dev/null
++++ b/src/domain/preferences.ts
+@@ -0,0 +1,43 @@
++export const channels = ['email', 'push', 'sms'] as const;
++export const categories = ['security', 'product', 'marketing'] as const;
++
++export type Channel = (typeof channels)[number];
++export type Category = (typeof categories)[number];
++
++export type PreferenceMatrix = Record<Category, Record<Channel, boolean>>;
++
++export type Preferences = {
++  revision: number;
++  userId: string;
++  values: PreferenceMatrix;
++};
++
++export const defaultPreferences = (userId: string): Preferences => ({
++  revision: 0,
++  userId,
++  values: {
++    marketing: { email: false, push: false, sms: false },
++    product: { email: true, push: true, sms: false },
++    security: { email: true, push: true, sms: true },
++  },
++});
++
++export const clonePreferences = (preferences: Preferences): Preferences => ({
++  ...preferences,
++  values: {
++    marketing: { ...preferences.values.marketing },
++    product: { ...preferences.values.product },
++    security: { ...preferences.values.security },
++  },
++});
++
++export const validatePreferences = (preferences: Preferences) => {
++  for (const category of categories) {
++    for (const channel of channels) {
++      if (typeof preferences.values[category][channel] !== 'boolean') {
++        throw new Error(`Preference ${category}.${channel} must be boolean.`);
++      }
++    }
++  }
++  return preferences;
++};
+diff --git a/src/domain/delivery-rules.ts b/src/domain/delivery-rules.ts
+new file mode 100644
+--- /dev/null
++++ b/src/domain/delivery-rules.ts
+@@ -0,0 +1,20 @@
++import type { Category, Channel, Preferences } from './preferences.ts';
++
++export type DeliveryDecision = {
++  channel: Channel;
++  deliver: boolean;
++  reason: 'enabled' | 'security-override' | 'suppressed';
++};
++
++export const decideDelivery = (
++  preferences: Preferences,
++  category: Category,
++  channel: Channel,
++): DeliveryDecision => {
++  if (category === 'security') {
++    return { channel, deliver: true, reason: 'security-override' };
++  }
++  return preferences.values[category][channel]
++    ? { channel, deliver: true, reason: 'enabled' }
++    : { channel, deliver: false, reason: 'suppressed' };
++};
+diff --git a/src/infrastructure/preferences-repository.ts b/src/infrastructure/preferences-repository.ts
+new file mode 100644
+--- /dev/null
++++ b/src/infrastructure/preferences-repository.ts
+@@ -0,0 +1,34 @@
++import {
++  clonePreferences,
++  defaultPreferences,
++  type Preferences,
++} from '../domain/preferences.ts';
++
++export type PreferencesRepository = {
++  load(userId: string): Promise<Preferences>;
++  save(preferences: Preferences, expectedRevision: number): Promise<Preferences>;
++};
++
++export const createMemoryPreferencesRepository = (): PreferencesRepository => {
++  const records = new Map<string, Preferences>();
++  return {
++    async load(userId) {
++      const existing = records.get(userId);
++      if (existing) {
++        return clonePreferences(existing);
++      }
++      const created = defaultPreferences(userId);
++      records.set(userId, created);
++      return clonePreferences(created);
++    },
++    async save(preferences, expectedRevision) {
++      const current = await this.load(preferences.userId);
++      if (current.revision !== expectedRevision) {
++        throw new Error(`Preference revision changed from ${expectedRevision} to ${current.revision}.`);
++      }
++      const next = { ...clonePreferences(preferences), revision: expectedRevision + 1 };
++      records.set(next.userId, next);
++      return clonePreferences(next);
++    },
++  };
++};
+diff --git a/src/application/update-preferences.ts b/src/application/update-preferences.ts
+new file mode 100644
+--- /dev/null
++++ b/src/application/update-preferences.ts
+@@ -0,0 +1,29 @@
++import {
++  clonePreferences,
++  type Category,
++  type Channel,
++  type Preferences,
++  validatePreferences,
++} from '../domain/preferences.ts';
++import type { PreferencesRepository } from '../infrastructure/preferences-repository.ts';
++
++export type PreferenceChange = {
++  category: Category;
++  channel: Channel;
++  enabled: boolean;
++};
++
++export const updatePreferences = async (
++  repository: PreferencesRepository,
++  userId: string,
++  expectedRevision: number,
++  changes: ReadonlyArray<PreferenceChange>,
++): Promise<Preferences> => {
++  const current = await repository.load(userId);
++  const next = clonePreferences(current);
++  for (const change of changes) {
++    next.values[change.category][change.channel] = change.enabled;
++  }
++  validatePreferences(next);
++  return repository.save(next, expectedRevision);
++};
+diff --git a/src/api/preferences-handler.ts b/src/api/preferences-handler.ts
+new file mode 100644
+--- /dev/null
++++ b/src/api/preferences-handler.ts
+@@ -0,0 +1,25 @@
++import type { PreferenceChange } from '../application/update-preferences.ts';
++import type { PreferencesRepository } from '../infrastructure/preferences-repository.ts';
++import { updatePreferences } from '../application/update-preferences.ts';
++
++export type UpdatePreferencesRequest = {
++  changes: ReadonlyArray<PreferenceChange>;
++  expectedRevision: number;
++  userId: string;
++};
++
++export const handleUpdatePreferences = async (
++  repository: PreferencesRepository,
++  request: UpdatePreferencesRequest,
++) => {
++  const preferences = await updatePreferences(
++    repository,
++    request.userId,
++    request.expectedRevision,
++    request.changes,
++  );
++  return {
++    revision: preferences.revision,
++    values: preferences.values,
++  };
++};
+diff --git a/src/cli/preferences.ts b/src/cli/preferences.ts
+new file mode 100644
+--- /dev/null
++++ b/src/cli/preferences.ts
+@@ -0,0 +1,13 @@
++import type { PreferenceChange } from '../application/update-preferences.ts';
++
++export const parsePreferenceChange = (value: string): PreferenceChange => {
++  const [category, channel, enabled] = value.split(':');
++  if (!category || !channel || (enabled !== 'on' && enabled !== 'off')) {
++    throw new Error('Expected category:channel:on|off.');
++  }
++  return {
++    category: category as PreferenceChange['category'],
++    channel: channel as PreferenceChange['channel'],
++    enabled: enabled === 'on',
++  };
++};
+diff --git a/test/preferences.test.ts b/test/preferences.test.ts
+new file mode 100644
+--- /dev/null
++++ b/test/preferences.test.ts
+@@ -0,0 +1,14 @@
++import { decideDelivery } from '../src/domain/delivery-rules.ts';
++import { defaultPreferences } from '../src/domain/preferences.ts';
++
++const preferences = defaultPreferences('ada');
++
++const productEmail = decideDelivery(preferences, 'product', 'email');
++if (!productEmail.deliver) {
++  throw new Error('Expected product email delivery.');
++}
++
++const marketingSms = decideDelivery(preferences, 'marketing', 'sms');
++if (marketingSms.deliver) {
++  throw new Error('Expected marketing SMS suppression.');
++}

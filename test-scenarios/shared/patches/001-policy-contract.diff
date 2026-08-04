@@ -1,0 +1,77 @@
+diff --git a/src/domain/quiet-hours.ts b/src/domain/quiet-hours.ts
+new file mode 100644
+--- /dev/null
++++ b/src/domain/quiet-hours.ts
+@@ -0,0 +1,24 @@
++export type QuietHours = {
++  endMinute: number;
++  startMinute: number;
++  timezone: string;
++};
++
++export const validateQuietHours = (quietHours: QuietHours) => {
++  if (
++    !Number.isInteger(quietHours.startMinute) ||
++    !Number.isInteger(quietHours.endMinute) ||
++    quietHours.startMinute < 0 ||
++    quietHours.startMinute > 1_439 ||
++    quietHours.endMinute < 0 ||
++    quietHours.endMinute > 1_439
++  ) {
++    throw new Error('Quiet hours must use minutes between 0 and 1439.');
++  }
++  if (!quietHours.timezone) {
++    throw new Error('Quiet hours require a timezone.');
++  }
++  return quietHours;
++};
+diff --git a/src/domain/preference-policy.ts b/src/domain/preference-policy.ts
+new file mode 100644
+--- /dev/null
++++ b/src/domain/preference-policy.ts
+@@ -0,0 +1,22 @@
++import type { Category, Channel } from './preferences.ts';
++
++export type PreferencePolicy = {
++  category: Category;
++  channel: Channel;
++  reason: string;
++};
++
++export const protectedPolicies = (): ReadonlyArray<PreferencePolicy> => [
++  {
++    category: 'security',
++    channel: 'sms',
++    reason: 'Security incidents need an urgent fallback channel.',
++  },
++  {
++    category: 'security',
++    channel: 'email',
++    reason: 'Security notices must remain externally visible.',
++  },
++];
+diff --git a/test/quiet-hours.test.ts b/test/quiet-hours.test.ts
+new file mode 100644
+--- /dev/null
++++ b/test/quiet-hours.test.ts
+@@ -0,0 +1,19 @@
++import { validateQuietHours } from '../src/domain/quiet-hours.ts';
++
++const quietHours = validateQuietHours({
++  endMinute: 420,
++  startMinute: 1_320,
++  timezone: 'America/Chicago',
++});
++
++if (quietHours.timezone !== 'America/Chicago') {
++  throw new Error('Expected timezone to survive validation.');
++}
++
++try {
++  validateQuietHours({ endMinute: 1_500, startMinute: 0, timezone: 'UTC' });
++  throw new Error('Expected invalid minutes to fail.');
++} catch (error) {
++  if (!(error instanceof Error)) {
++    throw error;
++  }
++}

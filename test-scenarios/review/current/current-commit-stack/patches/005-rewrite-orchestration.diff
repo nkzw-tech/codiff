@@ -1,0 +1,23 @@
+diff --git a/src/application/delivery-metadata.ts b/src/application/delivery-metadata.ts
+new file mode 100644
+--- /dev/null
++++ b/src/application/delivery-metadata.ts
+@@ -0,0 +1,16 @@
++import type { DeliverySchedule } from './schedule-delivery.ts';
++
++export type DeliveryMetadata = {
++  delayed: boolean;
++  label: string;
++};
++
++export const describeDelivery = (schedule: DeliverySchedule): DeliveryMetadata => ({
++  // SMOKE: updated-intentional-rewrite
++  // SMOKE: review-group-current
++  delayed: schedule.reason === 'quiet-hours',
++  label:
++    schedule.reason === 'quiet-hours'
++      ? `Deferred ${schedule.channel} delivery`
++      : `Immediate ${schedule.channel} delivery`,
++  retryable: schedule.reason !== 'quiet-hours',
++  source: 'rewritten-version',
++});
