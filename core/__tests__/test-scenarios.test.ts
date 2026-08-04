@@ -4,7 +4,10 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterAll, expect, test } from 'vite-plus/test';
+import { runScenarioCommand } from '../../scripts/test-scenario-command.mjs';
 import { materializeReviewScenario, reviewScenarios } from '../../test-scenarios/review/index.mjs';
+import { resolveSubmissionAnchor } from '../../test-scenarios/submission-anchors.mjs';
+import { getSubmissionPlan } from '../../test-scenarios/submission/index.mjs';
 
 type MaterializedScenario = {
   directory: string;
@@ -88,6 +91,76 @@ test('scenario manifests reference six canonical patch bodies without stored dup
   }
 });
 
+test('scenario commands bound output and terminate timeout and cancellation paths', async () => {
+  const directory = await mkdtemp(`${tmpdir()}/codiff-scenario-command-`);
+  try {
+    await expect(
+      runScenarioCommand({
+        args: ['-e', `process.stdout.write('x'.repeat(2048))`],
+        capture: true,
+        cwd: directory,
+        executable: process.execPath,
+        maxBytes: 1024,
+        timeoutMs: 5000,
+      }),
+    ).rejects.toMatchObject({ code: 'output-limit' });
+
+    const marker = `${directory}/partial-state`;
+    const timeoutSignal = `${directory}/timeout-signal`;
+    await expect(
+      runScenarioCommand({
+        args: [
+          '-e',
+          `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(marker)}, 'partial'); process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(timeoutSignal)}, 'SIGTERM'); process.exit(0); }); setInterval(() => {}, 1000);`,
+        ],
+        capture: true,
+        cwd: directory,
+        executable: process.execPath,
+        timeoutMs: 100,
+      }),
+    ).rejects.toMatchObject({ code: 'timeout' });
+    await expect(readFile(marker, 'utf8')).resolves.toBe('partial');
+    await expect(readFile(timeoutSignal, 'utf8')).resolves.toBe('SIGTERM');
+
+    const preAbortedMarker = `${directory}/pre-aborted-marker`;
+    const preAbortedController = new AbortController();
+    preAbortedController.abort();
+    await expect(
+      runScenarioCommand({
+        args: [
+          '-e',
+          `require('node:fs').writeFileSync(${JSON.stringify(preAbortedMarker)}, 'ran')`,
+        ],
+        capture: true,
+        cwd: directory,
+        executable: process.execPath,
+        signal: preAbortedController.signal,
+        timeoutMs: 5000,
+      }),
+    ).rejects.toMatchObject({ code: 'aborted' });
+    await expect(readFile(preAbortedMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+
+    const abortSignal = `${directory}/abort-signal`;
+    const controller = new AbortController();
+    const aborted = runScenarioCommand({
+      args: [
+        '-e',
+        `const fs = require('node:fs'); process.on('SIGTERM', () => { fs.writeFileSync(${JSON.stringify(abortSignal)}, 'SIGTERM'); process.exit(0); }); setInterval(() => {}, 1000);`,
+      ],
+      capture: true,
+      cwd: directory,
+      executable: process.execPath,
+      signal: controller.signal,
+      timeoutMs: 5000,
+    });
+    setTimeout(() => controller.abort(), 100);
+    await expect(aborted).rejects.toMatchObject({ code: 'aborted' });
+    await expect(readFile(abortSignal, 'utf8')).resolves.toBe('SIGTERM');
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
 for (const scenarioId of Object.keys(reviewScenarios)) {
   test(
     `materializes ${scenarioId} as a current notification-preferences review`,
@@ -150,3 +223,31 @@ test(
   },
   scenarioTestTimeout,
 );
+
+test('every current scenario exposes provider submission plans with resolvable anchors', async () => {
+  for (const scenarioId of Object.keys(reviewScenarios)) {
+    const scenario = await materialize(scenarioId);
+    for (const provider of ['github', 'gitlab'] as const) {
+      const plan = await getSubmissionPlan({
+        provider,
+        revisions: scenario.result.revisions,
+        scenarioId,
+      });
+      expect(plan.length).toBeGreaterThan(0);
+      for (const action of plan) {
+        const targets = [
+          ...(action.target ? [action.target] : []),
+          ...('targets' in action ? action.targets : []),
+        ];
+        for (const target of targets) {
+          await expect(
+            resolveSubmissionAnchor({
+              ...target,
+              runGit: scenario.runGit,
+            }),
+          ).resolves.toMatchObject({ path: expect.any(String) });
+        }
+      }
+    }
+  }
+}, 120_000);
