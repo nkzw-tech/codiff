@@ -1527,6 +1527,403 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding: 4px;
 }
 
+.history-section.version-comparison-section {
+  align-items: stretch;
+  border-bottom: 1px solid var(--sidebar-border);
+  display: grid;
+  flex: none;
+  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(46vh, 420px);
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  text-transform: none;
+  white-space: normal;
+}
+
+.history-section.version-comparison-section.collapsed {
+  grid-template-rows: auto;
+  max-height: none;
+}
+
+.version-comparison-header {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 8px 10px 8px 8px;
+}
+
+.version-comparison-toggle {
+  align-items: start;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.version-comparison-toggle-caret {
+  color: var(--muted);
+  font: 11px/1.35 var(--font-mono);
+  margin-top: 2px;
+}
+
+.version-comparison-toggle-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.version-comparison-toggle-copy > strong {
+  color: var(--sidebar-text);
+  font: 700 11px/1.25 var(--font-sans);
+  text-transform: uppercase;
+}
+
+.version-comparison-summary {
+  color: var(--muted);
+  font: 11px/1.35 var(--font-mono);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.diff-scope-control {
+  border: 1px solid var(--sidebar-border);
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.diff-scope-control button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: 600 10px/1.25 var(--font-sans);
+  min-width: 0;
+  padding: 5px 7px;
+  white-space: nowrap;
+}
+
+.diff-scope-control button + button {
+  border-left: 1px solid var(--sidebar-border);
+}
+
+.diff-scope-control button.selected {
+  background: color-mix(in srgb, var(--tree-selection-bg) 72%, transparent);
+  color: var(--sidebar-text);
+}
+
+.diff-scope-control button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.version-comparison-body {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 12px 10px;
+}
+
+.version-picker-pair {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.version-picker {
+  min-width: 0;
+  position: relative;
+}
+
+.version-picker-label {
+  color: var(--muted);
+  display: block;
+  font: 10px/1.35 var(--font-mono);
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.version-picker-trigger {
+  align-items: center;
+  background: rgb(127 127 127 / 0.08);
+  border: 1px solid rgb(127 127 127 / 0.18);
+  border-radius: 6px;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  display: flex;
+  font: 12px/1.35 var(--font-mono);
+  justify-content: space-between;
+  min-width: 0;
+  padding: 5px 7px;
+  width: 100%;
+}
+
+.version-picker-positioner {
+  z-index: 1000;
+}
+
+.version-picker-popover {
+  background: var(--code-bg);
+  border: 1px solid rgb(127 127 127 / 0.25);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+  max-height: min(320px, 55vh);
+  min-width: min(560px, calc(100vw - 32px));
+  overflow: auto;
+  padding: 3px;
+}
+
+.version-picker-popover [role='listbox'] {
+  display: grid;
+}
+
+.version-picker-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  display: grid;
+  font: 11px/1.5 var(--font-mono);
+  gap: 5px;
+  grid-template-columns: 32px 36px minmax(54px, 1fr) auto auto auto minmax(110px, auto) auto;
+  min-width: 0;
+  padding: 4px 5px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.version-picker-option:hover,
+.version-picker-option[data-highlighted],
+.version-picker-option[data-selected] {
+  background: rgb(127 127 127 / 0.14);
+}
+
+.version-picker-option[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.version-picker-head {
+  color: var(--accent, var(--sidebar-text));
+  font-weight: 700;
+}
+
+.version-picker-additions {
+  color: var(--diff-addition);
+}
+
+.version-picker-deletions {
+  color: var(--diff-deletion);
+}
+
+.version-picker-timing,
+.version-comparison-status {
+  color: var(--muted);
+}
+
+.version-review-activity-pill,
+.comparison-kind-pill,
+.comparison-range-pill {
+  background: rgb(127 127 127 / 0.12);
+  border-radius: 999px;
+  display: inline-flex;
+  font: 600 9px/1.3 var(--font-sans);
+  margin-left: 5px;
+  padding: 2px 5px;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.version-comparison-status {
+  align-items: center;
+  display: flex;
+  font: 11px/1.4 var(--font-mono);
+  gap: 6px;
+  min-height: 24px;
+}
+
+.version-comparison-status.error,
+.sidebar-scope-status.error {
+  color: var(--danger);
+}
+
+.version-comparison-spinner {
+  animation: version-comparison-spin 0.8s linear infinite;
+  border: 2px solid rgb(127 127 127 / 0.25);
+  border-radius: 50%;
+  border-top-color: var(--sidebar-text);
+  height: 12px;
+  width: 12px;
+}
+
+@keyframes version-comparison-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.version-base-movement,
+.version-commit-evolution,
+.version-unit-scope {
+  background: rgb(127 127 127 / 0.06);
+  border: 1px solid rgb(127 127 127 / 0.14);
+  border-radius: 7px;
+  color: var(--sidebar-text);
+  font: 11px/1.45 var(--font-sans);
+  padding: 7px;
+}
+
+.version-base-movement small {
+  color: var(--muted);
+  display: block;
+  margin-top: 3px;
+}
+
+.version-base-movement-stat {
+  color: var(--muted);
+  font: 11px/1.45 var(--font-sans);
+}
+
+.version-base-movement-commits {
+  margin-top: 6px;
+}
+
+.version-base-movement-commits > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font: 11px/1.45 var(--font-sans);
+}
+
+.version-base-movement-commit-list {
+  margin-top: 5px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.version-base-movement-commit {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.version-commit-stack-header,
+.version-unit-scope {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.version-commit-stack-header button,
+.version-unit-scope button {
+  background: transparent;
+  border: 0;
+  color: var(--accent, var(--sidebar-text));
+  cursor: pointer;
+  font: 10px/1.35 var(--font-sans);
+}
+
+.version-commit-stack-header button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.version-commit-evolution-list,
+.version-commit-unit-block,
+.version-commit-rebase-overlaps {
+  display: grid;
+  gap: 1px;
+}
+
+.version-commit-unit-block .version-commit-unit {
+  grid-template-columns: 12px auto minmax(0, 1fr);
+}
+
+.version-commit-kind {
+  font-weight: 700;
+}
+
+.version-commit-kind.removed {
+  color: var(--diff-deletion);
+}
+
+.version-commit-kind.revised {
+  color: #d9962f;
+}
+
+.version-commit-kind.introduced {
+  color: #3f9a5a;
+}
+
+.version-commit-kind.unchanged {
+  color: var(--muted);
+}
+
+.version-commit-rebase-overlaps {
+  border-left: 1px solid rgb(127 127 127 / 0.22);
+  margin: 0 0 2px 12px;
+  padding-left: 6px;
+}
+
+.version-commit-rebase-overlaps-label {
+  color: var(--muted);
+  font: 9px/1.3 var(--font-sans);
+  padding: 2px 4px 0;
+}
+
+.version-tree-commit-options label {
+  align-items: center;
+  border-radius: 4px;
+  cursor: pointer;
+  display: grid;
+  font: 10px/1.35 var(--font-sans);
+  gap: 5px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  min-height: 25px;
+  padding: 3px 4px;
+}
+
+.version-tree-commit-options label:hover {
+  background: rgb(127 127 127 / 0.1);
+}
+
+.version-tree-commit-options label span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-scope-status {
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+  padding: 10px 8px;
+}
+
+@media (max-width: 720px) {
+  .version-comparison-header,
+  .version-picker-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .diff-scope-control,
+  .version-picker {
+    width: 100%;
+  }
+}
+
 .diffstat-additions {
   color: var(--diff-addition);
 }

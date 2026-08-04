@@ -5,7 +5,12 @@
 import { act } from 'react';
 import { expect, test, vi } from 'vite-plus/test';
 import { CommitScopePanel } from '../app/components/CommitScopePanel.tsx';
-import type { GitSha, ReviewCommitListEntry } from '../types.ts';
+import type {
+  EvolutionUnitId,
+  GitSha,
+  ReviewCommitEvolution,
+  ReviewCommitListEntry,
+} from '../types.ts';
 import { renderReact } from './helpers/react.tsx';
 
 const gitSha = (value: string) => value.repeat(40) as GitSha;
@@ -193,6 +198,85 @@ test('highlights graph-derived members of a merge range', async () => {
     expect(app.container.querySelector('.commit-scope-heading')?.textContent).toContain(
       '3 selected commits',
     );
+  } finally {
+    await app.cleanup();
+  }
+});
+
+test('selects one reviewable Evolution Unit without changing commit-range behavior', async () => {
+  const evolutionUnitId = 'unit-revised' as EvolutionUnitId;
+  const evolution = {
+    recommendation: {
+      rationale: 'Review the revised commit directly.',
+      suggestedStructure: 'commit-evolution',
+    },
+    summary: {
+      absorbedIntoBase: 0,
+      added: 0,
+      ambiguous: 0,
+      completeCoverage: true,
+      pairingCoverage: 1,
+      removed: 0,
+      retained: 0,
+      reviewable: 1,
+      revised: 1,
+      rewrittenSamePatch: 0,
+      unreviewableAmbiguous: 0,
+    },
+    units: [
+      {
+        after: commits[1],
+        before: commits[0],
+        confidence: 'high',
+        kind: 'revised',
+        order: 0,
+        reviewable: true,
+        unitId: evolutionUnitId,
+      },
+    ],
+  } satisfies ReviewCommitEvolution;
+  const onToggleVersionUnit = vi.fn();
+  const onClear = vi.fn();
+  const app = await renderReact(
+    <CommitScopePanel
+      commits={commits}
+      mode="version-compare"
+      onClear={onClear}
+      onSelectCommitRange={vi.fn()}
+      onToggleVersionUnit={onToggleVersionUnit}
+      versionCommitEvolution={evolution}
+    />,
+  );
+
+  try {
+    expect(app.container.querySelector('.commit-scope-heading')?.textContent).toContain(
+      'All commit changes',
+    );
+    const option = app.container.querySelector<HTMLLabelElement>(
+      '.version-tree-commit-options label',
+    );
+    await act(async () => option?.click());
+    expect(onToggleVersionUnit).toHaveBeenCalledWith(evolution.units[0]);
+
+    await app.rerender(
+      <CommitScopePanel
+        commits={commits}
+        mode="version-compare"
+        onClear={onClear}
+        onSelectCommitRange={vi.fn()}
+        onToggleVersionUnit={onToggleVersionUnit}
+        selectedVersionUnitIds={new Set([evolutionUnitId])}
+        versionCommitEvolution={evolution}
+      />,
+    );
+    expect(app.container.querySelector('.commit-scope-heading')?.textContent).toContain(
+      '1 selected commit',
+    );
+    const clear = [...app.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'View all commit changes',
+    );
+    await act(async () => clear?.click());
+    expect(onClear).toHaveBeenCalledOnce();
   } finally {
     await app.cleanup();
   }
