@@ -127,7 +127,7 @@ const installWindowApi = (overrides: Record<string, unknown> = {}) => {
       root: '/repo',
     })),
     getRepositoryState: vi.fn(async () => stateFor({ type: 'working-tree' })),
-    getReviewComments: vi.fn(async () => []),
+    getReviewComments: vi.fn(async () => ({ generalComments: [], reviewComments: [] })),
     getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     isWindowFullScreen: vi.fn(async () => false),
     onCopyPendingCommentsRequest: vi.fn((callback: () => string | Promise<string>) => {
@@ -1669,26 +1669,28 @@ test('keeps failed whitespace reloads recoverable without applying stale state',
 
 test('hydrates provider comments after first usable and ignores a superseded source result', async () => {
   surfaceProps.mockClear();
-  const firstComments = deferred<
-    ReadonlyArray<{
+  const firstComments = deferred<{
+    generalComments: [];
+    reviewComments: ReadonlyArray<{
       author: { login: string };
       body: string;
       filePath: string;
       id: string;
       lineNumber: number;
       side: 'additions';
-    }>
-  >();
-  const secondComments = deferred<
-    ReadonlyArray<{
+    }>;
+  }>();
+  const secondComments = deferred<{
+    generalComments: [];
+    reviewComments: ReadonlyArray<{
       author: { login: string };
       body: string;
       filePath: string;
       id: string;
       lineNumber: number;
       side: 'additions';
-    }>
-  >();
+    }>;
+  }>();
   const firstSource = {
     headSha: gitSha('a'),
     number: 12,
@@ -1744,16 +1746,19 @@ test('hydrates provider comments after first usable and ignores a superseded sou
     );
 
     await act(async () => {
-      firstComments.resolve([
-        {
-          author: { login: 'stale-reviewer' },
-          body: 'Stale comment',
-          filePath: 'src/first.ts',
-          id: 'stale',
-          lineNumber: 1,
-          side: 'additions',
-        },
-      ]);
+      firstComments.resolve({
+        generalComments: [],
+        reviewComments: [
+          {
+            author: { login: 'stale-reviewer' },
+            body: 'Stale comment',
+            filePath: 'src/first.ts',
+            id: 'stale',
+            lineNumber: 1,
+            side: 'additions',
+          },
+        ],
+      });
       await firstComments.promise;
     });
     expect(getSurfaceProps().snapshot.reviewComments ?? []).not.toEqual(
@@ -1761,16 +1766,19 @@ test('hydrates provider comments after first usable and ignores a superseded sou
     );
 
     await act(async () => {
-      secondComments.resolve([
-        {
-          author: { login: 'current-reviewer' },
-          body: 'Current comment',
-          filePath: 'src/second.ts',
-          id: 'current',
-          lineNumber: 1,
-          side: 'additions',
-        },
-      ]);
+      secondComments.resolve({
+        generalComments: [],
+        reviewComments: [
+          {
+            author: { login: 'current-reviewer' },
+            body: 'Current comment',
+            filePath: 'src/second.ts',
+            id: 'current',
+            lineNumber: 1,
+            side: 'additions',
+          },
+        ],
+      });
       await secondComments.promise;
     });
     await waitFor(() =>
@@ -1788,7 +1796,7 @@ test('keeps provider comment hydration failures visible and retryable', async ()
   const getReviewComments = vi
     .fn()
     .mockRejectedValueOnce(new Error('Provider comments are unavailable.'))
-    .mockResolvedValueOnce([]);
+    .mockResolvedValueOnce({ generalComments: [], reviewComments: [] });
   installWindowApi({ getReviewComments });
   const source = {
     headSha: gitSha('c'),

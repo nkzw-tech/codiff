@@ -89,7 +89,7 @@ const createAppApi = (overrides: Record<string, unknown> = {}) => ({
   getPlanReview: vi.fn(async () => null),
   getRepositoryHistory: vi.fn(async () => ({ entries: [], root: '/repo' })),
   getRepositoryState: vi.fn(async () => repositoryState),
-  getReviewComments: vi.fn(async () => []),
+  getReviewComments: vi.fn(async () => ({ generalComments: [], reviewComments: [] })),
   getTerminalHelperStatus: vi.fn(async () => ({
     command: 'codiff',
     installed: true,

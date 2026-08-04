@@ -1702,8 +1702,122 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding-top: 6px;
 }
 
+.sidebar-comment-section {
+  border-bottom: 1px solid var(--sidebar-border);
+  min-width: 0;
+}
+
+.sidebar-comment-section-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar-comment-section-toggle > span {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sidebar-comment-section-toggle strong {
+  font: 700 11px/1.25 var(--font-sans);
+  text-transform: uppercase;
+}
+
+.sidebar-comment-section-toggle small {
+  color: var(--muted);
+  font: 11px/1.25 var(--font-mono);
+}
+
+.sidebar-comment-section-toggle svg {
+  color: var(--muted);
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.sidebar-comment-section-toggle svg.collapsed {
+  transform: rotate(-90deg);
+}
+
+.sidebar-comment-section-body {
+  min-width: 0;
+}
+
 .sidebar-comment-entry.history-entry {
   grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.sidebar-inline-comment-entry.history-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 8px;
+}
+
+.sidebar-inline-comment-location {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.sidebar-inline-comment-location > span:first-child {
+  color: var(--sidebar-ref);
+  font: 11px/1.35 var(--font-mono);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-inline-comment-location > span:last-child {
+  color: var(--muted);
+  flex: none;
+  font: 10px/1.35 var(--font-mono);
+}
+
+.sidebar-inline-comment-entry .history-entry-subject {
+  display: -webkit-box;
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.sidebar-inline-comment-entry .history-entry-meta {
+  justify-content: flex-start;
+}
+
+.sidebar-inline-comment-entry .history-entry-author > span:last-child {
+  flex: initial;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  visibility: visible;
+  width: auto;
+}
+
+.sidebar-inline-comment-status {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font: 10px/1.35 var(--font-sans);
+  gap: 4px 8px;
+}
+
+.sidebar-inline-comment-status a {
+  color: var(--link);
 }
 
 .sidebar-comment-entry .history-entry-ref {
@@ -2282,6 +2396,58 @@ html[data-codiff-platform='darwin'] .sidebar {
   min-height: 0;
   overflow: auto;
   padding: 11px 12px 48px;
+}
+
+.review-comments-overview .merge-request-comments-view {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+  padding-bottom: 12px;
+}
+
+.review-comments-section-heading {
+  color: var(--text);
+  font: 700 13px/1.35 var(--font-sans);
+  padding: 12px 16px 6px;
+}
+
+.missing-review-comments {
+  padding-bottom: 16px;
+}
+
+.missing-review-comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px;
+}
+
+.missing-review-comment-thread {
+  background: var(--file-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 20px;
+  corner-shape: squircle;
+  overflow: hidden;
+}
+
+.missing-review-comment-location {
+  align-items: baseline;
+  border-bottom: 1px solid var(--file-border);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font: 11px/1.35 var(--font-sans);
+  gap: 4px 10px;
+  padding: 8px 12px;
+}
+
+.missing-review-comment-location strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.missing-review-comment-thread > .review-comment-thread-group {
+  padding: 10px 12px;
 }
 
 .merge-request-comments-source-description {
@@ -3618,6 +3784,26 @@ diffs-container .review-comment-thread {
 .review-comment-header span {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-comment-header a {
+  align-items: center;
+  color: inherit;
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.review-comment-header a:hover {
+  color: var(--text);
+}
+
+.review-comment-header .review-comment-permalink {
+  flex: none;
+  margin-left: auto;
+  overflow: visible;
   white-space: nowrap;
 }
 

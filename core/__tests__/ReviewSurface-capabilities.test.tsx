@@ -514,6 +514,319 @@ test('keeps title-only source footer actions reachable', async () => {
   });
 });
 
+test('keeps empty provider Comments visible and guides inline feedback through Tree', async () => {
+  await using empty = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: providerSnapshot,
+  });
+  expect(findButton(empty.container, 'Comments')).not.toBeUndefined();
+  expect(empty.container.textContent).toContain('No review comments yet');
+  expect(empty.container.textContent).toContain('Add inline feedback from Tree');
+  expect(empty.container.textContent).toContain('PR #7');
+
+  const file = providerSnapshot.files[0]!;
+  await using inlineOnly = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: {
+      ...providerSnapshot,
+      reviewComments: [
+        {
+          author: { login: 'reviewer' },
+          body: 'Inline feedback exists.',
+          filePath: file.path,
+          id: 'inline-only',
+          lineNumber: 1,
+          side: 'additions',
+        },
+      ],
+    },
+  });
+  expect(inlineOnly.container.textContent).toContain('No overview comments yet');
+  expect(inlineOnly.container.textContent).toContain(
+    'Inline review comments are available in Tree.',
+  );
+  expect(
+    Array.from(inlineOnly.container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+      .find((button) => button.textContent?.includes('Comments'))
+      ?.getAttribute('aria-label'),
+  ).toBe('Comments (1)');
+});
+
+test('renders overview threads before Pierre-anchored old, ranged, and file comments', async () => {
+  const file = createChangedFile('src/anchored.ts', {
+    kind: 'pull-request',
+    patch:
+      'diff --git a/src/anchored.ts b/src/anchored.ts\n@@ -1,3 +1,3 @@\n context\n-old value\n+new value\n tail\n',
+  });
+  const position = { range: file.sections[0]!.range! };
+  await using view = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: {
+      ...providerSnapshot,
+      files: [file],
+      repository: {
+        ...providerSnapshot.repository,
+        generalComments: [
+          {
+            comments: [
+              {
+                author: { login: 'overview-author' },
+                body: 'Overview feedback arrives with the inline threads.',
+                id: 'overview-1',
+                url: 'https://github.test/overview-1',
+              },
+            ],
+            id: 'overview-thread',
+          },
+        ],
+      },
+      reviewComments: [
+        {
+          author: { login: 'old-author' },
+          body: 'Old-side feedback stays on the reported deletion.',
+          filePath: file.path,
+          id: 'old-side',
+          lineNumber: 2,
+          position,
+          side: 'deletions',
+          threadId: 'old-thread',
+        },
+        {
+          author: { login: 'range-author' },
+          body: 'The cross-side range stays intact.',
+          filePath: file.path,
+          id: 'cross-side-range',
+          lineNumber: 2,
+          position,
+          side: 'additions',
+          startLineNumber: 2,
+          startSide: 'deletions',
+          threadId: 'range-thread',
+        },
+        {
+          anchor: 'file',
+          author: { login: 'file-author' },
+          body: 'The file-level thread stays on this file.',
+          filePath: file.path,
+          id: 'file-comment',
+          position,
+          threadId: 'file-thread',
+        },
+      ],
+    },
+  });
+
+  const main = view.container.querySelector('main.review');
+  expect(main?.textContent).toContain('Overview feedback arrives with the inline threads.');
+  expect(main?.textContent).toContain('Old-side feedback stays on the reported deletion.');
+  expect(main?.textContent).toContain('The cross-side range stays intact.');
+  expect(main?.textContent).toContain('The file-level thread stays on this file.');
+  expect(main?.textContent?.indexOf('Overview feedback')).toBeLessThan(
+    main?.textContent?.indexOf('Old-side feedback') ?? -1,
+  );
+  expect(main?.querySelectorAll('.codiff-file-header')).toHaveLength(3);
+  expect(view.container.textContent).toContain('Old line 2');
+  expect(view.container.textContent).toContain('Old line 2 to New line 2');
+  expect(view.container.textContent).toContain('File');
+  expect(main?.textContent).not.toContain('Comments without a code region');
+});
+
+test('lists complete threads when revision, file, side, or line coordinates cannot resolve', async () => {
+  const file = createChangedFile('src/available.ts', { kind: 'pull-request' });
+  const position = { range: file.sections[0]!.range! };
+  await using view = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: {
+      ...providerSnapshot,
+      files: [file],
+      reviewComments: [
+        {
+          author: { login: 'revision-author' },
+          body: 'Missing immutable revision.',
+          filePath: file.path,
+          id: 'missing-revision',
+          lineNumber: 1,
+          side: 'additions',
+          threadId: 'missing-revision-thread',
+        },
+        {
+          author: { login: 'file-author' },
+          body: 'Missing file.',
+          filePath: 'src/missing.ts',
+          id: 'missing-file',
+          lineNumber: 1,
+          position,
+          side: 'additions',
+          threadId: 'missing-file-thread',
+        },
+        {
+          author: { login: 'side-author' },
+          body: 'Missing side.',
+          filePath: file.path,
+          id: 'missing-side',
+          lineNumber: 1,
+          position,
+          threadId: 'missing-side-thread',
+        },
+        {
+          author: { login: 'line-author' },
+          body: 'Out-of-range line.',
+          filePath: file.path,
+          id: 'bad-line',
+          lineNumber: 999,
+          position,
+          side: 'additions',
+          threadId: 'bad-line-thread',
+        },
+      ],
+    },
+  });
+
+  const missing = view.container.querySelector('main.review .missing-review-comments');
+  expect(missing?.querySelectorAll('.missing-review-comment-thread')).toHaveLength(4);
+  for (const text of [
+    'Missing immutable revision.',
+    'Missing file.',
+    'Missing side.',
+    'Out-of-range line.',
+  ]) {
+    expect(missing?.textContent).toContain(text);
+  }
+  expect(missing?.textContent).toContain('revision-author');
+  expect(missing?.textContent).toContain('Code region unavailable');
+});
+
+test('preserves missing-region permalink and edit, delete, reply, and resolve actions', async () => {
+  const onDelete = vi.fn(async () => {});
+  const onResolve = vi.fn(async () => {});
+  const onSubmit = vi.fn(async () => {
+    throw new Error('Not submitted by this test.');
+  });
+  const onUpdate = vi.fn(async () => {});
+  await using view = await renderSurface({
+    capabilities: {
+      comments: createProviderComments({
+        inline: { onDelete, onResolve, onSubmit, onUpdate },
+      }),
+    },
+    initialMode: 'comments',
+    snapshot: {
+      ...providerSnapshot,
+      reviewComments: [
+        {
+          author: { login: 'action-author' },
+          body: 'Keep every action available in the fallback.',
+          canDelete: true,
+          canEdit: true,
+          canResolveThread: true,
+          filePath: 'src/missing-actions.ts',
+          id: 'action-comment',
+          lineNumber: 12,
+          position: { range: providerSnapshot.files[0]!.sections[0]!.range! },
+          side: 'additions',
+          threadId: 'action-thread',
+          url: 'https://github.test/action-comment',
+        },
+      ],
+    },
+  });
+
+  const fallback = view.container.querySelector('main.review .missing-review-comments');
+  expect(fallback?.textContent).toContain('Keep every action available in the fallback.');
+  expect(fallback?.textContent).toContain('action-author');
+  expect(fallback?.querySelector('a[href="https://github.test/action-comment"]')).not.toBeNull();
+  expect(findButton(fallback as HTMLElement, 'Edit')).not.toBeUndefined();
+  expect(fallback?.querySelector('button[aria-label="Delete comment"]')).not.toBeNull();
+  expect(findButton(fallback as HTMLElement, 'Reply')).not.toBeUndefined();
+  const resolve = findButton(fallback as HTMLElement, 'Resolve');
+  expect(resolve).not.toBeUndefined();
+  await act(async () => resolve?.click());
+  await waitFor(() => expect(onResolve).toHaveBeenCalledWith('action-thread', true));
+});
+
+test('keeps unresolved outdated provider comments in Comments without guessing a diff target', async () => {
+  const unresolvedSnapshot = {
+    ...providerSnapshot,
+    reviewComments: [
+      {
+        author: { login: 'reviewer' },
+        body: 'The original provider line is unavailable.',
+        filePath: 'src/missing.ts',
+        id: 'provider:unresolved',
+        isOutdated: true,
+        lineNumber: 999,
+        position: { range: providerSnapshot.files[0]!.sections[0]!.range! },
+        side: 'additions' as const,
+        url: 'https://github.com/cloudflare/codiff/pull/7#discussion_r1',
+      },
+    ],
+  } satisfies SharedWalkthroughSnapshot;
+  await using view = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: unresolvedSnapshot,
+  });
+
+  const commentsTab = () =>
+    Array.from(view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((button) =>
+      button.textContent?.includes('Comments'),
+    );
+  expect(commentsTab()?.getAttribute('aria-label')).toBe('Comments (1)');
+  expect(view.container.textContent).toContain('Location unavailable');
+  expect(view.container.textContent).toContain('The original provider line is unavailable.');
+  expect(view.container.textContent).toContain('reviewer');
+  expect(view.container.textContent).toContain('Outdated');
+  expect(view.container.textContent).toContain('View on provider');
+  const entry = view.container.querySelector<HTMLButtonElement>('.sidebar-comment-entry');
+  await act(async () => entry?.click());
+  expect(commentsTab()?.getAttribute('aria-selected')).toBe('true');
+  expect(entry?.getAttribute('aria-current')).toBe('true');
+  expect(view.container.querySelector('.file-tree-shell')).toBeNull();
+
+  await view.render({
+    capabilities: {
+      comments: createProviderComments(),
+      preferences: { outdatedVisibility: { onChange: vi.fn(), value: false } },
+    },
+    initialMode: 'comments',
+    snapshot: unresolvedSnapshot,
+  });
+  expect(commentsTab()?.getAttribute('aria-label')).toBe('Comments');
+  expect(view.container.textContent).not.toContain('The original provider line is unavailable.');
+});
+
+test('labels shared review provenance as Codiff rather than a provider', async () => {
+  const file = snapshot.files[0]!;
+  await using view = await renderSurface({
+    capabilities: { comments: createShareComments() },
+    initialMode: 'comments',
+    snapshot: {
+      ...snapshot,
+      reviewComments: [
+        {
+          author: { login: 'ada' },
+          body: 'Shared Codiff feedback.',
+          filePath: file.path,
+          id: 'share:comment',
+          lineNumber: 1,
+          sectionId: file.sections[0]!.id,
+          side: 'additions',
+          url: 'https://codiff.example/share/comment/1',
+        },
+      ],
+    },
+  });
+
+  expect(view.container.textContent).toContain('Shared Codiff feedback.');
+  expect(view.container.textContent).toContain('ada');
+  expect(view.container.textContent).toContain('View on Codiff');
+  expect(view.container.textContent).not.toContain('View on provider');
+});
+
 test('keeps provider source-description collapse state across Tree and Comments', async () => {
   const richSnapshot = {
     ...providerSnapshot,
@@ -720,7 +1033,7 @@ test('copies provider drafts with the provider label and Markdown heading', asyn
 });
 
 test('excludes existing provider comments from Ask and pending-copy flows', async () => {
-  const file = providerSnapshot.files[0]!;
+  const file = createChangedFile('src/app.ts', { kind: 'pull-request' });
   const onAsk = vi.fn();
   const bridge = { current: null as ReviewSurfaceCommandBridge | null };
   await using view = await renderSurface({
@@ -738,6 +1051,7 @@ test('excludes existing provider comments from Ask and pending-copy flows', asyn
     },
     snapshot: {
       ...providerSnapshot,
+      files: [file],
       reviewComments: [
         {
           author: { login: 'reviewer' },
@@ -745,6 +1059,7 @@ test('excludes existing provider comments from Ask and pending-copy flows', asyn
           filePath: file.path,
           id: 'provider:existing',
           lineNumber: 1,
+          position: { range: file.sections[0]!.range! },
           side: 'additions',
         },
       ],

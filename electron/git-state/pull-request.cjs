@@ -365,13 +365,33 @@ const isGitHubReviewSide = (side) => side === 'LEFT' || side === 'RIGHT';
 /** @param {...unknown} values */
 const firstNumber = (...values) => values.find((value) => typeof value === 'number');
 
-/** @param {GitHubReviewComment} comment */
-const normalizeGitHubReviewComment = (comment) => {
-  const lineNumber = firstNumber(comment.line, comment.original_line);
-  if (!comment.path || !comment.body) {
+/** @param {string} sha */
+const createReviewCommitRevision = (sha) => ({
+  label: { kind: /** @type {const} */ ('commit'), text: sha.slice(0, 7) },
+  sha: /** @type {GitSha} */ (sha),
+});
+
+/**
+ * @param {GitHubReviewComment} comment
+ * @param {GitHubReviewComment} [rootComment]
+ * @param {string} [baseSha]
+ */
+const normalizeGitHubReviewComment = (comment, rootComment = comment, baseSha) => {
+  const lineNumber = firstNumber(rootComment.line, rootComment.original_line);
+  if (!rootComment.path || !comment.body) {
     return null;
   }
-  if (lineNumber == null && comment.subject_type === 'file') {
+  const reviewCommitSha = rootComment.original_commit_id || rootComment.commit_id;
+  const position =
+    baseSha && reviewCommitSha
+      ? {
+          range: {
+            base: createReviewCommitRevision(baseSha),
+            head: createReviewCommitRevision(reviewCommitSha),
+          },
+        }
+      : undefined;
+  if (lineNumber == null && rootComment.subject_type === 'file') {
     return {
       anchor: 'file',
       author: {
@@ -380,9 +400,12 @@ const normalizeGitHubReviewComment = (comment) => {
         url: comment.user?.html_url,
       },
       body: comment.body,
-      filePath: comment.path,
+      filePath: rootComment.path,
       id: `github:${comment.id}`,
-      threadId: String(comment.in_reply_to_id || comment.id),
+      ...(position ? { position } : {}),
+      threadId: String(
+        rootComment === comment ? comment.in_reply_to_id || comment.id : rootComment.id,
+      ),
       submittedAt: comment.created_at,
       url: comment.html_url,
     };
@@ -391,10 +414,10 @@ const normalizeGitHubReviewComment = (comment) => {
     return null;
   }
 
-  const side = fromGitHubReviewSide(comment.side);
-  const startLineNumber = firstNumber(comment.start_line, comment.original_start_line);
-  const startSide = isGitHubReviewSide(comment.start_side)
-    ? fromGitHubReviewSide(comment.start_side)
+  const side = fromGitHubReviewSide(rootComment.side);
+  const startLineNumber = firstNumber(rootComment.start_line, rootComment.original_start_line);
+  const startSide = isGitHubReviewSide(rootComment.start_side)
+    ? fromGitHubReviewSide(rootComment.start_side)
     : undefined;
   const hasRange =
     startLineNumber != null && (startLineNumber !== lineNumber || (startSide ?? side) !== side);
@@ -406,14 +429,17 @@ const normalizeGitHubReviewComment = (comment) => {
       url: comment.user?.html_url,
     },
     body: comment.body,
-    filePath: comment.path,
+    filePath: rootComment.path,
     id: `github:${comment.id}`,
-    ...(typeof comment.line !== 'number' ? { isOutdated: true } : {}),
+    ...(typeof rootComment.line !== 'number' ? { isOutdated: true } : {}),
     lineNumber,
+    ...(position ? { position } : {}),
     side,
     ...(hasRange ? { startLineNumber } : {}),
     ...(hasRange && startSide != null && startSide !== side ? { startSide } : {}),
-    threadId: String(comment.in_reply_to_id || comment.id),
+    threadId: String(
+      rootComment === comment ? comment.in_reply_to_id || comment.id : rootComment.id,
+    ),
     submittedAt: comment.created_at,
     url: comment.html_url,
   };
@@ -436,12 +462,56 @@ const collectResolvedReviewCommentIds = (threads) => {
   return ids;
 };
 
-/** @param {ReadonlyArray<GitHubReviewComment>} comments @param {ReadonlySet<number>} resolvedCommentIds */
-const selectUnresolvedReviewComments = (comments, resolvedCommentIds) =>
-  comments
+/**
+ * @param {ReadonlyArray<GitHubReviewComment>} comments
+ * @param {ReadonlySet<number>} resolvedCommentIds
+ * @param {string} [baseSha]
+ */
+const selectUnresolvedReviewComments = (comments, resolvedCommentIds, baseSha) => {
+  const byId = new Map(comments.map((comment) => [comment.id, comment]));
+  return comments
     .filter((comment) => !resolvedCommentIds.has(comment.id))
-    .map(normalizeGitHubReviewComment)
+    .map((comment) => {
+      const root = byId.get(comment.in_reply_to_id) || comment;
+      return normalizeGitHubReviewComment(comment, root, baseSha);
+    })
     .filter(Boolean);
+};
+
+/** @param {GitHubReviewComment} comment @param {'issue' | 'review'} kind */
+const normalizeGitHubGeneralComment = (comment, kind) => {
+  if (!comment?.body || typeof comment.id !== 'number') {
+    return null;
+  }
+  return {
+    author: {
+      avatarUrl: comment.user?.avatar_url,
+      login: comment.user?.login || 'GitHub user',
+      url: comment.user?.html_url,
+    },
+    body: comment.body,
+    id: `github:${kind}:${comment.id}`,
+    submittedAt: comment.submitted_at || comment.created_at,
+    url: comment.html_url,
+  };
+};
+
+/**
+ * @param {ReadonlyArray<GitHubReviewComment>} issueComments
+ * @param {ReadonlyArray<GitHubReviewComment>} reviews
+ */
+const selectGitHubGeneralCommentThreads = (issueComments, reviews) =>
+  [
+    ...issueComments.map((comment) => normalizeGitHubGeneralComment(comment, 'issue')),
+    ...reviews
+      .filter((review) => review.state !== 'PENDING')
+      .map((review) => normalizeGitHubGeneralComment(review, 'review')),
+  ]
+    .filter(Boolean)
+    .sort((left, right) =>
+      String(left.submittedAt || '').localeCompare(String(right.submittedAt || '')),
+    )
+    .map((comment) => ({ comments: [comment], id: comment.id }));
 
 const RESOLVED_REVIEW_THREADS_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -504,7 +574,7 @@ const readResolvedReviewCommentIds = async (repoRoot, pullRequest) => {
 };
 
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest */
-const readPullRequestComments = async (repoRoot, pullRequest) => {
+const readPullRequestComments = async (repoRoot, pullRequest, baseSha) => {
   const [pages, resolvedCommentIds] = await Promise.all([
     ghApi(repoRoot, [
       '--paginate',
@@ -513,7 +583,24 @@ const readPullRequestComments = async (repoRoot, pullRequest) => {
     ]).then((output) => JSON.parse(output)),
     readResolvedReviewCommentIds(repoRoot, pullRequest),
   ]);
-  return selectUnresolvedReviewComments(pages.flat(), resolvedCommentIds);
+  return selectUnresolvedReviewComments(pages.flat(), resolvedCommentIds, baseSha);
+};
+
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
+const readPullRequestGeneralComments = async (repoRoot, pullRequest) => {
+  const [issuePages, reviewPages] = await Promise.all([
+    ghApi(repoRoot, [
+      '--paginate',
+      '--slurp',
+      `repos/${pullRequest.owner}/${pullRequest.repo}/issues/${pullRequest.number}/comments?per_page=100`,
+    ]).then((output) => JSON.parse(output)),
+    ghApi(repoRoot, [
+      '--paginate',
+      '--slurp',
+      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/reviews?per_page=100`,
+    ]).then((output) => JSON.parse(output)),
+  ]);
+  return selectGitHubGeneralCommentThreads(issuePages.flat(), reviewPages.flat());
 };
 
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<Array<GitHubCommit>>} */
@@ -652,12 +739,14 @@ const readPullRequestReviewComments = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const pullRequest = parseGitHubPullRequestUrl(source.url);
   await assertPullRequestMatchesRepository(repoRoot, pullRequest);
-  const comments = await readPullRequestComments(repoRoot, pullRequest);
-  const metadata = await readPullRequestMetadata(repoRoot, pullRequest);
-  if (source.headSha && metadata.head?.sha !== source.headSha) {
-    throw new Error('The pull request head changed. Refresh before loading review comments.');
-  }
-  return comments;
+  const { range } = await readPullRequestHydrationSnapshot(repoRoot, pullRequest, {
+    expectedHeadSha: source.headSha,
+  });
+  const [reviewComments, generalComments] = await Promise.all([
+    readPullRequestComments(repoRoot, pullRequest, range.baseSha),
+    readPullRequestGeneralComments(repoRoot, pullRequest),
+  ]);
+  return { generalComments, reviewComments };
 };
 
 const { submitPullRequestComment, submitPullRequestReview } = createGitHubReviewMutations({
@@ -674,6 +763,7 @@ module.exports = {
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSource,
   listPullRequestHistory,
+  normalizeGitHubGeneralComment,
   normalizeGitHubCommit,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
@@ -681,6 +771,7 @@ module.exports = {
   parseGitHubPullRequestUrl,
   readPullRequestReviewComments,
   readPullRequestState,
+  selectGitHubGeneralCommentThreads,
   selectPullRequestRemote,
   selectUnresolvedReviewComments,
   submitPullRequestComment,

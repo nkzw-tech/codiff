@@ -84,7 +84,11 @@ type GitStateModule = {
     source?: ReviewSource,
   ) => Promise<{ entries: ReadonlyArray<unknown>; root: string }>;
   normalizeGitHubPullRequestCommit: (commit: Record<string, unknown>) => unknown;
-  normalizeGitHubReviewComment: (comment: Record<string, unknown>) => unknown;
+  normalizeGitHubReviewComment: (
+    comment: Record<string, unknown>,
+    rootComment?: Record<string, unknown>,
+    baseSha?: string,
+  ) => unknown;
   normalizePullRequestComment: (comment: Record<string, unknown>) => Record<string, unknown>;
   parseGitHubPullRequestUrl: (value: string) => {
     number: number;
@@ -115,6 +119,7 @@ type GitStateModule = {
   selectUnresolvedReviewComments: (
     comments: ReadonlyArray<Record<string, unknown>>,
     resolvedCommentIds: ReadonlySet<number>,
+    baseSha?: string,
   ) => Array<Record<string, unknown>>;
   submitPullRequestComment: (
     launchPath: string,
@@ -178,6 +183,13 @@ const {
   submitPullRequestComment,
   validateRepositoryPath,
 } = require('../../electron/git-state.cjs') as GitStateModule;
+const { selectGitHubGeneralCommentThreads } =
+  require('../../electron/git-state/pull-request.cjs') as {
+    selectGitHubGeneralCommentThreads: (
+      issueComments: ReadonlyArray<Record<string, unknown>>,
+      reviews: ReadonlyArray<Record<string, unknown>>,
+    ) => Array<Record<string, unknown>>;
+  };
 const {
   getRepositoryWatcherInitialSnapshot,
   readRepositoryWatcherSnapshot: readRepositoryChangeSignature,
@@ -923,6 +935,159 @@ test('normalizeGitHubReviewComment keeps replies in their root thread', () => {
       user: { login: 'reviewer' },
     }),
   ).toMatchObject({ id: 'github:2', threadId: '1' });
+});
+
+test('selectUnresolvedReviewComments makes replies inherit the root anchor and immutable range', () => {
+  const baseSha = 'a'.repeat(40);
+  const rootCommitSha = 'b'.repeat(40);
+  const comments = [
+    {
+      body: 'Root.',
+      commit_id: rootCommitSha,
+      id: 1,
+      line: 8,
+      path: 'src/new-name.ts',
+      side: 'LEFT',
+      start_line: 5,
+      start_side: 'LEFT',
+      user: { login: 'root-reviewer' },
+    },
+    {
+      body: 'Reply with misleading coordinates.',
+      commit_id: 'c'.repeat(40),
+      id: 2,
+      in_reply_to_id: 1,
+      line: 99,
+      path: 'src/reply-name.ts',
+      side: 'RIGHT',
+      user: { login: 'reply-reviewer' },
+    },
+  ];
+
+  expect(selectUnresolvedReviewComments(comments, new Set(), baseSha)).toEqual([
+    expect.objectContaining({
+      filePath: 'src/new-name.ts',
+      lineNumber: 8,
+      position: {
+        range: {
+          base: expect.objectContaining({ sha: baseSha }),
+          head: expect.objectContaining({ sha: rootCommitSha }),
+        },
+      },
+      side: 'deletions',
+      startLineNumber: 5,
+      threadId: '1',
+    }),
+    expect.objectContaining({
+      body: 'Reply with misleading coordinates.',
+      filePath: 'src/new-name.ts',
+      lineNumber: 8,
+      side: 'deletions',
+      startLineNumber: 5,
+      threadId: '1',
+    }),
+  ]);
+});
+
+test('normalizeGitHubReviewComment uses original commits and coordinates for outdated roots', () => {
+  const baseSha = 'a'.repeat(40);
+  const originalCommitSha = 'b'.repeat(40);
+  const normalized = normalizeGitHubReviewComment(
+    {
+      body: 'This belongs to the old side.',
+      commit_id: 'c'.repeat(40),
+      id: 7,
+      line: null,
+      original_commit_id: originalCommitSha,
+      original_line: 12,
+      original_start_line: 10,
+      path: 'src/renamed.ts',
+      side: 'LEFT',
+      start_side: 'LEFT',
+      user: { login: 'reviewer' },
+    },
+    undefined,
+    baseSha,
+  );
+
+  expect(normalized).toMatchObject({
+    filePath: 'src/renamed.ts',
+    isOutdated: true,
+    lineNumber: 12,
+    position: {
+      range: {
+        base: { sha: baseSha },
+        head: { sha: originalCommitSha },
+      },
+    },
+    side: 'deletions',
+    startLineNumber: 10,
+  });
+});
+
+test('normalizeGitHubReviewComment anchors file comments to the review commit', () => {
+  const baseSha = 'a'.repeat(40);
+  const headSha = 'b'.repeat(40);
+  expect(
+    normalizeGitHubReviewComment(
+      {
+        body: 'Review the whole file.',
+        commit_id: headSha,
+        id: 41,
+        path: 'src/file.ts',
+        subject_type: 'file',
+        user: { login: 'reviewer' },
+      },
+      undefined,
+      baseSha,
+    ),
+  ).toMatchObject({
+    anchor: 'file',
+    position: {
+      range: {
+        base: { sha: baseSha },
+        head: { sha: headSha },
+      },
+    },
+  });
+});
+
+test('selectGitHubGeneralCommentThreads includes issue comments and submitted review bodies', () => {
+  expect(
+    selectGitHubGeneralCommentThreads(
+      [
+        {
+          body: 'Issue-level context.',
+          created_at: '2026-05-18T00:00:00Z',
+          html_url: 'https://github.test/issue-comment',
+          id: 1,
+          user: { login: 'issue-author' },
+        },
+      ],
+      [
+        {
+          body: 'Submitted review summary.',
+          html_url: 'https://github.test/review',
+          id: 2,
+          state: 'COMMENTED',
+          submitted_at: '2026-05-19T00:00:00Z',
+          user: { login: 'review-author' },
+        },
+        { body: 'Draft review.', id: 3, state: 'PENDING', user: { login: 'draft-author' } },
+      ],
+    ),
+  ).toEqual([
+    {
+      comments: [expect.objectContaining({ body: 'Issue-level context.', id: 'github:issue:1' })],
+      id: 'github:issue:1',
+    },
+    {
+      comments: [
+        expect.objectContaining({ body: 'Submitted review summary.', id: 'github:review:2' }),
+      ],
+      id: 'github:review:2',
+    },
+  ]);
 });
 
 test('normalizeGitHubReviewComment flags comments anchored to outdated lines', () => {

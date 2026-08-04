@@ -1,5 +1,6 @@
 import type { MarkdownEditorHandle } from '@nkzw/mdx-editor';
 import { frontmatterPlugin, imagePlugin } from '@nkzw/mdx-editor/core';
+import { ArrowSquareOutIcon as ArrowSquareOut } from '@phosphor-icons/react/ArrowSquareOut';
 import { CaretDownIcon as CaretDown } from '@phosphor-icons/react/CaretDown';
 import { ChatCircleIcon as ChatCircle } from '@phosphor-icons/react/ChatCircle';
 import { CheckIcon as Check } from '@phosphor-icons/react/Check';
@@ -1650,7 +1651,7 @@ function ReviewCommentEditor({
   );
   return (
     <Fragment>
-      <div className="review-comment">
+      <div className="review-comment" data-review-comment-id={comment.id}>
         {comment.author ? (
           <ReviewAvatar author={comment.author} />
         ) : (
@@ -1668,7 +1669,28 @@ function ReviewCommentEditor({
                 : ''
             }${comment.isReadOnly ? ' read-only' : ''}`}
           >
-            <strong>{displayName}</strong>
+            {comment.author?.url ? (
+              <a href={comment.author.url} rel="noreferrer" target="_blank">
+                <strong>{displayName}</strong>
+              </a>
+            ) : (
+              <strong>{displayName}</strong>
+            )}
+            {comment.submittedAt ? (
+              <time dateTime={comment.submittedAt}>{comment.submittedAt}</time>
+            ) : null}
+            {comment.url ? (
+              <a
+                aria-label="Open review comment on provider"
+                className="review-comment-permalink"
+                href={comment.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                View comment
+                <ArrowSquareOut aria-hidden size={12} />
+              </a>
+            ) : null}
             {editingExistingComment ? (
               <span className="general-comment-edit-actions">
                 <button
@@ -2086,6 +2108,110 @@ function ReviewCommentThreadGroup({
   );
 }
 
+export function ReviewCommentThreadList({
+  agentId,
+  agentLabel,
+  comments,
+  focusCommentId,
+  focusCommentRequest,
+  identity,
+  keymap,
+  onAskCodex,
+  onCommentDraftChange,
+  onCreateReply,
+  onDeleteComment,
+  onResolveThread,
+  onSaveCommentEdit,
+  onSubmitComment,
+  onUpdateComment,
+  supportsReviewCommentActions,
+}: {
+  agentId: 'codex' | 'claude' | 'opencode' | 'pi';
+  agentLabel: string;
+  comments: ReadonlyArray<ReviewComment>;
+  focusCommentId: string | null;
+  focusCommentRequest: number;
+  identity: GitIdentity | null;
+  keymap: CodiffKeymap;
+  onAskCodex?: (comment: ReviewComment) => void;
+  onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
+  onCreateReply: (threadId: string, comment: ReviewComment) => void;
+  onDeleteComment: (commentId: string) => void;
+  onResolveThread?: (threadId: string, resolved: boolean) => Promise<void> | void;
+  onSaveCommentEdit: (commentId: string, body: string) => Promise<void> | void;
+  onSubmitComment: (commentId: string) => void;
+  onUpdateComment: (commentId: string, body: string) => void;
+  supportsReviewCommentActions: boolean;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const focusEditorRef = useRef<MarkdownEditorHandle | null>(null);
+  const setFocusEditorRef = useCallback((editor: MarkdownEditorHandle | null) => {
+    focusEditorRef.current = editor;
+  }, []);
+
+  useEffect(() => {
+    if (!focusCommentId) {
+      return;
+    }
+    const element = [
+      ...(containerRef.current?.querySelectorAll<HTMLElement>('[data-review-comment-id]') ?? []),
+    ].find((candidate) => candidate.dataset.reviewCommentId === focusCommentId);
+    element?.scrollIntoView?.({ block: 'center' });
+    focusEditorRef.current?.focus({ preventScroll: true });
+  }, [focusCommentId, focusCommentRequest]);
+
+  return (
+    <div className="missing-review-comment-list" ref={containerRef}>
+      {groupReviewCommentsByThread(comments).map((group) => {
+        const root = group.comments[0]!;
+        return (
+          <section className="missing-review-comment-thread" key={group.key}>
+            <header className="missing-review-comment-location">
+              <strong>{root.filePath}</strong>
+              <span>{getReviewCommentLineLabel(root)}</span>
+              {root.isOutdated ? <span>Outdated</span> : null}
+              <span>Code region unavailable</span>
+            </header>
+            <ReviewCommentThreadGroup
+              agentId={agentId}
+              agentLabel={agentLabel}
+              comments={group.comments}
+              focusCommentId={focusCommentId}
+              focusCommentRequest={focusCommentRequest}
+              focusEditorRef={setFocusEditorRef}
+              identity={identity}
+              keymap={keymap}
+              onAskCodex={onAskCodex}
+              onCommentBlur={(comment, body) => {
+                onCommentDraftChange?.(null);
+                if (!isReviewDraft(comment)) {
+                  return;
+                }
+                if (body.trim()) {
+                  onUpdateComment(comment.id, body);
+                } else {
+                  onDeleteComment(comment.id);
+                }
+              }}
+              onCommentDraftChange={onCommentDraftChange}
+              onCommentFocus={(comment) =>
+                onCommentDraftChange?.({ body: comment.body, id: comment.id })
+              }
+              onDeleteComment={onDeleteComment}
+              onReplyToThread={onCreateReply}
+              onResolveThread={onResolveThread}
+              onSaveCommentEdit={onSaveCommentEdit}
+              onSubmitComment={onSubmitComment}
+              onUpdateComment={onUpdateComment}
+              supportsReviewCommentActions={supportsReviewCommentActions}
+            />
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function ReviewAnnotation({
   agentId,
   agentLabel,
@@ -2141,8 +2267,14 @@ function ReviewAnnotation({
     focusCommentId != null && annotationComments.some((comment) => comment.id === focusCommentId);
 
   useEffect(() => {
-    if (hasFocusedComment) {
-      focusEditorRef.current?.focus();
+    if (!hasFocusedComment) {
+      return;
+    }
+    threadRef.current?.scrollIntoView?.({ block: 'center' });
+    if (focusEditorRef.current) {
+      focusEditorRef.current.focus();
+    } else {
+      threadRef.current?.focus({ preventScroll: true });
     }
   }, [focusCommentId, focusCommentRequest, hasFocusedComment]);
 
@@ -2171,7 +2303,7 @@ function ReviewAnnotation({
   const commentGroups = groupReviewCommentsByThread(annotationComments);
 
   return (
-    <div className="review-comment-thread" ref={threadRef}>
+    <div className="review-comment-thread" ref={threadRef} tabIndex={-1}>
       {commentGroups.map((group) => (
         <ReviewCommentThreadGroup
           agentId={agentId}

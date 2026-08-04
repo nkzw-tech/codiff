@@ -7,7 +7,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
 import { createDefaultConfig } from '../config/defaults.ts';
-import { ReviewSurface, type ReviewCommenting } from '../ReviewSurface.tsx';
+import { ReviewSurface } from '../ReviewSurface.tsx';
 import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { waitFor } from './helpers/react.tsx';
@@ -21,6 +21,7 @@ reactActEnvironment.ResizeObserver ??= class ResizeObserver {
   unobserve() {}
 };
 HTMLElement.prototype.scrollBy ??= function scrollBy() {};
+HTMLElement.prototype.scrollIntoView ??= function scrollIntoView() {};
 HTMLElement.prototype.scrollTo ??= function scrollTo() {};
 
 const createMarkdownFile = (path = 'README.md') =>
@@ -61,7 +62,7 @@ const commenting = {
   onSubmitGeneralComment: async () => {},
   onUpdateComment: async () => {},
   onUpdateGeneralComment: async () => {},
-} satisfies ReviewCommenting;
+};
 
 test('review top bar renders its leading control at the far left', async () => {
   const container = document.createElement('div');
@@ -220,6 +221,158 @@ test('shared review surface owns configured search and portable commands', async
     expect(commandBar?.textContent).not.toContain('Open File in Editor');
     expect(commandBar?.textContent).not.toContain('Open Config File');
   } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('review threads expose provider provenance and code status navigates to the current diff', async () => {
+  const firstFile = createChangedFile('src/first.ts');
+  const file = createChangedFile('src/thread.ts', { kind: 'pull-request' });
+  const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+  const source = {
+    number: 31,
+    projectPath: 'example-org/example-repo',
+    provider: 'gitlab',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/example-org/example-repo/-/merge_requests/31',
+  } as const;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: 'test',
+    exportedAt: '2026-07-29T00:00:00.000Z',
+    files: [firstFile, file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: {
+      generalComments: [
+        {
+          comments: [
+            {
+              author: {
+                login: 'overview-reviewer',
+                name: 'Overview Reviewer',
+                url: 'https://gitlab.example.com/overview-reviewer',
+              },
+              body: 'Overview feedback.',
+              id: 'overview-comment',
+              submittedAt: '2026-07-29T00:00:00.000Z',
+              url: `${source.url}#note_1`,
+            },
+          ],
+          id: 'overview-thread',
+        },
+      ],
+      root: '/repo',
+      source,
+    },
+    reviewComments: [
+      {
+        author: {
+          login: 'code-reviewer',
+          name: 'Code Reviewer',
+          url: 'https://gitlab.example.com/code-reviewer',
+        },
+        body: 'This line changed later.',
+        filePath: file.path,
+        id: 'outdated-comment',
+        isOutdated: true,
+        lineNumber: 1,
+        position: { range: file.sections[0]!.range! },
+        sectionId: file.sections[0]!.id,
+        side: 'additions' as const,
+        submittedAt: '2026-07-29T00:01:00.000Z',
+        url: `${source.url}#note_2`,
+      },
+    ],
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the change.',
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'feature', root: '/repo' },
+      source,
+      support: [],
+      title: 'Review',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            comments: {
+              authoring: {},
+              destination: 'provider',
+              inline: {},
+            },
+            desktop: { collapsed: new Set([file.path]) },
+          }}
+          initialMode="comments"
+          providerLabel="GitLab"
+          snapshot={snapshot}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Overview comments');
+    expect(container.textContent).toContain('Inline review comments');
+    expect(
+      [...container.querySelectorAll('[role="tab"]')]
+        .find((tab) => tab.textContent?.includes('Comments'))
+        ?.getAttribute('aria-label'),
+    ).toBe('Comments (2)');
+    expect(
+      container.querySelector(`a[href="https://gitlab.example.com/overview-reviewer"]`),
+    ).not.toBeNull();
+    const overviewPermalink = container.querySelector<HTMLAnchorElement>(
+      `a[href="${source.url}#note_1"]`,
+    );
+    expect(overviewPermalink?.textContent).toContain('View on GitLab');
+
+    const outdatedStatus = [...container.querySelectorAll('span')].find(
+      ({ textContent }) => textContent === 'Outdated',
+    );
+    expect(outdatedStatus?.getAttribute('role')).toBeNull();
+    const inlineEntry = [
+      ...container.querySelectorAll<HTMLButtonElement>('.sidebar-comment-entry'),
+    ].find((entry) => entry.title === 'This line changed later.');
+    expect(inlineEntry).not.toBeUndefined();
+    await act(async () => inlineEntry?.click());
+    await waitFor(() => expect(container.querySelector('.file-tree-shell')).not.toBeNull());
+    await waitFor(() =>
+      expect(
+        container.querySelector('.codiff-file-header.selected .codiff-file-path')?.textContent,
+      ).toBe(file.path),
+    );
+    const targetHeader = [...container.querySelectorAll<HTMLElement>('.codiff-file-header')].find(
+      (header) => header.textContent?.includes(file.path),
+    );
+    expect(
+      targetHeader
+        ?.querySelector<HTMLElement>('.codiff-header-toggle')
+        ?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('review-comment-thread')).toBe(true),
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+  } finally {
+    scrollIntoView.mockRestore();
     await act(async () => root.unmount());
     container.remove();
   }

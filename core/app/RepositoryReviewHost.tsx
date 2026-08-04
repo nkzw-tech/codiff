@@ -21,10 +21,13 @@ import {
 import { reconcileRepositoryRefresh } from '../lib/repository-refresh.ts';
 import type { RepositoryReviewBootstrap } from '../lib/repository-review-bootstrap.ts';
 import { resolveReviewCommandTarget } from '../lib/review-command-target.ts';
+import { diffRangesMatch } from '../lib/review-comment-target.ts';
 import {
   getReviewCommentsFromState,
+  isProviderReviewCommentPosition,
   isReviewDraft,
   mergeReviewComments,
+  reviewCommentRegionSectionPrefix,
   toProviderSubmittedReviewComment,
   toPullRequestExistingReviewComment,
 } from '../lib/review-comments.ts';
@@ -64,6 +67,7 @@ import type {
   NarrativeWalkthrough,
   NarrativeWalkthroughResult,
   OpenReviewSourceKind,
+  PullRequestExistingReviewComment,
   RepositoryState,
   ReviewSource,
   DiffSection,
@@ -272,6 +276,71 @@ const mergeStateReviewComments = (
   currentComments: ReadonlyArray<ReviewComment>,
 ) => mergeReviewComments(getReviewCommentsFromState(state), currentComments.filter(isReviewDraft));
 
+const getReviewCommentRegionKey = (comment: PullRequestExistingReviewComment) => {
+  const position = comment.position;
+  if (!position || !isProviderReviewCommentPosition(position)) {
+    return null;
+  }
+  return `${encodeURIComponent(comment.filePath)}:${position.range.base.sha}:${position.range.head.sha}`;
+};
+
+const createReviewCommentRegionFile = (
+  state: RepositoryState,
+  comment: PullRequestExistingReviewComment,
+): ChangedFile | null => {
+  const key = getReviewCommentRegionKey(comment);
+  const position = comment.position;
+  if (
+    !key ||
+    !position ||
+    (comment.anchor !== 'file' && (comment.lineNumber == null || comment.side == null))
+  ) {
+    return null;
+  }
+  const currentFile = state.files.find((file) => file.path === comment.filePath);
+  if (currentFile?.sections.some((section) => diffRangesMatch(section.range, position.range))) {
+    return null;
+  }
+
+  const id = `${reviewCommentRegionSectionPrefix}${key}`;
+  return {
+    fingerprint: id,
+    ...(currentFile?.oldPath ? { oldPath: currentFile.oldPath } : {}),
+    path: comment.filePath,
+    sections: [
+      {
+        binary: false,
+        id,
+        kind: 'pull-request',
+        loadState: 'deferred',
+        patch: '',
+        range: position.range,
+        summary: {
+          canLoad: true,
+          reason: 'Loading the exact code region for this review thread.',
+        },
+      },
+    ],
+    status: currentFile?.status ?? 'modified',
+  };
+};
+
+const mergeReviewCommentRegionFiles = (
+  files: ReadonlyArray<ChangedFile>,
+  regions: ReadonlyArray<ChangedFile>,
+) => {
+  const remaining = new Map(regions.map((file) => [file.path, file]));
+  const merged = files.map((file) => {
+    const region = remaining.get(file.path);
+    if (!region) {
+      return file;
+    }
+    remaining.delete(file.path);
+    return { ...file, sections: [...file.sections, ...region.sections] };
+  });
+  return [...merged, ...remaining.values()];
+};
+
 export type RepositoryReviewHostProps = {
   bootstrap: RepositoryReviewBootstrap;
   config: CodiffConfig;
@@ -344,6 +413,10 @@ export function RepositoryReviewHost({
     ...initialState,
     files: sortFiles(initialState.files),
   }));
+  const [reviewCommentRegions, setReviewCommentRegions] = useState<{
+    files: ReadonlyArray<ChangedFile>;
+    sourceKey: string;
+  } | null>(null);
   const [updateStatus, setUpdateStatus] = useState<CodiffUpdateStatus | null>(null);
   const historyRequestRef = useRef(0);
   const historySourceRef = useRef<ReviewSource | null>(null);
@@ -480,7 +553,7 @@ export function RepositoryReviewHost({
 
       void window.codiff
         .getReviewComments(requestedState.source, requestId)
-        .then((loadedComments) => {
+        .then(({ generalComments, reviewComments: loadedComments }) => {
           if (!isCurrentState()) {
             return;
           }
@@ -490,6 +563,7 @@ export function RepositoryReviewHost({
           }
           const hydratedState = {
             ...current,
+            generalComments,
             reviewComments: loadedComments,
             reviewCommentsError: undefined,
             reviewCommentsLoadState: 'loaded' as const,
@@ -862,6 +936,43 @@ export function RepositoryReviewHost({
         return Promise.reject(new Error(`Cannot load diff contents for '${file.path}'.`));
       }
       return reviewContentRun.resolveSectionContents(file, section);
+    },
+    [reviewContentRun],
+  );
+
+  const loadReviewCommentRegion = useCallback(
+    async (comment: PullRequestExistingReviewComment) => {
+      const current = stateRef.current;
+      if (!current || !reviewContentRun) {
+        return;
+      }
+      const file = createReviewCommentRegionFile(current, comment);
+      if (!file) {
+        return;
+      }
+      const section = file.sections[0]!;
+      const loadedFile = {
+        ...file,
+        sections: [
+          hydrateSectionFromContents(
+            file,
+            section,
+            await reviewContentRun.resolveSectionContents(file, section),
+          ),
+        ],
+      };
+      const sourceKey = `${current.root}:${getSourceRevisionKey(current.source)}`;
+      const latest = stateRef.current;
+      if (!latest || `${latest.root}:${getSourceRevisionKey(latest.source)}` !== sourceKey) {
+        return;
+      }
+      setReviewCommentRegions((regions) => ({
+        files:
+          regions?.sourceKey === sourceKey
+            ? mergeReviewCommentRegionFiles(regions.files, [loadedFile])
+            : [loadedFile],
+        sourceKey,
+      }));
     },
     [reviewContentRun],
   );
@@ -1651,10 +1762,17 @@ export function RepositoryReviewHost({
         ? 'failed'
         : 'idle';
   const walkthroughAgent = launchOptions.agentBackend ?? config.settings.agentBackend;
+  const snapshotState =
+    reviewCommentRegions?.sourceKey === `${state.root}:${getSourceRevisionKey(state.source)}`
+      ? {
+          ...state,
+          files: mergeReviewCommentRegionFiles(state.files, reviewCommentRegions.files),
+        }
+      : state;
   const snapshot = {
     ...buildSharedReviewSnapshot({
       preferences,
-      state,
+      state: snapshotState,
       title,
       walkthrough:
         narrativeWalkthrough ?? createPlaceholderWalkthrough(state, title, walkthroughAgent),
@@ -1740,6 +1858,7 @@ export function RepositoryReviewHost({
           initialScrollTarget: surfaceInitialScrollTarget,
           itemVersionByKey,
           loadingSectionIds,
+          onLoadCommentRegion: loadReviewCommentRegion,
           onLoadSection: loadDiffSection,
           onRefreshMarkdown: refreshMarkdownFile,
           resolveImage,

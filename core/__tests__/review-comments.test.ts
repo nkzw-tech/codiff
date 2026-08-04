@@ -81,6 +81,7 @@ const createPullRequestState = (): RepositoryState => ({
           kind: 'pull-request',
           patch:
             'diff --git a/src/a.ts b/src/a.ts\n@@ -1,6 +1,6 @@\n one\n two\n three\n four\n five\n six\n',
+          range: providerPosition.range,
         },
       ],
       status: 'modified',
@@ -96,6 +97,7 @@ const createPullRequestState = (): RepositoryState => ({
       id: 'github:1',
       isOutdated: true,
       lineNumber: 5,
+      position: providerPosition,
       side: 'additions',
     },
     {
@@ -104,6 +106,7 @@ const createPullRequestState = (): RepositoryState => ({
       filePath: 'src/a.ts',
       id: 'github:2',
       lineNumber: 6,
+      position: providerPosition,
       side: 'additions',
     },
   ],
@@ -419,6 +422,7 @@ test('getReviewCommentsFromState preserves file-level GitLab anchors', () => {
       body: 'Review the file as a whole.',
       filePath: 'src/a.ts',
       id: 'gitlab:file',
+      position: providerPosition,
     },
   ];
 
@@ -429,6 +433,7 @@ test('getReviewCommentsFromState preserves file-level GitLab anchors', () => {
       filePath: 'src/a.ts',
       id: 'gitlab:file',
       isReadOnly: true,
+      position: providerPosition,
       resolvedSectionId: 'src/a.ts:pull-request:1',
     }),
   ]);

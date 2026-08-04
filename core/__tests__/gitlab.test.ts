@@ -18,6 +18,7 @@ const {
   createGitLabPosition,
   createMergeRequestFetchRefspecs,
   createMergeRequestSource,
+  normalizeGitLabGeneralDiscussion,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
   readMergeRequestReviewComments,
@@ -37,16 +38,24 @@ const {
     mergeRequest: Record<string, unknown>,
     metadata: Record<string, unknown>,
   ) => Record<string, unknown>;
+  normalizeGitLabGeneralDiscussion: (
+    discussion: Record<string, unknown>,
+    url: string,
+  ) => Record<string, unknown> | null;
   normalizeGitLabReviewComment: (
     note: Record<string, unknown>,
     url: string,
     threadId?: string,
+    rootNote?: Record<string, unknown>,
   ) => Record<string, unknown> | null;
   parseGitLabMergeRequestUrl: (url: string) => Record<string, unknown>;
   readMergeRequestReviewComments: (
     launchPath: string,
     source: Record<string, unknown>,
-  ) => Promise<ReadonlyArray<Record<string, unknown>>>;
+  ) => Promise<{
+    generalComments: ReadonlyArray<Record<string, unknown>>;
+    reviewComments: ReadonlyArray<Record<string, unknown>>;
+  }>;
   submitMergeRequestComment: (
     launchPath: string,
     request: {
@@ -376,6 +385,144 @@ describe('GitLab merge requests', () => {
     });
   });
 
+  test('makes GitLab replies inherit the root position, range, and thread identity', () => {
+    const root = {
+      author: { username: 'root-reviewer' },
+      body: 'Root.',
+      created_at: '2026-06-17T00:00:00Z',
+      id: 44,
+      position: {
+        base_sha: 'a'.repeat(40),
+        head_sha: 'b'.repeat(40),
+        line_range: {
+          end: { new_line: 14, old_line: null, type: 'new' },
+          start: { new_line: null, old_line: 10, type: 'old' },
+        },
+        new_line: 14,
+        new_path: 'src/new-name.ts',
+        old_line: 10,
+        old_path: 'src/old-name.ts',
+      },
+      resolvable: true,
+    };
+    const reply = {
+      author: { username: 'reply-reviewer' },
+      body: 'Reply with misleading coordinates.',
+      created_at: '2026-06-18T00:00:00Z',
+      id: 45,
+      position: {
+        new_line: 99,
+        new_path: 'src/reply.ts',
+        old_path: 'src/reply.ts',
+      },
+    };
+
+    expect(
+      normalizeGitLabReviewComment(
+        reply,
+        'https://gitlab.example.com/group/project/-/merge_requests/23',
+        'discussion-44',
+        root,
+      ),
+    ).toMatchObject({
+      body: 'Reply with misleading coordinates.',
+      canResolveThread: true,
+      filePath: 'src/new-name.ts',
+      lineNumber: 14,
+      position: {
+        range: {
+          base: { sha: 'a'.repeat(40) },
+          head: { sha: 'b'.repeat(40) },
+        },
+      },
+      side: 'additions',
+      startLineNumber: 10,
+      startSide: 'deletions',
+      threadId: 'discussion-44',
+    });
+  });
+
+  test('uses original GitLab positions for outdated old-side and file comments', () => {
+    const url = 'https://gitlab.example.com/group/project/-/merge_requests/23';
+    const oldSide = normalizeGitLabReviewComment(
+      {
+        author: { username: 'reviewer' },
+        body: 'Historical old-side comment.',
+        created_at: '2026-06-17T00:00:00Z',
+        id: 46,
+        original_position: {
+          base_sha: 'a'.repeat(40),
+          head_sha: 'b'.repeat(40),
+          new_path: 'src/new-name.ts',
+          old_line: 7,
+          old_path: 'src/old-name.ts',
+        },
+      },
+      url,
+    );
+    const file = normalizeGitLabReviewComment(
+      {
+        author: { username: 'reviewer' },
+        body: 'Historical file comment.',
+        created_at: '2026-06-17T00:00:00Z',
+        id: 47,
+        original_position: {
+          base_sha: 'a'.repeat(40),
+          head_sha: 'b'.repeat(40),
+          new_path: 'src/new-name.ts',
+          old_path: 'src/old-name.ts',
+          position_type: 'file',
+        },
+      },
+      url,
+    );
+
+    expect(oldSide).toMatchObject({
+      filePath: 'src/new-name.ts',
+      isOutdated: true,
+      lineNumber: 7,
+      side: 'deletions',
+    });
+    expect(file).toMatchObject({
+      anchor: 'file',
+      filePath: 'src/new-name.ts',
+      isOutdated: true,
+    });
+  });
+
+  test('maps positionless GitLab discussions to overview threads', () => {
+    expect(
+      normalizeGitLabGeneralDiscussion(
+        {
+          id: 'overview-thread',
+          notes: [
+            {
+              author: { username: 'author' },
+              body: 'Overview root.',
+              created_at: '2026-06-17T00:00:00Z',
+              id: 50,
+              resolvable: true,
+            },
+            {
+              author: { username: 'reply-author' },
+              body: 'Overview reply.',
+              created_at: '2026-06-18T00:00:00Z',
+              id: 51,
+            },
+          ],
+        },
+        'https://gitlab.example.com/group/project/-/merge_requests/23',
+      ),
+    ).toMatchObject({
+      canResolve: true,
+      comments: [
+        { body: 'Overview root.', id: 'gitlab:50' },
+        { body: 'Overview reply.', id: 'gitlab:51' },
+      ],
+      id: 'overview-thread',
+    });
+  });
+
   test('submits GitLab reviews with paginated diffs and JSON request bodies', async () => {
     await withFakeGitLab(async (repo, readCalls) => {
       const source = {
@@ -469,13 +616,16 @@ describe('GitLab merge requests', () => {
           type: 'pull-request',
           url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
         }),
-      ).resolves.toEqual([
-        expect.objectContaining({
-          body: 'Loaded discussion comment.',
-          id: 'gitlab:47',
-          threadId: 'discussion-from-provider',
-        }),
-      ]);
+      ).resolves.toEqual({
+        generalComments: [],
+        reviewComments: [
+          expect.objectContaining({
+            body: 'Loaded discussion comment.',
+            id: 'gitlab:47',
+            threadId: 'discussion-from-provider',
+          }),
+        ],
+      });
     });
   });
 

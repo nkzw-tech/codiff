@@ -33,6 +33,7 @@ import type {
   SharedWalkthroughSnapshot,
   ShareWalkthroughResult,
   SubmitPullRequestCommentRequest,
+  PullRequestGeneralCommentThread,
   PullRequestExistingReviewComment,
   RevisionContentBatchRequest,
   RevisionContentBatchResult,
@@ -83,7 +84,10 @@ declare global {
       getReviewComments: (
         source: Extract<ReviewSource, { type: 'pull-request' }>,
         requestId?: string,
-      ) => Promise<ReadonlyArray<PullRequestExistingReviewComment>>;
+      ) => Promise<{
+        generalComments: ReadonlyArray<PullRequestGeneralCommentThread>;
+        reviewComments: ReadonlyArray<PullRequestExistingReviewComment>;
+      }>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;

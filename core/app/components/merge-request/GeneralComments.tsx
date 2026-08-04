@@ -1,5 +1,7 @@
 import { MarkdownEditor, type MarkdownEditorHandle } from '@nkzw/mdx-editor';
 import useRelativeTime from '@nkzw/use-relative-time';
+import { ArrowSquareOutIcon as ArrowSquareOut } from '@phosphor-icons/react/ArrowSquareOut';
+import { CaretDownIcon as CaretDown } from '@phosphor-icons/react/CaretDown';
 import { ChatCircleIcon as ChatCircle } from '@phosphor-icons/react/ChatCircle';
 import { X } from 'lucide-react';
 import {
@@ -13,6 +15,8 @@ import {
 } from 'react';
 import { matchesShortcut } from '../../../config/keymap.ts';
 import type { CodiffKeymap } from '../../../config/types.ts';
+import type { RenderedSubmittedReviewComment } from '../../../lib/app-types.ts';
+import { getReviewCommentLineLabel } from '../../../lib/review-comments.ts';
 import type {
   GitIdentity,
   PullRequestGeneralComment,
@@ -94,10 +98,12 @@ export function ReadOnlyGeneralCommentCard({
   className = '',
   comment,
   focused = false,
+  permalinkLabel = 'View on provider',
 }: {
   className?: string;
   comment: PullRequestGeneralComment;
   focused?: boolean;
+  permalinkLabel?: string;
 }) {
   const displayName = getAuthorDisplayName(comment.author);
   const classes = ['review-comment', 'general-comment-card', focused ? 'focused' : '', className]
@@ -109,8 +115,25 @@ export function ReadOnlyGeneralCommentCard({
       <Avatar name={displayName} size="medium" url={comment.author.avatarUrl} />
       <div className="review-comment-body source-description-body">
         <div className="review-comment-header read-only general-comment-header">
-          <strong title={`@${comment.author.login}`}>{displayName}</strong>
+          {comment.author.url ? (
+            <a href={comment.author.url} rel="noreferrer" target="_blank">
+              <strong title={`@${comment.author.login}`}>{displayName}</strong>
+            </a>
+          ) : (
+            <strong title={`@${comment.author.login}`}>{displayName}</strong>
+          )}
           {comment.submittedAt ? <SubmittedAtTime submittedAt={comment.submittedAt} /> : null}
+          {comment.url ? (
+            <a
+              className="review-comment-permalink"
+              href={comment.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {permalinkLabel}
+              <ArrowSquareOut aria-hidden size={12} />
+            </a>
+          ) : null}
         </div>
         <ReadOnlyMarkdownView
           ariaLabel={`Comment by ${displayName}`}
@@ -140,6 +163,7 @@ function GeneralCommentCard({
   onDelete,
   onSaveEdit,
   onStartEdit,
+  permalinkLabel,
 }: {
   canDelete: boolean;
   canEdit: boolean;
@@ -155,6 +179,7 @@ function GeneralCommentCard({
   onDelete: (commentId: string) => void;
   onSaveEdit: () => void;
   onStartEdit: (comment: PullRequestGeneralComment) => void;
+  permalinkLabel: string;
 }) {
   const displayName = getAuthorDisplayName(comment.author);
   const canSaveEdit = editing && !editSubmitting && Boolean(editDraft.trim());
@@ -205,8 +230,26 @@ function GeneralCommentCard({
             canEdit || canDelete || editing ? ' with-comment-action' : ''
           }`}
         >
-          <strong title={`@${comment.author.login}`}>{displayName}</strong>
+          {comment.author.url ? (
+            <a href={comment.author.url} rel="noreferrer" target="_blank">
+              <strong title={`@${comment.author.login}`}>{displayName}</strong>
+            </a>
+          ) : (
+            <strong title={`@${comment.author.login}`}>{displayName}</strong>
+          )}
           {comment.submittedAt ? <SubmittedAtTime submittedAt={comment.submittedAt} /> : null}
+          {comment.url ? (
+            <a
+              aria-label="Open comment on provider"
+              className="review-comment-permalink"
+              href={comment.url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {permalinkLabel}
+              <ArrowSquareOut aria-hidden size={12} />
+            </a>
+          ) : null}
           {editing ? (
             <span className="general-comment-edit-actions">
               <button
@@ -305,6 +348,7 @@ function GeneralCommentThreadCard({
   onResolve,
   onSaveEdit,
   onStartEdit,
+  permalinkLabel,
   thread,
 }: {
   canDelete: boolean;
@@ -325,6 +369,7 @@ function GeneralCommentThreadCard({
   onResolve: (threadId: string, resolved: boolean) => Promise<void>;
   onSaveEdit: () => void;
   onStartEdit: (comment: PullRequestGeneralComment) => void;
+  permalinkLabel: string;
   thread: PullRequestGeneralCommentThread;
 }) {
   const [replyDraft, setReplyDraft] = useState('');
@@ -393,6 +438,7 @@ function GeneralCommentThreadCard({
           onDelete={onDelete}
           onSaveEdit={onSaveEdit}
           onStartEdit={onStartEdit}
+          permalinkLabel={permalinkLabel}
         />
       ))}
       {thread.canReply && canReply && !effectiveResolved && !resolving ? (
@@ -462,8 +508,7 @@ export function SidebarGeneralCommentList({
   if (comments.length === 0) {
     return (
       <div className="sidebar-comments-empty">
-        <strong>No comments yet</strong>
-        <span>Start the discussion in the main panel.</span>
+        <strong>No overview comments.</strong>
       </div>
     );
   }
@@ -490,6 +535,101 @@ export function SidebarGeneralCommentList({
                 <span>{displayName}</span>
               </span>
               {comment.submittedAt ? <SubmittedAtTime submittedAt={comment.submittedAt} /> : null}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function SidebarCommentSection({
+  children,
+  count,
+  title,
+}: {
+  children: ReactNode;
+  count: number;
+  title: string;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <section className="sidebar-comment-section">
+      <button
+        aria-expanded={expanded}
+        className="sidebar-comment-section-toggle"
+        onClick={() => setExpanded((value) => !value)}
+        type="button"
+      >
+        <span>
+          <strong>{title}</strong>
+          <small>{count}</small>
+        </span>
+        <CaretDown aria-hidden className={expanded ? '' : 'collapsed'} size={12} />
+      </button>
+      {expanded ? <div className="sidebar-comment-section-body">{children}</div> : null}
+    </section>
+  );
+}
+
+export function SidebarInlineReviewCommentList({
+  comments,
+  focusedCommentId,
+  onActivateComment,
+  permalinkLabel,
+}: {
+  comments: ReadonlyArray<RenderedSubmittedReviewComment>;
+  focusedCommentId: string | null;
+  onActivateComment: (commentId: string) => void;
+  permalinkLabel: string;
+}) {
+  if (comments.length === 0) {
+    return <div className="sidebar-comments-empty">No inline review comments.</div>;
+  }
+
+  return (
+    <div className="history-list sidebar-comment-list">
+      {comments.map((comment) => {
+        const displayName = getAuthorDisplayName(comment.author);
+        return (
+          <button
+            aria-current={comment.id === focusedCommentId ? 'true' : undefined}
+            className={`history-entry sidebar-comment-entry sidebar-inline-comment-entry${
+              comment.id === focusedCommentId ? ' selected' : ''
+            }`}
+            key={comment.id}
+            onClick={() => onActivateComment(comment.id)}
+            title={comment.body}
+            type="button"
+          >
+            <span className="sidebar-inline-comment-location">
+              <span title={comment.filePath}>{comment.filePath}</span>
+              <span>{getReviewCommentLineLabel(comment)}</span>
+            </span>
+            <span className="history-entry-subject">{getCommentPreview(comment.body)}</span>
+            <span className="history-entry-meta">
+              <span className="history-entry-author">
+                <Avatar name={displayName} size="small" url={comment.author.avatarUrl} />
+                <span>{displayName}</span>
+              </span>
+              {comment.submittedAt ? <SubmittedAtTime submittedAt={comment.submittedAt} /> : null}
+            </span>
+            <span className="sidebar-inline-comment-status">
+              {comment.canResolveThread || comment.isThreadResolved ? (
+                <span>{comment.isThreadResolved ? 'Resolved' : 'Open'}</span>
+              ) : null}
+              {comment.isOutdated ? <span>Outdated</span> : null}
+              {!comment.resolvedSectionId ? <span>Location unavailable</span> : null}
+              {comment.url ? (
+                <a
+                  href={comment.url}
+                  onClick={(event) => event.stopPropagation()}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {permalinkLabel}
+                </a>
+              ) : null}
             </span>
           </button>
         );
@@ -578,6 +718,7 @@ function GeneralCommentComposer({
 export function MergeRequestCommentsView({
   canComment,
   commenting,
+  commentPermalinkLabel,
   draft,
   editDraft,
   editError,
@@ -587,6 +728,7 @@ export function MergeRequestCommentsView({
   focusedCommentId,
   focusedCommentRequest,
   gitIdentity,
+  inlineCommentCount,
   keymap,
   onCancelEdit,
   onChangeDraft,
@@ -602,6 +744,7 @@ export function MergeRequestCommentsView({
 }: {
   canComment: boolean;
   commenting?: ReviewCommenting;
+  commentPermalinkLabel: string;
   draft: string;
   editDraft: string;
   editError: string | null;
@@ -611,6 +754,7 @@ export function MergeRequestCommentsView({
   focusedCommentId: string | null;
   focusedCommentRequest: number;
   gitIdentity: GitIdentity | null;
+  inlineCommentCount: number;
   keymap: CodiffKeymap;
   onCancelEdit: () => void;
   onChangeDraft: (draft: string) => void;
@@ -678,6 +822,7 @@ export function MergeRequestCommentsView({
               }
               onSaveEdit={onSaveEdit}
               onStartEdit={onStartEdit}
+              permalinkLabel={commentPermalinkLabel}
               thread={thread}
             />
           ))}
@@ -685,8 +830,14 @@ export function MergeRequestCommentsView({
       ) : (
         <div className="empty-state">
           <div className="empty-panel squircle">
-            <strong>No comments yet</strong>
-            <span>Add a comment to start the discussion.</span>
+            <strong>
+              {inlineCommentCount > 0 ? 'No overview comments yet' : 'No review comments yet'}
+            </strong>
+            <span>
+              {inlineCommentCount > 0
+                ? 'Inline review comments are available in Tree.'
+                : 'Add inline feedback from Tree to start the review.'}
+            </span>
           </div>
         </div>
       )}

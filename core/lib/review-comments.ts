@@ -118,9 +118,14 @@ export const isProviderReviewCommentPosition = (
 export const getReviewCommentRendererSectionId = (comment: ReviewComment) =>
   isReviewDraft(comment) ? comment.sectionId : comment.resolvedSectionId;
 
+export const reviewCommentRegionSectionPrefix = 'review-comment-region:';
+
+export const isReviewCommentRegionSection = (section: Pick<DiffSection, 'id'>) =>
+  section.id.startsWith(reviewCommentRegionSectionPrefix);
+
 export const isFileReviewComment = (
   comment: Pick<ReviewComment, 'anchor' | 'lineNumber' | 'side'>,
-) => comment.anchor === 'file' || comment.lineNumber == null || comment.side == null;
+) => comment.anchor === 'file';
 
 export const isLineReviewComment = (
   comment: ReviewComment,
@@ -173,6 +178,9 @@ export const getReviewCommentLineLabel = (
 ) => {
   if (isFileReviewComment(comment)) {
     return 'File';
+  }
+  if (comment.lineNumber == null || comment.side == null) {
+    return 'Location unavailable';
   }
   const startLineNumber = comment.startLineNumber;
   const startSide = getReviewCommentStartSide(comment);
@@ -532,6 +540,76 @@ const resolveReviewCommentSectionCandidates = (
         strategy,
       };
 
+const sectionContainsReviewCommentAnchor = (
+  file: ChangedFile,
+  section: DiffSection,
+  comment: Pick<ReviewComment, 'anchor' | 'lineNumber' | 'side' | 'startLineNumber' | 'startSide'>,
+  showWhitespace: boolean,
+) => {
+  if (isFileReviewComment(comment)) {
+    return true;
+  }
+  if (comment.lineNumber == null || comment.side == null) {
+    return false;
+  }
+
+  const line = comment.lineNumber;
+  const side = comment.side;
+  const startLine = comment.startLineNumber ?? line;
+  const startSide = comment.startSide ?? side;
+  const parsed = parseSectionDiffWithOptions(file, section, showWhitespace);
+  return parsed.hunks.some((hunk) => {
+    let oldLine = hunk.deletionStart;
+    let newLine = hunk.additionStart;
+    let hasStart = false;
+    let hasEnd = false;
+    for (const content of hunk.hunkContent) {
+      if (content.type === 'context') {
+        if (
+          (startSide === 'additions' &&
+            startLine >= newLine &&
+            startLine < newLine + content.lines) ||
+          (startSide === 'deletions' && startLine >= oldLine && startLine < oldLine + content.lines)
+        ) {
+          hasStart = true;
+        }
+        if (
+          (side === 'additions' && line >= newLine && line < newLine + content.lines) ||
+          (side === 'deletions' && line >= oldLine && line < oldLine + content.lines)
+        ) {
+          hasEnd = true;
+        }
+        oldLine += content.lines;
+        newLine += content.lines;
+        continue;
+      }
+      if (side === 'deletions' && line >= oldLine && line < oldLine + content.deletions) {
+        hasEnd = true;
+      }
+      if (
+        startSide === 'deletions' &&
+        startLine >= oldLine &&
+        startLine < oldLine + content.deletions
+      ) {
+        hasStart = true;
+      }
+      if (side === 'additions' && line >= newLine && line < newLine + content.additions) {
+        hasEnd = true;
+      }
+      if (
+        startSide === 'additions' &&
+        startLine >= newLine &&
+        startLine < newLine + content.additions
+      ) {
+        hasStart = true;
+      }
+      oldLine += content.deletions;
+      newLine += content.additions;
+    }
+    return hasStart && hasEnd;
+  });
+};
+
 export const resolveReviewCommentSection = (
   file: ChangedFile,
   comment: Pick<
@@ -543,7 +621,11 @@ export const resolveReviewCommentSection = (
   const positionedRange = comment.position?.range;
   if (positionedRange) {
     return resolveReviewCommentSectionCandidates(
-      file.sections.filter((candidate) => diffRangesMatch(candidate.range, positionedRange)),
+      file.sections.filter(
+        (candidate) =>
+          diffRangesMatch(candidate.range, positionedRange) &&
+          sectionContainsReviewCommentAnchor(file, candidate, comment, showWhitespace),
+      ),
       'position',
     );
   }
@@ -559,65 +641,9 @@ export const resolveReviewCommentSection = (
     return resolveReviewCommentSectionCandidates(file.sections, 'file');
   }
 
-  const side = comment.side ?? 'additions';
-  const line = comment.lineNumber ?? 1;
-  const startLine = comment.startLineNumber ?? line;
-  const startSide = comment.startSide ?? side;
-  const matchingSections = file.sections.filter((section) => {
-    const parsed = parseSectionDiffWithOptions(file, section, showWhitespace);
-    return parsed.hunks.some((hunk) => {
-      let oldLine = hunk.deletionStart;
-      let newLine = hunk.additionStart;
-      let hasStart = false;
-      let hasEnd = false;
-      for (const content of hunk.hunkContent) {
-        if (content.type === 'context') {
-          if (
-            (startSide === 'additions' &&
-              startLine >= newLine &&
-              startLine < newLine + content.lines) ||
-            (startSide === 'deletions' &&
-              startLine >= oldLine &&
-              startLine < oldLine + content.lines)
-          ) {
-            hasStart = true;
-          }
-          if (
-            (side === 'additions' && line >= newLine && line < newLine + content.lines) ||
-            (side === 'deletions' && line >= oldLine && line < oldLine + content.lines)
-          ) {
-            hasEnd = true;
-          }
-          oldLine += content.lines;
-          newLine += content.lines;
-          continue;
-        }
-        if (side === 'deletions' && line >= oldLine && line < oldLine + content.deletions) {
-          hasEnd = true;
-        }
-        if (
-          startSide === 'deletions' &&
-          startLine >= oldLine &&
-          startLine < oldLine + content.deletions
-        ) {
-          hasStart = true;
-        }
-        if (side === 'additions' && line >= newLine && line < newLine + content.additions) {
-          hasEnd = true;
-        }
-        if (
-          startSide === 'additions' &&
-          startLine >= newLine &&
-          startLine < newLine + content.additions
-        ) {
-          hasStart = true;
-        }
-        oldLine += content.deletions;
-        newLine += content.additions;
-      }
-      return hasStart && hasEnd;
-    });
-  });
+  const matchingSections = file.sections.filter((section) =>
+    sectionContainsReviewCommentAnchor(file, section, comment, showWhitespace),
+  );
   return resolveReviewCommentSectionCandidates(matchingSections, 'coordinates');
 };
 
@@ -684,7 +710,12 @@ export const getReviewCommentsFromState = (
 ): ReadonlyArray<RenderedSubmittedReviewComment> =>
   (state.reviewComments ?? []).map((comment) => {
     const file = state.files.find((candidate) => candidate.path === comment.filePath);
-    const section = file ? getReviewCommentSection(file, comment, false) : undefined;
+    const hasProviderPosition =
+      comment.position != null && isProviderReviewCommentPosition(comment.position);
+    const section =
+      file && (destination === 'share' || hasProviderPosition)
+        ? getReviewCommentSection(file, comment, false)
+        : undefined;
     const common = {
       author: comment.author,
       body: comment.body,

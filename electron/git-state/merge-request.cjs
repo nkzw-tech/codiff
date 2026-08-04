@@ -161,9 +161,15 @@ const readMergeRequestHydrationSnapshot = async (repoRoot, mergeRequest, options
   return snapshot;
 };
 
-/** @param {any} note @param {string} url @param {string} [threadId] */
-const normalizeGitLabReviewComment = (note, url, threadId) => {
-  const position = note.position || note.original_position;
+/** @param {string} sha */
+const createReviewCommitRevision = (sha) => ({
+  label: { kind: /** @type {const} */ ('commit'), text: sha.slice(0, 7) },
+  sha,
+});
+
+/** @param {any} note @param {string} url @param {string} [threadId] @param {any} [rootNote] */
+const normalizeGitLabReviewComment = (note, url, threadId, rootNote = note) => {
+  const position = rootNote.position || rootNote.original_position;
   const isFilePosition = position?.position_type === 'file';
   const lineNumber = position?.new_line ?? position?.old_line;
   const filePath = position?.new_path || position?.old_path;
@@ -174,6 +180,12 @@ const normalizeGitLabReviewComment = (note, url, threadId) => {
   const range = position.line_range;
   const start = range?.start;
   const end = range?.end;
+  const endSide = end?.type === 'old' ? 'deletions' : side;
+  const startSide = start?.type === 'old' ? 'deletions' : 'additions';
+  const startLineNumber = start?.new_line ?? start?.old_line;
+  const endLineNumber = end?.new_line ?? end?.old_line ?? lineNumber;
+  const hasRange =
+    startLineNumber != null && (startLineNumber !== endLineNumber || startSide !== endSide);
   return {
     author: {
       avatarUrl: note.author?.avatar_url,
@@ -183,20 +195,32 @@ const normalizeGitLabReviewComment = (note, url, threadId) => {
     body: note.body,
     filePath,
     id: `gitlab:${note.id}`,
-    ...(!note.position ? { isOutdated: true } : {}),
+    ...(!rootNote.position ? { isOutdated: true } : {}),
     ...(isFilePosition
       ? { anchor: 'file' }
       : {
-          lineNumber: end?.new_line ?? end?.old_line ?? lineNumber,
-          side: end?.type === 'old' ? 'deletions' : side,
+          lineNumber: endLineNumber,
+          side: endSide,
         }),
-    ...(start && (start.new_line ?? start.old_line) !== (end?.new_line ?? end?.old_line)
+    ...(hasRange
       ? {
-          startLineNumber: start.new_line ?? start.old_line,
-          startSide: start.type === 'old' ? 'deletions' : 'additions',
+          startLineNumber,
+          ...(startSide !== endSide ? { startSide } : {}),
         }
       : {}),
     ...(threadId ? { threadId } : {}),
+    ...(position?.base_sha && position?.head_sha
+      ? {
+          position: {
+            range: {
+              base: createReviewCommitRevision(position.base_sha),
+              head: createReviewCommitRevision(position.head_sha),
+            },
+          },
+        }
+      : {}),
+    ...(rootNote.resolvable === true ? { canResolveThread: true } : {}),
+    ...(rootNote.resolved === true ? { isThreadResolved: true } : {}),
     submittedAt: note.created_at,
     url: `${url}#note_${note.id}`,
   };
@@ -237,13 +261,48 @@ const readMergeRequestComments = async (repoRoot, mergeRequest, transport) => {
     path: mergeRequestEndpoint(mergeRequest, '/discussions'),
     query: { per_page: 100 },
   });
-  return discussions
-    .flatMap((discussion) =>
-      (discussion.notes || []).map((note) => ({ note, threadId: discussion.id })),
-    )
-    .filter(({ note }) => !note.system && !note.resolved)
-    .map(({ note, threadId }) => normalizeGitLabReviewComment(note, mergeRequest.url, threadId))
-    .filter(Boolean);
+  return {
+    generalComments: discussions
+      .map((discussion) => normalizeGitLabGeneralDiscussion(discussion, mergeRequest.url))
+      .filter(Boolean),
+    reviewComments: discussions.flatMap((discussion) => {
+      const notes = (discussion.notes || []).filter((note) => !note.system && note.body);
+      const root = notes[0];
+      if (!root || (!root.position && !root.original_position)) {
+        return [];
+      }
+      return notes
+        .map((note) => normalizeGitLabReviewComment(note, mergeRequest.url, discussion.id, root))
+        .filter(Boolean);
+    }),
+  };
+};
+
+/** Treat a positionless GitLab discussion as one overview-comment thread. */
+const normalizeGitLabGeneralDiscussion = (discussion, url) => {
+  const notes = (discussion?.notes || []).filter((note) => !note.system && note.body);
+  const root = notes[0];
+  if (!root || root.position || root.original_position) {
+    return null;
+  }
+  const comments = notes.map((note) => ({
+    author: {
+      avatarUrl: note.author?.avatar_url,
+      login: note.author?.username || note.author?.name || 'GitLab user',
+      url: note.author?.web_url,
+    },
+    body: note.body,
+    id: `gitlab:${note.id}`,
+    submittedAt: note.created_at,
+    url: `${url}#note_${note.id}`,
+  }));
+  const id = typeof discussion?.id === 'string' ? discussion.id : String(discussion?.id || '');
+  return {
+    ...(root.resolvable === true ? { canResolve: true } : {}),
+    comments,
+    id: id || `gitlab:general:${comments[0].id}`,
+    ...(root.resolved === true ? { isResolved: true } : {}),
+  };
 };
 
 /** @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest @param {any} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
@@ -402,6 +461,7 @@ module.exports = {
   createMergeRequestFetchRefspecs,
   createMergeRequestSource,
   listMergeRequestHistory,
+  normalizeGitLabGeneralDiscussion,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
   resolveGitLabCommentTarget,

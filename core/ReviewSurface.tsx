@@ -22,7 +22,9 @@ import { ReviewFileTree } from './app/components/FileTree.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import {
   MergeRequestCommentsView,
+  SidebarCommentSection,
   SidebarGeneralCommentList,
+  SidebarInlineReviewCommentList,
 } from './app/components/merge-request/GeneralComments.tsx';
 import {
   AgentUnavailablePanel,
@@ -36,6 +38,7 @@ import {
 } from './app/components/Panels.tsx';
 import {
   PullRequestSourceDescription,
+  ReviewCommentThreadList,
   ReviewCodeView,
   type ReviewDiffBlock,
 } from './app/components/ReviewCodeView.tsx';
@@ -95,9 +98,12 @@ import {
 import {
   buildReviewCommentsMarkdown,
   getPendingPullRequestReviewComments,
+  getReviewCommentRendererSectionId,
   getReviewCommentsFromState,
+  isFileReviewComment,
   isLocalReviewNote,
   isProviderCommentDraft,
+  isReviewCommentRegionSection,
   isReviewDraft,
   isShareCommentDraft,
   isSubmittedReviewComment,
@@ -312,6 +318,7 @@ export type ReviewContentCapabilities = {
   initialScrollTarget?: ReviewScrollTarget | null;
   itemVersionByKey?: Readonly<Record<string, number>>;
   loadingSectionIds?: ReadonlySet<string>;
+  onLoadCommentRegion?: (comment: PullRequestExistingReviewComment) => Promise<void> | void;
   onLoadSection?: (file: ChangedFile, section: DiffSection) => Promise<void> | void;
   onRefreshMarkdown?: (file: ChangedFile, section: DiffSection) => Promise<boolean>;
   resolveImage?: (file: ChangedFile, section: DiffSection) => Promise<DiffImageContentResult>;
@@ -544,6 +551,14 @@ export function ReviewSurface({
   const controlledPreferences = capabilities?.preferences;
   const sourceNavigation = capabilities?.sourceNavigation;
   const walkthrough = capabilities?.walkthrough;
+  const reviewedFiles = useMemo(
+    () =>
+      snapshot.files.flatMap((file) => {
+        const sections = file.sections.filter((section) => !isReviewCommentRegionSection(section));
+        return sections.length > 0 ? [{ ...file, sections }] : [];
+      }),
+    [snapshot.files],
+  );
   const reviewSession = providerComments?.reviewSession;
   const canComment =
     localReviewNotes?.canCreateInline ??
@@ -607,7 +622,7 @@ export function ReviewSurface({
   );
   const navigation = useNarrativeNavigation(
     sharedWalkthrough,
-    snapshot.files,
+    reviewedFiles,
     `${snapshot.repository.root}:${getSourceKey(snapshot.repository.source)}`,
   );
   const defaultKeymap = useMemo(() => createDefaultConfig().keymap, []);
@@ -660,7 +675,7 @@ export function ReviewSurface({
   } = useReviewFileState({
     collapsed: desktop?.collapsed,
     initialSelectedPath:
-      controlledPreferences?.selectedPath?.value ?? snapshot.files[0]?.path ?? null,
+      controlledPreferences?.selectedPath?.value ?? reviewedFiles[0]?.path ?? null,
     onCollapsedChange: desktop?.onCollapsedChange,
     onViewedChange: desktop?.onViewedChange,
     viewed: desktop?.viewed,
@@ -804,6 +819,13 @@ export function ReviewSurface({
     () => mergeReviewComments(visibleSnapshotReviewComments, localReviewComments),
     [localReviewComments, visibleSnapshotReviewComments],
   );
+  const renderableReviewComments = useMemo(
+    () =>
+      reviewComments.filter(
+        (comment) => isReviewDraft(comment) || comment.resolvedSectionId != null,
+      ),
+    [reviewComments],
+  );
   const {
     activeReviewCommentDraftRef,
     activeReviewCommentDraftState,
@@ -832,7 +854,7 @@ export function ReviewSurface({
       if (!comments) {
         return;
       }
-      const file = snapshot.files.find((candidate) => candidate.path === comment.filePath);
+      const file = reviewedFiles.find((candidate) => candidate.path === comment.filePath);
       const section = file?.sections.find((candidate) => candidate.id === comment.sectionId);
       if (!file || !section) {
         return;
@@ -849,8 +871,8 @@ export function ReviewSurface({
       };
       const target =
         comments.destination === 'share'
-          ? resolveShareCommentTarget({ ...targetInput, displayedFiles: snapshot.files })
-          : resolveProviderCommentTarget({ ...targetInput, canonicalFiles: snapshot.files });
+          ? resolveShareCommentTarget({ ...targetInput, displayedFiles: reviewedFiles })
+          : resolveProviderCommentTarget({ ...targetInput, canonicalFiles: reviewedFiles });
       if (target.status !== 'enabled') {
         return;
       }
@@ -863,9 +885,29 @@ export function ReviewSurface({
       comments,
       createDraftComment,
       localReviewNotes,
-      snapshot.files,
+      reviewedFiles,
       snapshot.preferences.showWhitespace,
     ],
+  );
+  const createMissingReviewReply = useCallback(
+    (threadId: string, comment: ReviewComment) => {
+      if (!canComment) {
+        return;
+      }
+      createDraftComment({
+        ...(isFileReviewComment(comment) ? { anchor: 'file' as const } : {}),
+        filePath: comment.filePath,
+        ...(comment.lineNumber != null ? { lineNumber: comment.lineNumber } : {}),
+        ...(comment.position ? { position: comment.position } : {}),
+        sectionId:
+          getReviewCommentRendererSectionId(comment) ?? `missing-review-thread:${threadId}`,
+        ...(comment.side ? { side: comment.side } : {}),
+        ...(comment.startLineNumber != null ? { startLineNumber: comment.startLineNumber } : {}),
+        ...(comment.startSide ? { startSide: comment.startSide } : {}),
+        threadId,
+      });
+    },
+    [canComment, createDraftComment],
   );
   const generalCommentThreads = snapshot.repository.generalComments ?? emptyGeneralCommentThreads;
   const generalComments = useMemo(
@@ -876,8 +918,9 @@ export function ReviewSurface({
     [snapshot.repository.generalComments],
   );
   const generalCommentCount = generalComments.length;
-  const showCommentsTab =
-    comments != null || generalCommentCount > 0 || visibleSnapshotReviewComments.length > 0;
+  const inlineReviewCommentCount = visibleSnapshotReviewComments.length;
+  const reviewCommentCount = generalCommentCount + inlineReviewCommentCount;
+  const showCommentsTab = comments != null || reviewCommentCount > 0;
   const [generalCommentDraft, setGeneralCommentDraft] = useState('');
   const [generalCommentEditDraft, setGeneralCommentEditDraft] = useState('');
   const [editingGeneralCommentId, setEditingGeneralCommentId] = useState<string | null>(null);
@@ -885,6 +928,13 @@ export function ReviewSurface({
   const [generalCommentEditSubmitting, setGeneralCommentEditSubmitting] = useState(false);
   const [generalCommentError, setGeneralCommentError] = useState<string | null>(null);
   const [focusedGeneralCommentId, setFocusedGeneralCommentId] = useState<string | null>(null);
+  const [focusedInlineSidebarCommentId, setFocusedInlineSidebarCommentId] = useState<string | null>(
+    null,
+  );
+  const [focusedReviewCommentPath, setFocusedReviewCommentPath] = useState<string | null>(null);
+  const [pendingReviewCommentNavigationId, setPendingReviewCommentNavigationId] = useState<
+    string | null
+  >(null);
   const handledHashTargetRef = useRef<string | null>(null);
   const [generalCommentScrollRequest, setGeneralCommentScrollRequest] = useState(0);
   const [generalCommentSubmitting, setGeneralCommentSubmitting] = useState(false);
@@ -898,7 +948,7 @@ export function ReviewSurface({
   const [walkthroughRequestId, setWalkthroughRequestId] = useState(0);
   const walkthroughRef = useRef(walkthrough);
 
-  const orderedFiles = useMemo(() => sortFiles(snapshot.files), [snapshot.files]);
+  const orderedFiles = useMemo(() => sortFiles(reviewedFiles), [reviewedFiles]);
   const {
     activeMatch: activeDiffSearchMatch,
     activeMatchIndex: activeDiffSearchMatchIndex,
@@ -920,8 +970,13 @@ export function ReviewSurface({
     showWhitespace: snapshot.preferences.showWhitespace,
   });
   const forceExpandedPaths = useMemo(
-    () => new Set([...diffSearchMatchPathSet, ...(content?.forceExpandedPaths ?? emptyPaths)]),
-    [content?.forceExpandedPaths, diffSearchMatchPathSet],
+    () =>
+      new Set([
+        ...diffSearchMatchPathSet,
+        ...(content?.forceExpandedPaths ?? emptyPaths),
+        ...(focusedReviewCommentPath ? [focusedReviewCommentPath] : []),
+      ]),
+    [content?.forceExpandedPaths, diffSearchMatchPathSet, focusedReviewCommentPath],
   );
   const totalLineCount = useMemo(
     () =>
@@ -937,7 +992,7 @@ export function ReviewSurface({
       ? selectedPath
       : (visibleFiles[0]?.path ?? null);
   const initialMarkdownPreviewSectionIds = useMemo(() => {
-    const nonGeneratedFiles = snapshot.files.filter((file) => !isGeneratedWalkthroughFile(file));
+    const nonGeneratedFiles = reviewedFiles.filter((file) => !isGeneratedWalkthroughFile(file));
     if (
       nonGeneratedFiles.length === 0 ||
       !nonGeneratedFiles.every((file) => isMarkdownFilePath(file.path))
@@ -946,11 +1001,11 @@ export function ReviewSurface({
     }
 
     return new Set(
-      snapshot.files
+      reviewedFiles
         .filter((file) => isMarkdownFilePath(file.path))
         .flatMap((file) => file.sections.map((section) => section.id)),
     );
-  }, [snapshot.files]);
+  }, [reviewedFiles]);
 
   useDocumentAppearance({
     codeFontFamily: snapshot.preferences.codeFontFamily,
@@ -984,23 +1039,25 @@ export function ReviewSurface({
   const activateGeneralComment = useCallback(
     (commentId: string) => {
       changeSidebarMode('comments');
+      setFocusedReviewCommentPath(null);
       setFocusedGeneralCommentId(commentId);
       setGeneralCommentScrollRequest((current) => current + 1);
     },
     [changeSidebarMode],
   );
-  const activateReviewComment = useCallback(
-    (comment: ReviewComment) => {
-      changeSidebarMode('tree');
+  const showResolvedReviewComment = useCallback(
+    (comment: PullRequestExistingReviewComment) => {
+      setFocusedInlineSidebarCommentId(null);
+      setFocusedReviewCommentPath(comment.filePath);
       setUncontrolledSelectedPath(comment.filePath);
       controlledPreferences?.selectedPath?.onChange(comment.filePath);
-      focusComment(comment.id);
       setTreeScrollTarget((current) => ({
         behavior: 'smooth',
-        commentId: comment.id,
         path: comment.filePath,
         request: (current?.request ?? 0) + 1,
       }));
+      changeSidebarMode('tree');
+      focusComment(comment.id);
     },
     [
       changeSidebarMode,
@@ -1009,18 +1066,56 @@ export function ReviewSurface({
       setUncontrolledSelectedPath,
     ],
   );
+  const activateReviewComment = useCallback(
+    (commentId: string) => {
+      const comment = visibleSnapshotReviewComments.find((candidate) => candidate.id === commentId);
+      if (!comment?.resolvedSectionId) {
+        changeSidebarMode('comments');
+        setFocusedReviewCommentPath(null);
+        setFocusedInlineSidebarCommentId(commentId);
+        if (comment && content?.onLoadCommentRegion) {
+          setPendingReviewCommentNavigationId(commentId);
+          void Promise.resolve(content.onLoadCommentRegion(comment)).catch(() => {
+            setPendingReviewCommentNavigationId((current) =>
+              current === commentId ? null : current,
+            );
+          });
+        }
+        return;
+      }
+      showResolvedReviewComment(comment);
+    },
+    [changeSidebarMode, content, showResolvedReviewComment, visibleSnapshotReviewComments],
+  );
+  useEffect(() => {
+    if (!pendingReviewCommentNavigationId) {
+      return;
+    }
+    const comment = visibleSnapshotReviewComments.find(
+      (candidate) =>
+        candidate.id === pendingReviewCommentNavigationId && candidate.resolvedSectionId,
+    );
+    if (!comment) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setPendingReviewCommentNavigationId(null);
+      showResolvedReviewComment(comment);
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [pendingReviewCommentNavigationId, showResolvedReviewComment, visibleSnapshotReviewComments]);
   const activateHashTarget = useCallback(() => {
     const target = getLocationHashTarget();
     if (!target || handledHashTargetRef.current === target) {
       return;
     }
 
-    const reviewComment = reviewComments.find((comment) =>
+    const reviewComment = visibleSnapshotReviewComments.find((comment) =>
       commentMatchesHashTarget(comment, target),
     );
     if (reviewComment) {
       handledHashTargetRef.current = target;
-      activateReviewComment(reviewComment);
+      activateReviewComment(reviewComment.id);
       return;
     }
 
@@ -1034,7 +1129,12 @@ export function ReviewSurface({
         return;
       }
     }
-  }, [activateGeneralComment, activateReviewComment, generalCommentThreads, reviewComments]);
+  }, [
+    activateGeneralComment,
+    activateReviewComment,
+    generalCommentThreads,
+    visibleSnapshotReviewComments,
+  ]);
   useEffect(() => {
     const timeout = window.setTimeout(activateHashTarget, 0);
     return () => window.clearTimeout(timeout);
@@ -1488,6 +1588,7 @@ export function ReviewSurface({
   );
   const activateTreePath = useCallback(
     (path: string) => {
+      setFocusedReviewCommentPath(null);
       selectPath(path);
       setTreeScrollTarget((current) => ({
         behavior: 'smooth',
@@ -1616,7 +1717,7 @@ export function ReviewSurface({
     () => ({
       copyPendingComments: () =>
         buildReviewCommentsMarkdown(
-          snapshot.files,
+          reviewedFiles,
           localReviewComments,
           snapshot.preferences.showWhitespace,
           pendingCommentPrefix,
@@ -1629,7 +1730,7 @@ export function ReviewSurface({
       openDiffSearch,
       pendingCommentPrefix,
       sidebarMode,
-      snapshot.files,
+      reviewedFiles,
       snapshot.preferences.showWhitespace,
       visibleSelectedPath,
     ],
@@ -1676,7 +1777,7 @@ export function ReviewSurface({
     agentLabel: getAgentLabel(snapshot.walkthrough.agent),
     codeQualityFindings: snapshot.codeQualityFindings,
     collapsed,
-    comments: reviewComments,
+    comments: renderableReviewComments,
     commitMetadata: snapshot.commitMetadata ?? null,
     diffLineHeight,
     diffStyle: controlledPreferences?.diffLayout?.value ?? snapshot.preferences.diffStyle,
@@ -1728,7 +1829,7 @@ export function ReviewSurface({
   const showDesktopCommitButton =
     sidebarMode === 'tree' &&
     source.type === 'working-tree' &&
-    snapshot.files.length > 0 &&
+    reviewedFiles.length > 0 &&
     desktop?.commit != null;
   const emptySourceDetail = getEmptySourceDetail(source, snapshot.repository.root);
   const hasDiffSearchQuery = diffSearchQuery.trim().length > 0;
@@ -1798,6 +1899,122 @@ export function ReviewSurface({
         source={source}
       />
     ) : null;
+
+  const { commentReviewBlocks, missingRegionComments } = useMemo(() => {
+    const groups: Array<{ comments: Array<ReviewComment>; key: string }> = [];
+    const byThread = new Map<string, { comments: Array<ReviewComment>; key: string }>();
+    for (const comment of reviewComments) {
+      const key = comment.threadId ? `thread:${comment.threadId}` : `comment:${comment.id}`;
+      let group = byThread.get(key);
+      if (!group) {
+        group = { comments: [], key };
+        byThread.set(key, group);
+        groups.push(group);
+      }
+      group.comments.push(comment);
+    }
+
+    const blocks: Array<ReviewDiffBlock> = [];
+    const missing: Array<ReviewComment> = [];
+    for (const group of groups) {
+      const root = group.comments[0]!;
+      const sectionId = getReviewCommentRendererSectionId(root);
+      const file = snapshot.files.find((candidate) => candidate.path === root.filePath);
+      const section = file?.sections.find((candidate) => candidate.id === sectionId);
+      if (!file || !section) {
+        missing.push(...group.comments);
+        continue;
+      }
+      blocks.push({
+        comments: group.comments,
+        file: { ...file, sections: [section] },
+        id: `review-comments:${group.key}`,
+        itemIdPrefix: `review-comments:${group.key}`,
+      });
+    }
+    return { commentReviewBlocks: blocks, missingRegionComments: missing };
+  }, [reviewComments, snapshot.files]);
+
+  const commentsOverview = (
+    <div className="review-comments-overview">
+      <MergeRequestCommentsView
+        canComment={comments?.general?.onCreate != null}
+        commenting={commenting}
+        commentPermalinkLabel={
+          comments?.destination === 'share' ? 'View on Codiff' : `View on ${providerLabel}`
+        }
+        draft={generalCommentDraft}
+        editDraft={generalCommentEditDraft}
+        editError={generalCommentEditError}
+        editingCommentId={editingGeneralCommentId}
+        editSubmitting={generalCommentEditSubmitting}
+        error={generalCommentError}
+        focusedCommentId={focusedGeneralCommentId}
+        focusedCommentRequest={generalCommentScrollRequest}
+        gitIdentity={gitIdentity}
+        inlineCommentCount={inlineReviewCommentCount}
+        keymap={keymap}
+        onCancelEdit={cancelEditGeneralComment}
+        onChangeDraft={setGeneralCommentDraft}
+        onChangeEditDraft={setGeneralCommentEditDraft}
+        onSaveEdit={saveGeneralCommentEdit}
+        onStartEdit={startEditGeneralComment}
+        onSubmit={submitGeneralComment}
+        signInLabel={signInLabel}
+        sourceDescription={sourceDescription}
+        submitting={generalCommentSubmitting}
+        threads={generalCommentThreads}
+      />
+    </div>
+  );
+  const commentsBlocks: ReadonlyArray<ReviewDiffBlock> = [
+    { header: commentsOverview, id: 'review-comments:overview' },
+    ...(commentReviewBlocks.length > 0
+      ? [
+          {
+            header: (
+              <div className="review-comments-section-heading">
+                <strong>Code comments</strong>
+              </div>
+            ),
+            id: 'review-comments:code-heading',
+          } satisfies ReviewDiffBlock,
+          ...commentReviewBlocks,
+        ]
+      : []),
+    ...(missingRegionComments.length > 0
+      ? [
+          {
+            header: (
+              <section className="missing-review-comments">
+                <div className="review-comments-section-heading">
+                  <strong>Comments without a code region</strong>
+                </div>
+                <ReviewCommentThreadList
+                  agentId={snapshot.walkthrough.agent}
+                  agentLabel={getAgentLabel(snapshot.walkthrough.agent)}
+                  comments={missingRegionComments}
+                  focusCommentId={focusCommentId}
+                  focusCommentRequest={focusCommentRequest}
+                  identity={gitIdentity}
+                  keymap={keymap}
+                  onAskCodex={commonReviewProps.onAskCodex}
+                  onCommentDraftChange={updateActiveReviewCommentDraft}
+                  onCreateReply={createMissingReviewReply}
+                  onDeleteComment={deleteComment}
+                  onResolveThread={resolveDiscussion ?? noop}
+                  onSaveCommentEdit={updateExistingReviewComment}
+                  onSubmitComment={submitComment}
+                  onUpdateComment={updateComment}
+                  supportsReviewCommentActions={submitReviewComment != null}
+                />
+              </section>
+            ),
+            id: 'review-comments:missing',
+          } satisfies ReviewDiffBlock,
+        ]
+      : []),
+  ];
 
   const renderWalkthroughDiffBlocks = (
     blocks: ReadonlyArray<ReviewDiffBlock>,
@@ -1894,18 +2111,18 @@ export function ReviewSurface({
     ...(showCommentsTab
       ? [
           {
-            ariaLabel: generalCommentCount > 0 ? `Comments (${generalCommentCount})` : 'Comments',
+            ariaLabel: reviewCommentCount > 0 ? `Comments (${reviewCommentCount})` : 'Comments',
             icon: <ChatCircle aria-hidden size={14} weight="bold" />,
             indicator:
-              generalCommentCount > 0 ? (
+              reviewCommentCount > 0 ? (
                 <span aria-hidden className="review-mode-count">
-                  {generalCommentCount}
+                  {reviewCommentCount}
                 </span>
               ) : undefined,
             label: 'Comments',
             title:
-              generalCommentCount > 0
-                ? `${generalCommentCount} ${generalCommentCount === 1 ? 'comment' : 'comments'}`
+              reviewCommentCount > 0
+                ? `${reviewCommentCount} ${reviewCommentCount === 1 ? 'comment' : 'comments'}`
                 : 'Comments',
             value: 'comments' as const,
           },
@@ -2020,7 +2237,7 @@ export function ReviewSurface({
             <CopyCommentsButton
               actionLabel={copyPendingCommentsLabel}
               comments={localReviewComments}
-              files={snapshot.files}
+              files={reviewedFiles}
               reviewCommentsPrefix={pendingCommentPrefix ?? ''}
               showWhitespace={snapshot.preferences.showWhitespace}
             />
@@ -2076,11 +2293,30 @@ export function ReviewSurface({
               viewed={viewed}
             />
           ) : sidebarMode === 'comments' ? (
-            <SidebarGeneralCommentList
-              comments={generalComments}
-              focusedCommentId={focusedGeneralCommentId}
-              onActivateComment={activateGeneralComment}
-            />
+            <>
+              <SidebarCommentSection count={generalComments.length} title="Overview comments">
+                <SidebarGeneralCommentList
+                  comments={generalComments}
+                  focusedCommentId={focusedGeneralCommentId}
+                  onActivateComment={activateGeneralComment}
+                />
+              </SidebarCommentSection>
+              <SidebarCommentSection
+                count={inlineReviewCommentCount}
+                title="Inline review comments"
+              >
+                <SidebarInlineReviewCommentList
+                  comments={visibleSnapshotReviewComments}
+                  focusedCommentId={focusedInlineSidebarCommentId ?? focusCommentId}
+                  onActivateComment={activateReviewComment}
+                  permalinkLabel={
+                    comments?.destination === 'share'
+                      ? 'View on Codiff'
+                      : `View on ${providerLabel}`
+                  }
+                />
+              </SidebarCommentSection>
+            </>
           ) : walkthroughReady ? (
             <NarrativeSidebar
               allowCommit={walkthrough?.commit != null}
@@ -2149,32 +2385,28 @@ export function ReviewSurface({
               onUpdateMessage={desktop.commit.onUpdateMessage}
             />
           ) : sidebarMode === 'comments' ? (
-            <MergeRequestCommentsView
-              canComment={comments?.general?.onCreate != null}
-              commenting={commenting}
-              draft={generalCommentDraft}
-              editDraft={generalCommentEditDraft}
-              editError={generalCommentEditError}
-              editingCommentId={editingGeneralCommentId}
-              editSubmitting={generalCommentEditSubmitting}
-              error={generalCommentError}
-              focusedCommentId={focusedGeneralCommentId}
-              focusedCommentRequest={generalCommentScrollRequest}
-              gitIdentity={gitIdentity}
-              keymap={keymap}
-              onCancelEdit={cancelEditGeneralComment}
-              onChangeDraft={setGeneralCommentDraft}
-              onChangeEditDraft={setGeneralCommentEditDraft}
-              onSaveEdit={saveGeneralCommentEdit}
-              onStartEdit={startEditGeneralComment}
-              onSubmit={submitGeneralComment}
-              signInLabel={signInLabel}
-              sourceDescription={sourceDescription}
-              submitting={generalCommentSubmitting}
-              threads={generalCommentThreads}
+            <ReviewCodeView
+              {...commonReviewProps}
+              activeSearchMatch={null}
+              blocks={commentsBlocks}
+              comments={[]}
+              files={[]}
+              forceExpandedPaths={
+                new Set(
+                  commentReviewBlocks.flatMap((block) => (block.file ? [block.file.path] : [])),
+                )
+              }
+              hunkNavigation={null}
+              isReadOnly
+              onSelectPathFromScroll={noop}
+              scrollTarget={null}
+              searchQuery=""
+              selectedPath={null}
+              showSourceDescription={false}
+              walkthroughNotes={emptyWalkthroughNotes}
             />
           ) : sidebarMode === 'tree' || sidebarMode === 'history' ? (
-            snapshot.files.length === 0 ? (
+            reviewedFiles.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-panel squircle">
                   <strong>{getEmptySourceTitle(source)}</strong>
@@ -2220,7 +2452,7 @@ export function ReviewSurface({
           ) : walkthroughReady ? (
             <NarrativeWalkthroughView
               allowCommit={walkthrough?.commit != null}
-              files={snapshot.files}
+              files={reviewedFiles}
               navigation={navigation}
               onActiveReviewTargetChange={desktop?.onActiveWalkthroughReviewTargetChange ?? noop}
               onCommit={walkthrough?.commit ?? disabledCommit}
