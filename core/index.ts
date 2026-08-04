@@ -71,7 +71,9 @@ export type {
   PullRequestReviewStatus,
   PullRequestReviewer,
   ProviderCommentSubmission,
+  ProviderReviewCommentPosition,
   ReviewCommenting,
+  ReviewCommentPosition,
   ReviewCommitSummary,
   ReviewPreferences,
   ResolvedReviewSource,
@@ -92,3 +94,15 @@ export type {
   WalkthroughProgressEvent,
   WalkthroughProgressPhase,
 } from './types.ts';
+export type {
+  LocalReviewNote,
+  ProviderCommentDraft,
+  ProviderInlineComment,
+  RenderedReviewCommentTarget,
+  RenderedSubmittedReviewComment,
+  ReviewComment,
+  ReviewCommentDraftTarget,
+  ReviewDraft,
+  ShareCommentDraft,
+  ShareInlineComment,
+} from './lib/app-types.ts';

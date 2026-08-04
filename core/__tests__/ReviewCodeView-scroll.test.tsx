@@ -567,6 +567,7 @@ test('focused walkthrough blocks render only global comments visible in the focu
     body: 'Visible focused comment.',
     filePath: file.path,
     id: 'visible-comment',
+    kind: 'local-note',
     lineNumber: 1,
     sectionId: file.sections[0].id,
     side: 'additions',
@@ -613,6 +614,7 @@ test('focused walkthrough blocks keep cross-side comments when their rendered an
     body: 'Cross-side comment.',
     filePath: file.path,
     id: 'cross-side-comment',
+    kind: 'local-note',
     lineNumber: 10,
     sectionId: file.sections[0].id,
     side: 'additions',
@@ -697,6 +699,7 @@ test('review comment drafts resync clean external updates and reset on comment s
     body: 'Original body',
     filePath: file.path,
     id: 'comment-1',
+    kind: 'local-note',
     lineNumber: 1,
     sectionId: file.sections[0].id,
     side: 'additions',
@@ -755,11 +758,13 @@ test('read-only review comments render safe details blocks', async () => {
   const comment = {
     author: { login: 'ai-reviewer', name: 'AI Code Reviewer' },
     body: '<details>\n<summary>Review rationale</summary>\n\nThis branch needs attention.\n\n</details>',
+    destination: 'provider',
     filePath: file.path,
     id: 'comment-details',
     isReadOnly: true,
+    kind: 'submitted-comment',
     lineNumber: 1,
-    sectionId: file.sections[0].id,
+    resolvedSectionId: file.sections[0].id,
     side: 'additions',
   } satisfies ReviewComment;
 
@@ -1137,6 +1142,7 @@ test('hunk navigation orders deletion comments before added rows in unified chan
     body: 'Needs work.',
     filePath: 'src/first.ts',
     id: 'comment-1',
+    kind: 'local-note',
     lineNumber: 1,
     sectionId: 'src/first.ts:unstaged',
     side: 'deletions',
@@ -1197,6 +1203,7 @@ test('review comment typing stays local until a comment action commits it', asyn
     body: '',
     filePath: file.path,
     id: 'comment-1',
+    kind: 'local-note',
     lineNumber: 1,
     sectionId: 'src/comment.ts:unstaged',
     side: 'additions',
@@ -1272,6 +1279,7 @@ const renderLocalReviewComment = async ({
     body,
     filePath: file.path,
     id: 'comment-1',
+    kind: 'local-note',
     lineNumber: 1,
     sectionId: file.sections[0].id,
     side: 'additions',
@@ -1394,6 +1402,7 @@ test('a Codex reply does not repeatedly invalidate the diff item layout', async 
     body: 'Please explain this change.',
     filePath: file.path,
     id: 'comment-1',
+    kind: 'local-note',
     lineNumber: 1,
     sectionId: 'src/comment.ts:unstaged',
     side: 'additions',
@@ -1413,7 +1422,7 @@ test('a Codex reply does not repeatedly invalidate the diff item layout', async 
           ...comment,
           codexReply: {
             body: 'This reply is tall enough to use a different markdown measurement.',
-            status: 'ready',
+            status: 'ready' as const,
           },
         },
       ]}
@@ -1430,6 +1439,7 @@ test('failed pull request comments keep their draft and can be retried', async (
     body: 'Keep this comment.',
     filePath: file.path,
     id: 'comment-1',
+    kind: 'provider-draft',
     lineNumber: 1,
     remoteSubmit: {
       error:
@@ -1477,6 +1487,7 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
     body: 'Submit this shared comment.',
     filePath: file.path,
     id: 'shared-comment',
+    kind: 'share-draft',
     lineNumber: 1,
     sectionId: file.sections[0].id,
     side: 'additions',
@@ -1519,7 +1530,12 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
 });
 
 test('file comments can be created for GitLab merge requests but not GitHub pull requests', async () => {
-  const file = createChangedFile('src/comment.ts');
+  const file: ChangedFile = createChangedFile('src/comment.ts');
+  const range = {
+    base: { label: { kind: 'commit' as const, text: 'base' }, sha: gitSha('a'.repeat(40)) },
+    head: { label: { kind: 'commit' as const, text: 'head' }, sha: gitSha('b'.repeat(40)) },
+  };
+  file.sections[0]!.range = range;
   const onCreateComment = vi.fn();
   const gitLabSource = {
     provider: 'gitlab',
@@ -1549,6 +1565,7 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
   expect(onCreateComment).toHaveBeenCalledWith({
     anchor: 'file',
     filePath: 'src/comment.ts',
+    position: { range },
     sectionId: 'src/comment.ts:unstaged',
   });
   await view.rerender(
@@ -1571,10 +1588,12 @@ test('file-level review comments render as measured file annotations', async () 
           anchor: 'file',
           author: { login: 'reviewer' },
           body: 'Review this file as a whole.',
+          destination: 'provider',
           filePath: file.path,
           id: 'gitlab:file',
           isReadOnly: true,
-          sectionId: 'src/comment.ts:unstaged',
+          kind: 'submitted-comment',
+          resolvedSectionId: 'src/comment.ts:unstaged',
         },
       ]}
       files={[file]}
@@ -1745,10 +1764,18 @@ const nonInteractivePointerEvent = { composedPath: () => [] };
 
 test('line content clicks create review comments unless text is selected', async () => {
   const onCreateComment = vi.fn();
-  const file = createChangedFileWithPatch(
+  const file: ChangedFile = createChangedFileWithPatch(
     'src/click.ts',
     'diff --git a/src/click.ts b/src/click.ts\n@@ -1 +1 @@\n-old\n+new\n',
   );
+  const reviewRange = {
+    base: { kind: 'index' as const, label: { kind: 'review-marker' as const, text: 'Index' } },
+    head: {
+      kind: 'working-copy' as const,
+      label: { kind: 'review-marker' as const, text: 'Working copy' },
+    },
+  };
+  file.sections[0]!.range = reviewRange;
   const container = document.createElement('div');
   const selectionHost = document.createElement('span');
   selectionHost.textContent = 'selected code';
@@ -1787,6 +1814,7 @@ test('line content clicks create review comments unless text is selected', async
   expect(onCreateComment).toHaveBeenLastCalledWith({
     filePath: 'src/click.ts',
     lineNumber: 1,
+    position: { range: reviewRange },
     sectionId: 'src/click.ts:unstaged',
     side: 'additions',
   });
@@ -1815,6 +1843,7 @@ test('line content clicks create review comments unless text is selected', async
   expect(onCreateComment).toHaveBeenLastCalledWith({
     filePath: 'src/click.ts',
     lineNumber: 1,
+    position: { range: reviewRange },
     sectionId: 'src/click.ts:unstaged',
     side: 'additions',
   });

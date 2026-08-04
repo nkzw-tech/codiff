@@ -21,6 +21,7 @@ import {
   type Database,
   type DatabaseBatchStatement,
 } from './db.ts';
+import { reviewCommentPositionSchema } from './review-position.ts';
 import schema, {
   plan,
   shareCommentMessage,
@@ -168,6 +169,7 @@ type WalkthroughReviewComment = {
   id: string;
   isThreadResolved?: boolean;
   lineNumber?: number;
+  position?: unknown;
   sectionId?: string;
   side?: 'additions' | 'deletions';
   startLineNumber?: number;
@@ -197,6 +199,12 @@ const importWalkthroughComments = async (
   const statements: Array<DatabaseBatchStatement> = [];
   const groups = new Map<string, Array<WalkthroughReviewComment>>();
   for (const comment of snapshot.reviewComments ?? []) {
+    if (comment.sectionId != null && comment.position != null) {
+      throw new FateRequestError(
+        'BAD_REQUEST',
+        'A review comment cannot contain both sectionId and position.',
+      );
+    }
     const key = comment.threadId ? `thread:${comment.threadId}` : `comment:${comment.id}`;
     const group = groups.get(key);
     if (group) {
@@ -228,6 +236,7 @@ const importWalkthroughComments = async (
           id: threadId,
           kind: 'walkthrough-diff',
           lineNumber: isFileComment ? null : first.lineNumber,
+          positionJson: first.position ? JSON.stringify(first.position) : null,
           resolvedAt: resolved ? createdAt : null,
           sectionId: first.sectionId ?? null,
           side: isFileComment ? null : first.side,
@@ -471,6 +480,7 @@ export const shareCommentAnchorSchema = z
 const walkthroughCommentTargetBaseSchema = z.object({
   filePath: z.string().min(1).max(4096),
   kind: z.literal('walkthrough-diff'),
+  position: reviewCommentPositionSchema.optional(),
 });
 export const shareCommentTargetSchema = z.union([
   z.object({
@@ -480,14 +490,19 @@ export const shareCommentTargetSchema = z.union([
   walkthroughCommentTargetBaseSchema.extend({
     anchor: z.literal('file'),
   }),
-  walkthroughCommentTargetBaseSchema.extend({
-    anchor: z.literal('line').optional(),
-    lineNumber: z.number().int().positive(),
-    sectionId: z.string().min(1).max(4096).optional(),
-    side: z.enum(['additions', 'deletions']),
-    startLineNumber: z.number().int().positive().optional(),
-    startSide: z.enum(['additions', 'deletions']).optional(),
-  }),
+  walkthroughCommentTargetBaseSchema
+    .extend({
+      anchor: z.literal('line').optional(),
+      lineNumber: z.number().int().positive(),
+      sectionId: z.string().min(1).max(4096).optional(),
+      side: z.enum(['additions', 'deletions']),
+      startLineNumber: z.number().int().positive().optional(),
+      startSide: z.enum(['additions', 'deletions']).optional(),
+    })
+    .refine(
+      ({ position, sectionId }) => !(position != null && sectionId != null),
+      'A comment target cannot contain both sectionId and position.',
+    ),
   z.object({
     kind: z.literal('walkthrough-general'),
   }),
@@ -744,6 +759,7 @@ export const createSharingFateServer = ({
               kind: 'plan',
               lineNumber: null,
               planId: record.id,
+              positionJson: null,
               resolvedAt: null,
               sectionId: null,
               side: null,
@@ -780,6 +796,8 @@ export const createSharingFateServer = ({
               input.target.kind === 'walkthrough-diff' && input.target.anchor !== 'file'
                 ? input.target
                 : null;
+            const position =
+              input.target.kind === 'walkthrough-diff' ? input.target.position : undefined;
             thread = {
               anchorJson: null,
               createdAt: now,
@@ -788,6 +806,7 @@ export const createSharingFateServer = ({
               kind: input.target.kind,
               lineNumber: lineTarget?.lineNumber ?? null,
               planId: null,
+              positionJson: position ? JSON.stringify(position) : null,
               resolvedAt: null,
               sectionId: lineTarget?.sectionId ?? null,
               side: lineTarget?.side ?? null,

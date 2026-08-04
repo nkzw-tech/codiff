@@ -1,16 +1,29 @@
-import { useCallback, useState, type RefObject } from 'react';
-import type { ReviewComment } from '../../lib/app-types.ts';
-import { getReviewCommentRangeProps } from '../../lib/review-comments.ts';
+import { useCallback, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import type {
+  LocalReviewNote,
+  ProviderCommentDraft,
+  ReviewComment,
+  ReviewDraft,
+} from '../../lib/app-types.ts';
+import {
+  getReviewCommentRangeProps,
+  isLocalReviewNote,
+  isProviderCommentDraft,
+  isProviderInlineComment,
+  isReviewDraft,
+} from '../../lib/review-comments.ts';
 import type { RepositoryState, ReviewAssistantRequest } from '../../types.ts';
 import { useReviewCommentDrafts } from './useReviewCommentDrafts.ts';
 
 type UseAppReviewCommentsOptions = {
+  draftKind: ReviewDraft['kind'];
   initialReviewComments?: ReadonlyArray<ReviewComment>;
   onCommentFileChange: (filePath: string) => void;
   stateRef: RefObject<RepositoryState | null>;
 };
 
 export function useAppReviewComments({
+  draftKind,
   initialReviewComments = [],
   onCommentFileChange,
   stateRef,
@@ -19,15 +32,16 @@ export function useAppReviewComments({
     useState<ReadonlyArray<ReviewComment>>(initialReviewComments);
   const commentDrafts = useReviewCommentDrafts({
     comments: reviewComments,
+    draftKind,
     onCommentFileChange,
     setComments: setReviewComments,
   });
 
   const updateCodexReply = useCallback(
-    (commentId: string, filePath: string, codexReply: NonNullable<ReviewComment['codexReply']>) => {
+    (commentId: string, filePath: string, codexReply: NonNullable<ReviewDraft['codexReply']>) => {
       setReviewComments((current) =>
         current.map((comment) =>
-          comment.id === commentId
+          comment.id === commentId && isReviewDraft(comment)
             ? {
                 ...comment,
                 codexReply,
@@ -41,7 +55,7 @@ export function useAppReviewComments({
   );
 
   const askCodex = useCallback(
-    (comment: ReviewComment) => {
+    (comment: ReviewDraft) => {
       const currentState = stateRef.current;
       if (
         !currentState ||
@@ -91,10 +105,38 @@ export function useAppReviewComments({
     [stateRef, updateCodexReply],
   );
 
+  const localReviewNotes = reviewComments.filter(isLocalReviewNote);
+  const providerDrafts = reviewComments.filter(isProviderCommentDraft);
+  const providerInlineComments = reviewComments.filter(isProviderInlineComment);
+  const setLocalReviewNotes = useCallback<Dispatch<SetStateAction<ReadonlyArray<LocalReviewNote>>>>(
+    (update) => {
+      setReviewComments((current) => {
+        const currentNotes = current.filter(isLocalReviewNote);
+        const nextNotes = typeof update === 'function' ? update(currentNotes) : update;
+        return [...current.filter((comment) => !isLocalReviewNote(comment)), ...nextNotes];
+      });
+    },
+    [],
+  );
+  const setProviderDrafts = useCallback<
+    Dispatch<SetStateAction<ReadonlyArray<ProviderCommentDraft>>>
+  >((update) => {
+    setReviewComments((current) => {
+      const currentDrafts = current.filter(isProviderCommentDraft);
+      const nextDrafts = typeof update === 'function' ? update(currentDrafts) : update;
+      return [...current.filter((comment) => !isProviderCommentDraft(comment)), ...nextDrafts];
+    });
+  }, []);
+
   return {
     ...commentDrafts,
     askCodex,
+    localReviewNotes,
+    providerDrafts,
+    providerInlineComments,
     reviewComments,
+    setLocalReviewNotes,
+    setProviderDrafts,
     setReviewComments,
   };
 }

@@ -5,7 +5,7 @@
 import { act, useRef } from 'react';
 import { afterEach, expect, test, vi } from 'vite-plus/test';
 import { useAppReviewComments } from '../app/hooks/useAppReviewComments.ts';
-import type { ReviewComment } from '../lib/app-types.ts';
+import type { LocalReviewNote } from '../lib/app-types.ts';
 import type { RepositoryState } from '../types.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
 
@@ -20,10 +20,11 @@ const workingTreeState = {
   root: '/repo',
   source: { type: 'working-tree' },
 } satisfies RepositoryState;
-const comment: ReviewComment = {
+const localNote: LocalReviewNote = {
   body: 'Review this',
   filePath: 'src/app.ts',
   id: 'comment-1',
+  kind: 'local-note',
   lineNumber: 4,
   sectionId: 'src/app.ts:pull-request',
   side: 'additions',
@@ -40,6 +41,7 @@ function AppReviewCommentsHarness({
 }) {
   const stateRef = useRef<RepositoryState | null>(state);
   const comments = useAppReviewComments({
+    draftKind: state.source.type === 'pull-request' ? 'provider-draft' : 'local-note',
     onCommentFileChange,
     stateRef,
   });
@@ -83,18 +85,18 @@ test('app review comments request and store assistant replies', async () => {
   const { getState, onCommentFileChange } = view;
 
   await act(async () => {
-    getState().setReviewComments([comment]);
+    getState().setReviewComments([localNote]);
   });
   await act(async () => {
-    getState().askCodex(comment);
+    getState().askCodex(localNote);
   });
   expect(askReviewAssistant).toHaveBeenCalledWith({
     comment: {
-      body: comment.body,
-      filePath: comment.filePath,
-      lineNumber: comment.lineNumber,
-      sectionId: comment.sectionId,
-      side: comment.side,
+      body: localNote.body,
+      filePath: localNote.filePath,
+      lineNumber: localNote.lineNumber,
+      sectionId: localNote.sectionId,
+      side: localNote.side,
     },
     source: workingTreeState.source,
   });

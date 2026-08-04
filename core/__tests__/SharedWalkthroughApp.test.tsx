@@ -58,9 +58,6 @@ const commenting = {
   onReplyGeneralComment: async () => {},
   onResolveDiscussion: async () => {},
   onSignIn: () => {},
-  onSubmitComment: async () => {
-    throw new Error('Not used by this test.');
-  },
   onSubmitGeneralComment: async () => {},
   onUpdateComment: async () => {},
   onUpdateGeneralComment: async () => {},
@@ -332,7 +329,6 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
             inline: {
               onDelete: commenting.onDeleteComment,
               onResolve: commenting.onResolveDiscussion,
-              onSubmit: commenting.onSubmitComment,
               onUpdate: commenting.onUpdateComment,
             },
             onSignIn: commenting.onSignIn,

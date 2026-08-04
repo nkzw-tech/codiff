@@ -6,14 +6,20 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import type { ReviewComment } from '../../lib/app-types.ts';
-import { findReusableReviewCommentDraft, getCommentKey } from '../../lib/review-comments.ts';
+import type { ReviewComment, ReviewCommentCreation, ReviewDraft } from '../../lib/app-types.ts';
+import {
+  findReusableReviewCommentDraft,
+  getCommentKey,
+  isProviderReviewCommentPosition,
+  isReviewDraft,
+} from '../../lib/review-comments.ts';
 
-type ReviewCommentDraft = Pick<ReviewComment, 'body' | 'id'>;
+type ReviewCommentDraft = Pick<ReviewDraft, 'body' | 'id'>;
 
 type UseReviewCommentDraftsOptions = {
   canCreateComment?: boolean;
   comments: ReadonlyArray<ReviewComment>;
+  draftKind: ReviewDraft['kind'];
   onCommentFileChange: (filePath: string) => void;
   setComments: Dispatch<SetStateAction<ReadonlyArray<ReviewComment>>>;
 };
@@ -25,7 +31,7 @@ const updateCommentBody = (
 ) => {
   let changed = false;
   const next = comments.map((comment) => {
-    if (comment.id !== commentId || comment.isReadOnly || comment.body === body) {
+    if (comment.id !== commentId || !isReviewDraft(comment) || comment.body === body) {
       return comment;
     }
     changed = true;
@@ -34,9 +40,40 @@ const updateCommentBody = (
   return changed ? next : comments;
 };
 
+const createReviewDraft = (
+  kind: ReviewDraft['kind'],
+  comment: ReviewCommentCreation,
+  id: string,
+): ReviewDraft => {
+  const { position, threadId, ...anchor } = comment;
+  switch (kind) {
+    case 'local-note':
+      return { ...anchor, body: '', id, kind, ...(position ? { position } : {}) };
+    case 'provider-draft':
+      return {
+        ...anchor,
+        body: '',
+        id,
+        kind,
+        ...(position && isProviderReviewCommentPosition(position) ? { position } : {}),
+        ...(threadId ? { threadId } : {}),
+      };
+    case 'share-draft':
+      return {
+        ...anchor,
+        body: '',
+        id,
+        kind,
+        ...(position ? { position } : {}),
+        ...(threadId ? { threadId } : {}),
+      };
+  }
+};
+
 export function useReviewCommentDrafts({
   canCreateComment = true,
   comments,
+  draftKind,
   onCommentFileChange,
   setComments,
 }: UseReviewCommentDraftsOptions) {
@@ -80,14 +117,17 @@ export function useReviewCommentDrafts({
   }, []);
 
   const createComment = useCallback(
-    (comment: Omit<ReviewComment, 'body' | 'id'>) => {
+    (comment: ReviewCommentCreation) => {
       if (!canCreateComment) {
         return;
       }
 
       const commentKey = getCommentKey(comment);
       const emptyExistingComment = reviewCommentsRef.current.find(
-        (candidate) => candidate.body.length === 0 && getCommentKey(candidate) === commentKey,
+        (candidate) =>
+          isReviewDraft(candidate) &&
+          candidate.body.length === 0 &&
+          getCommentKey(candidate) === commentKey,
       );
       if (emptyExistingComment) {
         focusComment(emptyExistingComment.id);
@@ -95,7 +135,7 @@ export function useReviewCommentDrafts({
       }
 
       const emptyDraft = findReusableReviewCommentDraft(
-        reviewCommentsRef.current,
+        reviewCommentsRef.current.filter(isReviewDraft),
         activeReviewCommentDraftRef.current,
       );
       if (emptyDraft) {
@@ -103,13 +143,7 @@ export function useReviewCommentDrafts({
         focusComment(id);
         setComments((current) =>
           current.map((candidate) =>
-            candidate.id === emptyDraft.id
-              ? {
-                  ...comment,
-                  body: '',
-                  id,
-                }
-              : candidate,
+            candidate.id === emptyDraft.id ? createReviewDraft(draftKind, comment, id) : candidate,
           ),
         );
         onCommentFileChange(emptyDraft.filePath);
@@ -119,10 +153,10 @@ export function useReviewCommentDrafts({
 
       const id = crypto.randomUUID();
       focusComment(id);
-      setComments((current) => [...current, { ...comment, body: '', id }]);
+      setComments((current) => [...current, createReviewDraft(draftKind, comment, id)]);
       onCommentFileChange(comment.filePath);
     },
-    [canCreateComment, focusComment, onCommentFileChange, setComments],
+    [canCreateComment, draftKind, focusComment, onCommentFileChange, setComments],
   );
 
   const updateComment = useCallback(
