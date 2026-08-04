@@ -167,6 +167,43 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
   expect(getController().showPlainCommitView).toBe(false);
 });
 
+test('pull request walkthroughs defer generation to the structure-aware review surface', async () => {
+  const getNarrativeWalkthrough = vi.fn(async () => ({
+    status: 'ready' as const,
+    walkthrough,
+  }));
+  const state = {
+    ...createRepositoryState(),
+    source: {
+      number: 42,
+      provider: 'github' as const,
+      type: 'pull-request' as const,
+      url: 'https://github.com/example/repo/pull/42',
+    },
+  } satisfies RepositoryState;
+  await using view = await renderWalkthroughController({
+    codiff: {
+      cancelNarrativeWalkthrough: vi.fn(async () => {}),
+      getNarrativeWalkthrough,
+      onWalkthroughProgress: vi.fn(() => () => {}),
+    },
+    state,
+  });
+
+  await act(async () => {
+    view.getController().changeSidebarMode('walkthrough');
+  });
+  expect(view.getController().sidebarMode).toBe('walkthrough');
+  expect(getNarrativeWalkthrough).not.toHaveBeenCalled();
+
+  await act(async () => {
+    view.stateGenerationRef.current += 1;
+    view.stateRef.current = state;
+    view.getController().refreshWalkthroughForState(state);
+  });
+  expect(getNarrativeWalkthrough).not.toHaveBeenCalled();
+});
+
 test('walkthrough controller routes progress, commit APIs, and sharing through current state', async () => {
   let onProgress: ((progress: WalkthroughProgressEvent) => void) | null = null;
   const createWalkthroughCommit = vi.fn(async () => ({

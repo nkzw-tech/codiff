@@ -368,10 +368,10 @@ export function useAppWalkthrough({
       if (nextState.files.length === 0) {
         return;
       }
-
       if (nextState.source.type === 'pull-request') {
         return;
       }
+
       loadNarrativeWalkthrough({
         force: true,
         kind: 'single-diff',

@@ -350,7 +350,7 @@ test('prompts small walkthroughs to group similar hunks into compact chapters', 
   expect(prompt).toContain('digest has 2 files and 3 reviewable hunks');
   expect(prompt).toContain('Target 1-2 main-path stops');
   expect(prompt).toContain('Use 1 conceptual chapters');
-  expect(prompt).toContain('Prefer conceptual chapters across the complete diff');
+  expect(prompt).toContain('Prefer conceptual chapters across the net merge-request diff');
   expect(prompt).toContain('Default to one review idea per stop');
 });
 

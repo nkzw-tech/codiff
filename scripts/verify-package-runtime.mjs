@@ -130,6 +130,9 @@ try {
     loadGitLabHistory(),
     loadWalkthroughGeneration(),
   ]);
+  if (typeof walkthroughGeneration.generateReviewWalkthrough !== 'function') {
+    throw new Error('Core walkthrough-generation runtime did not load review generation.');
+  }
   if (typeof github.createGitHubArtifactSource !== 'function') {
     throw new Error('GitHub runtime bridge did not load createGitHubArtifactSource.');
   }

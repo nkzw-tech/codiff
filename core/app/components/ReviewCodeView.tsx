@@ -17,6 +17,7 @@ import {
   type ExpansionDirections,
   type FileDiffLoadedFiles,
   type FileDiffMetadata,
+  getLineAnnotationName,
   type LineAnnotation,
   type SelectedLineRange,
 } from '@pierre/diffs';
@@ -4951,10 +4952,12 @@ export function ReviewCodeView({
       }
 
       if (annotation.metadata.type === 'regional-replay') {
+        const regionalReplayAnnotation =
+          annotation as DiffLineAnnotation<RegionalReplayAnnotationMetadata>;
         return (
-          <RegionalReplayAnnotation
-            annotation={annotation as DiffLineAnnotation<RegionalReplayAnnotationMetadata>}
-          />
+          <div slot={getLineAnnotationName(regionalReplayAnnotation)}>
+            <RegionalReplayAnnotation annotation={regionalReplayAnnotation} />
+          </div>
         );
       }
 

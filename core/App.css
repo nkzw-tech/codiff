@@ -1789,6 +1789,28 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding: 7px;
 }
 
+.version-walkthrough-structure {
+  background: rgb(127 127 127 / 0.06);
+  border: 1px solid rgb(127 127 127 / 0.14);
+  border-radius: 7px;
+  color: var(--sidebar-text);
+  display: grid;
+  font: 11px/1.45 var(--font-sans);
+  gap: 5px;
+  margin-bottom: 10px;
+  padding: 7px;
+}
+
+.version-walkthrough-structure label {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.version-walkthrough-structure small {
+  color: var(--muted);
+}
+
 .version-base-movement small {
   color: var(--muted);
   display: block;

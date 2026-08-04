@@ -5,7 +5,11 @@ import { createFakeGitHubTransport } from '../../github/src/transport.ts';
 import { createGitLabArtifactSource } from '../../gitlab/src/history.ts';
 import { createFakeGitLabTransport } from '../../gitlab/src/transport.ts';
 import { createCommitFingerprint } from '../lib/commit-stack-evolution.ts';
-import type { CommitArtifact, ReviewArtifactProject } from '../lib/review-artifacts.ts';
+import {
+  createCommitArtifactRequestKey,
+  type CommitArtifact,
+  type ReviewArtifactProject,
+} from '../lib/review-artifacts.ts';
 import type { GitSha } from '../types.ts';
 
 const require = createRequire(import.meta.url);
@@ -75,12 +79,10 @@ const gitLabArtifact = async (): Promise<CommitArtifact> => {
     projectPath: project.project,
     transport,
   });
-  const artifact = (
-    await source.readCommitArtifacts(
-      [{ commitSha: commitSha as never, parentSha: parentSha as never }],
-      new AbortController().signal,
-    )
-  ).get(commitSha as never);
+  const request = { commitSha: commitSha as never, parentSha: parentSha as never };
+  const artifact = (await source.readCommitArtifacts([request], new AbortController().signal)).get(
+    createCommitArtifactRequestKey(request) as never,
+  );
   if (!artifact) {
     throw new Error('GitLab fixture did not produce a Commit Artifact.');
   }
@@ -110,12 +112,10 @@ const gitHubArtifact = async (): Promise<CommitArtifact> => {
     pull: { number: 12, owner: 'nkzw-tech', repo: 'codiff' },
     transport,
   });
-  const artifact = (
-    await source.readCommitArtifacts(
-      [{ commitSha: commitSha as never, parentSha: parentSha as never }],
-      new AbortController().signal,
-    )
-  ).get(commitSha as never);
+  const request = { commitSha: commitSha as never, parentSha: parentSha as never };
+  const artifact = (await source.readCommitArtifacts([request], new AbortController().signal)).get(
+    createCommitArtifactRequestKey(request) as never,
+  );
   if (!artifact) {
     throw new Error('GitHub fixture did not produce a Commit Artifact.');
   }

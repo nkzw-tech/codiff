@@ -1,5 +1,6 @@
 export {
   authorWalkthroughArtifactV5,
+  buildReviewFocusPrompt,
   buildWalkthroughPrompt,
   buildWalkthroughPromptInput,
   captureWalkthroughContext,
@@ -27,6 +28,7 @@ export {
   type AuthoredWalkthrough,
   type WalkthroughDraft,
   type WalkthroughPromptOptions,
+  type WalkthroughReviewStrategy,
 } from './lib/walkthrough-authoring.ts';
 
 export {
@@ -35,9 +37,11 @@ export {
   type GenerateReviewWalkthroughResult,
   type NarrativeIdentity,
   type NarrativeSemanticInput,
+  type ReviewFocusSemanticInput,
   type ResolvedWalkthroughGenerationPlan,
   type ReusableWalkthroughComponent,
   type ReviewWalkthroughModelResult,
+  type ReviewWalkthroughRunFocusModel,
   type ReviewWalkthroughRunModel,
   type WalkthroughGenerationFailure,
   type WalkthroughGenerationSelection,
@@ -66,6 +70,8 @@ export {
 export {
   eligibleWalkthroughAssessmentCandidates,
   selectWalkthroughAssessmentCandidates,
+  untouchedWalkthroughAssessmentCandidates,
+  type AssessmentReviewVersion,
   type AssessmentRoutingContext,
   type AssessmentSelection,
   type AssessmentThreadCandidate,

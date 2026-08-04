@@ -904,6 +904,94 @@ test('commit walkthroughs render canonical boundaries and switch structure expli
   }
 });
 
+test('shows the selected commit structure before generation and waits for commit history', async () => {
+  const file = createChangedFile('src/pending.ts');
+  const source = {
+    baseSha: 'a'.repeat(40) as GitSha,
+    headSha: 'b'.repeat(40) as GitSha,
+    number: 42,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/42',
+  } as const;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: 'test',
+    exportedAt: '2026-08-18T00:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source },
+    reviewScope: { kind: 'merge-request', structure: 'commit-by-commit' },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Preparing the walkthrough.',
+      generatedAt: '2026-08-18T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'feature', root: '/repo' },
+      source: {
+        number: source.number,
+        provider: source.provider,
+        type: source.type,
+        url: source.url,
+      },
+      support: [],
+      title: 'Pending walkthrough',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const onGenerate = vi.fn(async () => {});
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            walkthrough: { generationReady: false, onGenerate, status: 'idle' },
+          }}
+          initialMode="walkthrough"
+          snapshot={snapshot}
+        />,
+      );
+    });
+    expect(container.querySelector('.walkthrough-structure-controls')?.textContent).toContain(
+      'Structured by commits',
+    );
+    expect(container.textContent).toContain('Loading commit structure…');
+    expect(onGenerate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            walkthrough: { generationReady: true, onGenerate, status: 'idle' },
+          }}
+          initialMode="walkthrough"
+          snapshot={snapshot}
+        />,
+      );
+    });
+    await waitFor(() =>
+      expect(onGenerate).toHaveBeenCalledWith({ reviewStructure: 'commit-by-commit' }),
+    );
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test('shared walkthroughs initially preview Markdown when other files are generated', async () => {
   const file = createMarkdownFile();
   const generatedFile = {

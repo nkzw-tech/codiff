@@ -10,13 +10,16 @@ import type {
   CommitMetadata,
   PullRequestCodeQualityFinding,
   ReviewCommitSummary,
+  ReviewEvolutionUnit,
   TargetComparisonReviewStructure,
   VersionComparisonReviewStructure,
 } from './review-history.ts';
 import type {
   ChangedFile,
+  DiffComparison,
   DiffRange,
   DiffSection,
+  EvolutionUnitId,
   GitFileStatus,
   GitSha,
   ResolvedReviewSource,
@@ -41,7 +44,11 @@ export type SaveMarkdownDocumentResult =
   | { document: CodiffMarkdownDocument; status: 'saved' };
 
 export type WalkthroughContext = {
-  changedFiles?: ReadonlyArray<{ path: string; rationale?: string; role: string }>;
+  changedFiles?: ReadonlyArray<{
+    path: string;
+    rationale?: string;
+    role: string;
+  }>;
   constraints?: ReadonlyArray<string>;
   decisions?: ReadonlyArray<string>;
   implementationSummary?: string;
@@ -84,7 +91,11 @@ export type CodiffLaunchOptions = {
 export type AgentSkillStatus = { installed: boolean; path: string };
 /** @deprecated Use AgentSkillStatus. */
 export type CodexSkillStatus = AgentSkillStatus;
-export type TerminalHelperStatus = { command: string; installed: boolean; path: string };
+export type TerminalHelperStatus = {
+  command: string;
+  installed: boolean;
+  path: string;
+};
 
 export type WalkthroughIcon = 'bug' | 'wrench' | 'path' | 'flask' | 'beaker' | 'doc' | 'gear';
 export type WalkthroughAnchor = {
@@ -148,7 +159,10 @@ export type WalkthroughStop = WalkthroughHunkGroup & {
 export type WalkthroughStopV5 = WalkthroughStop & {
   regions?: ReadonlyArray<WalkthroughRegion>;
 };
-export type WalkthroughSupportGroup = WalkthroughHunkGroup & { note?: string; reason: string };
+export type WalkthroughSupportGroup = WalkthroughHunkGroup & {
+  note?: string;
+  reason: string;
+};
 export type WalkthroughChapter = {
   blurb: string;
   icon: WalkthroughIcon;
@@ -203,7 +217,12 @@ export type WalkthroughCapturedContext = {
     | { type: 'working-tree' }
     | { sha: GitSha; type: 'commit' }
     | { baseSha: GitSha; headSha: GitSha; ref: string; type: 'branch-diff' }
-    | { baseSha: GitSha; headSha: GitSha; ref: string; type: 'branch-working-tree' }
+    | {
+        baseSha: GitSha;
+        headSha: GitSha;
+        ref: string;
+        type: 'branch-working-tree';
+      }
     | { base: string; head: string; symmetric: boolean; type: 'range' }
     | {
         description?: string;
@@ -230,6 +249,11 @@ export type WalkthroughGenerationRequest = {
         range: DiffRange;
         relation: 'target-comparison';
         structure: TargetComparisonReviewStructure;
+      }
+    | {
+        comparison: DiffComparison;
+        relation: 'version-comparison';
+        structure: VersionComparisonReviewStructure;
       };
 };
 
@@ -237,7 +261,9 @@ export type WalkthroughGenerationRequest = {
 export type AssessmentCodeScope =
   | { type: 'single-diff' }
   | { range: DiffRange; type: 'target-comparison' }
-  | { sha: GitSha; type: 'commit' };
+  | { comparison: DiffComparison; type: 'version-comparison' }
+  | { sha: GitSha; type: 'commit' }
+  | { type: 'evolution-unit'; unitId: EvolutionUnitId };
 
 export type AssessmentThreadAnchor = {
   filePath: string;
@@ -311,7 +337,9 @@ export type WalkthroughNarrativeContentV5 = Omit<
   'chapters' | 'repo' | 'source' | 'version'
 > & {
   chapters: ReadonlyArray<
-    Omit<WalkthroughChapter, 'stops'> & { stops: ReadonlyArray<WalkthroughStopV5> }
+    Omit<WalkthroughChapter, 'stops'> & {
+      stops: ReadonlyArray<WalkthroughStopV5>;
+    }
   >;
   /** Display identity only; persisted V5 never contains a checkout-local root. */
   repo: { branch: string | null };
@@ -322,7 +350,7 @@ export type WalkthroughNarrativeContentV5 = Omit<
 export type WalkthroughSingleCallNarrativeV5 = {
   content: WalkthroughNarrativeContentV5;
   generationMetadata: GenerationMetadata;
-  structure: 'net-change' | 'single-diff';
+  structure: 'complete-comparison' | 'net-change' | 'single-diff';
 };
 
 /** One independently reusable commit narrative call. */
@@ -334,12 +362,33 @@ export type WalkthroughCommitNarrativeUnitV5 = {
   sha: GitSha;
 };
 
+/** One independently reusable Evolution Unit narrative call. */
+export type WalkthroughEvolutionNarrativeUnitV5 = {
+  /** Current/new commit used for chapter boundaries. Removed units omit it. */
+  commit?: ReviewCommitSummary;
+  content: WalkthroughNarrativeContentV5;
+  generationMetadata: GenerationMetadata;
+  kind?: Exclude<ReviewEvolutionUnit['kind'], 'commit'>;
+  unitId: EvolutionUnitId;
+};
+
+/** Required model-produced orientation for a complete commit-evolution narrative. */
+export type WalkthroughReviewFocusV5 = {
+  content: string;
+  generationMetadata: GenerationMetadata;
+};
+
 /** Persisted V5 topology for aggregate or commit-by-commit target reviews. */
 export type WalkthroughNarrativeV5 =
   | WalkthroughSingleCallNarrativeV5
   | {
       structure: 'commit-by-commit';
       units: ReadonlyArray<WalkthroughCommitNarrativeUnitV5>;
+    }
+  | {
+      reviewFocus: WalkthroughReviewFocusV5;
+      structure: 'commit-evolution';
+      units: ReadonlyArray<WalkthroughEvolutionNarrativeUnitV5>;
     };
 
 /**
@@ -394,11 +443,14 @@ export type WalkthroughModel = Immutable<Omit<NarrativeWalkthroughV4, 'chapters'
   readonly sourceVersion: 4 | 5;
   /** Present only for V5 and derived from the persisted narrative discriminator. */
   readonly structure?: WalkthroughNarrativeV5['structure'];
-  /** Preserved commit ownership after chapter and support IDs are namespaced. */
+  /** Preserved unit ownership after chapter and support IDs are namespaced. */
   readonly units?: ReadonlyArray<{
     readonly chapterIds: ReadonlyArray<string>;
     readonly commit?: Immutable<ReviewCommitSummary>;
-    readonly identity: { readonly kind: 'commit'; readonly sha: GitSha };
+    readonly identity:
+      | { readonly kind: 'commit'; readonly sha: GitSha }
+      | { readonly kind: 'evolution-unit'; readonly unitId: EvolutionUnitId };
+    readonly kind?: ReviewEvolutionUnit['kind'];
     readonly supportIds: ReadonlyArray<string>;
   }>;
 };
@@ -477,7 +529,10 @@ export type SharedPlanSnapshot = {
   kind: 'codiff-plan-share';
   preferences: Pick<CodiffPreferences, 'theme'>;
   review: { threads: ReadonlyArray<PlanCommentThread>; version: 1 };
-  source?: { agent?: 'claude' | 'codex' | 'opencode' | 'pi'; sessionId?: string };
+  source?: {
+    agent?: 'claude' | 'codex' | 'opencode' | 'pi';
+    sessionId?: string;
+  };
   version: 1;
 };
 export type WalkthroughShareManifestV1 = SharedWalkthroughSnapshot;

@@ -45,6 +45,37 @@ test('registers source-change cancellation across the production Electron bridge
   );
 });
 
+test('routes version walkthroughs from preload through the coordinated main handler', async () => {
+  const [mainSource, preloadSource] = await Promise.all([
+    readFile(new URL('../main.cjs', import.meta.url), 'utf8'),
+    readFile(new URL('../preload.cjs', import.meta.url), 'utf8'),
+  ]);
+  const handlerStart = mainSource.indexOf('const getTargetComparisonNarrativeWalkthrough');
+  const handlerEnd = mainSource.indexOf(
+    "ipcMain.handle('codiff:getNarrativeWalkthrough'",
+    handlerStart,
+  );
+  const handler = mainSource.slice(handlerStart, handlerEnd);
+
+  expect(handlerStart).toBeGreaterThan(-1);
+  expect(handlerEnd).toBeGreaterThan(handlerStart);
+  expect(preloadSource).toContain("ipcRenderer.invoke('codiff:getNarrativeWalkthrough', request)");
+  expect(handler).toContain("request.selection.relation === 'version-comparison'");
+  expect(handler).toContain('compareReviewVersionAggregate(');
+  expect(handler).toContain('classifyReviewVersionEvolution(');
+  expect(handler).toContain('walkthroughGenerationCoordinator.begin(');
+  expect(handler).toContain('walkthroughGenerationCoordinator.getReusable(');
+  expect(handler).toContain('walkthroughGenerationCoordinator.retain(');
+  expect(handler).toContain('walkthroughGenerationCoordinator.finish(');
+  expect(handler).toContain('base: parentSha');
+  expect(handler).toContain('runWithCommandSignal(signal');
+  expect(handler).toContain('mapWithConcurrency(commitUnits, 3');
+  expect(handler).toContain('preparedCommitDiffs += 1;');
+  expect(handler).toContain(
+    'Prepared ${preparedCommitDiffs} of ${commitUnits.length} commit diffs.',
+  );
+});
+
 test('loads the built walkthrough runtime from a packaged application shape', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'codiff-walkthrough-package-'));
   try {

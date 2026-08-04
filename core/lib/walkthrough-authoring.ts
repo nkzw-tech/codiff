@@ -29,12 +29,14 @@ import {
 import type {
   ChangedFile,
   DiffSection,
+  EvolutionUnitId,
   GenerationMetadata,
   GenerationProfile,
   GitSha,
   RepositoryState,
   ResolvedReviewSource,
   ReviewSource,
+  TreeInspectionScope,
   WalkthroughArtifactV5,
   WalkthroughCapturedContext,
   WalkthroughGenerationRequest,
@@ -47,6 +49,7 @@ import {
   getSectionWalkthroughHunks,
   isGeneratedWalkthroughPath,
 } from './narrative-walkthrough-diff.js';
+import type { TargetComparisonReviewClassification } from './review-strategy.ts';
 
 export const maxProseChars = 4000;
 export const maxPatchExcerpt = 2500;
@@ -57,7 +60,7 @@ export const maxWalkthroughChapters = 20;
 export const maxWalkthroughStops = 14;
 export const maxHunksPerGroup = 14;
 /** Changes only when prompt projection, response schema, or normalization semantics change. */
-export const walkthroughAuthoringVersion = 'walkthrough-v5-single-diff-1';
+export const walkthroughAuthoringVersion = 'walkthrough-v5-narrative-1';
 
 /** Build the safe requested profile that participates in component reuse. */
 export const createWalkthroughGenerationProfile = (
@@ -367,6 +370,8 @@ export const parseAuthoredWalkthrough = parseWalkthroughDraft;
 
 export const parseRepositoryState = (value: unknown): RepositoryState =>
   parse(repositoryStateSchema, value) as RepositoryState;
+
+export type WalkthroughReviewStrategy = TargetComparisonReviewClassification;
 
 type IndexedHunk = WalkthroughHunk & {
   sectionId: string;
@@ -682,6 +687,13 @@ const captureWalkthroughSource = (
   };
 };
 
+const omitPullRequestDescription = (
+  source: Extract<WalkthroughCapturedContext['source'], { type: 'pull-request' }>,
+) => {
+  const { description: _description, ...sourceWithoutDescription } = source;
+  return sourceWithoutDescription;
+};
+
 export const captureWalkthroughContext = (state: RepositoryState): WalkthroughCapturedContext => ({
   branch: state.branch,
   files: state.files.map((file) => ({
@@ -695,10 +707,20 @@ export const captureWalkthroughContext = (state: RepositoryState): WalkthroughCa
       kind: section.kind,
       ...(section.loadState ? { loadState: section.loadState } : {}),
       ...(section.newFile
-        ? { newFile: { contents: section.newFile.contents, name: section.newFile.name } }
+        ? {
+            newFile: {
+              contents: section.newFile.contents,
+              name: section.newFile.name,
+            },
+          }
         : {}),
       ...(section.oldFile
-        ? { oldFile: { contents: section.oldFile.contents, name: section.oldFile.name } }
+        ? {
+            oldFile: {
+              contents: section.oldFile.contents,
+              name: section.oldFile.name,
+            },
+          }
         : {}),
       patch: section.patch,
       ...(section.range ? { range: section.range } : {}),
@@ -723,7 +745,12 @@ export const createWalkthroughArtifactV5 = (
   narrative: WalkthroughNarrativeV5,
   capturedContext: WalkthroughCapturedContext,
   generationRequest: WalkthroughGenerationRequest,
-): WalkthroughArtifactV5 => ({ capturedContext, generationRequest, narrative, version: 5 });
+): WalkthroughArtifactV5 => ({
+  capturedContext,
+  generationRequest,
+  narrative,
+  version: 5,
+});
 
 /** Normalize one successful model response directly into a persisted V5 artifact. */
 export const authorWalkthroughArtifactV5 = (input: {
@@ -733,7 +760,7 @@ export const authorWalkthroughArtifactV5 = (input: {
   state: RepositoryState;
 }): WalkthroughArtifactV5 => {
   const { structure } = input.generationRequest.review;
-  if (structure === 'commit-by-commit') {
+  if (structure === 'commit-by-commit' || structure === 'commit-evolution') {
     throw new Error('Multi-unit V5 narratives must be composed by the generation orchestrator.');
   }
   if (input.generationMetadata.profile.authoringVersion !== walkthroughAuthoringVersion) {
@@ -842,9 +869,43 @@ ${
 
 export type WalkthroughPromptOptions = {
   /** When set, the digest contains exactly one commit and is authored independently. */
-  commitContext?: { sha: GitSha; subject: string } | null;
+  commitContext?: {
+    sha: GitSha;
+    subject: string;
+  } | null;
+  reviewStrategy?: WalkthroughReviewStrategy | null;
   /** Exact narrative unit identity; aggregate calls omit this field. */
-  scope?: { kind: 'commit'; sha: GitSha } | null;
+  scope?: Exclude<TreeInspectionScope, { kind: 'complete-diff' }> | null;
+  versionBaseContext?: {
+    absorbedCommits: ReadonlyArray<{
+      baseShortSha?: string;
+      shortSha: string;
+      subject: string;
+    }>;
+    commits: ReadonlyArray<{ shortSha: string; subject: string }>;
+    relationship: 'forward' | 'backward' | 'divergent' | 'unknown';
+  } | null;
+  /** One changed logical commit unit inside a selected version range. */
+  versionCommitContext?: {
+    after?: { shortSha: string; subject: string };
+    before?: { shortSha: string; subject: string };
+    evolutionKind: 'ambiguous' | 'introduced' | 'removed' | 'revised';
+    kind: 'version-commit';
+    range: { fromLabel: string; toLabel: string };
+    rebaseOverlaps?: ReadonlyArray<{
+      authorName: string;
+      overlappingPaths: ReadonlyArray<string>;
+      shortSha: string;
+      subject: string;
+    }>;
+    unitId: Extract<TreeInspectionScope, { kind: 'evolution-unit' }>['unitId'];
+  } | null;
+  /** When set, author a walkthrough of MR version evolution, not the whole net MR. */
+  versionCompareRange?: {
+    fromLabel: string;
+    structure?: 'commit-evolution' | 'complete-comparison';
+    toLabel: string;
+  } | null;
 };
 
 const sourceDescription = (source: ResolvedReviewSource | ReviewSource) => {
@@ -881,6 +942,192 @@ ${trimmed}`
     : '';
 };
 
+/** Build the required cross-unit orientation call for Commit Evolution. */
+export const buildReviewFocusPrompt = ({
+  generationRequest,
+  units,
+}: {
+  generationRequest: WalkthroughGenerationRequest;
+  units: ReadonlyArray<{
+    content: WalkthroughNarrativeContentV5;
+    unitId: EvolutionUnitId;
+  }>;
+}) => {
+  const review = generationRequest.review;
+  if (review.relation !== 'version-comparison' || review.structure !== 'commit-evolution') {
+    throw new Error('Review focus requires a Commit Evolution generation request.');
+  }
+  const fromLabel = review.comparison.before.head.label.text;
+  const toLabel = review.comparison.after.head.label.text;
+  const summaries = units.map(({ content, unitId }) => ({
+    chapters: content.chapters.map((chapter) => ({
+      stops: chapter.stops.map((stop) => stop.title),
+      title: chapter.title,
+    })),
+    focus: content.focus,
+    unitId,
+  }));
+
+  return `Write the Review focus for a Commit Evolution comparison from ${fromLabel} to ${toLabel}.
+
+Scope every statement to changes after ${fromLabel} through ${toLabel}. Synthesize the supplied Evolution Unit summaries into 2-4 short, evidence-based sentences with no heading or list. Explain the most important behavioral progression and review order. Do not merely count units, repeat titles, describe behavior already present in ${fromLabel} as newly introduced, or treat pure rebase overlap as new behavior.
+
+${buildCustomInstructionsGuidance(generationRequest.customInstructions)}
+
+Evolution Unit summaries (ordered):
+${JSON.stringify(summaries)}`;
+};
+
+const buildReviewStrategyDigest = (strategy: WalkthroughReviewStrategy | null | undefined) => {
+  if (!strategy) {
+    return null;
+  }
+  if (strategy.structure === 'commit-by-commit') {
+    return {
+      commits: strategy.commits.map((commit) => ({
+        role: commit.role,
+        sha: commit.shortSha,
+        subject: truncate(commit.subject, 120),
+      })),
+      confidence: strategy.confidence,
+      reason: strategy.reason,
+      structure: strategy.structure,
+    };
+  }
+  return {
+    confidence: strategy.confidence,
+    reason: strategy.reason,
+    structure: strategy.structure,
+  };
+};
+
+const buildCommitStructureGuidance = (strategy: WalkthroughReviewStrategy | null | undefined) => {
+  if (!strategy || strategy.structure !== 'commit-by-commit') {
+    return `- Prefer conceptual chapters across the net merge-request diff.
+- A commit list may be present as weak author history context; do not structure the walkthrough around fixups or review-response commits.
+- Do not invent commit metadata that is not in the digest.`;
+  }
+  return `- Review strategy is commit-by-commit (${strategy.reason}).
+- Preserve distinct review ideas as separate chapters; there is no one-chapter-per-commit limit.
+- Stop titles must stay semantic, but may reference the related commit subject.
+- Digest hunks still come from the live whole-MR diff for stable anchors; optionally mention commit subjects in prose when they clarify chapter boundaries.
+- Include every non-merge commit in its own boundary; do not group commits.`;
+};
+
+const buildVersionCompareStructureGuidance = (
+  versionCompareRange: WalkthroughPromptOptions['versionCompareRange'],
+) => {
+  if (!versionCompareRange) {
+    return '';
+  }
+  const structureLabel =
+    versionCompareRange.structure === 'commit-evolution'
+      ? 'commit-evolution'
+      : versionCompareRange.structure === 'complete-comparison'
+        ? 'complete-comparison'
+        : null;
+  return `- This walkthrough covers the version comparison from ${versionCompareRange.fromLabel} to ${versionCompareRange.toLabel}${structureLabel ? ` as a ${structureLabel} walkthrough` : ''}.
+- Focus on how the merge request itself evolved: intentional edits, conflict-resolution fallout, and newly added/removed behavior.
+- Do not narrate pure rebase noise. Prefer chapters that answer "what changed since the earlier version?" for a returning reviewer.
+- Hunks still come from the supplied digest; treat them as the version-comparison surface, not the full historical MR net diff.${
+    structureLabel === 'commit-evolution'
+      ? '\n- This request is one Evolution Unit inside a commit-evolution walkthrough; stay scoped to the supplied unit.'
+      : structureLabel === 'complete-comparison'
+        ? '\n- This is a Complete Comparison walkthrough across the intentional version-comparison surface.'
+        : ''
+  }`;
+};
+
+const buildVersionBaseGuidance = (context: WalkthroughPromptOptions['versionBaseContext']) => {
+  if (!context) {
+    return '';
+  }
+  const absorbed = context.absorbedCommits
+    .map(
+      (commit) =>
+        `  - ${commit.shortSha}: ${commit.subject}${commit.baseShortSha ? ` (now in base as ${commit.baseShortSha})` : ''}`,
+    )
+    .join('\n');
+  const baseCommits = context.commits
+    .slice(0, 12)
+    .map((commit) => `  - ${commit.shortSha}: ${commit.subject}`)
+    .join('\n');
+  return `- The target base changed between these versions (${context.relationship}).
+${
+  absorbed
+    ? `- These earlier MR commits are now supplied by the target base. Do not describe their behavior as removed:
+${absorbed}`
+    : '- No earlier MR commits were confidently identified as moving into the target base.'
+}
+- Base commits are context only. Mention them only when the supplied version diff demonstrates an adaptation:
+${baseCommits || '  - none available'}`;
+};
+
+const buildSingleCommitGuidance = (commit: WalkthroughPromptOptions['commitContext']) => {
+  if (!commit) {
+    return '';
+  }
+  return `- This is an independent walkthrough for commit ${commit.sha}: ${commit.subject}.
+- Explain only the changes introduced by this commit. Do not summarize the merge request as a whole.
+- Never refer to earlier or later commits, the commit stack, a rebase, or cumulative merge-request history.
+- Do not infer behavior from code outside this commit's supplied diff.
+- Build the best reviewer path through this commit's own diff.`;
+};
+
+const buildVersionCommitGuidance = (context: WalkthroughPromptOptions['versionCommitContext']) => {
+  if (!context) {
+    return '';
+  }
+  const before = context.before ? `${context.before.shortSha}: ${context.before.subject}` : 'none';
+  const after = context.after ? `${context.after.shortSha}: ${context.after.subject}` : 'none';
+  if (context.evolutionKind === 'introduced') {
+    return `- This is one commit added between ${context.range.fromLabel} and ${context.range.toLabel}: ${after}.
+- Explain only this new commit's own contribution. Do not summarize the complete version range.`;
+  }
+  if (context.evolutionKind === 'removed') {
+    return `- This commit was removed from the MR stack between ${context.range.fromLabel} and ${context.range.toLabel}: ${before}.
+- The supplied diff is intentionally inverted. Explain what was removed from the MR, never as newly authored implementation.`;
+  }
+  if (context.evolutionKind === 'ambiguous') {
+    return `- Commit changes could not be paired confidently between ${context.range.fromLabel} and ${context.range.toLabel}.
+- This best-effort paired comparison may be useful, but its logical commit identity is uncertain.
+- Explain only the supplied patch evolution and do not invent a confident commit identity.`;
+  }
+  const overlaps = context.rebaseOverlaps ?? [];
+  if (overlaps.length === 0) {
+    return `- This is the change to one logical commit between ${context.range.fromLabel} and ${context.range.toLabel}.
+- Earlier commit: ${before}. Later commit: ${after}.
+- Explain only the supplied patch evolution, not the complete later commit or changes in other commits.
+- This pairing is heuristic. Never claim the two SHAs are exactly the same commit.
+- If the patch looks like conflict resolution or context-line churn, say the rewrite may be rebase fallout, but only when the supplied hunks support that reading.
+- Do not invent base-branch commits that are not listed in the digest.
+- Treat the supplied hunks as the source of truth.`;
+  }
+  const primary = overlaps[0]!;
+  const overlapLines = overlaps
+    .map(
+      (driver) =>
+        `  - ${driver.shortSha}: ${driver.subject} (by ${driver.authorName}; overlaps ${driver.overlappingPaths.slice(0, 4).join(', ')}${driver.overlappingPaths.length > 4 ? ', …' : ''})`,
+    )
+    .join('\n');
+  return `- This is a REBASE-REVISED logical commit between ${context.range.fromLabel} and ${context.range.toLabel}.
+- Earlier commit: ${before}. Later commit: ${after}.
+- Opening requirement: the first sentence of the first chapter blurb MUST start from the base-branch update that this rebase pulled in, using this shape:
+  "Because this rebase brought in ${primary.shortSha} (${primary.subject}) from the base branch, this MR commit was revised to …"
+- Preferred primary driver: ${primary.shortSha} — ${primary.subject}.
+- All attributed base-branch commits brought in by the rebase:
+${overlapLines}
+- After that opening sentence, explain only the supplied patch evolution for this logical commit.
+- Distinguish clearly:
+  1) adaptations required because the rebase moved the MR onto newer base-branch commits, versus
+  2) intentional new MR behavior not explained by those base-branch commits.
+- Do not narrate the entire base branch; only the listed base commits that the rebase introduced under this MR commit.
+- Prefer wording like "brought in by the rebase", "now present on the updated base", or "required after rebasing onto newer base commits". Avoid "landed by rebase".
+- This pairing is heuristic. Never claim the two SHAs are exactly the same commit.
+- Treat the supplied hunks as the source of truth.
+`;
+};
+
 export const buildWalkthroughPromptInput = (
   capturedContext: WalkthroughCapturedContext,
   generationRequest: WalkthroughGenerationRequest,
@@ -892,22 +1139,6 @@ export const buildWalkthroughPromptInput = (
     fileCount: capturedContext.files.length,
     hunkCount: index.hunks.length,
   };
-  const promptSource = (() => {
-    if (options.commitContext && capturedContext.source.type === 'pull-request') {
-      const { description: _description, ...source } = capturedContext.source;
-      return { ...source, title: options.commitContext.subject };
-    }
-    if (
-      capturedContext.source.type === 'pull-request' &&
-      typeof capturedContext.source.description === 'string'
-    ) {
-      return {
-        ...capturedContext.source,
-        description: truncate(capturedContext.source.description, maxProseChars),
-      };
-    }
-    return capturedContext.source;
-  })();
   let remainingPatchBudget = patchBudgets.total;
   const digest = {
     branch: capturedContext.branch,
@@ -939,8 +1170,29 @@ export const buildWalkthroughPromptInput = (
       }),
       status: file.status,
     })),
+    reviewStrategy: buildReviewStrategyDigest(options.reviewStrategy),
     scope: options.scope ?? null,
-    source: promptSource,
+    source:
+      (options.commitContext || options.versionCommitContext) &&
+      capturedContext.source.type === 'pull-request'
+        ? {
+            ...omitPullRequestDescription(capturedContext.source),
+            title:
+              options.commitContext?.subject ??
+              options.versionCommitContext?.after?.subject ??
+              options.versionCommitContext?.before?.subject ??
+              capturedContext.source.title,
+          }
+        : capturedContext.source.type === 'pull-request' &&
+            typeof capturedContext.source.description === 'string'
+          ? {
+              ...capturedContext.source,
+              description: truncate(capturedContext.source.description, maxProseChars),
+            }
+          : capturedContext.source,
+    versionBaseContext: options.versionBaseContext ?? null,
+    versionCommitContext: options.versionCommitContext ?? null,
+    versionCompareRange: options.versionCompareRange ?? null,
     walkthroughRequest: generationRequest.review,
   };
   return { digest, patchBudgets, size };
@@ -956,7 +1208,7 @@ export const buildWalkthroughPrompt = (
 
 Use only the supplied digest. Return the required structured object. If source.description is present, treat it as author-written intent and orientation, not proof of behavior; patches and hunk data remain the source of truth.
 
-${buildWalkthroughSizingGuidance(size, { independentCommit: Boolean(options.commitContext) })}
+${buildWalkthroughSizingGuidance(size, { independentCommit: Boolean(options.commitContext || options.versionCommitContext) })}
 
 Product rules:
 - Write all user-visible text in English.
@@ -970,15 +1222,11 @@ Product rules:
 - Regions are optional, but strongly prefer one or two precise regions when a substantive stop makes a line-local implementation claim. Structural, cross-file, and whole-file explanations may omit them. Never add more than four. A region must stay inside one supplied hunk and one side, and stop prose must reference it as [phrase](#region-id).
 - Region titles are short labels. Tooltips use safe inline Markdown only, no links or block elements, and explain why the selected range matters. Do not add regions that merely cover a whole hunk without added precision.
 - Do not claim tests, risks, or behavior that the diff does not support.
-${
-  options.commitContext
-    ? `- This is an independent walkthrough for commit ${options.commitContext.sha}: ${options.commitContext.subject}.
-- Explain only the changes introduced by this commit. Do not summarize the merge request as a whole.
-- Never refer to earlier or later commits, the commit stack, a rebase, or cumulative merge-request history.
-- Do not infer behavior from code outside this commit's supplied diff.
-- Build the best reviewer path through this commit's own diff.`
-    : '- Prefer conceptual chapters across the complete diff.'
-}
+${buildCommitStructureGuidance(options.reviewStrategy)}
+${buildVersionCompareStructureGuidance(options.versionCompareRange)}
+${buildVersionBaseGuidance(options.versionBaseContext)}
+${buildSingleCommitGuidance(options.commitContext)}
+${buildVersionCommitGuidance(options.versionCommitContext)}
 ${buildCustomInstructionsGuidance(generationRequest.customInstructions)}
 
 Repository digest:

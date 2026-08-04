@@ -107,7 +107,7 @@ process.stdin.on('end', () => {
     );
     return;
   }
-  if (endpoint.endsWith('/discussions?per_page=100')) {
+  if (endpoint.endsWith('/discussions') || endpoint.includes('/discussions?per_page=100')) {
     process.stdout.write(JSON.stringify([{
       id: 'discussion-from-provider',
       notes: [{

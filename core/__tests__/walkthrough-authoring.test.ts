@@ -2,6 +2,7 @@ import { expect, test } from 'vite-plus/test';
 import { parseWalkthroughArtifactV5 } from '../lib/narrative-walkthrough-schema.ts';
 import {
   authorWalkthroughArtifactV5,
+  buildReviewFocusPrompt,
   buildWalkthroughPrompt,
   buildWalkthroughPromptInput,
   captureWalkthroughContext,
@@ -11,9 +12,13 @@ import {
   normalizeWalkthroughDraft,
   parseWalkthroughDraft,
 } from '../lib/walkthrough-authoring.ts';
-import type { GenerationMetadata, GitSha, RepositoryState } from '../types.ts';
+import type { EvolutionUnitId, GenerationMetadata, GitSha, RepositoryState } from '../types.ts';
 
 const gitSha = (value: string) => value as GitSha;
+const revision = (sha: string, label: string) => ({
+  label: { kind: 'version' as const, text: label },
+  sha: gitSha(sha),
+});
 const generationMetadata: GenerationMetadata = {
   agent: 'codex',
   generatedAt: '2026-06-26T00:00:00.000Z',
@@ -24,6 +29,64 @@ const generationMetadata: GenerationMetadata = {
     settings: { reasoningEffort: 'medium' },
   }),
 };
+
+test('builds Review focus prompts from ordered Commit Evolution inputs', () => {
+  const content = {
+    agent: 'codex' as const,
+    chapters: [
+      {
+        blurb: 'Trace the behavior.',
+        icon: 'path' as const,
+        id: 'chapter',
+        stops: [
+          {
+            added: 1,
+            deleted: 1,
+            hunkIds: [],
+            hunks: [],
+            id: 'stop',
+            importance: 'normal' as const,
+            prose: 'Trace the new path.',
+            title: 'New path',
+          },
+        ],
+        title: 'Routing change',
+      },
+    ],
+    focus: 'Follow the routing behavior.',
+    generatedAt: '2026-07-28T00:00:00.000Z',
+    kind: 'narrative' as const,
+    repo: { branch: 'feature' },
+    source: { type: 'working-tree' as const },
+    support: [],
+    title: 'Routing update',
+  };
+  const prompt = buildReviewFocusPrompt({
+    generationRequest: {
+      customInstructions: 'Emphasize user-visible behavior.',
+      review: {
+        comparison: {
+          after: {
+            base: revision('c'.repeat(40), 'Target'),
+            head: revision('d'.repeat(40), 'Version 2'),
+          },
+          before: {
+            base: revision('a'.repeat(40), 'Target'),
+            head: revision('b'.repeat(40), 'Version 1'),
+          },
+        },
+        relation: 'version-comparison',
+        structure: 'commit-evolution',
+      },
+    },
+    units: [{ content, unitId: 'evolution-unit-1' as EvolutionUnitId }],
+  });
+
+  expect(prompt).toContain('from Version 1 to Version 2');
+  expect(prompt).toContain('Emphasize user-visible behavior.');
+  expect(prompt).toContain('Follow the routing behavior.');
+  expect(prompt).toContain('Routing change');
+});
 
 const state = {
   branch: 'feature/walkthrough',
@@ -52,7 +115,14 @@ const state = {
     number: 42,
     projectPath: 'example/repository',
     provider: 'gitlab',
-    reviewers: [{ approved: false, id: 'reviewer-1', login: 'reviewer', name: 'Reviewer' }],
+    reviewers: [
+      {
+        approved: false,
+        id: 'reviewer-1',
+        login: 'reviewer',
+        name: 'Reviewer',
+      },
+    ],
     type: 'pull-request',
     url: 'https://git.example.org/example/repository/merge_requests/42',
   },
@@ -89,7 +159,10 @@ test('uses source-aware terminology and applies custom instructions once', () =>
     [
       {
         ...state,
-        source: { sha: gitSha('cccccccccccccccccccccccccccccccccccccccc'), type: 'commit' },
+        source: {
+          sha: gitSha('cccccccccccccccccccccccccccccccccccccccc'),
+          type: 'commit',
+        },
       },
       'commit',
     ],
@@ -106,7 +179,15 @@ test('uses source-aware terminology and applies custom instructions once', () =>
       'branch comparison',
     ],
     [
-      { ...state, source: { base: 'main', head: 'feature', symmetric: true, type: 'range' } },
+      {
+        ...state,
+        source: {
+          base: 'main',
+          head: 'feature',
+          symmetric: true,
+          type: 'range',
+        },
+      },
       'ref range',
     ],
     [{ ...state, source: { type: 'working-tree' } }, 'working-tree changes'],
@@ -151,7 +232,10 @@ test('authors commit prompts from only that commit diff and canonical identity',
     relation: 'target-comparison',
     structure: 'commit-by-commit',
   });
-  const options = { commitContext, scope: { kind: 'commit' as const, sha: commitSha } };
+  const options = {
+    commitContext,
+    scope: { kind: 'commit' as const, sha: commitSha },
+  };
   const { digest } = buildWalkthroughPromptInput(capturedContext, request, options);
   const prompt = buildWalkthroughPrompt(capturedContext, request, options);
 
@@ -312,6 +396,29 @@ test('accepts compact and legacy nullable draft shapes', () => {
   expect(legacy.support).toBeUndefined();
 });
 
+test('includes final commit-evolution guidance and scope identity', () => {
+  const prompt = buildWalkthroughPrompt(capturedState, singleDiffRequest, {
+    scope: { kind: 'evolution-unit', unitId: 'unit-1' as EvolutionUnitId },
+    versionCommitContext: {
+      after: { shortSha: 'bbbbbbb', subject: 'Later' },
+      before: { shortSha: 'aaaaaaa', subject: 'Earlier' },
+      evolutionKind: 'revised',
+      kind: 'version-commit',
+      range: { fromLabel: 'v1', toLabel: 'v2' },
+      unitId: 'unit-1' as EvolutionUnitId,
+    },
+    versionCompareRange: {
+      fromLabel: 'v1',
+      structure: 'commit-evolution',
+      toLabel: 'v2',
+    },
+  });
+  expect(prompt).toContain('logical commit between v1 and v2');
+  expect(prompt).toContain('Earlier');
+  expect(prompt).toContain('Later');
+  expect(prompt).toContain('"kind":"evolution-unit"');
+});
+
 test('authors a sanitized V5 artifact from authoritative inputs', () => {
   const response = {
     chapters: [
@@ -382,7 +489,10 @@ test('rejects stale authoring semantics for newly generated artifacts', () => {
     authorWalkthroughArtifactV5({
       generationMetadata: {
         ...generationMetadata,
-        profile: { ...generationMetadata.profile, authoringVersion: 'stale-authoring' },
+        profile: {
+          ...generationMetadata.profile,
+          authoringVersion: 'stale-authoring',
+        },
       },
       generationRequest: singleDiffRequest,
       response: {},

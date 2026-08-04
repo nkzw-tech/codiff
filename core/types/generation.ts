@@ -7,8 +7,16 @@ import type {
   TargetComparisonReviewPlan,
   TargetComparisonReviewStructure,
   VersionComparisonReviewPlan,
+  VersionComparisonReviewStructure,
 } from './review-history.ts';
-import type { DiffComparison, DiffRange, GitSha, ResolvedReviewSource } from './review-identity.ts';
+import type {
+  DiffComparison,
+  DiffRange,
+  EvolutionUnitId,
+  GitSha,
+  ResolvedReviewSource,
+  ReviewVersionId,
+} from './review-identity.ts';
 import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
 export type GenerationSettings = Readonly<Record<string, boolean | number | string>>;
@@ -79,7 +87,11 @@ export type WalkthroughProgressEvent = {
 
 export type WalkthroughGenerationFailure = {
   error: string;
-  identity: 'single' | { kind: 'commit'; sha: GitSha };
+  identity:
+    | 'review-focus'
+    | 'single'
+    | { kind: 'commit'; sha: GitSha }
+    | { kind: 'evolution-unit'; unitId: EvolutionUnitId };
   label: string;
 };
 
@@ -110,11 +122,19 @@ export type SingleDiffNarrativeWalkthroughRequest = NarrativeWalkthroughRequestO
 export type TargetComparisonNarrativeWalkthroughRequest = NarrativeWalkthroughRequestOptions & {
   commits: ReadonlyArray<ReviewCommitSummary>;
   kind: 'target-comparison';
-  selection: {
-    range: DiffRange;
-    relation: 'target-comparison';
-    structure: TargetComparisonReviewStructure;
-  };
+  regenerateUnitId?: EvolutionUnitId;
+  selection:
+    | {
+        range: DiffRange;
+        relation: 'target-comparison';
+        structure: TargetComparisonReviewStructure | 'auto';
+      }
+    | {
+        fromVersionId: ReviewVersionId;
+        relation: 'version-comparison';
+        structure: VersionComparisonReviewStructure | 'auto';
+        toVersionId: ReviewVersionId;
+      };
   source: Extract<ResolvedReviewSource, { type: 'pull-request' }>;
 };
 

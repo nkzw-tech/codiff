@@ -102,7 +102,13 @@ const resolvedSourceSchema = variant('type', [
     provider: optional(picklist(['github', 'gitlab'])),
     repo: optional(string()),
     reviewers: optional(
-      array(strictObject({ ...reviewAuthorFields, approved: boolean(), id: string() })),
+      array(
+        strictObject({
+          ...reviewAuthorFields,
+          approved: boolean(),
+          id: string(),
+        }),
+      ),
     ),
     reviewStatus: optional(
       strictObject({
@@ -214,10 +220,19 @@ const chapterV5Schema = strictObject({
   stops: array(stopV5Schema),
   title: string(),
 });
-const commitSchema = strictObject({ body: optional(string()), title: optional(string()) });
+const commitSchema = strictObject({
+  body: optional(string()),
+  title: optional(string()),
+});
 const contextSchema = strictObject({
   changedFiles: optional(
-    array(strictObject({ path: string(), rationale: optional(string()), role: string() })),
+    array(
+      strictObject({
+        path: string(),
+        rationale: optional(string()),
+        role: string(),
+      }),
+    ),
   ),
   constraints: optional(array(string())),
   decisions: optional(array(string())),
@@ -255,11 +270,22 @@ const revisionCommonFields = {
   label: revisionLabelSchema,
 };
 const revisionSchema = union([
-  strictObject({ ...revisionCommonFields, kind: optional(literal('commit')), sha: gitShaSchema }),
+  strictObject({
+    ...revisionCommonFields,
+    kind: optional(literal('commit')),
+    sha: gitShaSchema,
+  }),
   strictObject({ ...revisionCommonFields, kind: literal('index') }),
   strictObject({ ...revisionCommonFields, kind: literal('working-copy') }),
 ]);
-const diffRangeSchema = strictObject({ base: revisionSchema, head: revisionSchema });
+const diffRangeSchema = strictObject({
+  base: revisionSchema,
+  head: revisionSchema,
+});
+const diffComparisonSchema = strictObject({
+  after: diffRangeSchema,
+  before: diffRangeSchema,
+});
 
 const capturedSectionSchema = strictObject({
   binary: boolean(),
@@ -344,12 +370,17 @@ const generationMetadataSchema = strictObject({
 const assessmentCodeScopeSchema = variant('type', [
   strictObject({ type: literal('single-diff') }),
   strictObject({ range: diffRangeSchema, type: literal('target-comparison') }),
+  strictObject({
+    comparison: diffComparisonSchema,
+    type: literal('version-comparison'),
+  }),
   strictObject({ sha: gitShaSchema, type: literal('commit') }),
+  strictObject({ type: literal('evolution-unit'), unitId: string() }),
 ]);
 const assessmentThreadAnchorSchema = strictObject({
   filePath: string(),
   lineNumber: optional(number()),
-  position: optional(strictObject({ range: diffRangeSchema })),
+  position: optional(strictObject({ range: diffRangeSchema, versionId: optional(string()) })),
   side: optional(picklist(['additions', 'deletions'])),
   startLineNumber: optional(number()),
   startSide: optional(picklist(['additions', 'deletions'])),
@@ -392,23 +423,38 @@ const assessmentOutcomeSchema = variant('status', [
     result: assessmentResultSchema,
     status: literal('ready'),
   }),
-  strictObject({ error: pipe(string(), minLength(1), maxLength(500)), status: literal('failed') }),
+  strictObject({
+    error: pipe(string(), minLength(1), maxLength(500)),
+    status: literal('failed'),
+  }),
 ]);
 const assessmentComponentSchema = strictObject({
-  capturedPresentationState: strictObject({ threadState: picklist(['open', 'resolved']) }),
+  capturedPresentationState: strictObject({
+    threadState: picklist(['open', 'resolved']),
+  }),
   identity: assessmentIdentitySchema,
   input: assessmentInputSchema,
   outcome: assessmentOutcomeSchema,
 });
-const assessmentCollectionSchema = strictObject({ items: array(assessmentComponentSchema) });
+const assessmentCollectionSchema = strictObject({
+  items: array(assessmentComponentSchema),
+});
 const generationRequestSchema = strictObject({
   customInstructions: optional(string()),
   review: union([
-    strictObject({ relation: literal('single-diff'), structure: literal('single-diff') }),
+    strictObject({
+      relation: literal('single-diff'),
+      structure: literal('single-diff'),
+    }),
     strictObject({
       range: diffRangeSchema,
       relation: literal('target-comparison'),
       structure: picklist(['commit-by-commit', 'net-change']),
+    }),
+    strictObject({
+      comparison: diffComparisonSchema,
+      relation: literal('version-comparison'),
+      structure: picklist(['commit-evolution', 'complete-comparison']),
     }),
   ]),
 });
@@ -445,7 +491,11 @@ const reviewCommitSummarySchema = strictObject({
   authoredAt: string(),
   authorName: string(),
   diffStat: optional(
-    strictObject({ additions: number(), deletions: number(), filesChanged: number() }),
+    strictObject({
+      additions: number(),
+      deletions: number(),
+      filesChanged: number(),
+    }),
   ),
   parentShas: array(gitShaSchema),
   sha: gitShaSchema,
@@ -459,15 +509,40 @@ const commitNarrativeUnitSchema = strictObject({
   generationMetadata: generationMetadataSchema,
   sha: gitShaSchema,
 });
+const evolutionNarrativeUnitSchema = strictObject({
+  commit: optional(reviewCommitSummarySchema),
+  content: narrativeContentV5Schema,
+  generationMetadata: generationMetadataSchema,
+  kind: optional(
+    picklist([
+      'absorbed-into-base',
+      'ambiguous',
+      'introduced',
+      'removed',
+      'retained',
+      'revised',
+      'rewritten-same-patch',
+    ]),
+  ),
+  unitId: string(),
+});
 const walkthroughNarrativeV5Schema = variant('structure', [
   strictObject({
     content: narrativeContentV5Schema,
     generationMetadata: generationMetadataSchema,
-    structure: picklist(['net-change', 'single-diff']),
+    structure: picklist(['complete-comparison', 'net-change', 'single-diff']),
   }),
   strictObject({
     structure: literal('commit-by-commit'),
     units: pipe(array(commitNarrativeUnitSchema), minLength(1)),
+  }),
+  strictObject({
+    reviewFocus: strictObject({
+      content: pipe(string(), minLength(1)),
+      generationMetadata: generationMetadataSchema,
+    }),
+    structure: literal('commit-evolution'),
+    units: pipe(array(evolutionNarrativeUnitSchema), minLength(1)),
   }),
 ]);
 
@@ -512,7 +587,20 @@ const validateArtifactStructure = (artifact: WalkthroughArtifactV5) => {
   if (artifact.generationRequest.review.structure !== artifact.narrative.structure) {
     throw new Error('Walkthrough narrative structure does not match its generation request.');
   }
-  if (artifact.narrative.structure !== 'commit-by-commit') {
+  if (
+    artifact.narrative.structure !== 'commit-by-commit' &&
+    artifact.narrative.structure !== 'commit-evolution'
+  ) {
+    return artifact;
+  }
+  if (artifact.narrative.structure === 'commit-evolution') {
+    const unitIds = new Set<string>();
+    for (const unit of artifact.narrative.units) {
+      if (unitIds.has(unit.unitId)) {
+        throw new Error('Evolution narrative unit identities must be unique.');
+      }
+      unitIds.add(unit.unitId);
+    }
     return artifact;
   }
   const shas = new Set<string>();
@@ -535,10 +623,20 @@ const assessmentScopeResolves = (artifact: WalkthroughArtifactV5, scope: Assessm
       return request.relation === 'single-diff' && artifact.narrative.structure === 'single-diff';
     case 'target-comparison':
       return request.relation === 'target-comparison' && valuesEqual(scope.range, request.range);
+    case 'version-comparison':
+      return (
+        request.relation === 'version-comparison' &&
+        valuesEqual(scope.comparison, request.comparison)
+      );
     case 'commit':
       return (
         artifact.narrative.structure === 'commit-by-commit' &&
         artifact.narrative.units.some((unit) => unit.sha === scope.sha)
+      );
+    case 'evolution-unit':
+      return (
+        artifact.narrative.structure === 'commit-evolution' &&
+        artifact.narrative.units.some((unit) => unit.unitId === scope.unitId)
       );
   }
 };
@@ -563,8 +661,22 @@ const assessmentAnchorMatchesScope = (
       );
     case 'target-comparison':
       return valuesEqual(anchor.position.range, scope.range);
+    case 'version-comparison':
+      return (
+        valuesEqual(anchor.position.range, scope.comparison.before) ||
+        valuesEqual(anchor.position.range, scope.comparison.after)
+      );
     case 'commit':
       return 'sha' in anchor.position.range.head && anchor.position.range.head.sha === scope.sha;
+    case 'evolution-unit':
+      return artifact.capturedContext.files.some(
+        (file) =>
+          (file.path === anchor.filePath || file.oldPath === anchor.filePath) &&
+          file.sections.some(
+            (section) =>
+              section.range != null && valuesEqual(section.range, anchor.position?.range),
+          ),
+      );
   }
 };
 
@@ -652,33 +764,56 @@ const prefixNarrativeContent = (
         : {}),
     })),
   })),
-  support: content.support.map((group) => ({ ...group, id: `${identity}:${group.id}` })),
+  support: content.support.map((group) => ({
+    ...group,
+    id: `${identity}:${group.id}`,
+  })),
 });
 
 const contentFromV5Narrative = (narrative: WalkthroughNarrativeV5) => {
   if ('content' in narrative) {
     return { content: narrative.content, units: undefined };
   }
-  const contents = narrative.units.map((unit) => prefixNarrativeContent(unit.content, unit.sha));
+  const contents =
+    narrative.structure === 'commit-by-commit'
+      ? narrative.units.map((unit) => prefixNarrativeContent(unit.content, unit.sha))
+      : narrative.units.map((unit) => prefixNarrativeContent(unit.content, unit.unitId));
   const first = contents[0];
   if (!first) {
-    throw new Error('A commit-by-commit V5 narrative requires at least one unit.');
+    throw new Error('A multi-unit V5 narrative requires at least one unit.');
   }
+  const content = {
+    ...first,
+    chapters: contents.flatMap((item) => item.chapters),
+    focus: narrative.structure === 'commit-evolution' ? narrative.reviewFocus.content : first.focus,
+    support: contents.flatMap((item) => item.support),
+  };
   return {
-    content: {
-      ...first,
-      chapters: contents.flatMap((content) => content.chapters),
-      support: contents.flatMap((content) => content.support),
-    },
-    units: narrative.units.map((unit, index) => {
-      const prefixed = contents[index]!;
-      return {
-        chapterIds: prefixed.chapters.map((chapter) => chapter.id),
-        ...(unit.commit ? { commit: unit.commit } : {}),
-        identity: { kind: 'commit', sha: unit.sha } as const,
-        supportIds: prefixed.support.map((group) => group.id),
-      };
-    }),
+    content,
+    units:
+      narrative.structure === 'commit-by-commit'
+        ? narrative.units.map((unit, index) => {
+            const prefixed = contents[index]!;
+            return {
+              chapterIds: prefixed.chapters.map((chapter) => chapter.id),
+              ...(unit.commit ? { commit: unit.commit } : {}),
+              identity: { kind: 'commit', sha: unit.sha } as const,
+              supportIds: prefixed.support.map((group) => group.id),
+            };
+          })
+        : narrative.units.map((unit, index) => {
+            const prefixed = contents[index]!;
+            return {
+              chapterIds: prefixed.chapters.map((chapter) => chapter.id),
+              ...(unit.commit ? { commit: unit.commit } : {}),
+              identity: {
+                kind: 'evolution-unit',
+                unitId: unit.unitId,
+              } as const,
+              ...(unit.kind ? { kind: unit.kind } : {}),
+              supportIds: prefixed.support.map((group) => group.id),
+            };
+          }),
   };
 };
 

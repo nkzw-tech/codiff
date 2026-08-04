@@ -14,9 +14,11 @@ export {
   type GenerateReviewWalkthroughResult,
   type NarrativeIdentity,
   type NarrativeSemanticInput,
+  type ReviewFocusSemanticInput,
   type ResolvedWalkthroughGenerationPlan,
   type ReusableWalkthroughComponent,
   type ReviewWalkthroughModelResult,
+  type ReviewWalkthroughRunFocusModel,
   type ReviewWalkthroughRunModel,
   type WalkthroughGenerationSelection,
 } from './lib/generate-review-walkthrough.ts';

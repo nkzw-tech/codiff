@@ -5,12 +5,15 @@ import {
   type ReviewWalkthroughRunModel,
 } from '../lib/generate-review-walkthrough.ts';
 import type {
+  DiffComparisonAnalysis,
+  EvolutionUnitId,
   GenerationMetadata,
   GenerationProfile,
   GitSha,
   RepositoryState,
   ReviewCommitSummary,
   ReviewCommitUnit,
+  ReviewEvolutionUnit,
   TreeInspectionScope,
 } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
@@ -105,7 +108,11 @@ const targetInput = (
 ): GenerateReviewWalkthroughInput => ({
   narrativeProfile: profileFor,
   runModel: successfulRunner(),
-  selection: { range, relation: 'target-comparison', structure: 'commit-by-commit' },
+  selection: {
+    range,
+    relation: 'target-comparison',
+    structure: 'commit-by-commit',
+  },
   states: {
     byCommitSha: Object.fromEntries(
       units.map((unit) => [unit.commit.sha, stateFor(`src/${unit.order}.ts`)]),
@@ -121,14 +128,21 @@ test('publishes aggregate target-comparison narratives with one call', async () 
   const result = await generateReviewWalkthrough({
     narrativeProfile: profileFor,
     runModel,
-    selection: { range, relation: 'target-comparison', structure: 'net-change' },
+    selection: {
+      range,
+      relation: 'target-comparison',
+      structure: 'net-change',
+    },
     states: { whole: baseState },
   });
 
   expect(result.status).toBe('ready');
   expect(runModel).toHaveBeenCalledTimes(1);
   if (result.status === 'ready') {
-    expect(result.plan).toEqual({ reviewRelation: 'target-comparison', structure: 'net-change' });
+    expect(result.plan).toEqual({
+      reviewRelation: 'target-comparison',
+      structure: 'net-change',
+    });
     expect(result.artifact.narrative).toMatchObject({
       generationMetadata: { model: 'model-a' },
       structure: 'net-change',
@@ -162,7 +176,10 @@ test('runs commit narratives with bounded concurrency and preserves canonical pl
   await vi.waitFor(() => expect(pending).toHaveLength(3));
   const complete = (index: number) => {
     const profile = profileFor(pending[index]!.scope);
-    pending[index]!.resolve({ generationMetadata: metadataFor(profile), response: draft });
+    pending[index]!.resolve({
+      generationMetadata: metadataFor(profile),
+      response: draft,
+    });
   };
   complete(2);
   await vi.waitFor(() => expect(pending).toHaveLength(4));
@@ -187,7 +204,10 @@ test('fails atomically for a missing commit diff while retaining successful comp
   const units = [commitUnit(sha.commitA, 0), commitUnit(sha.commitB, 1)];
   const result = await generateReviewWalkthrough(
     targetInput(units, {
-      states: { byCommitSha: { [sha.commitA]: stateFor('src/a.ts') }, whole: baseState },
+      states: {
+        byCommitSha: { [sha.commitA]: stateFor('src/a.ts') },
+        whole: baseState,
+      },
     }),
   );
 
@@ -224,7 +244,10 @@ test('retries only failed commit narratives', async () => {
 
   const retry = vi.fn(successfulRunner());
   const second = await generateReviewWalkthrough(
-    targetInput(units, { reusableComponents: first.reusableComponents, runModel: retry }),
+    targetInput(units, {
+      reusableComponents: first.reusableComponents,
+      runModel: retry,
+    }),
   );
 
   expect(second.status).toBe('ready');
@@ -266,7 +289,11 @@ test('rejects empty aggregate and commit diffs without publishing an artifact', 
   const aggregate = await generateReviewWalkthrough({
     narrativeProfile: profileFor,
     runModel: successfulRunner(),
-    selection: { range, relation: 'target-comparison', structure: 'net-change' },
+    selection: {
+      range,
+      relation: 'target-comparison',
+      structure: 'net-change',
+    },
     states: { whole: emptyState },
   });
   const unit = commitUnit(sha.commitA, 0);
@@ -280,4 +307,151 @@ test('rejects empty aggregate and commit diffs without publishing an artifact', 
   expect(commit.status).toBe('failed');
   expect('artifact' in aggregate).toBe(false);
   expect('artifact' in commit).toBe(false);
+});
+
+const evolutionUnitId = (value: string) => value as EvolutionUnitId;
+const comparison = {
+  after: {
+    base: range.base,
+    head: { label: { kind: 'version' as const, text: 'v2' }, sha: sha.head },
+  },
+  before: {
+    base: range.base,
+    head: { label: { kind: 'version' as const, text: 'v1' }, sha: sha.commitA },
+  },
+};
+const evolutionAnalysis = (units: ReadonlyArray<ReviewEvolutionUnit>): DiffComparisonAnalysis => ({
+  commitEvolution: {
+    recommendation: {
+      rationale: 'The logical commits remain independently reviewable.',
+      suggestedStructure: 'commit-evolution',
+    },
+    summary: {
+      absorbedIntoBase: 0,
+      added: units.filter((unit) => unit.kind === 'introduced').length,
+      ambiguous: 0,
+      completeCoverage: true,
+      pairingCoverage: 1,
+      removed: 0,
+      retained: 0,
+      reviewable: units.length,
+      revised: units.filter((unit) => unit.kind === 'revised').length,
+      rewrittenSamePatch: 0,
+      unreviewableAmbiguous: 0,
+    },
+    units,
+  },
+  summary: {
+    addedLines: 1,
+    baseMoved: false,
+    commentsAffected: 0,
+    conflictFiles: 0,
+    deletedLines: 1,
+    empty: false,
+    filesChanged: 1,
+    intentionalFiles: 1,
+    noiseFiles: 0,
+  },
+});
+
+test('publishes ordered Evolution Units only after Review focus succeeds', async () => {
+  const units = [
+    {
+      after: commitSummary(sha.commitA, 'Introduce routing'),
+      confidence: 'high' as const,
+      kind: 'introduced' as const,
+      order: 0,
+      reviewable: true as const,
+      unitId: evolutionUnitId('unit-a'),
+    },
+    {
+      after: commitSummary(sha.commitB, 'Revise routing'),
+      before: commitSummary(sha.commitA, 'Earlier routing'),
+      confidence: 'high' as const,
+      kind: 'revised' as const,
+      order: 1,
+      reviewable: true as const,
+      unitId: evolutionUnitId('unit-b'),
+    },
+  ] satisfies ReadonlyArray<ReviewEvolutionUnit>;
+  const events: Array<string> = [];
+  const result = await generateReviewWalkthrough({
+    analysis: evolutionAnalysis(units),
+    narrativeProfile: profileFor,
+    reviewFocusProfile: profileFor({ kind: 'complete-diff' }),
+    runModel: async ({ profile, semanticInput }) => {
+      const scope = semanticInput.promptOptions.scope;
+      events.push(scope?.kind === 'evolution-unit' ? scope.unitId : 'narrative');
+      return { generationMetadata: metadataFor(profile), response: draft };
+    },
+    runReviewFocusModel: async ({ profile }) => {
+      events.push('review-focus');
+      return {
+        content: 'Review how routing evolved.',
+        generationMetadata: metadataFor(profile),
+      };
+    },
+    selection: {
+      comparison,
+      relation: 'version-comparison',
+      structure: 'commit-evolution',
+    },
+    states: {
+      byUnitId: {
+        [units[0].unitId]: stateFor('src/a.ts'),
+        [units[1].unitId]: stateFor('src/b.ts'),
+      },
+      whole: baseState,
+    },
+  });
+
+  expect(events.at(-1)).toBe('review-focus');
+  expect(result.status).toBe('ready');
+  if (result.status === 'ready' && result.artifact.narrative.structure === 'commit-evolution') {
+    expect(result.artifact.narrative.reviewFocus.content).toBe('Review how routing evolved.');
+    expect(result.artifact.narrative.units.map((unit) => unit.unitId)).toEqual([
+      evolutionUnitId('unit-a'),
+      evolutionUnitId('unit-b'),
+    ]);
+  }
+});
+
+test('retains successful Evolution Units when Review focus fails', async () => {
+  const unit = {
+    after: commitSummary(sha.commitA, 'Introduce routing'),
+    confidence: 'high' as const,
+    kind: 'introduced' as const,
+    order: 0,
+    reviewable: true as const,
+    unitId: evolutionUnitId('unit-a'),
+  } satisfies ReviewEvolutionUnit;
+  const result = await generateReviewWalkthrough({
+    analysis: evolutionAnalysis([unit]),
+    narrativeProfile: profileFor,
+    reviewFocusProfile: profileFor({ kind: 'complete-diff' }),
+    runModel: successfulRunner(),
+    runReviewFocusModel: async () => {
+      throw new Error('focus unavailable');
+    },
+    selection: {
+      comparison,
+      relation: 'version-comparison',
+      structure: 'commit-evolution',
+    },
+    states: {
+      byUnitId: { [unit.unitId]: stateFor('src/a.ts') },
+      whole: baseState,
+    },
+  });
+
+  expect(result.status).toBe('failed');
+  expect('artifact' in result).toBe(false);
+  if (result.status === 'failed') {
+    expect(result.failures).toContainEqual({
+      error: 'focus unavailable',
+      identity: 'review-focus',
+      label: 'Review focus',
+    });
+    expect(result.reusableComponents).toHaveLength(1);
+  }
 });

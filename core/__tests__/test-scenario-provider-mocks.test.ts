@@ -474,7 +474,7 @@ test('replays a GitLab transcript through the current-review artifact source', a
   expect([...blobs!.values()][0]?.bytes).toEqual(new TextEncoder().encode('provider mock'));
   expect(transport.calls.map(({ path }) => path)).toEqual([
     `/api/v4/projects/${encodeURIComponent(projectPath)}/repository/compare`,
-    `/api/v4/projects/${encodeURIComponent(projectPath)}/repository/compare`,
+    `/api/v4/projects/${encodeURIComponent(projectPath)}/repository/commits/${revisions.head}/diff`,
     `/api/v4/projects/${encodeURIComponent(projectPath)}/repository/files/src%2Fapp.ts`,
   ]);
 });
