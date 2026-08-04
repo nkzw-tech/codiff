@@ -1397,6 +1397,214 @@ html[data-codiff-platform='darwin'] .sidebar {
   color: var(--muted);
 }
 
+.target-comparison-scope {
+  border-bottom: 1px solid var(--sidebar-border);
+  flex: none;
+}
+
+.target-comparison-header {
+  display: grid;
+  gap: 4px;
+  padding: 7px 8px 5px;
+}
+
+.target-comparison-header > strong {
+  color: var(--sidebar-text);
+  font: 600 10px/1.35 var(--font-sans);
+}
+
+.comparison-endpoint-row {
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+}
+
+.version-comparison-endpoint {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.version-tree-commit-scope {
+  border-top: 1px solid var(--sidebar-border);
+  display: grid;
+  gap: 5px;
+  padding: 6px 8px 8px;
+}
+
+.version-tree-commit-scope-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.version-tree-commit-scope-header button {
+  background: transparent;
+  border: 0;
+  color: var(--accent, var(--sidebar-text));
+  cursor: pointer;
+  font: 10px/1.35 var(--font-sans);
+  height: auto;
+  padding: 2px 0;
+  width: auto;
+}
+
+.commit-scope-heading {
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font: 600 10px/1.35 var(--font-sans);
+  min-width: 0;
+}
+
+.commit-scope-heading small {
+  color: var(--muted);
+  font: 9px/1.25 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-tree-commit-options {
+  display: grid;
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.commit-range-list {
+  display: grid;
+  gap: 1px;
+}
+
+.version-commit-unit {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: 10px/1.35 var(--font-sans);
+  gap: 5px;
+  padding: 4px;
+  text-align: left;
+}
+
+.commit-range-row {
+  grid-template-columns: 30px auto minmax(0, 1fr);
+}
+
+.version-commit-unit:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.version-commit-unit:not(:disabled):hover,
+.version-commit-unit[aria-pressed='true'] {
+  background: rgb(127 127 127 / 0.14);
+}
+
+.version-commit-unit code {
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.version-commit-unit > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-range-boundary {
+  color: var(--muted);
+  font: 600 8px/1.35 var(--font-sans);
+  text-transform: uppercase;
+}
+
+.commit-range-instruction {
+  color: var(--muted);
+  font: 9px/1.35 var(--font-sans);
+  padding: 4px;
+}
+
+.diffstat-additions {
+  color: var(--diff-addition);
+}
+
+.diffstat-deletions {
+  color: var(--diff-deletion);
+}
+
+.git-commit-ref-trigger {
+  align-items: center;
+  color: var(--tree-selection-focus);
+  cursor: pointer;
+  display: inline-flex;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.git-commit-ref-trigger code {
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.git-commit-ref-trigger:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--tree-selection-focus);
+  outline-offset: 2px;
+}
+
+.git-commit-tooltip-positioner {
+  z-index: 10000;
+}
+
+.git-commit-tooltip {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.22);
+  color: var(--text);
+  display: grid;
+  gap: 5px;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 9px 10px;
+}
+
+.git-commit-tooltip > strong {
+  font: 600 11px/1.4 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.git-commit-tooltip-sha {
+  color: var(--muted);
+  font: 10px/1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.git-commit-tooltip-meta {
+  color: var(--muted);
+  font: 10px/1.4 var(--font-sans);
+}
+
+.git-commit-tooltip-diffstat {
+  display: inline-flex;
+  font: 600 10px/1.4 var(--font-mono);
+  gap: 7px;
+}
+
+.git-commit-tooltip-link {
+  align-items: center;
+  color: var(--tree-selection-focus);
+  display: inline-flex;
+  font: 600 10px/1.4 var(--font-sans);
+  gap: 5px;
+  margin-top: 2px;
+  text-decoration: none;
+  width: fit-content;
+}
+
 .sidebar-total-row {
   align-items: center;
   border-top: 1px solid var(--sidebar-border);

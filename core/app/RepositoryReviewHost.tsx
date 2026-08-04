@@ -25,6 +25,7 @@ import {
   toProviderSubmittedReviewComment,
   toPullRequestExistingReviewComment,
 } from '../lib/review-comments.ts';
+import { orderReviewCommitStack, reviewCommitRange } from '../lib/review-commit-stack.ts';
 import { getFileReviewIdentity } from '../lib/review-identity.ts';
 import {
   getHistorySource,
@@ -51,12 +52,14 @@ import type {
   CodiffLaunchOptions,
   CodiffPreferences,
   CodiffUpdateStatus,
+  GitSha,
   GitIdentity,
   HistoryEntry,
   NarrativeWalkthrough,
   NarrativeWalkthroughResult,
   OpenReviewSourceKind,
   RepositoryState,
+  ReviewCommitListEntry,
   ReviewSource,
   DiffImageContentRequest,
   DiffImageContentResult,
@@ -130,6 +133,35 @@ const toPullRequestReviewEvent = (
     case 'request-changes':
       return 'REQUEST_CHANGES';
   }
+};
+
+export const toMergeRequestCommit = (entry: HistoryEntry): ReviewCommitListEntry => ({
+  authoredAt: new Date(entry.committedAt).toISOString(),
+  authorName: entry.author,
+  ...(entry.diffStat ? { diffStat: entry.diffStat } : {}),
+  parentShas: entry.parentShas,
+  sha: entry.sha,
+  shortSha: entry.sha.slice(0, 8),
+  subject: entry.subject,
+});
+
+export const toMergeRequestCommits = (
+  entries: ReadonlyArray<HistoryEntry>,
+): ReadonlyArray<ReviewCommitListEntry> =>
+  orderReviewCommitStack(entries.filter((entry) => entry.scope !== 'base')).map(
+    toMergeRequestCommit,
+  );
+
+const getTargetBaseSha = (state: RepositoryState): GitSha | null => {
+  for (const file of state.files) {
+    for (const section of file.sections) {
+      const base = section.range?.base;
+      if (base && 'sha' in base) {
+        return base.sha;
+      }
+    }
+  }
+  return null;
 };
 
 const projectReleasedWalkthroughSource = (
@@ -1634,6 +1666,11 @@ export function RepositoryReviewHost({
         ? 'failed'
         : 'idle';
   const walkthroughAgent = launchOptions.agentBackend ?? config.settings.agentBackend;
+  const reviewCommits = source.type === 'pull-request' ? toMergeRequestCommits(historyEntries) : [];
+  const targetBaseSha = source.type === 'pull-request' ? getTargetBaseSha(state) : null;
+  const targetBaseEntry = targetBaseSha
+    ? historyEntries.find((entry) => entry.scope === 'base' && entry.sha === targetBaseSha)
+    : undefined;
   const snapshot = {
     ...buildSharedReviewSnapshot({
       preferences,
@@ -1766,6 +1803,24 @@ export function RepositoryReviewHost({
           ),
           collapsed,
           commands: desktopCommands,
+          ...(source.type === 'pull-request' && reviewCommits.length > 0
+            ? {
+                commitScope: {
+                  commits: reviewCommits,
+                  onLoadRangeDiff: async (fromSha: GitSha, toSha: GitSha) => {
+                    const range = reviewCommitRange(reviewCommits, fromSha, toSha);
+                    const rangeState = await window.codiff.getRepositoryState({
+                      base: range.baseSha,
+                      head: range.headSha,
+                      symmetric: false,
+                      type: 'range',
+                    });
+                    return sortFiles(rangeState.files);
+                  },
+                  targetBaseCommit: targetBaseEntry ? toMergeRequestCommit(targetBaseEntry) : null,
+                },
+              }
+            : {}),
           ...(isLocalCommitSource && state.files.length > 0
             ? {
                 commit: {

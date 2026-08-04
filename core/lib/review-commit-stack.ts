@@ -171,4 +171,3 @@ export const reviewCommitRange = <Commit extends ReviewCommitStackItem>(
     to,
   };
 };
-

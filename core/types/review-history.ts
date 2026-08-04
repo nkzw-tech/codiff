@@ -75,11 +75,17 @@ export type HistoryEntry = {
 export type ReviewCommitSummary = {
   authoredAt: string;
   authorName: string;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
   parentShas: ReadonlyArray<GitSha>;
   sha: GitSha;
   shortSha: string;
   subject: string;
   webUrl?: string;
+};
+
+/** Complete canonical commit item consumed by current-review stack surfaces. */
+export type ReviewCommitListEntry = ReviewCommitSummary & {
+  role?: string;
 };
 
 /** One ordinary commit in a Target Comparison review plan. */
