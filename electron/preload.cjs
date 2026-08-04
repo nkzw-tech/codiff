@@ -151,6 +151,8 @@ const codiff = {
   sharePlan: (review) => ipcRenderer.invoke('codiff:sharePlan', review),
   shareWalkthrough: (snapshot) => ipcRenderer.invoke('codiff:shareWalkthrough', snapshot),
   resetCodeFontSize: () => ipcRenderer.invoke('codiff:resetCodeFontSize'),
+  resolveReviewContext: (request, requestId) =>
+    ipcRenderer.invoke('codiff:resolveReviewContext', request, requestId),
   saveMarkdownDocument: (request) => ipcRenderer.invoke('codiff:saveMarkdownDocument', request),
   savePlanReview: (review) => ipcRenderer.invoke('codiff:savePlanReview', review),
   showInFolder: (path) => ipcRenderer.invoke('codiff:showInFolder', path),

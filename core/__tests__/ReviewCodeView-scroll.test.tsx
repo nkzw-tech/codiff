@@ -10,7 +10,13 @@ import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
 } from '../lib/review-identity.ts';
-import type { ChangedFile, GitSha, PullRequestCodeQualityFinding, ReviewSource } from '../types.ts';
+import type {
+  ChangedFile,
+  DiffSection,
+  GitSha,
+  PullRequestCodeQualityFinding,
+  ReviewSource,
+} from '../types.ts';
 import { createChangedFile, createChangedFileWithPatch } from './helpers/fixtures.ts';
 import { renderReact, setInputValue, waitFor } from './helpers/react.tsx';
 import {
@@ -1865,4 +1871,250 @@ test('line content clicks create review comments unless text is selected', async
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(onCreateComment).toHaveBeenCalledTimes(3);
+});
+
+test('read-only patch context resolves through the optional host capability without mutation', async () => {
+  const partialFile = createChangedFileWithPatch(
+    'src/context.ts',
+    'diff --git a/src/context.ts b/src/context.ts\n@@ -2 +2 @@\n-old\n+new\n',
+  );
+  const file = {
+    ...partialFile,
+    sections: partialFile.sections.map((section) => ({
+      ...section,
+      range: {
+        base: { label: { kind: 'commit' as const, text: 'base' }, sha: 'a'.repeat(40) as GitSha },
+        head: { label: { kind: 'commit' as const, text: 'head' }, sha: 'b'.repeat(40) as GitSha },
+      },
+    })),
+  } satisfies ChangedFile;
+  const source = {
+    host: 'gitlab.example.com',
+    projectPath: 'example/repo',
+    provider: 'gitlab' as const,
+    type: 'pull-request' as const,
+    url: 'https://gitlab.example.com/example/repo/-/merge_requests/1',
+  };
+  const before = JSON.stringify(file);
+  const resolveReviewContext = vi.fn(async () => ({
+    newFile: { contents: 'before\nnew\nafter\n', name: file.path },
+    oldFile: { contents: 'before\nold\nafter\n', name: file.path },
+    status: 'ready' as const,
+  }));
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      isReadOnly
+      resolveReviewContext={resolveReviewContext}
+      source={source}
+    />,
+  );
+
+  try {
+    const item = codeViewMock.lastItems.find((candidate) => candidate.type === 'diff') as
+      | { fileDiff: unknown }
+      | undefined;
+    const loadDiffFiles = codeViewMock.lastOptions?.loadDiffFiles as
+      | ((fileDiff: unknown) => Promise<unknown>)
+      | undefined;
+    expect(loadDiffFiles).toBeTypeOf('function');
+    await expect(loadDiffFiles?.(item?.fileDiff)).resolves.toMatchObject({
+      newFile: { contents: 'before\nnew\nafter\n' },
+      oldFile: { contents: 'before\nold\nafter\n' },
+    });
+    expect(resolveReviewContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filePath: file.path,
+        range: file.sections[0]?.range,
+        source,
+      }),
+    );
+    expect(JSON.stringify(file)).toBe(before);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('coverage warnings do not disable immutable context expansion for real files', async () => {
+  const partialFile = createChangedFileWithPatch(
+    'src/truncated.ts',
+    'diff --git a/src/truncated.ts b/src/truncated.ts\n@@ -2 +2 @@\n-old\n+new\n',
+  );
+  const range = {
+    base: {
+      label: { kind: 'commit' as const, text: 'base' },
+      sha: 'a'.repeat(40) as GitSha,
+    },
+    head: {
+      label: { kind: 'commit' as const, text: 'head' },
+      sha: 'b'.repeat(40) as GitSha,
+    },
+  };
+  const file = {
+    ...partialFile,
+    sections: partialFile.sections.map((section) => ({
+      ...section,
+      kind: 'pull-request' as const,
+      loadState: 'ready' as const,
+      range,
+    })),
+  } satisfies ChangedFile;
+  const warning = {
+    fingerprint: 'review-range-incomplete:7',
+    path: 'Review diff incomplete',
+    sections: [
+      {
+        binary: false,
+        id: 'review-range-incomplete:7',
+        kind: 'pull-request' as const,
+        loadState: 'error' as const,
+        patch: '',
+        summary: {
+          canLoad: false,
+          reason: 'GitLab returned only the first changed file.',
+        },
+      },
+    ],
+    status: 'modified' as const,
+  } satisfies ChangedFile;
+  const source = {
+    host: 'gitlab.example.com',
+    projectPath: 'example/repo',
+    provider: 'gitlab' as const,
+    type: 'pull-request' as const,
+    url: 'https://gitlab.example.com/example/repo/-/merge_requests/7',
+  };
+  const resolveReviewContext = vi.fn(async () => ({
+    newFile: { contents: 'before\nnew\nafter\n', name: file.path },
+    oldFile: { contents: 'before\nold\nafter\n', name: file.path },
+    status: 'ready' as const,
+  }));
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file, warning]}
+      isReadOnly
+      resolveReviewContext={resolveReviewContext}
+      source={source}
+    />,
+  );
+
+  const diffItems = codeViewMock.lastItems.filter(
+    (candidate) => candidate.type === 'diff',
+  ) as unknown as Array<{
+    fileDiff: { isPartial?: boolean; name?: string };
+  }>;
+  const realItem = diffItems.find((item) => item.fileDiff.name === file.path);
+  const warningItem = diffItems.find((item) => item.fileDiff.name === warning.path);
+  const loadDiffFiles = codeViewMock.lastOptions?.loadDiffFiles as
+    | ((fileDiff: unknown) => Promise<unknown>)
+    | undefined;
+
+  expect(loadDiffFiles).toBeTypeOf('function');
+  await expect(loadDiffFiles?.(realItem?.fileDiff)).resolves.toMatchObject({
+    newFile: { contents: 'before\nnew\nafter\n' },
+    oldFile: { contents: 'before\nold\nafter\n' },
+  });
+  expect(resolveReviewContext).toHaveBeenCalledWith(
+    expect.objectContaining({ filePath: file.path, range, source }),
+  );
+  expect(view.container.textContent).toContain(warning.path);
+  expect(warningItem?.fileDiff.isPartial).toBe(false);
+  expect(resolveReviewContext).toHaveBeenCalledTimes(1);
+});
+
+test('mutable local sections retain context expansion through the host loader', async () => {
+  const partialFile = createChangedFileWithPatch(
+    'src/local-context.ts',
+    'diff --git a/src/local-context.ts b/src/local-context.ts\n@@ -2 +2 @@\n-old\n+new\n',
+  );
+  const originalSection = partialFile.sections[0]!;
+  const file = {
+    ...partialFile,
+    sections: [
+      { ...originalSection, id: 'src/local-context.ts:staged', kind: 'staged' as const },
+      { ...originalSection, id: 'src/local-context.ts:unstaged', kind: 'unstaged' as const },
+    ],
+  } satisfies ChangedFile;
+  const onLoadSectionContents = vi.fn(async (_file: ChangedFile, section: DiffSection) => ({
+    newFile: { contents: `before\n${section.kind} new\nafter\n`, name: file.path },
+    oldFile: { contents: `before\n${section.kind} old\nafter\n`, name: file.path },
+  }));
+  const resolveReviewContext = vi.fn(async () => ({
+    reason: 'Immutable context should not handle mutable sections.',
+    status: 'unavailable' as const,
+  }));
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onLoadSectionContents={onLoadSectionContents}
+      resolveReviewContext={resolveReviewContext}
+      source={{ type: 'working-tree' }}
+    />,
+  );
+
+  const diffItems = codeViewMock.lastItems.filter(
+    (candidate) => candidate.type === 'diff',
+  ) as unknown as Array<{ fileDiff: unknown }>;
+  const loadDiffFiles = codeViewMock.lastOptions?.loadDiffFiles as
+    | ((fileDiff: unknown) => Promise<unknown>)
+    | undefined;
+  expect(loadDiffFiles).toBeTypeOf('function');
+  for (const item of diffItems) {
+    await expect(loadDiffFiles?.(item.fileDiff)).resolves.toMatchObject({
+      newFile: { contents: expect.stringContaining('new') },
+      oldFile: { contents: expect.stringContaining('old') },
+    });
+  }
+  expect(onLoadSectionContents).toHaveBeenCalledTimes(2);
+  expect(onLoadSectionContents.mock.calls.map(([, section]) => section.kind)).toEqual([
+    'staged',
+    'unstaged',
+  ]);
+  expect(resolveReviewContext).not.toHaveBeenCalled();
+});
+
+test('unavailable host context leaves the origin-independent patch review intact', async () => {
+  const partialFile = createChangedFile('src/unavailable-context.ts');
+  const file = {
+    ...partialFile,
+    sections: partialFile.sections.map((section) => ({
+      ...section,
+      range: {
+        base: { label: { kind: 'commit' as const, text: 'base' }, sha: 'c'.repeat(40) as GitSha },
+        head: { label: { kind: 'commit' as const, text: 'head' }, sha: 'd'.repeat(40) as GitSha },
+      },
+    })),
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      isReadOnly
+      resolveReviewContext={async () => ({
+        reason: "GitLab could not load before contents for 'src/unavailable-context.ts'.",
+        status: 'unavailable',
+      })}
+      source={{
+        host: 'gitlab.example.com',
+        projectPath: 'example/repo',
+        provider: 'gitlab',
+        type: 'pull-request',
+        url: 'https://gitlab.example.com/example/repo/-/merge_requests/1',
+      }}
+    />,
+  );
+
+  try {
+    const item = codeViewMock.lastItems.find((candidate) => candidate.type === 'diff') as
+      | { fileDiff: unknown }
+      | undefined;
+    const loadDiffFiles = codeViewMock.lastOptions?.loadDiffFiles as (
+      fileDiff: unknown,
+    ) => Promise<unknown>;
+    await expect(loadDiffFiles(item?.fileDiff)).rejects.toThrow(
+      "GitLab could not load before contents for 'src/unavailable-context.ts'.",
+    );
+    expect(codeViewMock.lastItems.some((candidate) => candidate.type === 'diff')).toBe(true);
+  } finally {
+    await view.cleanup();
+  }
 });

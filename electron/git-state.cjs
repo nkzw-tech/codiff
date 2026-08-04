@@ -73,6 +73,7 @@ const {
   readWorkingTreeState,
 } = require('./git-state/working-tree.cjs');
 const { annotateGeneratedFiles } = require('./generated-files.cjs');
+const { resolveReviewContext } = require('./review-context.cjs');
 
 /**
  * @typedef {import('../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
@@ -309,6 +310,7 @@ module.exports = {
   readCommitState,
   readPullRequestState,
   readRepositoryState,
+  resolveReviewContext,
   readWalkthroughRepositoryState,
   readWorkingTreeState,
   resolvePullRequestContentRefs,

@@ -1568,7 +1568,6 @@ export function ReviewSurface({
     onDeleteComment: deleteComment,
     onLoadImageContent: content?.onLoadImageContent,
     onLoadSection: content?.onLoadSection,
-    onLoadSectionContents: content?.onLoadSectionContents,
     onOpenFile: desktop?.onOpenFile,
     onRefreshMarkdown: content?.onRefreshMarkdown,
     onResolveThread: resolveDiscussion ?? noop,

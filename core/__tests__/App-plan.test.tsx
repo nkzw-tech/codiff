@@ -151,6 +151,10 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   reportInitialLoadMilestone: vi.fn(),
   resetCodeFontSize: vi.fn(async () => {}),
   resolvePullRequestUrl: vi.fn(async (value) => value),
+  resolveReviewContext: vi.fn(async () => ({
+    reason: 'Not used.',
+    status: 'unavailable' as const,
+  })),
   saveMarkdownDocument: vi.fn(async (request) => ({
     document: {
       content: request.content,

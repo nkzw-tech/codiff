@@ -1,5 +1,6 @@
 import {
   createCommitArtifactRequestKey,
+  createFileBlobArtifactRequestKey,
   createReviewArtifactRun,
   type ReviewArtifactProject,
 } from '@nkzw/codiff-core';
@@ -142,6 +143,36 @@ test('uses GitHub merge_base_commit as the effective artifact base', async () =>
   expect(run.diagnostics().acquired.stackAndRanges).toEqual({
     [`${requestedBaseSha}:${headSha}`]: 1,
   });
+});
+
+test('resolves GitHub ref paths as bounded Blob Artifacts', async () => {
+  const ref = gitSha('a'.repeat(40));
+  const objectId = gitSha('b'.repeat(40));
+  const request = { maxBytes: 32, path: 'images/logo.png', ref };
+  const path = '/repos/nkzw-tech/codiff/contents/images/logo.png';
+  const transport = createFakeGitHubTransport([
+    {
+      path,
+      query: { ref },
+      response: {
+        content: btoa(String.fromCharCode(0, 1, 255)),
+        encoding: 'base64',
+        sha: objectId,
+      },
+    },
+  ]);
+  const run = createReviewArtifactRun(createGitHubArtifactSource({ project, pull, transport }));
+
+  const first = await run.readFileBlobs([request], run.signal);
+  const warm = await run.readFileBlobs([request], run.signal);
+
+  expect(first.get(createFileBlobArtifactRequestKey(request))).toMatchObject({
+    bytes: new Uint8Array([0, 1, 255]),
+    objectId,
+    provenance: { kind: 'github-api', project },
+  });
+  expect(warm).toEqual(first);
+  expect(transport.calls).toHaveLength(1);
 });
 
 test('caps current GitHub commit stacks at forty', async () => {

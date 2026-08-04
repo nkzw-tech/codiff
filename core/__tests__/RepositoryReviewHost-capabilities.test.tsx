@@ -18,6 +18,7 @@ import type {
   NarrativeWalkthroughResult,
   RepositoryHistory,
   RepositoryState,
+  ReviewContextRequest,
   ResolvedReviewSource,
   WalkthroughProgressEvent,
 } from '../types.ts';
@@ -710,6 +711,44 @@ test('loads deferred section content for supported Electron sources', async () =
   } finally {
     await view.cleanup();
   }
+});
+
+test('cancels active immutable review context work on unmount', async () => {
+  surfaceProps.mockClear();
+  const cancelDiffContentRequest = vi.fn();
+  const resolveReviewContext = vi.fn(
+    (_request: ReviewContextRequest, _requestId?: string) => new Promise(() => {}),
+  );
+  installWindowApi({ cancelDiffContentRequest, resolveReviewContext });
+  const source = {
+    headSha: gitSha('b'),
+    number: 12,
+    owner: 'example',
+    provider: 'github',
+    repo: 'repo',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/12',
+  } as const;
+  const view = await renderHost(stateFor(source));
+  await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
+  const request = {
+    baseSha: gitSha('a'),
+    filePath: 'src/context.ts',
+    headSha: source.headSha,
+    range: {
+      base: { label: { kind: 'commit', text: 'base' }, sha: gitSha('a') },
+      head: { label: { kind: 'commit', text: 'head' }, sha: source.headSha },
+    },
+    source,
+    status: 'modified',
+  } satisfies ReviewContextRequest;
+
+  void getSurfaceProps().capabilities?.content?.resolveReviewContext?.(request);
+  await waitFor(() => expect(resolveReviewContext).toHaveBeenCalledOnce());
+  const requestId = resolveReviewContext.mock.calls[0]![1];
+  expect(requestId).toMatch(/^context:/);
+  await view.cleanup();
+  expect(cancelDiffContentRequest).toHaveBeenCalledWith(requestId);
 });
 
 test('bumps the mounted review key when deferred loading fails', async () => {
