@@ -1,5 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
-import { getDiffSearchResult } from '../../lib/diff-search.ts';
+import {
+  defaultDiffSearchFilters,
+  getDiffSearchResult,
+  type DiffSearchFilters,
+} from '../../lib/diff-search.ts';
 import { fileHasVisibleDiff } from '../../lib/diff.ts';
 import { fuzzyMatches } from '../../lib/files.ts';
 import type { ChangedFile } from '../../types.ts';
@@ -13,6 +17,7 @@ type UseDiffSearchOptions = {
 export function useDiffSearch({ files, fileSearchQuery, showWhitespace }: UseDiffSearchOptions) {
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [filters, setFilters] = useState<DiffSearchFilters>(defaultDiffSearchFilters);
   const [query, setQuery] = useState('');
   const [visible, setVisible] = useState(false);
 
@@ -28,10 +33,10 @@ export function useDiffSearch({ files, fileSearchQuery, showWhitespace }: UseDif
     () =>
       query.trim()
         ? fileFilteredFiles
-            .map((file) => getDiffSearchResult(file, showWhitespace, query))
+            .map((file) => getDiffSearchResult(file, showWhitespace, query, filters))
             .filter((result) => result != null)
         : [],
-    [fileFilteredFiles, query, showWhitespace],
+    [fileFilteredFiles, filters, query, showWhitespace],
   );
   const matches = useMemo(() => results.flatMap((result) => result.matches), [results]);
   const matchPathSet = useMemo(() => new Set(results.map((result) => result.file.path)), [results]);
@@ -88,6 +93,7 @@ export function useDiffSearch({ files, fileSearchQuery, showWhitespace }: UseDif
     activeMatchIndex: effectiveActiveMatchIndex,
     closeSearch,
     fileFilteredFiles,
+    filters,
     focusRequest,
     hasQuery: query.trim().length > 0,
     matches,
@@ -96,6 +102,7 @@ export function useDiffSearch({ files, fileSearchQuery, showWhitespace }: UseDif
     openSearch,
     query,
     resetSearch,
+    updateFilters: setFilters,
     updateQuery,
     visible,
     visibleFiles,

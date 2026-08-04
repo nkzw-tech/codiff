@@ -473,7 +473,6 @@ test('dispatches neutral GitLab review sessions with pending drafts and summarie
   });
 });
 
-
 test('keeps title-only source footer actions reachable', async () => {
   const onMergePullRequest = vi.fn(async () => {});
   const source = {
@@ -641,7 +640,6 @@ test('renders the same source-description semantics once in Tree, Walkthrough, a
   await waitFor(assertSourceDescriptionOnce);
 });
 
->>>>>>> conflict 1 of 1 ends
 test('copies local notes with the local label and Markdown heading', async () => {
   const file = snapshot.files[0]!;
   const draft = {
@@ -1132,7 +1130,7 @@ test('forwards controlled draft updates atomically across an asynchronous submis
   container.remove();
 });
 
-test('preloads deferred files before applying diff-content search results', async () => {
+test('search filters never load hidden full-file content', async () => {
   const deferredFile = {
     ...createChangedFile('src/lazy.ts', { kind: 'pull-request', patch: '' }),
     sections: [
@@ -1180,96 +1178,17 @@ test('preloads deferred files before applying diff-content search results', asyn
     setInputValue?.call(input, 'needle');
     input?.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await waitFor(() =>
-    expect(onLoadSection).toHaveBeenCalledWith(deferredFile, deferredFile.sections[0]),
-  );
+  const filters = [
+    ...view.container.querySelectorAll<HTMLInputElement>('.diff-search-filters input'),
+  ];
+  for (const filter of filters) {
+    await act(async () => filter.click());
+    await act(async () => filter.click());
+  }
+  expect(onLoadSection).not.toHaveBeenCalled();
   expect(view.container.querySelector('.empty-panel')?.textContent).toContain(
     'No matches in diffs',
   );
-
-  const loadedFile = {
-    ...deferredFile,
-    sections: [
-      {
-        ...deferredFile.sections[0],
-        loadState: 'ready',
-        newFile: { contents: 'const needle = true;\n', name: deferredFile.path },
-        oldFile: { contents: 'const value = false;\n', name: deferredFile.path },
-        patch: '@@ -1 +1 @@\n-const value = false;\n+const needle = true;\n',
-      },
-    ],
-  } satisfies SharedWalkthroughSnapshot['files'][number];
-  await view.render({
-    capabilities: { content: { onLoadSection } },
-    initialMode: 'tree',
-    onCommandBridgeChange: (value) => {
-      bridge.current = value;
-    },
-    snapshot: { ...lazySnapshot, files: [loadedFile] },
-  });
-  await waitFor(() => expect(view.container.querySelector('.empty-panel')).toBeNull());
-  expect(view.container.textContent).toContain('src/lazy.ts');
-});
-
-test('bounds deferred diff-search preloads to three concurrent section loads', async () => {
-  const files = Array.from({ length: 100 }, (_, index) => {
-    const path = `src/lazy-${index}.ts`;
-    return {
-      ...createChangedFile(path, { kind: 'pull-request', patch: '' }),
-      sections: [
-        {
-          binary: false,
-          id: `${path}:pull-request`,
-          kind: 'pull-request' as const,
-          loadState: 'deferred' as const,
-          patch: '',
-          summary: { canLoad: true, reason: 'Load exact contents.' },
-        },
-      ],
-    };
-  }) satisfies ReadonlyArray<SharedWalkthroughSnapshot['files'][number]>;
-  const lazySnapshot = {
-    ...snapshot,
-    files,
-    repository: {
-      root: '/repo',
-      source: {
-        number: 7,
-        owner: 'cloudflare',
-        provider: 'github',
-        repo: 'codiff',
-        type: 'pull-request',
-        url: 'https://github.com/cloudflare/codiff/pull/7',
-      },
-    },
-  } satisfies SharedWalkthroughSnapshot;
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const onLoadSection = vi.fn(() => gate);
-  const bridge = { current: null as ReviewSurfaceCommandBridge | null };
-  await using view = await renderSurface({
-    capabilities: { content: { onLoadSection } },
-    initialMode: 'tree',
-    onCommandBridgeChange: (value) => {
-      bridge.current = value;
-    },
-    snapshot: lazySnapshot,
-  });
-
-  await act(async () => bridge.current?.openDiffSearch());
-  const input = view.container.querySelector<HTMLInputElement>('.diff-search-input');
-  const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-  await act(async () => {
-    setInputValue?.call(input, 'needle');
-    input?.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await waitFor(() => expect(onLoadSection).toHaveBeenCalledTimes(3));
-  expect(onLoadSection).toHaveBeenCalledTimes(3);
-
-  await act(async () => release());
-  await waitFor(() => expect(onLoadSection).toHaveBeenCalledTimes(100));
 });
 
 test('tracks controlled collapsed and viewed state across same-source rerenders', async () => {

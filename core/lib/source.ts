@@ -10,7 +10,6 @@ type SourceCapabilities = {
   emptyTitle: string;
   historySource: boolean;
   lazyDiffContent: boolean;
-  preloadDiffSearchContent: boolean;
   startInHistoryWhenEmpty: boolean;
   viewedFileState: boolean;
 };
@@ -20,7 +19,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No branch changes',
     historySource: true,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: false,
   },
@@ -28,7 +26,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No branch changes',
     historySource: true,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: false,
   },
@@ -36,7 +33,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No changes',
     historySource: true,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: true,
   },
@@ -44,7 +40,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No changes in commit',
     historySource: false,
     lazyDiffContent: true,
-    preloadDiffSearchContent: false,
     startInHistoryWhenEmpty: false,
     viewedFileState: false,
   },
@@ -52,7 +47,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No review changes',
     historySource: true,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: false,
     viewedFileState: false,
   },
@@ -60,7 +54,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No changes in range',
     historySource: false,
     lazyDiffContent: true,
-    preloadDiffSearchContent: false,
     startInHistoryWhenEmpty: false,
     viewedFileState: false,
   },
@@ -68,7 +61,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No local changes',
     historySource: false,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: true,
   },
@@ -142,9 +134,6 @@ export const getRefreshSource = (source: DisplayReviewSource): ReviewSource =>
 
 export const supportsLazyDiffContent = (source: DisplayReviewSource) =>
   getSourceCapabilities(source).lazyDiffContent;
-
-export const supportsDiffSearchContentPreload = (source: DisplayReviewSource) =>
-  getSourceCapabilities(source).preloadDiffSearchContent;
 
 export const shouldStartInHistoryWhenEmpty = (source: DisplayReviewSource) =>
   getSourceCapabilities(source).startInHistoryWhenEmpty;

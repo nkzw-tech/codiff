@@ -2,6 +2,18 @@ import type { ChangedFile } from '../types.ts';
 import type { DiffSearchMatch, DiffSearchResult } from './app-types.ts';
 import { getFirstVisibleSection, getItemId, getVisibleDiffSections } from './diff.ts';
 
+export type DiffSearchFilters = {
+  additions: boolean;
+  deletions: boolean;
+  unchanged: boolean;
+};
+
+export const defaultDiffSearchFilters: DiffSearchFilters = {
+  additions: true,
+  deletions: true,
+  unchanged: false,
+};
+
 const countOccurrences = (text: string, normalizedQuery: string) => {
   if (!normalizedQuery) {
     return 0;
@@ -25,6 +37,7 @@ export const getDiffSearchResult = (
   file: ChangedFile,
   showWhitespace: boolean,
   query: string,
+  filters: DiffSearchFilters = defaultDiffSearchFilters,
 ): DiffSearchResult | null => {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
@@ -70,19 +83,23 @@ export const getDiffSearchResult = (
 
       for (const content of hunk.hunkContent) {
         if (content.type === 'context') {
-          for (let index = 0; index < content.lines; index += 1) {
-            const line = fileDiff.additionLines[content.additionLineIndex + index];
-            const occurrences = countOccurrences(line ?? '', normalizedQuery);
-            if (occurrences > 0) {
-              pushMatch(
-                {
-                  filePath: file.path,
-                  itemId,
-                  lineNumber: additionLineNumber + index,
-                  side: 'additions',
-                },
-                occurrences,
-              );
+          // Search only unchanged lines that are part of the visible patch.
+          // Full file contents must not make hidden context searchable.
+          if (filters.unchanged) {
+            for (let index = 0; index < content.lines; index += 1) {
+              const line = fileDiff.additionLines[content.additionLineIndex + index];
+              const occurrences = countOccurrences(line ?? '', normalizedQuery);
+              if (occurrences > 0) {
+                pushMatch(
+                  {
+                    filePath: file.path,
+                    itemId,
+                    lineNumber: additionLineNumber + index,
+                    side: 'additions',
+                  },
+                  occurrences,
+                );
+              }
             }
           }
 
@@ -91,7 +108,7 @@ export const getDiffSearchResult = (
           continue;
         }
 
-        for (let index = 0; index < content.deletions; index += 1) {
+        for (let index = 0; filters.deletions && index < content.deletions; index += 1) {
           const line = fileDiff.deletionLines[content.deletionLineIndex + index];
           const occurrences = countOccurrences(line ?? '', normalizedQuery);
           if (occurrences > 0) {
@@ -107,7 +124,7 @@ export const getDiffSearchResult = (
           }
         }
 
-        for (let index = 0; index < content.additions; index += 1) {
+        for (let index = 0; filters.additions && index < content.additions; index += 1) {
           const line = fileDiff.additionLines[content.additionLineIndex + index];
           const occurrences = countOccurrences(line ?? '', normalizedQuery);
           if (occurrences > 0) {

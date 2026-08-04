@@ -28,12 +28,6 @@ export const isPatchOnlyDiffSection = (section: DiffSection) =>
 export const shouldLoadDiffSectionContents = (section: DiffSection) =>
   section.summary?.canLoad !== false && section.loadState === 'deferred';
 
-// Diff search needs full context lines in app state, so it also preloads
-// patch-only sections through the eager (state-replacing) flow.
-export const shouldPreloadSectionContentsForSearch = (section: DiffSection) =>
-  shouldLoadDiffSectionContents(section) ||
-  (section.summary?.canLoad !== false && isPatchOnlyDiffSection(section));
-
 // Full file contents fetched lazily for patch-only sections via the CodeView
 // `loadDiffFiles` option. Kept outside React state so the library's in-place
 // hydration of the rendered diff is not reset by re-renders. Keyed without the

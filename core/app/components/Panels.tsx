@@ -22,6 +22,7 @@ import {
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
 import type { RepositoryLoadError, ReviewComment } from '../../lib/app-types.ts';
+import type { DiffSearchFilters } from '../../lib/diff-search.ts';
 import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
 import type {
   ChangedFile,
@@ -365,22 +366,26 @@ export function AgentUnavailablePanel({
 
 export function DiffSearchPanel({
   activeIndex,
+  filters,
   focusRequest,
   keymap,
   matchCount,
   onChange,
   onClose,
+  onFiltersChange,
   onNext,
   onPrevious,
   query,
   visible,
 }: {
   activeIndex: number;
+  filters: DiffSearchFilters;
   focusRequest: number;
   keymap: CodiffKeymap;
   matchCount: number;
   onChange: (query: string) => void;
   onClose: () => void;
+  onFiltersChange: (filters: DiffSearchFilters) => void;
   onNext: () => void;
   onPrevious: () => void;
   query: string;
@@ -437,6 +442,26 @@ export function DiffSearchPanel({
       <span className="diff-search-count">
         {query.trim() ? (matchCount > 0 ? `${activeIndex + 1}/${matchCount}` : '0/0') : ''}
       </span>
+      <div aria-label="Search line filters" className="diff-search-filters">
+        {(
+          [
+            ['additions', 'New lines'],
+            ['deletions', 'Old lines'],
+            ['unchanged', 'Unchanged lines'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key}>
+            <input
+              checked={filters[key]}
+              onChange={(event) =>
+                onFiltersChange({ ...filters, [key]: event.currentTarget.checked })
+              }
+              type="checkbox"
+            />
+            {label}
+          </label>
+        ))}
+      </div>
       <button
         aria-label="Previous match"
         disabled={matchCount === 0}

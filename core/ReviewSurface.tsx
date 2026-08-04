@@ -88,7 +88,6 @@ import {
   getDiffLineCount,
   getTotalDiffLineCount,
   isMarkdownFilePath,
-  shouldPreloadSectionContentsForSearch,
 } from './lib/diff.ts';
 import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
@@ -124,7 +123,6 @@ import {
   getEmptySourceTitle,
   getSourceLabel,
   getSourceKey,
-  supportsDiffSearchContentPreload,
 } from './lib/source.ts';
 import type {
   ChangedFile,
@@ -911,12 +909,14 @@ export function ReviewSurface({
     activeMatchIndex: activeDiffSearchMatchIndex,
     closeSearch: closeDiffSearch,
     fileFilteredFiles,
+    filters: diffSearchFilters,
     focusRequest: diffSearchFocusRequest,
     matches: diffSearchMatches,
     matchPathSet: diffSearchMatchPathSet,
     moveMatch: moveDiffSearchMatch,
     openSearch: openDiffSearch,
     query: diffSearchQuery,
+    updateFilters: updateDiffSearchFilters,
     updateQuery: updateDiffSearchQuery,
     visible: diffSearchVisible,
     visibleFiles,
@@ -925,41 +925,6 @@ export function ReviewSurface({
     fileSearchQuery,
     showWhitespace: snapshot.preferences.showWhitespace,
   });
-  useEffect(() => {
-    if (
-      !content?.onLoadSection ||
-      !supportsDiffSearchContentPreload(snapshot.repository.source) ||
-      !diffSearchQuery.trim()
-    ) {
-      return;
-    }
-
-    const requests = fileFilteredFiles.flatMap((file) =>
-      file.sections
-        .filter(shouldPreloadSectionContentsForSearch)
-        .map((section) => ({ file, section })),
-    );
-    if (requests.length === 0) {
-      return;
-    }
-
-    let canceled = false;
-    let cursor = 0;
-    const loadNext = async () => {
-      while (!canceled) {
-        const request = requests[cursor];
-        cursor += 1;
-        if (!request) {
-          return;
-        }
-        await content.onLoadSection!(request.file, request.section);
-      }
-    };
-    void Promise.all(Array.from({ length: Math.min(3, requests.length) }, () => loadNext()));
-    return () => {
-      canceled = true;
-    };
-  }, [content, diffSearchQuery, fileFilteredFiles, snapshot.repository.source]);
   const forceExpandedPaths = useMemo(
     () => new Set([...diffSearchMatchPathSet, ...(content?.forceExpandedPaths ?? emptyPaths)]),
     [content?.forceExpandedPaths, diffSearchMatchPathSet],
@@ -2069,11 +2034,13 @@ export function ReviewSurface({
         ) : null}
         <DiffSearchPanel
           activeIndex={activeDiffSearchMatchIndex}
+          filters={diffSearchFilters}
           focusRequest={diffSearchFocusRequest}
           keymap={keymap}
           matchCount={diffSearchMatches.length}
           onChange={updateDiffSearchQuery}
           onClose={closeDiffSearch}
+          onFiltersChange={updateDiffSearchFilters}
           onNext={() => moveDiffSearchMatch(1)}
           onPrevious={() => moveDiffSearchMatch(-1)}
           query={diffSearchQuery}
