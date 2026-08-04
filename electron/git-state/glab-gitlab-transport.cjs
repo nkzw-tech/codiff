@@ -6,6 +6,7 @@
  */
 
 const { spawn } = require('node:child_process');
+const { getCommandActionSignal, startCommandTiming } = require('../command-log.cjs');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
@@ -27,6 +28,7 @@ class ProviderOutputLimitError extends Error {
 /** @typedef {{errorName?: string, maxBytes?: number, outputLimitExceeded: boolean, promise: Promise<Buffer>, status: 'pending' | 'fulfilled' | 'rejected'}} SharedGetRequest */
 
 const sharedGetRequests = new Map();
+const MAX_STDERR_BYTES = 1024 * 1024;
 
 /** @param {number | undefined} maxBytes */
 const normalizeMaxBytes = (maxBytes) => {
@@ -52,19 +54,26 @@ const enforceOutputLimit = (bytes, maxBytes) => {
 };
 
 /**
- * Share only uncancelable GETs, briefly retaining completed bytes so the
- * initial loader and history enrichment can apply their own response bounds
- * to one provider read. Concurrent consumers can raise the acquisition bound
- * until output crosses it; a later consumer with a larger bound starts a new
- * read only when an earlier bounded read has already discarded bytes.
+ * Share GETs within one cancellation boundary, briefly retaining completed
+ * bytes. The initial loader and history enrichment can apply their own
+ * response bounds to one provider read. Concurrent consumers can raise the
+ * acquisition bound until output crosses it; a later consumer with a larger
+ * bound starts a new read only when an earlier bounded read discarded bytes.
  * @param {string} key
  * @param {number | undefined} maxBytes
  * @param {(options: {getMaxBytes: () => number | undefined, onOutputLimit: () => void}) => Promise<Buffer>} read
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<Buffer>}
  */
-const readSharedGet = (key, maxBytes, read) => {
+const readSharedGet = (key, maxBytes, read, signal) => {
+  let requestsBySignal = sharedGetRequests.get(key);
+  if (!requestsBySignal) {
+    requestsBySignal = new Map();
+    sharedGetRequests.set(key, requestsBySignal);
+  }
+  const signalKey = signal || null;
   /** @type {SharedGetRequest | undefined} */
-  const existing = sharedGetRequests.get(key);
+  const existing = requestsBySignal.get(signalKey);
   if (existing) {
     if (existing.status === 'fulfilled') {
       return existing.promise;
@@ -101,11 +110,14 @@ const readSharedGet = (key, maxBytes, read) => {
     }),
   );
   entry.promise = request;
-  sharedGetRequests.set(key, entry);
+  requestsBySignal.set(signalKey, entry);
   const expire = () => {
     const timeout = setTimeout(() => {
-      if (sharedGetRequests.get(key) === entry) {
-        sharedGetRequests.delete(key);
+      if (requestsBySignal.get(signalKey) === entry) {
+        requestsBySignal.delete(signalKey);
+        if (requestsBySignal.size === 0 && sharedGetRequests.get(key) === requestsBySignal) {
+          sharedGetRequests.delete(key);
+        }
       }
     }, 1000);
     timeout.unref?.();
@@ -202,6 +214,7 @@ const runGlabApiBuffer = async (repoRoot, hostname, args, input, options = {}) =
   const environment = await getCommandEnvironment();
   return new Promise((resolve, reject) => {
     const fixedMaxBytes = normalizeMaxBytes(options.maxBytes);
+    const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
     let command;
     try {
       command = getGlabCommand();
@@ -210,17 +223,56 @@ const runGlabApiBuffer = async (repoRoot, hostname, args, input, options = {}) =
       return;
     }
 
-    const child = spawn(command, args, {
-      cwd: repoRoot,
-      env: environment,
-      signal: options.signal ?? getCurrentCommandSignal(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const timing = startCommandTiming({ args, command, cwd: repoRoot });
+    let child;
+    try {
+      signal?.throwIfAborted();
+      child = spawn(command, args, {
+        cwd: repoRoot,
+        env: environment,
+        signal,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      timing.finish({ canceled: signal?.aborted, error });
+      reject(error);
+      return;
+    }
     const stdout = [];
     const stderr = [];
+    let stderrBytes = 0;
     let outputBytes = 0;
     let outputLimit;
-    child.stdout.on('data', (chunk) => {
+    let settled = false;
+
+    /**
+     * @param {unknown} reason
+     * @param {{canceled?: boolean, exitCode?: number | null, signal?: string | null}} [result]
+     */
+    const fail = (reason, result = {}) => {
+      if (settled) return;
+      settled = true;
+      const error = reason instanceof Error ? reason : new Error(String(reason));
+      timing.finish({
+        canceled: result.canceled,
+        error,
+        exitCode: result.exitCode,
+        signal: result.signal,
+      });
+      reject(error);
+    };
+
+    const abortError = () => {
+      const reason = signal?.reason;
+      if (reason instanceof Error) return reason;
+      const error = new Error('glab api request was aborted.');
+      error.name = 'AbortError';
+      return error;
+    };
+
+    child.stdout.on('data', (value) => {
+      if (settled) return;
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       outputBytes += chunk.length;
       if (outputLimit != null) {
         return;
@@ -234,32 +286,60 @@ const runGlabApiBuffer = async (repoRoot, hostname, args, input, options = {}) =
       }
       stdout.push(chunk);
     });
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.stderr.on('data', (value) => {
+      if (settled || stderrBytes >= MAX_STDERR_BYTES) return;
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      const retained = chunk.subarray(0, MAX_STDERR_BYTES - stderrBytes);
+      stderr.push(Buffer.from(retained));
+      stderrBytes += retained.length;
+    });
+    child.stdin.on('error', (error) => {
+      if (!settled && /** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE') {
+        fail(error, { canceled: signal?.aborted });
+        child.kill();
+      }
+    });
     child.on('error', (error) => {
-      reject(
+      fail(
         /** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT'
           ? createGlabNotFoundError()
           : error,
+        { canceled: error.name === 'AbortError' || signal?.aborted },
       );
     });
-    child.on('close', (code, signal) => {
+    child.on('close', (code, childSignal) => {
+      if (settled) return;
+      if (signal?.aborted) {
+        fail(abortError(), { canceled: true, exitCode: code, signal: childSignal });
+        return;
+      }
       if (code === 0) {
         if (outputLimit != null) {
-          reject(new ProviderOutputLimitError(outputLimit));
+          fail(new ProviderOutputLimitError(outputLimit), {
+            exitCode: code,
+            signal: childSignal,
+          });
         } else {
+          settled = true;
+          timing.finish({ exitCode: code });
           resolve(Buffer.concat(stdout, outputBytes));
         }
       } else {
         const error = new Error(
           Buffer.concat(stderr).toString('utf8').trim() || `glab api exited with code ${code}.`,
         );
-        reject(error);
+        fail(error, { exitCode: code, signal: childSignal });
       }
     });
-    if (input == null) {
-      child.stdin.end();
-    } else {
-      child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input));
+    try {
+      if (input == null) {
+        child.stdin.end();
+      } else {
+        child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input));
+      }
+    } catch (error) {
+      fail(error, { canceled: signal?.aborted });
+      child.kill();
     }
   });
 };
@@ -285,18 +365,21 @@ const createGlabGitLabTransport = ({ hostname, repoRoot, signal: defaultSignal }
    */
   const readApiBuffer = async (args, input, options) => {
     const maxBytes = normalizeMaxBytes(options.maxBytes);
-    const signal = options.signal ?? getCurrentCommandSignal();
     const bytes = options.sharedKey
-      ? await readSharedGet(options.sharedKey, maxBytes, ({ getMaxBytes, onOutputLimit }) =>
-          runGlabApiBuffer(repoRoot, hostname, args, input, {
-            getMaxBytes,
-            onOutputLimit,
-            signal,
-          }),
+      ? await readSharedGet(
+          options.sharedKey,
+          maxBytes,
+          ({ getMaxBytes, onOutputLimit }) =>
+            runGlabApiBuffer(repoRoot, hostname, args, input, {
+              getMaxBytes,
+              onOutputLimit,
+              signal: options.signal,
+            }),
+          options.signal,
         )
       : await runGlabApiBuffer(repoRoot, hostname, args, input, {
           maxBytes,
-          signal,
+          signal: options.signal,
         });
     return enforceOutputLimit(bytes, maxBytes);
   };
@@ -319,9 +402,10 @@ const createGlabGitLabTransport = ({ hostname, repoRoot, signal: defaultSignal }
       request.method,
       request.body,
     );
-    const signal = request.signal || defaultSignal || getCurrentCommandSignal();
+    const signal =
+      request.signal || defaultSignal || getCurrentCommandSignal() || getCommandActionSignal();
     const sharedKey =
-      request.body == null && (!request.method || request.method === 'GET') && !signal
+      request.body == null && (!request.method || request.method === 'GET')
         ? `${repoRoot}\0${hostname}\0text\0${args.join('\0')}`
         : undefined;
     return (
@@ -413,22 +497,24 @@ const createGlabGitLabTransport = ({ hostname, repoRoot, signal: defaultSignal }
     },
     async requestBuffer(request) {
       const args = createGlabApiArgs(hostname, request.path, request.query, undefined, undefined);
-      const signal = request.signal || defaultSignal || getCurrentCommandSignal();
+      const signal =
+        request.signal || defaultSignal || getCurrentCommandSignal() || getCommandActionSignal();
       return readApiBuffer(args, undefined, {
         maxBytes: request.maxBytes,
-        sharedKey: !signal ? `${repoRoot}\0${hostname}\0buffer\0${args.join('\0')}` : undefined,
+        sharedKey: `${repoRoot}\0${hostname}\0buffer\0${args.join('\0')}`,
         signal,
       });
     },
     async requestPages(request) {
       const args = createGlabApiArgs(hostname, request.path, request.query, undefined, undefined);
       args.splice(-1, 0, '--paginate');
-      const signal = request.signal || defaultSignal || getCurrentCommandSignal();
+      const signal =
+        request.signal || defaultSignal || getCurrentCommandSignal() || getCommandActionSignal();
       const pages = parseJsonPages(
         (
           await readApiBuffer(args, undefined, {
             maxBytes: request.maxBytes,
-            sharedKey: !signal ? `${repoRoot}\0${hostname}\0${args.join('\0')}` : undefined,
+            sharedKey: `${repoRoot}\0${hostname}\0${args.join('\0')}`,
             signal,
           })
         ).toString('utf8'),

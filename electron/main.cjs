@@ -1,5 +1,7 @@
 // @ts-check
 
+const electronProcessStartedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
+
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { basename, dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -15,6 +17,14 @@ const {
   screen,
   shell,
 } = require('electron');
+const {
+  configureCommandLog,
+  recordCommandMilestone,
+  runWithCommandAction,
+  startCommandAction,
+} = require('./command-log.cjs');
+
+app.setName('Codiff');
 const squirrelStartup = require('electron-squirrel-startup');
 const {
   listRepositoryHistory,
@@ -165,9 +175,17 @@ const markdownDocumentWatchers = new Map();
 const completedPlanWindows = new Set();
 /** @type {Set<import('electron').BrowserWindow>} */
 const openWindows = new Set();
+/** @type {Map<number, ReturnType<typeof startCommandAction>>} */
+const initialLoadActions = new Map();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
 /** @type {CodiffConfig} */
 let config = createDefaultConfig();
+
+/** @template Value @param {number} webContentsId @param {() => Value} callback */
+const runInInitialLoadAction = (webContentsId, callback) => {
+  const action = initialLoadActions.get(webContentsId);
+  return action ? action.run(callback) : callback();
+};
 
 /**
  * @type {Map<string, ReturnType<typeof createSkillInstaller>>}
@@ -916,11 +934,13 @@ ipcMain.on(
  * @param {string} repositoryPath
  * @param {CodiffLaunchOptions} [launchOptions]
  * @param {WindowIdentity | null} [identity]
+ * @param {ReturnType<typeof startCommandAction>} initialLoadAction
  */
 const createWindow = (
   repositoryPath,
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
-  identity = getWindowIdentity(repositoryPath, launchOptions),
+  identity,
+  initialLoadAction,
 ) => {
   const savedState = readWindowState();
   const validatedState = savedState
@@ -969,6 +989,7 @@ const createWindow = (
   attachExternalLinkHandling(window.webContents, (url) => shell.openExternal(url));
 
   const webContentsId = window.webContents.id;
+  initialLoadActions.set(webContentsId, initialLoadAction);
   openWindows.add(window);
   if (identity) {
     windowIdentities.set(webContentsId, identity);
@@ -977,13 +998,31 @@ const createWindow = (
   windowLaunchOptions.set(webContentsId, launchOptions);
   const initialRepositoryStatePromise = launchOptions.planFile
     ? null
-    : readInitialRepositoryStateWithConfig(repositoryPath, launchOptions, identity?.repositoryRoot);
-  const initialRepositoryState = initialRepositoryStatePromise?.then((state) => {
-    if (!window.isDestroyed()) {
-      storeResolvedRepositoryState(webContentsId, state);
-    }
-    return state;
-  });
+    : initialLoadAction.run(() =>
+        readInitialRepositoryStateWithConfig(
+          repositoryPath,
+          launchOptions,
+          identity?.repositoryRoot,
+        ),
+      );
+  const initialRepositoryState = initialRepositoryStatePromise?.then(
+    (state) => {
+      recordCommandMilestone('repository-review-state-available', {
+        actionId: initialLoadAction.id,
+      });
+      if (!window.isDestroyed()) {
+        storeResolvedRepositoryState(webContentsId, state);
+      }
+      return state;
+    },
+    (error) => {
+      initialLoadAction.finish({ error });
+      if (initialLoadActions.get(webContentsId) === initialLoadAction) {
+        initialLoadActions.delete(webContentsId);
+      }
+      throw error;
+    },
+  );
   initialRepositoryState?.catch(() => {});
   if (initialRepositoryState) {
     windowInitialRepositoryStates.set(webContentsId, initialRepositoryState);
@@ -1017,7 +1056,13 @@ const createWindow = (
   window.on('minimize', () => repositoryWatcherCoordinator.visibilityChanged(webContentsId));
   window.on('restore', () => repositoryWatcherCoordinator.focus(webContentsId));
   window.on('show', () => repositoryWatcherCoordinator.focus(webContentsId));
-  window.once('ready-to-show', () => window.show());
+  window.once('ready-to-show', () => {
+    window.show();
+    if (launchOptions.planFile) {
+      initialLoadAction.finish();
+      initialLoadActions.delete(webContentsId);
+    }
+  });
   let allowClose = false;
   let copyingPendingCommentsBeforeClose = false;
   window.on('close', (event) => {
@@ -1066,6 +1111,8 @@ const createWindow = (
     });
   });
   window.on('closed', () => {
+    initialLoadActions.get(webContentsId)?.cancel();
+    initialLoadActions.delete(webContentsId);
     openWindows.delete(window);
     definitionSearchCoordinator.cancel(webContentsId);
     repositoryWatcherCoordinator.detach(webContentsId);
@@ -1163,7 +1210,9 @@ const focusWindow = (window) => {
 /** @param {number} webContentsId */
 const getWalkthroughShareContext = async (webContentsId) => {
   const repositoryPath = windowRepositories.get(webContentsId) || getLaunchPath();
-  const uploader = await readGitIdentity(repositoryPath);
+  const uploader = await runInInitialLoadAction(webContentsId, () =>
+    readGitIdentity(repositoryPath),
+  );
 
   return {
     target: resolveWalkthroughShareTarget({
@@ -1239,7 +1288,15 @@ const focusOrCreateWindow = (
   repositoryPath,
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
 ) => {
-  const identity = getWindowIdentity(repositoryPath, launchOptions);
+  const initialLoadAction = startCommandAction({
+    command: 'initial-load',
+    cwd: repositoryPath,
+    details: {
+      explicitSource: Boolean(launchOptions.source),
+      sourceType: launchOptions.source?.type,
+    },
+  });
+  const identity = initialLoadAction.run(() => getWindowIdentity(repositoryPath, launchOptions));
   const matchingWebContentsId = findMatchingWindowIdentity(identity, windowIdentities);
   const matchingWindow =
     matchingWebContentsId == null
@@ -1250,6 +1307,8 @@ const focusOrCreateWindow = (
 
   if (matchingWindow) {
     if (launchOptions.planFile || launchOptions.walkthrough || launchOptions.walkthroughFile) {
+      initialLoadActions.get(matchingWebContentsId)?.cancel();
+      initialLoadActions.set(matchingWebContentsId, initialLoadAction);
       windowRepositories.set(matchingWebContentsId, identity?.repositoryRoot || repositoryPath);
       windowLaunchOptions.set(matchingWebContentsId, launchOptions);
       if (launchOptions.planFile) {
@@ -1257,13 +1316,25 @@ const focusOrCreateWindow = (
         readyPlanWindows.delete(matchingWebContentsId);
         windowInitialRepositoryStates.delete(matchingWebContentsId);
       } else {
-        windowInitialRepositoryStates.set(
-          matchingWebContentsId,
+        const initialState = initialLoadAction.run(() =>
           readInitialRepositoryStateWithConfig(
             repositoryPath,
             launchOptions,
             identity?.repositoryRoot,
           ),
+        );
+        windowInitialRepositoryStates.set(matchingWebContentsId, initialState);
+        initialState.then(
+          () =>
+            recordCommandMilestone('repository-review-state-available', {
+              actionId: initialLoadAction.id,
+            }),
+          (error) => {
+            initialLoadAction.finish({ error });
+            if (initialLoadActions.get(matchingWebContentsId) === initialLoadAction) {
+              initialLoadActions.delete(matchingWebContentsId);
+            }
+          },
         );
       }
       if (identity) {
@@ -1275,12 +1346,18 @@ const focusOrCreateWindow = (
       );
       abortDiffContentRequests(matchingWebContentsId);
       matchingWindow.reload();
+      if (launchOptions.planFile) {
+        initialLoadAction.finish();
+        initialLoadActions.delete(matchingWebContentsId);
+      }
+    } else {
+      initialLoadAction.finish();
     }
     focusWindow(matchingWindow);
     return matchingWindow;
   }
 
-  return createWindow(repositoryPath, launchOptions, identity);
+  return createWindow(repositoryPath, launchOptions, identity, initialLoadAction);
 };
 
 const INITIAL_UPDATE_CHECK_DELAY_MS = 10 * 1000;
@@ -1367,8 +1444,11 @@ const lock =
 if (squirrelStartup || !lock) {
   app.quit();
 } else {
-  app.setName('Codiff');
-
+  configureCommandLog(app.getPath('logs'), { processStartedAt: electronProcessStartedAt });
+  recordCommandMilestone('electron-process-start', {
+    monotonicMs: 0,
+    timestamp: electronProcessStartedAt,
+  });
   app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
     const data = /** @type {SingleInstanceAdditionalData} */ (additionalData || {});
     const launchOptions =
@@ -1953,15 +2033,24 @@ ipcMain.handle('codiff:askReviewAssistant', async (event, request) => {
 
 ipcMain.handle('codiff:createWalkthroughCommit', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const result = await createWalkthroughCommit(repositoryPath, request, (chunk) => {
-    if (!event.sender.isDestroyed()) {
-      event.sender.send('codiff:walkthroughCommitOutput', chunk);
-    }
-  });
-  if (result.status === 'committed') {
-    await resetRepositoryWatcher(event.sender.id, repositoryPath);
-  }
-  return result;
+  return runWithCommandAction(
+    {
+      command: 'walkthrough-commit',
+      cwd: repositoryPath,
+      details: { fileCount: Array.isArray(request?.paths) ? request.paths.length : 0 },
+    },
+    async () => {
+      const result = await createWalkthroughCommit(repositoryPath, request, (chunk) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('codiff:walkthroughCommitOutput', chunk);
+        }
+      });
+      if (result.status === 'committed') {
+        await resetRepositoryWatcher(event.sender.id, repositoryPath);
+      }
+      return result;
+    },
+  );
 });
 
 ipcMain.handle('codiff:updateWalkthroughCommitMessage', async (event, request) => {
@@ -2002,13 +2091,32 @@ ipcMain.on('codiff:cancelDiffContentRequest', (event, requestId) => {
   if (typeof requestId !== 'string') {
     return;
   }
-  const requests = diffContentRequests.get(event.sender.id);
-  requests?.get(requestId)?.abort(new DOMException('Diff content request canceled.', 'AbortError'));
+  diffContentRequests
+    .get(event.sender.id)
+    ?.get(requestId)
+    ?.abort(new DOMException('Diff content request canceled.', 'AbortError'));
 });
 
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return listRepositoryHistory(repositoryPath, limit, source);
+  return runInInitialLoadAction(event.sender.id, () =>
+    listRepositoryHistory(repositoryPath, limit, source),
+  );
+});
+
+ipcMain.on('codiff:initialLoadMilestone', (event, name) => {
+  if (name !== 'first-usable-review-rendered' && name !== 'deferred-review-data-complete') {
+    return;
+  }
+  const action = initialLoadActions.get(event.sender.id);
+  if (!action) {
+    return;
+  }
+  recordCommandMilestone(name, { actionId: action.id });
+  if (name === 'deferred-review-data-complete') {
+    action.finish();
+    initialLoadActions.delete(event.sender.id);
+  }
 });
 
 ipcMain.handle('codiff:getReviewComments', async (event, source, requestId) => {
@@ -2017,13 +2125,13 @@ ipcMain.handle('codiff:getReviewComments', async (event, source, requestId) => {
   }
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   return runDiffContentRequest(event, { requestId }, () =>
-    readReviewComments(repositoryPath, source),
+    runInInitialLoadAction(event.sender.id, () => readReviewComments(repositoryPath, source)),
   );
 });
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return readGitIdentity(repositoryPath);
+  return runInInitialLoadAction(event.sender.id, () => readGitIdentity(repositoryPath));
 });
 
 ipcMain.handle('codiff:getPreferences', () => configToPreferences(config));

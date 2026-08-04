@@ -1,17 +1,16 @@
 // @ts-check
 
 const { AsyncLocalStorage } = require('node:async_hooks');
-const { execFile, spawn } = require('node:child_process');
+const { execFile, execFileSync, spawn } = require('node:child_process');
 const { promises: fs } = require('node:fs');
 const { createHash } = require('node:crypto');
 const { isAbsolute, join, normalize, sep } = require('node:path');
 const { promisify } = require('node:util');
+const { getCommandActionSignal, startCommandTiming } = require('../command-log.cjs');
 
 const execFileAsync = promisify(execFile);
 const commandSignalStorage = new AsyncLocalStorage();
-
 const getCurrentCommandSignal = () => commandSignalStorage.getStore();
-
 /** @template Value @param {AbortSignal} signal @param {() => Value} callback */
 const runWithCommandSignal = (signal, callback) => commandSignalStorage.run(signal, callback);
 
@@ -61,22 +60,71 @@ const getGravatarHash = (email) =>
  * @returns {Promise<string>}
  */
 const git = async (repoPath, args, options = {}) => {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
-    encoding: options.encoding || 'utf8',
-    maxBuffer: 1024 * 1024 * 64,
-    signal: options.signal ?? getCurrentCommandSignal(),
-  });
-  return stdout;
+  const commandArgs = ['-C', repoPath, ...args];
+  const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
+  const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
+  try {
+    const { stdout } = await execFileAsync('git', commandArgs, {
+      encoding: options.encoding || 'utf8',
+      maxBuffer: 1024 * 1024 * 64,
+      signal,
+    });
+    timing.finish();
+    return stdout;
+  } catch (error) {
+    timing.finish({ canceled: error instanceof Error && error.name === 'AbortError', error });
+    throw error;
+  }
 };
 
 /** @param {string} repoPath @param {ReadonlyArray<string>} args @param {{signal?: AbortSignal}} [options] @returns {Promise<Buffer>} */
 const gitBuffer = async (repoPath, args, options = {}) => {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
-    encoding: 'buffer',
-    maxBuffer: 1024 * 1024 * 64,
-    signal: options.signal ?? getCurrentCommandSignal(),
-  });
-  return stdout;
+  const commandArgs = ['-C', repoPath, ...args];
+  const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
+  const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
+  try {
+    const { stdout } = await execFileAsync('git', commandArgs, {
+      encoding: 'buffer',
+      maxBuffer: 1024 * 1024 * 64,
+      signal,
+    });
+    timing.finish();
+    return stdout;
+  } catch (error) {
+    timing.finish({ canceled: error instanceof Error && error.name === 'AbortError', error });
+    throw error;
+  }
+};
+
+/**
+ * Canonical synchronous Git boundary for startup paths that must resolve
+ * before a window exists.
+ * @param {string} repoPath
+ * @param {ReadonlyArray<string>} args
+ * @param {{encoding?: BufferEncoding}} [options]
+ */
+const gitSync = (repoPath, args, options = {}) => {
+  (getCurrentCommandSignal() || getCommandActionSignal())?.throwIfAborted();
+  const commandArgs = ['-C', repoPath, ...args];
+  const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
+  try {
+    const output = execFileSync('git', commandArgs, {
+      encoding: options.encoding || 'utf8',
+      maxBuffer: 1024 * 1024 * 64,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    timing.finish({ exitCode: 0 });
+    return output;
+  } catch (error) {
+    timing.finish({
+      error,
+      exitCode:
+        error && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
+          ? error.status
+          : null,
+    });
+    throw error;
+  }
 };
 
 /**
@@ -88,36 +136,80 @@ const gitBuffer = async (repoPath, args, options = {}) => {
  */
 const gitBufferWithInput = (repoPath, args, input, options = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn('git', ['-C', repoPath, ...args], {
-      env: options.env,
-      signal: options.signal ?? getCurrentCommandSignal(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const commandArgs = ['-C', repoPath, ...args];
+    const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
+    const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
     /** @type {Array<Buffer>} */
     const stdout = [];
     /** @type {Array<Buffer>} */
     const stderr = [];
+    let settled = false;
+
+    /** @param {unknown} reason @param {{canceled?: boolean, exitCode?: number | null, signal?: string | null}} [result] */
+    const fail = (reason, result = {}) => {
+      if (settled) return;
+      settled = true;
+      const error = reason instanceof Error ? reason : new Error(String(reason));
+      timing.finish({ ...result, error });
+      reject(error);
+    };
+
+    const abortError = () => {
+      const reason = signal?.reason;
+      if (reason instanceof Error) return reason;
+      const error = new Error('Git command was aborted.');
+      error.name = 'AbortError';
+      return error;
+    };
+
+    let child;
+    try {
+      signal?.throwIfAborted();
+      child = spawn('git', commandArgs, {
+        env: options.env,
+        signal,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      fail(error, { canceled: signal?.aborted });
+      return;
+    }
 
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
     child.stdin.on('error', (error) => {
-      if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE') {
-        reject(error);
+      if (!settled && /** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE') {
+        fail(error, { canceled: signal?.aborted });
+        child.kill();
       }
     });
-    child.on('error', reject);
-    child.on('close', (code) => {
+    child.on('error', (error) =>
+      fail(error, { canceled: error.name === 'AbortError' || signal?.aborted }),
+    );
+    child.on('close', (code, childSignal) => {
+      if (settled) return;
+      if (signal?.aborted) {
+        fail(abortError(), { canceled: true, exitCode: code, signal: childSignal });
+        return;
+      }
       if (code === 0) {
+        settled = true;
+        timing.finish({ exitCode: code });
         resolve(Buffer.concat(stdout));
       } else {
         const error = new Error(
           Buffer.concat(stderr).toString('utf8') || `git exited with status ${code}`,
         );
-        reject(error);
+        fail(error, { exitCode: code, signal: childSignal });
       }
     });
 
-    child.stdin.end(input);
+    try {
+      child.stdin.end(input);
+    } catch (error) {
+      fail(error, { canceled: signal?.aborted });
+      child.kill();
+    }
   });
 
 const EAGER_TEXT_FILE_LIMIT = 1024 * 1024;
@@ -796,17 +888,13 @@ const normalizeStatus = (statusCode) =>
         ? 'renamed'
         : 'modified';
 
-/** @param {string} repoRoot @param {ReadonlyArray<string>} args */
-const gitOrEmpty = async (repoRoot, args) => {
+/** @param {string} repoRoot @param {ReadonlyArray<string>} args @param {{signal?: AbortSignal}} [options] */
+const gitOrEmpty = async (repoRoot, args, options = {}) => {
+  const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
   try {
-    return await git(repoRoot, args);
-  } catch (error) {
-    if (
-      getCurrentCommandSignal()?.aborted ||
-      (error instanceof Error && error.name === 'AbortError')
-    ) {
-      throw error;
-    }
+    return await git(repoRoot, args, { ...options, signal });
+  } catch {
+    signal?.throwIfAborted();
     return '';
   }
 };
@@ -829,6 +917,7 @@ module.exports = {
   git,
   gitBufferWithInput,
   gitOrEmpty,
+  gitSync,
   normalizeStatus,
   parseStatus,
   readFileStat,
