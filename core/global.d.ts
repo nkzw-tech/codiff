@@ -35,6 +35,7 @@ import type {
   SubmitPullRequestCommentRequest,
   PullRequestExistingReviewComment,
   SubmitPullRequestReviewRequest,
+  SubmitPullRequestReviewResult,
   TerminalHelperStatus,
   WalkthroughCommitMessageRequest,
   WalkthroughCommitMessageResult,
@@ -134,7 +135,9 @@ declare global {
       submitPullRequestComment: (
         request: SubmitPullRequestCommentRequest,
       ) => Promise<PullRequestExistingReviewComment>;
-      submitPullRequestReview: (request: SubmitPullRequestReviewRequest) => Promise<void>;
+      submitPullRequestReview: (
+        request: SubmitPullRequestReviewRequest,
+      ) => Promise<SubmitPullRequestReviewResult>;
       updateWalkthroughCommitMessage: (
         request: WalkthroughCommitMessageRequest,
       ) => Promise<WalkthroughCommitMessageResult>;

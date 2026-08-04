@@ -1932,7 +1932,7 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
   expect(onSubmitComment).toHaveBeenCalledWith(comment.id);
 });
 
-test('file comments can be created for GitLab merge requests but not GitHub pull requests', async () => {
+test('file comments can be created for GitLab merge requests and GitHub pull requests', async () => {
   const file: ChangedFile = createChangedFile('src/comment.ts');
   const range = {
     base: { label: { kind: 'commit' as const, text: 'base' }, sha: gitSha('a'.repeat(40)) },
@@ -1979,7 +1979,17 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
       supportsReviewCommentActions
     />,
   );
-  expect(view.container.querySelector('.codiff-file-comment-button')).toBeNull();
+  const gitHubFileCommentButton = view.container.querySelector<HTMLButtonElement>(
+    '.codiff-file-comment-button',
+  );
+  expect(gitHubFileCommentButton).not.toBeNull();
+  await act(async () => gitHubFileCommentButton?.click());
+  expect(onCreateComment).toHaveBeenLastCalledWith({
+    anchor: 'file',
+    filePath: 'src/comment.ts',
+    position: { range },
+    sectionId: 'src/comment.ts:unstaged',
+  });
 });
 
 test('file-level review comments render as measured file annotations', async () => {

@@ -1984,7 +1984,15 @@ ipcMain.handle('codiff:submitPullRequestComment', async (event, request) => {
 
 ipcMain.handle('codiff:submitPullRequestReview', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return submitPullRequestReview(repositoryPath, request);
+  try {
+    return await submitPullRequestReview(repositoryPath, request);
+  } catch (error) {
+    return {
+      reason: error instanceof Error ? error.message : String(error),
+      status: 'failed',
+      submittedDraftIds: [],
+    };
+  }
 });
 
 ipcMain.handle('codiff:getDiffSectionContent', async (event, request) => {

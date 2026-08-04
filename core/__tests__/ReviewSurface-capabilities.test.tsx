@@ -19,9 +19,11 @@ import {
   type ReviewSurfaceCommandBridge,
   type ReviewSurfaceProps,
   type ShareReviewCommentCapabilities,
+  type SubmitProviderReviewRequest,
 } from '../ReviewSurface.tsx';
 import type {
   CommitMetadata,
+  GitSha,
   HistoryEntry,
   NarrativeWalkthrough,
   RepositoryState,
@@ -113,6 +115,36 @@ const providerSnapshot = {
       repo: 'codiff',
       type: 'pull-request',
       url: 'https://github.com/cloudflare/codiff/pull/7',
+    },
+  },
+} satisfies SharedWalkthroughSnapshot;
+
+const gitlabProviderSnapshot = {
+  ...providerSnapshot,
+  repository: {
+    root: '/repo',
+    source: {
+      headSha: 'b'.repeat(40),
+      host: 'gitlab.example.com',
+      number: 23,
+      projectPath: 'group/project',
+      provider: 'gitlab',
+      title: 'Review neutral comments',
+      type: 'pull-request',
+      url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+    },
+  },
+  walkthrough: {
+    ...providerSnapshot.walkthrough,
+    source: {
+      headSha: 'b'.repeat(40),
+      host: 'gitlab.example.com',
+      number: 23,
+      projectPath: 'group/project',
+      provider: 'gitlab',
+      title: 'Review neutral comments',
+      type: 'pull-request',
+      url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
     },
   },
 } satisfies SharedWalkthroughSnapshot;
@@ -330,6 +362,115 @@ test('composes implicit inline reply permission with the host reply capability',
     snapshot: snapshotWithThread,
   });
   await waitFor(() => expect(findButton(view.container, 'Reply')).toBeUndefined());
+});
+
+test('dispatches neutral GitLab review sessions with pending drafts and summaries', async () => {
+  const file = gitlabProviderSnapshot.files[0]!;
+  const draft: ProviderCommentDraft = {
+    body: 'Keep the provider target exact.',
+    filePath: file.path,
+    id: 'gitlab-draft-1',
+    kind: 'provider-draft',
+    lineNumber: 1,
+    position: {
+      range: {
+        base: {
+          label: { kind: 'commit', text: 'base' },
+          sha: 'a'.repeat(40) as GitSha,
+        },
+        head: {
+          label: { kind: 'commit', text: 'head' },
+          sha: 'b'.repeat(40) as GitSha,
+        },
+      },
+    },
+    sectionId: file.sections[0]!.id,
+    side: 'additions',
+  };
+  const submit = vi.fn(async (_request: SubmitProviderReviewRequest) => ({
+    status: 'submitted' as const,
+    submittedDraftIds: [draft.id],
+  }));
+  await using view = await renderSurface({
+    capabilities: {
+      comments: createProviderComments({
+        authoring: { canCreateInline: true },
+        reviewSession: {
+          drafts: { onChange: vi.fn(), value: [draft] },
+          submit,
+        },
+      }),
+    },
+    initialMode: 'tree',
+    snapshot: gitlabProviderSnapshot,
+  });
+
+  expect(view.container.querySelector('[aria-label="Submit review comments"]')).not.toBeNull();
+  expect(view.container.querySelector('[aria-label="Approve review"]')).not.toBeNull();
+  expect(view.container.querySelector('[aria-label="Request changes"]')).not.toBeNull();
+
+  await act(async () =>
+    view.container
+      .querySelector<HTMLButtonElement>('[aria-label="Submit review comments"]')
+      ?.click(),
+  );
+  await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+  expect(submit).toHaveBeenNthCalledWith(1, {
+    comments: [
+      expect.objectContaining({
+        body: draft.body,
+        filePath: draft.filePath,
+        localDraftId: draft.id,
+        position: draft.position,
+      }),
+    ],
+    outcome: 'comment',
+  });
+
+  await act(async () =>
+    view.container.querySelector<HTMLButtonElement>('[aria-label="Add review comment"]')?.click(),
+  );
+  const editor = view.container.querySelector<HTMLElement>(
+    '[contenteditable="true"][aria-label="Add review comment"]',
+  );
+  expect(editor).not.toBeNull();
+  await act(async () => {
+    if (editor) {
+      editor.focus();
+      editor.textContent = 'Neutral GitLab summary.';
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event('selectionchange'));
+      editor.dispatchEvent(
+        new InputEvent('input', {
+          bubbles: true,
+          data: 'Neutral GitLab summary.',
+          inputType: 'insertText',
+        }),
+      );
+    }
+  });
+  await waitFor(() =>
+    expect(
+      view.container.querySelector<HTMLButtonElement>('.review-submit-popover-submit.comment')
+        ?.disabled,
+    ).toBe(false),
+  );
+  await act(async () =>
+    view.container
+      .querySelector<HTMLButtonElement>('.review-submit-popover-submit.comment')
+      ?.click(),
+  );
+  await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+  expect(submit).toHaveBeenNthCalledWith(2, {
+    comments: [expect.objectContaining({ localDraftId: draft.id })],
+    outcome: 'comment',
+    summary: 'Neutral GitLab summary.',
+  });
 });
 
 test('copies local notes with the local label and Markdown heading', async () => {
@@ -750,6 +891,7 @@ test('forwards controlled draft updates atomically across an asynchronous submis
   const submission = new Promise<SubmittedReviewComment>((resolve) => {
     completeSubmission = resolve;
   });
+  const onSubmitComment = vi.fn(() => submission);
   let setDrafts!: Dispatch<SetStateAction<ReadonlyArray<ProviderCommentDraft>>>;
   let latestDrafts: ReadonlyArray<ProviderCommentDraft> = [];
 
@@ -767,7 +909,7 @@ test('forwards controlled draft updates atomically across an asynchronous submis
               canCreateInline: true,
               drafts: { onChange: updateDrafts, value: drafts },
             },
-            inline: { onSubmit: () => submission },
+            inline: { onSubmit: onSubmitComment },
           }),
         }}
         initialMode="tree"
@@ -785,6 +927,7 @@ test('forwards controlled draft updates atomically across an asynchronous submis
   ).find((button) => button.textContent === 'Comment');
   expect(commentButton).not.toBeUndefined();
   await act(async () => commentButton?.click());
+  expect(onSubmitComment).toHaveBeenCalledTimes(1);
   await act(async () => setDrafts((current) => [...current, secondDraft]));
   await act(async () =>
     completeSubmission({

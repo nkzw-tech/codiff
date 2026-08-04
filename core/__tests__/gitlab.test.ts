@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, test } from 'vite-plus/test';
+import type { SubmitPullRequestReviewResult } from '../types.ts';
 import { createTemporaryDirectory, createTemporaryEnvironment } from './helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
@@ -61,7 +62,7 @@ const {
       event: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
       source: Record<string, unknown>;
     },
-  ) => Promise<void>;
+  ) => Promise<SubmitPullRequestReviewResult>;
 };
 
 const execFileAsync = promisify(execFile);
@@ -126,6 +127,10 @@ process.stdin.on('end', () => {
       created_at: '2026-07-08T00:00:00Z',
       id: 46,
     }));
+    return;
+  }
+  if (endpoint.endsWith('/draft_notes')) {
+    process.stdout.write(JSON.stringify({ id: 101 }));
     return;
   }
   if (endpoint.endsWith('/merge_requests/23')) {
@@ -374,36 +379,52 @@ describe('GitLab merge requests', () => {
   test('submits GitLab reviews with paginated diffs and JSON request bodies', async () => {
     await withFakeGitLab(async (repo, readCalls) => {
       const source = {
+        headSha: 'head',
         provider: 'gitlab',
         type: 'pull-request',
         url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
       };
 
-      await submitMergeRequestReview(repo, {
-        body: 'Looks good.',
-        comments: [
-          {
-            body: 'Keep this explicit.',
-            filePath: 'src/new.ts',
-            lineNumber: 12,
-            side: 'additions',
-          },
-        ],
-        event: 'APPROVE',
-        source,
-      });
-      await submitMergeRequestReview(repo, {
-        comments: [],
-        event: 'REQUEST_CHANGES',
-        source,
-      });
       await expect(
         submitMergeRequestReview(repo, {
+          body: 'Looks good.',
+          comments: [
+            {
+              body: 'Keep this explicit.',
+              filePath: 'src/new.ts',
+              lineNumber: 12,
+              localDraftId: 'draft-1',
+              position: {
+                range: {
+                  base: { label: { kind: 'commit', text: 'base' }, sha: 'base' },
+                  head: { label: { kind: 'commit', text: 'head' }, sha: 'head' },
+                },
+              },
+              side: 'additions',
+            },
+          ],
+          event: 'APPROVE',
+          source,
+        }),
+      ).resolves.toEqual({ status: 'submitted', submittedDraftIds: ['draft-1'] });
+      await expect(
+        submitMergeRequestReview(repo, {
+          comments: [],
+          event: 'REQUEST_CHANGES',
+          source,
+        }),
+      ).resolves.toEqual({ status: 'submitted', submittedDraftIds: [] });
+      await expect(
+        submitMergeRequestReview(repo, {
+          body: 'Neutral review summary.',
           comments: [],
           event: 'COMMENT',
           source,
         }),
-      ).rejects.toThrow('GitLab merge request reviews do not support COMMENT.');
+      ).resolves.toEqual({
+        status: 'submitted',
+        submittedDraftIds: [],
+      });
 
       const calls = await readCalls();
       const requestsWithBodies = calls.filter((call) => call.input);
@@ -430,6 +451,13 @@ describe('GitLab merge requests', () => {
         'Looks good.\n\n/submit_review approve',
         '/submit_review request_changes',
       ]);
+      const neutralPublication = calls.find((call) =>
+        call.args.at(-1)?.endsWith('/draft_notes/bulk_publish'),
+      );
+      expect(JSON.parse(neutralPublication?.input || '')).toEqual({
+        note: 'Neutral review summary.',
+        reviewer_state: 'reviewed',
+      });
     });
   });
 

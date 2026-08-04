@@ -72,6 +72,7 @@ const renderAppReviewComments = async (state: RepositoryState) => {
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   window.codiff = originalCodiff;
 });
 

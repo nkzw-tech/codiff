@@ -34,6 +34,7 @@ export {
   type ReviewWalkthroughStatus,
   type ShareReviewCommentCapabilities,
   type SubmitProviderReviewRequest,
+  type SubmitProviderReviewResult,
 } from './ReviewSurface.tsx';
 export type {
   LocalReviewNote,
