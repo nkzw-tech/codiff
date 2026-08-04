@@ -117,11 +117,11 @@ import {
 } from '../../lib/review-context-expansion.ts';
 import { getReviewIdentity, isReviewIdentityViewed } from '../../lib/review-identity.ts';
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
-import { getSourceKey } from '../../lib/source.ts';
 import {
   buildSourceDescriptionModel,
   type SourceDescriptionAuthor,
 } from '../../lib/source-description.ts';
+import { getSourceKey } from '../../lib/source.ts';
 import type {
   ChangedFile,
   CodiffPreferences,

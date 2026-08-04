@@ -105,6 +105,12 @@ export default defineConfig({
       },
     },
   },
+  server: {
+    watch: {
+      // Jujutsu operation files change with local history, not product source.
+      ignored: ['**/.jj/**'],
+    },
+  },
   staged: {
     '*': 'vp check --fix',
   },
