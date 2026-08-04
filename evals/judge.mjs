@@ -7,6 +7,7 @@ import { basename, join } from 'node:path';
 import process from 'node:process';
 import {
   listAttemptDirs,
+  loadCaseAdapter,
   nowMs,
   readCases,
   readJson,
@@ -27,24 +28,11 @@ const cases = (await readCases()).filter((item) => !requestedCase || item.id ===
 
 const runJudge = async (evalCase, attemptDir) => {
   const walkthrough = await readFile(join(attemptDir, 'walkthrough.json'), 'utf8');
-  const prompt = `You are judging the quality of a Codiff narrative code walkthrough for commit ${evalCase.commit}.
-
-Inspect the commit directly with read-only git commands. Judge the candidate as a reviewer-facing path through the change, not as a generic summary. Hunk IDs are deterministic anchors; verify the prose and ordering against the actual diff. Do not reward verbosity.
-
-Case rubric:
-${evalCase.rubric.map((item) => `- ${item}`).join('\n')}
-
-Candidate walkthrough:
-${walkthrough}
-
-Scoring:
-- factualGrounding (0-35): statements match the diff; no invented behavior, tests, risks, or intent.
-- prioritization (0-30): main stops cover the highest-leverage behavior in a useful review order; mechanical changes are support.
-- organization (0-20): coherent conceptual chapters, sensible grouping, concise reviewer path.
-- specificity (0-15): prose names concrete symbols, contracts, and interactions rather than generic file summaries.
-- total must equal the four component scores.
-
-Be strict and consistent. Put material factual or coverage failures in majorErrors.`;
+  const adapter = await loadCaseAdapter(evalCase, 'buildJudgePrompt');
+  const prompt = await adapter.buildJudgePrompt({ attemptDir, evalCase, walkthrough });
+  if (typeof prompt !== 'string' || !prompt) {
+    throw new Error(`Eval adapter ${evalCase.adapter} returned an empty judge prompt.`);
+  }
 
   const temporaryDir = await mkdtemp(join(tmpdir(), 'codiff-eval-judge-'));
   const schemaPath = join(temporaryDir, 'judge-schema.json');
