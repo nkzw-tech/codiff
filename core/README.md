@@ -26,6 +26,16 @@ numbers stay ordinary strings. A `Revision` carries a SHA only when it is a
 commit. The working copy and index have no SHA.
 
 `RepositoryHistory.entries` is a newest-first navigation feed. Review commit
-stacks are separate parent-before-child values normalized by Core, while review
-version timelines remain earlier-before-later. Consumers validate those
-contracts instead of reversing provider values locally.
+stacks are parent-before-child values: parents come first, and a non-empty
+stack ends at the declared head.
+
+## Commit diffs
+
+A merge commit `M` with parents `A` and `B` has two different diffs: `M` vs
+`A`, and `M` vs `B`. Reads and in-flight maps key that work by
+`commitSha:parentSha` (`M:A`, `M:B`). A root commit uses `M:root`.
+
+Asking GitHub for `requestedBase...head` may return a different
+`merge_base_commit`. Dedupe the in-flight read by the pair we asked for, and
+record the effective base GitHub actually used on the returned range and
+stack.
