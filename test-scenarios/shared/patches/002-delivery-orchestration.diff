@@ -1,0 +1,99 @@
+diff --git a/src/application/schedule-delivery.ts b/src/application/schedule-delivery.ts
+new file mode 100644
+--- /dev/null
++++ b/src/application/schedule-delivery.ts
+@@ -0,0 +1,34 @@
++import { decideDelivery } from '../domain/delivery-rules.ts';
++import type { Category, Channel, Preferences } from '../domain/preferences.ts';
++import type { QuietHours } from '../domain/quiet-hours.ts';
++
++export type DeliverySchedule = {
++  channel: Channel;
++  deliverAt: Date;
++  reason: string;
++};
++
++export const scheduleDelivery = (
++  preferences: Preferences,
++  category: Category,
++  channel: Channel,
++  quietHours: QuietHours | null,
++  now: Date,
++): DeliverySchedule | null => {
++  const decision = decideDelivery(preferences, category, channel);
++  if (!decision.deliver) {
++    return null;
++  }
++  if (category === 'security' || !quietHours) {
++    return { channel, deliverAt: now, reason: decision.reason };
++  }
++  // SMOKE: delivery-schedule-original
++  // SMOKE: review-group-historical
++  const minute = now.getUTCHours() * 60 + now.getUTCMinutes();
++  const withinQuietHours =
++    quietHours.startMinute <= quietHours.endMinute
++      ? minute >= quietHours.startMinute && minute < quietHours.endMinute
++      : minute >= quietHours.startMinute || minute < quietHours.endMinute;
++  return {
++    channel,
++    deliverAt: withinQuietHours ? new Date(now.getTime() + 60 * 60 * 1_000) : now,
++    reason: withinQuietHours ? 'quiet-hours' : decision.reason,
++  };
++};
+diff --git a/src/cli/preferences.ts b/src/cli/preferences.ts
+--- a/src/cli/preferences.ts
++++ b/src/cli/preferences.ts
+@@ -1,3 +1,5 @@
++import type { QuietHours } from '../domain/quiet-hours.ts';
+ import type { PreferenceChange } from '../application/update-preferences.ts';
+ 
+ export const parsePreferenceChange = (value: string): PreferenceChange => {
+@@ -10,3 +12,15 @@ export const parsePreferenceChange = (value: string): PreferenceChange => {
+     enabled: enabled === 'on',
+   };
+ };
++
++export const parseQuietHours = (value: string): QuietHours => {
++  const [timezone, startMinute, endMinute] = value.split(':');
++  if (!timezone || !startMinute || !endMinute) {
++    throw new Error('Expected timezone:startMinute:endMinute.');
++  }
++  return {
++    endMinute: Number(endMinute),
++    startMinute: Number(startMinute),
++    timezone,
++  };
++};
+diff --git a/test/delivery-schedule.test.ts b/test/delivery-schedule.test.ts
+new file mode 100644
+--- /dev/null
++++ b/test/delivery-schedule.test.ts
+@@ -0,0 +1,26 @@
++import { scheduleDelivery } from '../src/application/schedule-delivery.ts';
++import { defaultPreferences } from '../src/domain/preferences.ts';
++
++const preferences = defaultPreferences('ada');
++const now = new Date('2026-07-23T22:30:00.000Z');
++const scheduled = scheduleDelivery(
++  preferences,
++  'product',
++  'push',
++  { endMinute: 420, startMinute: 1_200, timezone: 'America/Chicago' },
++  now,
++);
++
++if (!scheduled || scheduled.reason !== 'quiet-hours') {
++  throw new Error('Expected product push delivery to respect quiet hours.');
++}
++
++const security = scheduleDelivery(
++  preferences,
++  'security',
++  'sms',
++  { endMinute: 420, startMinute: 1_200, timezone: 'America/Chicago' },
++  now,
++);
++
++if (!security || security.deliverAt.getTime() !== now.getTime()) {
++  throw new Error('Expected security delivery to bypass quiet hours.');
++}
