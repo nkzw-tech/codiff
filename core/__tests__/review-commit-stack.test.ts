@@ -73,4 +73,3 @@ test('derives ancestry and first-parent range membership from the commit graph',
     'endpoints must both exist',
   );
 });
-

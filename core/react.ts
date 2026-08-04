@@ -1,6 +1,10 @@
 export { Button, buttonVariants, type ButtonProps } from './app/components/Button.tsx';
 export { Thinking } from './app/components/Thinking.tsx';
 export {
+  CommitScopePanel,
+  type CommitScopePanelProps,
+} from './app/components/CommitScopePanel.tsx';
+export {
   getPlanCommentAffordancePosition,
   getPlanCommentColorIndex,
   getPlanCommentIdentityColorIndex,
