@@ -1,4 +1,11 @@
 export { defaultReviewPreferences } from './defaults.ts';
+export {
+  diffRangesMatch,
+  resolveProviderCommentTarget,
+  resolveShareCommentTarget,
+  type ProviderCommentTargetResolution,
+  type ShareCommentTargetResolution,
+} from './lib/review-comment-target.ts';
 export { diffRange, isCommitRevision, shaForRevision } from './lib/review-history.ts';
 export {
   orderReviewCommitStack,
@@ -87,6 +94,7 @@ export type {
   SharedPlanSnapshot,
   SharedWalkthroughSnapshot,
   SubmittedReviewComment,
+  SubmitPullRequestReviewResult,
   WalkthroughShareManifestV1,
   WalkthroughHunk,
   WalkthroughGenerationProgress,

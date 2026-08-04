@@ -136,9 +136,14 @@ type GitStateModule = {
       comment: {
         body: string;
         filePath: string;
-        lineNumber?: number;
-        side?: 'additions' | 'deletions';
-        threadId?: string;
+        lineNumber: number;
+        position: {
+          range: {
+            base: { label: { kind: 'commit'; text: string }; sha: GitSha };
+            head: { label: { kind: 'commit'; text: string }; sha: GitSha };
+          };
+        };
+        side: 'additions' | 'deletions';
       };
       source: Extract<ReviewSource, { type: 'pull-request' }>;
     },
@@ -205,10 +210,7 @@ const commitAll = async (repo: string, message: string) => {
 
 const withFakeGitHub = async (
   mode: 'diagnosis-fails' | 'no-pending-review' | 'pending-review' | 'success',
-  callback: (
-    repo: string,
-    readCalls: () => ReadonlyArray<{ args: ReadonlyArray<string>; input: string }>,
-  ) => Promise<void>,
+  callback: (repo: string, readCalls: () => ReadonlyArray<ReadonlyArray<string>>) => Promise<void>,
 ) => {
   await using repoDirectory = await createTemporaryDirectory('codiff-git-state-');
   const repo = await realpath(repoDirectory.path);
@@ -228,16 +230,14 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => { input += chunk; });
 process.stdin.on('end', () => {
   appendFileSync(process.env.CODIFF_GITHUB_TEST_CALLS, JSON.stringify({ args, input }) + '\\n');
-  const endpoint = args.find((argument) => argument.startsWith('repos/')) || '';
+  const endpoint = args.find((argument) => argument.startsWith('/repos/')) || '';
   if (endpoint.endsWith('/comments')) {
     if (process.env.CODIFF_GITHUB_TEST_MODE === 'success') {
-      const payload = input ? JSON.parse(input) : {};
       process.stdout.write(JSON.stringify({
-        body: payload.body || 'Keep this comment.',
+        body: 'Keep this comment.',
         created_at: '2026-07-10T12:00:00Z',
         html_url: 'https://github.com/octo/example/pull/118#discussion_r1',
-        id: payload.in_reply_to ? 2 : 1,
-        in_reply_to_id: payload.in_reply_to,
+        id: 1,
         line: 1,
         path: 'src/app.ts',
         side: 'RIGHT',
@@ -249,6 +249,17 @@ process.stdin.on('end', () => {
     process.exitCode = 1;
     return;
   }
+  if (endpoint.includes('/compare/')) {
+    process.stdout.write(JSON.stringify({ merge_base_commit: { sha: 'base-sha' } }));
+    return;
+  }
+  if (endpoint.endsWith('/files?per_page=100')) {
+    process.stdout.write(JSON.stringify([{
+      filename: 'src/app.ts',
+      patch: '@@ -1 +1 @@\\n-old\\n+new\\n',
+    }]));
+    return;
+  }
   if (endpoint.includes('/reviews?')) {
     if (process.env.CODIFF_GITHUB_TEST_MODE === 'diagnosis-fails') {
       process.stderr.write('gh: review lookup failed\\n');
@@ -257,12 +268,15 @@ process.stdin.on('end', () => {
     }
     process.stdout.write(
       process.env.CODIFF_GITHUB_TEST_MODE === 'pending-review'
-        ? '[[{"id": 7, "state": "PENDING"}]]'
-        : '[[]]',
+        ? '[{"id": 7, "state": "PENDING"}]'
+        : '[]',
     );
     return;
   }
-  process.stdout.write(JSON.stringify({ head: { sha: 'head-sha' } }));
+  process.stdout.write(JSON.stringify({
+    base: { sha: 'base-sha' },
+    head: { sha: 'head-sha' },
+  }));
 });
 `,
   );
@@ -278,7 +292,7 @@ process.stdin.on('end', () => {
       .trim()
       .split('\n')
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as { args: ReadonlyArray<string>; input: string }),
+      .map((line) => (JSON.parse(line) as { args: ReadonlyArray<string> }).args),
   );
 };
 
@@ -287,9 +301,16 @@ const pullRequestCommentRequest = {
     body: 'Keep this comment.',
     filePath: 'src/app.ts',
     lineNumber: 1,
+    position: {
+      range: {
+        base: { label: { kind: 'commit' as const, text: 'base' }, sha: gitSha('base-sha') },
+        head: { label: { kind: 'commit' as const, text: 'head' }, sha: gitSha('head-sha') },
+      },
+    },
     side: 'additions' as const,
   },
   source: {
+    headSha: gitSha('head-sha'),
     provider: 'github' as const,
     type: 'pull-request' as const,
     url: 'https://github.com/octo/example/pull/118',
@@ -1113,6 +1134,40 @@ test('normalizePullRequestComment uses the start side for ranged comments', () =
   });
 });
 
+test('normalizes GitHub file comment payloads without local draft metadata', () => {
+  expect(
+    normalizePullRequestComment({
+      anchor: 'file',
+      body: 'Consider the whole file.',
+      filePath: 'src/file.ts',
+      localDraftId: 'draft-1',
+    }),
+  ).toEqual({
+    body: 'Consider the whole file.',
+    path: 'src/file.ts',
+    subject_type: 'file',
+  });
+});
+
+test('normalizes submitted GitHub file comments', () => {
+  expect(
+    normalizeGitHubReviewComment({
+      body: 'Consider the whole file.',
+      created_at: '2026-08-04T00:00:00Z',
+      html_url: 'https://github.com/nkzw-tech/codiff/pull/1#discussion_r41',
+      id: 41,
+      path: 'src/file.ts',
+      subject_type: 'file',
+      user: { login: 'reviewer' },
+    }),
+  ).toMatchObject({
+    anchor: 'file',
+    body: 'Consider the whole file.',
+    filePath: 'src/file.ts',
+    id: 'github:41',
+  });
+});
+
 test('pull request comments explain when a pending GitHub review blocks submission', async () => {
   await withFakeGitHub('pending-review', async (repo, readCalls) => {
     await expect(submitPullRequestComment(repo, pullRequestCommentRequest)).rejects.toThrow(
@@ -1120,7 +1175,7 @@ test('pull request comments explain when a pending GitHub review blocks submissi
     );
 
     expect(
-      readCalls().some(({ args }) =>
+      readCalls().some((args) =>
         args.some((argument) => argument.includes('/reviews?per_page=100')),
       ),
     ).toBe(true);
@@ -1148,37 +1203,10 @@ test('successful pull request comments skip pending review diagnosis', async () 
     });
 
     expect(
-      readCalls().some(({ args }) =>
+      readCalls().some((args) =>
         args.some((argument) => argument.includes('/reviews?per_page=100')),
       ),
     ).toBe(false);
-  });
-});
-
-test('pull request replies use GitHub thread identity without new position fields', async () => {
-  await withFakeGitHub('success', async (repo, readCalls) => {
-    await expect(
-      submitPullRequestComment(repo, {
-        comment: {
-          body: 'Reply in the existing thread.',
-          filePath: 'src/app.ts',
-          threadId: '7',
-        },
-        source: pullRequestCommentRequest.source,
-      }),
-    ).resolves.toMatchObject({
-      body: 'Reply in the existing thread.',
-      id: 'github:2',
-      threadId: '7',
-    });
-
-    const call = readCalls().find(({ args }) =>
-      args.some((argument) => argument.endsWith('/comments')),
-    );
-    expect(JSON.parse(call?.input || '{}')).toEqual({
-      body: 'Reply in the existing thread.',
-      in_reply_to: 7,
-    });
   });
 });
 

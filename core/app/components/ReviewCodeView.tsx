@@ -402,7 +402,8 @@ const canAskCodexForComment = (comment: ReviewComment) =>
 const canSubmitComment = (comment: ReviewComment) =>
   (isProviderCommentDraft(comment) || isShareCommentDraft(comment)) &&
   comment.body.trim().length > 0 &&
-  comment.remoteSubmit?.status !== 'submitting';
+  comment.remoteSubmit?.status !== 'submitting' &&
+  comment.remoteSubmit?.status !== 'outcome-unknown';
 
 const withCommentBody = (comment: ReviewComment, body: string): ReviewComment =>
   comment.body === body ? comment : { ...comment, body };
@@ -1713,7 +1714,11 @@ function ReviewCommentEditor({
                   size={14}
                   weight="bold"
                 />
-                {comment.remoteSubmit?.status === 'submitting' ? 'Sending' : 'Comment'}
+                {comment.remoteSubmit?.status === 'submitting'
+                  ? 'Sending'
+                  : comment.remoteSubmit?.status === 'outcome-unknown'
+                    ? 'Refresh required'
+                    : 'Comment'}
               </button>
             ) : null}
             {isReviewDraft(comment) ? (
@@ -1810,7 +1815,8 @@ function ReviewCommentEditor({
               />
             </Suspense>
           )}
-          {comment.remoteSubmit?.status === 'error' ? (
+          {comment.remoteSubmit?.status === 'error' ||
+          comment.remoteSubmit?.status === 'outcome-unknown' ? (
             <div className="review-comment-error">{comment.remoteSubmit.error}</div>
           ) : null}
         </div>
@@ -3089,7 +3095,12 @@ export function ReviewCodeView({
   }, []);
 
   const canCreateFileComments =
-    !isReadOnly && source.type === 'pull-request' && source.provider === 'gitlab';
+    !isReadOnly &&
+    source.type === 'pull-request' &&
+    (source.provider === 'gitlab' ||
+      source.provider === 'github' ||
+      source.host === 'github.com' ||
+      (!source.provider && !source.host));
 
   const createFileComment = useCallback(
     (meta: CodeViewItemMetadata, itemId: string) => {

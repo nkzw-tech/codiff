@@ -10,6 +10,7 @@ import {
   getReviewCommentsFromState,
   getVisibleReviewComments,
   mergeReviewComments,
+  resolveReviewCommentSection,
   toProviderCommentSubmission,
   toProviderSubmittedReviewComment,
   toPullRequestExistingReviewComment,
@@ -78,7 +79,8 @@ const createPullRequestState = (): RepositoryState => ({
           binary: false,
           id: 'src/a.ts:pull-request:1',
           kind: 'pull-request',
-          patch: '',
+          patch:
+            'diff --git a/src/a.ts b/src/a.ts\n@@ -1,6 +1,6 @@\n one\n two\n three\n four\n five\n six\n',
         },
       ],
       status: 'modified',
@@ -469,6 +471,7 @@ test('serializes provider replies without requiring position metadata', () => {
     anchor: 'file',
     body: 'Reply in the existing discussion.',
     filePath: 'src/a.ts',
+    localDraftId: 'github:1',
     threadId: 'discussion-1',
   });
   expect(
@@ -485,11 +488,20 @@ test('serializes provider replies without requiring position metadata', () => {
   ).not.toHaveProperty('position');
 });
 
-test('omits UI-only section identity from provider review comment payloads', () => {
-  const comment = createProviderDraft({ body: 'Persist this comment.' });
+test('omits UI-only section identity but preserves exact provider positions', () => {
+  const position = {
+    range: {
+      base: { label: { kind: 'commit' as const, text: 'a' }, sha: 'a'.repeat(40) as GitSha },
+      head: { label: { kind: 'commit' as const, text: 'b' }, sha: 'b'.repeat(40) as GitSha },
+    },
+  };
+  const comment = createProviderDraft({ body: 'Persist this comment.', position });
 
   expect(toProviderCommentSubmission(comment)).not.toHaveProperty('sectionId');
-  expect(toProviderCommentSubmission(comment).position).toEqual(providerPosition);
+  expect(toProviderCommentSubmission(comment)).toMatchObject({
+    localDraftId: comment.id,
+    position,
+  });
 });
 
 test('rejects provider submissions that contain pseudo-revisions', () => {
@@ -510,6 +522,27 @@ test('rejects provider submissions that contain pseudo-revisions', () => {
   expect(() => toProviderCommentSubmission(invalid)).toThrow(
     'Provider comments require an exact immutable commit position.',
   );
+});
+
+test('reports ambiguous persisted ranges instead of selecting an arbitrary section', () => {
+  const state = createPullRequestState();
+  const position = {
+    range: {
+      base: { label: { kind: 'commit' as const, text: 'a' }, sha: 'a'.repeat(40) as GitSha },
+      head: { label: { kind: 'commit' as const, text: 'b' }, sha: 'b'.repeat(40) as GitSha },
+    },
+  };
+  state.files[0]!.sections = [
+    { ...state.files[0]!.sections[0]!, id: 'first', range: position.range },
+    { ...state.files[0]!.sections[0]!, id: 'second', range: position.range },
+  ];
+  const comment = { ...state.reviewComments![0]!, position };
+
+  expect(resolveReviewCommentSection(state.files[0]!, comment, false)).toEqual({
+    candidateSectionIds: ['first', 'second'],
+    kind: 'ambiguous',
+    strategy: 'position',
+  });
 });
 
 test('uses durable positions and preserves section IDs only for legacy shared comments', () => {

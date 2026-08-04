@@ -145,7 +145,7 @@ export type ProviderCommentDraft = EditableReviewCommentDraft & {
   position?: ProviderReviewCommentPosition;
   remoteSubmit?: {
     error?: string;
-    status: 'error' | 'submitting';
+    status: 'error' | 'outcome-unknown' | 'submitting';
   };
   threadId?: string;
 };

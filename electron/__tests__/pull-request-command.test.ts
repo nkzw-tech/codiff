@@ -28,7 +28,10 @@ const { submitPullRequestReview } = require('../git-state/pull-request.cjs') as 
         url: string;
       };
     },
-  ) => Promise<void>;
+  ) => Promise<
+    | { status: 'submitted'; submittedDraftIds: ReadonlyArray<string> }
+    | { reason: string; status: 'failed'; submittedDraftIds: ReadonlyArray<string> }
+  >;
 };
 
 const execFileAsync = promisify(execFile);
@@ -113,7 +116,11 @@ test('reports a missing GitHub CLI when the resolved executable cannot be spawne
         url: 'https://github.com/nkzw-tech/codiff/pull/12',
       },
     }),
-  ).rejects.toThrow('GitHub support requires gh');
+  ).resolves.toMatchObject({
+    reason: expect.stringContaining('GitHub support requires gh'),
+    status: 'failed',
+    submittedDraftIds: [],
+  });
 });
 
 test('reaches the GitHub CLI when it is not on PATH', async () => {
@@ -148,11 +155,23 @@ test('reaches the GitHub CLI when it is not on PATH', async () => {
     fakeGh,
     `#!/bin/sh
 printf '%s | %s\\n' "$*" "$(cat)" >> "$CODIFF_GITHUB_COMMAND_TEST_CALLS"
+head_sha='0123456789abcdef0123456789abcdef01234567'
+base_sha='fedcba9876543210fedcba9876543210fedcba98'
 for arg in "$@"; do
   if [ "$arg" = '/repos/nkzw-tech/codiff/pulls/12' ]; then
-    printf '%s' '{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}'
+    printf '%s' '{"base":{"sha":"'"$base_sha"'"},"head":{"sha":"'"$head_sha"'"}}'
     exit 0
   fi
+  case "$arg" in
+    /repos/nkzw-tech/codiff/compare/*)
+      printf '%s' '{"merge_base_commit":{"sha":"'"$base_sha"'"}}'
+      exit 0
+      ;;
+    /repos/nkzw-tech/codiff/pulls/12/files*)
+      printf '%s' '[]'
+      exit 0
+      ;;
+  esac
 done
 printf '%s' '{}'
 `,
@@ -166,23 +185,31 @@ printf '%s' '{}'
     SHELL: undefined,
   });
 
-  await submitPullRequestReview(repo, {
-    body: 'General feedback.',
-    comments: [],
-    event: 'COMMENT',
-    source: {
-      provider: 'github',
-      type: 'pull-request',
-      url: 'https://github.com/nkzw-tech/codiff/pull/12',
-    },
-  });
+  await expect(
+    submitPullRequestReview(repo, {
+      body: 'General feedback.',
+      comments: [],
+      event: 'COMMENT',
+      source: {
+        provider: 'github',
+        type: 'pull-request',
+        url: 'https://github.com/nkzw-tech/codiff/pull/12',
+      },
+    }),
+  ).resolves.toEqual({ status: 'submitted', submittedDraftIds: [] });
 
   const calls = (await readFile(callsPath, 'utf8')).trim().split('\n');
-  expect(calls).toEqual([
-    'api /repos/nkzw-tech/codiff/pulls/12 | ',
-    'api -X POST repos/nkzw-tech/codiff/pulls/12/reviews --input - | ' +
-      '{"body":"General feedback.","comments":[],"event":"COMMENT"}',
-  ]);
+  expect(calls[0]).toBe('api /repos/nkzw-tech/codiff/pulls/12 | ');
+  expect(calls.slice(1, 3)).toEqual(
+    expect.arrayContaining([
+      `api /repos/nkzw-tech/codiff/compare/${'fedcba9876543210fedcba9876543210fedcba98'}...${'0123456789abcdef0123456789abcdef01234567'} | `,
+      'api --paginate /repos/nkzw-tech/codiff/pulls/12/files?per_page=100 | ',
+    ]),
+  );
+  expect(calls[3]).toBe(
+    'api --method POST /repos/nkzw-tech/codiff/pulls/12/reviews --input - | ' +
+      '{"body":"General feedback.","commit_id":"0123456789abcdef0123456789abcdef01234567","comments":[],"event":"COMMENT"}',
+  );
 });
 
 test('authenticates gh from the login shell environment when the app inherited none', async () => {

@@ -6,7 +6,6 @@ import type {
   PullRequestExistingReviewComment,
   RepositoryState,
   ReviewCommentPosition,
-  Revision,
   ShareCommentSubmission,
   SubmittedReviewComment,
 } from '../types.ts';
@@ -23,6 +22,7 @@ import type {
   ShareInlineComment,
 } from './app-types.ts';
 import { parseSectionDiffWithOptions } from './diff.ts';
+import { diffRangesMatch } from './review-comment-target.ts';
 import { isCommitRevision } from './review-history.ts';
 
 export const isInteractiveReviewEvent = (event: PointerEvent) =>
@@ -179,6 +179,7 @@ export const toProviderCommentSubmission = (
   if (comment.threadId) {
     return {
       ...getCommentSubmissionFields(comment),
+      localDraftId: comment.id,
       threadId: comment.threadId,
     };
   }
@@ -190,6 +191,7 @@ export const toProviderCommentSubmission = (
 
   return {
     ...getCommentSubmissionFields(comment),
+    localDraftId: comment.id,
     position: {
       range: {
         base: position.range.base,
@@ -285,6 +287,7 @@ export const mergeReviewComments = (
 const isPendingPullRequestReviewComment = (comment: ProviderCommentDraft) =>
   !comment.threadId &&
   comment.remoteSubmit?.status !== 'submitting' &&
+  comment.remoteSubmit?.status !== 'outcome-unknown' &&
   comment.body.trim().length > 0;
 
 export const getPendingPullRequestReviewComments = (
@@ -454,57 +457,64 @@ export const getReviewCommentPatchContext = (
   return section.summary?.reason || section.patch.trim() || 'No patch context available.';
 };
 
-const revisionKind = (revision: Revision) => revision.kind ?? 'commit';
+export type ReviewCommentSectionResolutionStrategy =
+  | 'coordinates'
+  | 'file'
+  | 'position'
+  | 'section-id';
 
-const revisionsMatch = (left: Revision, right: Revision) => {
-  const leftKind = revisionKind(left);
-  const rightKind = revisionKind(right);
-  if (leftKind !== rightKind) {
-    return false;
-  }
-  return leftKind !== 'commit' || ('sha' in left && 'sha' in right && left.sha === right.sha);
-};
+export type ReviewCommentSectionResolution =
+  | { kind: 'resolved'; section: DiffSection }
+  | {
+      candidateSectionIds: ReadonlyArray<string>;
+      kind: 'ambiguous' | 'unmapped';
+      strategy: ReviewCommentSectionResolutionStrategy;
+    };
 
-const rangesMatch = (left: DiffSection['range'], right: DiffSection['range']) =>
-  left != null &&
-  right != null &&
-  revisionsMatch(left.base, right.base) &&
-  revisionsMatch(left.head, right.head);
+const resolveReviewCommentSectionCandidates = (
+  sections: ReadonlyArray<DiffSection>,
+  strategy: ReviewCommentSectionResolutionStrategy,
+): ReviewCommentSectionResolution =>
+  sections.length === 1
+    ? { kind: 'resolved', section: sections[0]! }
+    : {
+        candidateSectionIds: sections.map((section) => section.id),
+        kind: sections.length === 0 ? 'unmapped' : 'ambiguous',
+        strategy,
+      };
 
-export const getReviewCommentSection = (
+export const resolveReviewCommentSection = (
   file: ChangedFile,
   comment: Pick<
     ReviewComment,
     'anchor' | 'lineNumber' | 'position' | 'side' | 'startLineNumber' | 'startSide'
   > & { sectionId?: string },
   showWhitespace: boolean,
-) => {
+): ReviewCommentSectionResolution => {
   const positionedRange = comment.position?.range;
   if (positionedRange) {
-    const section = file.sections.find((candidate) =>
-      rangesMatch(candidate.range, positionedRange),
+    return resolveReviewCommentSectionCandidates(
+      file.sections.filter((candidate) => diffRangesMatch(candidate.range, positionedRange)),
+      'position',
     );
-    if (section) {
-      return section;
-    }
   }
 
   if (comment.sectionId) {
-    const section = file.sections.find((candidate) => candidate.id === comment.sectionId);
-    if (section) {
-      return section;
+    const sections = file.sections.filter((candidate) => candidate.id === comment.sectionId);
+    if (sections.length > 0) {
+      return resolveReviewCommentSectionCandidates(sections, 'section-id');
     }
   }
 
   if (isFileReviewComment(comment)) {
-    return file.sections[0];
+    return resolveReviewCommentSectionCandidates(file.sections, 'file');
   }
 
   const side = comment.side ?? 'additions';
   const line = comment.lineNumber ?? 1;
   const startLine = comment.startLineNumber ?? line;
   const startSide = comment.startSide ?? side;
-  return file.sections.find((section) => {
+  const matchingSections = file.sections.filter((section) => {
     const parsed = parseSectionDiffWithOptions(file, section, showWhitespace);
     return parsed.hunks.some((hunk) => {
       let oldLine = hunk.deletionStart;
@@ -559,6 +569,19 @@ export const getReviewCommentSection = (
       return hasStart && hasEnd;
     });
   });
+  return resolveReviewCommentSectionCandidates(matchingSections, 'coordinates');
+};
+
+export const getReviewCommentSection = (
+  file: ChangedFile,
+  comment: Pick<
+    ReviewComment,
+    'anchor' | 'lineNumber' | 'position' | 'side' | 'startLineNumber' | 'startSide'
+  > & { sectionId?: string },
+  showWhitespace: boolean,
+) => {
+  const resolution = resolveReviewCommentSection(file, comment, showWhitespace);
+  return resolution.kind === 'resolved' ? resolution.section : undefined;
 };
 
 export const buildReviewCommentsMarkdown = (
