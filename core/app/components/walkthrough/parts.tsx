@@ -7,7 +7,7 @@ import { WrenchIcon as Wrench } from '@phosphor-icons/react/Wrench';
 import type { ComponentType, MouseEvent as ReactMouseEvent } from 'react';
 import { renderInlineMarkdown } from '../../../lib/markdown.tsx';
 import { importanceLabel } from '../../../lib/narrative-walkthrough.ts';
-import type { WalkthroughIcon, WalkthroughStop } from '../../../types.ts';
+import type { ReviewEvolutionUnit, WalkthroughIcon, WalkthroughStop } from '../../../types.ts';
 
 type IconProps = {
   size?: number;
@@ -31,6 +31,41 @@ export function ChapterIcon({ icon, size = 13 }: { icon: WalkthroughIcon; size?:
 
 export function ImportancePill({ importance }: { importance: WalkthroughStop['importance'] }) {
   return <span className={`wt-importance ${importance}`}>{importanceLabel[importance]}</span>;
+}
+
+const evolutionUnitLabel: Record<Exclude<ReviewEvolutionUnit['kind'], 'commit'>, string> = {
+  'absorbed-into-base': 'Absorbed',
+  ambiguous: 'Ambiguous',
+  introduced: 'Introduced',
+  removed: 'Removed',
+  retained: 'Retained',
+  revised: 'Revised',
+  'rewritten-same-patch': 'Rewritten',
+};
+
+const evolutionUnitTitle: Record<Exclude<ReviewEvolutionUnit['kind'], 'commit'>, string> = {
+  'absorbed-into-base': 'This change is now supplied by the target base.',
+  ambiguous: 'Codiff could not pair this logical commit with high confidence.',
+  introduced: 'This logical commit was added in the later review version.',
+  removed: 'This logical commit was removed from the later review version.',
+  retained: 'This logical commit is unchanged across the selected versions.',
+  revised: 'This logical commit changed across the selected versions.',
+  'rewritten-same-patch': 'The commit identity changed while its patch stayed equivalent.',
+};
+
+export function EvolutionUnitPill({
+  kind,
+}: {
+  kind?: Exclude<ReviewEvolutionUnit['kind'], 'commit'>;
+}) {
+  return (
+    <span
+      className={`wt-evolution-kind ${kind ?? 'unknown'}`}
+      title={kind ? evolutionUnitTitle[kind] : 'Evolution Unit'}
+    >
+      {kind ? evolutionUnitLabel[kind] : 'Evolution'}
+    </span>
+  );
 }
 
 export function WalkthroughLineCount({ added, deleted }: { added: number; deleted: number }) {

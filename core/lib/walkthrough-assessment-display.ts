@@ -62,10 +62,14 @@ const scopeOwnsGroup = (
   chapterId: string | undefined,
   supportId: string | undefined,
 ) => {
-  if (!scope || scope.type !== 'commit') {
+  if (!scope || (scope.type !== 'commit' && scope.type !== 'evolution-unit')) {
     return true;
   }
-  const matchingUnit = walkthrough.units?.find((unit) => unit.identity.sha === scope.sha);
+  const matchingUnit = walkthrough.units?.find((unit) =>
+    scope.type === 'commit'
+      ? unit.identity.kind === 'commit' && unit.identity.sha === scope.sha
+      : unit.identity.kind === 'evolution-unit' && unit.identity.unitId === scope.unitId,
+  );
   if (!matchingUnit) {
     return true;
   }
@@ -147,7 +151,11 @@ export const findPendingAssessmentDestination = (
 ): AssessmentDestination | null => resolveAssessmentDestination(walkthrough, [comment]);
 
 export const currentThreadStateById = (
-  comments: ReadonlyArray<{ id: string; isThreadResolved?: boolean; threadId?: string }>,
+  comments: ReadonlyArray<{
+    id: string;
+    isThreadResolved?: boolean;
+    threadId?: string;
+  }>,
 ) => {
   const state = new Map<string, 'open' | 'resolved'>();
   for (const comment of comments) {

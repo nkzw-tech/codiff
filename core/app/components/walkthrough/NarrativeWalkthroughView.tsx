@@ -35,7 +35,7 @@ import {
   type CommitMessageHandler,
   type CommitOutputSubscriber,
 } from './CommitView.tsx';
-import { ChapterIcon, ImportancePill, Narration } from './parts.tsx';
+import { ChapterIcon, EvolutionUnitPill, ImportancePill, Narration } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
 type FocusedRunDiff = {
@@ -102,7 +102,13 @@ const getFocusedRunDiffs = (
             hunk,
           ]);
           return singleHunkFile
-            ? [{ file: singleHunkFile, hunks: [hunk], key: `${run.key}:${hunk.id}` }]
+            ? [
+                {
+                  file: singleHunkFile,
+                  hunks: [hunk],
+                  key: `${run.key}:${hunk.id}`,
+                },
+              ]
             : [];
         });
     return focusedRuns.map(({ file, hunks, key }) => ({
@@ -227,6 +233,26 @@ const emptyWalkthroughBlockSet: WalkthroughBlockSet = {
   stopIndexByBlockId: new Map(),
 };
 
+function UnitBoundary({
+  boundary,
+}: {
+  boundary: NonNullable<WalkthroughView['chapters'][number]['boundary']>;
+}) {
+  const evolution = boundary.identity.kind === 'evolution-unit';
+  return (
+    <>
+      {evolution ? (
+        <EvolutionUnitPill kind={boundary.kind === 'commit' ? undefined : boundary.kind} />
+      ) : (
+        <span>Commit</span>
+      )}
+      {boundary.commit && (!evolution || boundary.kind !== 'removed') ? (
+        <CommitRefTooltip className="wt-unit-commit-ref" commit={boundary.commit} />
+      ) : null}
+    </>
+  );
+}
+
 function StopHeader({
   boundary,
   codeIssues,
@@ -244,8 +270,7 @@ function StopHeader({
     <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
       {boundary ? (
         <div className="wt-unit-boundary">
-          <span>Commit</span>
-          <CommitRefTooltip className="wt-unit-commit-ref" commit={boundary.commit} />
+          <UnitBoundary boundary={boundary} />
         </div>
       ) : null}
       <div className="wt-stage-title-row">
@@ -579,12 +604,7 @@ function Arc({
               <span className="wt-arc-chapter-label">
                 <ChapterIcon icon={chapter.icon} size={13} />
                 {chapter.title}
-                {chapter.boundary ? (
-                  <CommitRefTooltip
-                    className="wt-unit-commit-ref"
-                    commit={chapter.boundary.commit}
-                  />
-                ) : null}
+                {chapter.boundary ? <UnitBoundary boundary={chapter.boundary} /> : null}
               </span>
               <div className="wt-arc-nodes">
                 {chapter.stops.map((stop) => {

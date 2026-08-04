@@ -1,14 +1,16 @@
 // @ts-check
 
 const {
+  buildAssessmentVersionContext,
   capturedThreadStateById,
   toAssessmentChangedRanges,
   toAssessmentThreadCandidates,
 } = require('./walkthrough-assessment-adapter.cjs');
 
 /**
- * Keep reusable current-review outcomes, expose failed retries, and describe
- * independent background replacements without persisting pending claims.
+ * Derive current assessment demand, retain only reusable/current outcomes, and
+ * describe independent background replacements. Live resolution never enters
+ * this artifact projection.
  *
  * @param {{
  *   artifact: import('../core/types.ts').WalkthroughArtifactV5,
@@ -17,40 +19,79 @@ const {
  *     'normalizeAssessmentInput' | 'reconcileWalkthroughAssessments' |
  *     'selectWalkthroughAssessmentCandidates'>,
  *   byCommitSha?: Readonly<Record<string, import('../core/types.ts').RepositoryState>>,
+ *   byUnitId?: Readonly<Record<string, import('../core/types.ts').RepositoryState>>,
  *   comments: ReadonlyArray<import('../core/types.ts').PullRequestExistingReviewComment>,
  *   profile: import('../core/types.ts').GenerationProfile,
- *   units?: ReadonlyArray<import('../core/types.ts').ReviewCommitUnit>,
+ *   selection?: import('../core/lib/generate-review-walkthrough.ts').WalkthroughGenerationSelection,
+ *   units?: ReadonlyArray<import('../core/types.ts').ReviewEvolutionUnit>,
+ *   versions?: ReadonlyArray<import('../core/types.ts').ReviewVersionOption>,
  * }} input
  */
 const buildWalkthroughAssessmentPlan = (input) => {
   const review = input.artifact.generationRequest.review;
   const codeScope =
-    review.relation === 'target-comparison'
-      ? { range: review.range, type: 'target-comparison' }
-      : { type: 'single-diff' };
-  const candidates = toAssessmentThreadCandidates(
-    input.comments,
-    codeScope,
-    input.authoring.normalizeAssessmentInput,
-  );
+    review.relation === 'single-diff'
+      ? { type: 'single-diff' }
+      : review.relation === 'target-comparison'
+        ? { range: review.range, type: 'target-comparison' }
+        : { comparison: review.comparison, type: 'version-comparison' };
+
+  const versionContext =
+    review.relation === 'single-diff'
+      ? undefined
+      : buildAssessmentVersionContext(input.versions ?? [], review);
+  const candidates = versionContext
+    ? toAssessmentThreadCandidates(
+        input.comments,
+        versionContext,
+        codeScope,
+        input.authoring.normalizeAssessmentInput,
+      )
+    : toAssessmentThreadCandidates(
+        input.comments,
+        codeScope,
+        input.authoring.normalizeAssessmentInput,
+      );
+
+  const byCommitSha = input.byCommitSha ?? {};
+  const byUnitId = input.byUnitId ?? {};
+  const unitRoutes =
+    review.structure === 'commit-by-commit'
+      ? (input.units ?? []).flatMap((unit) =>
+          unit.kind === 'commit' && byCommitSha[unit.commit.sha]
+            ? [
+                {
+                  changedRanges: toAssessmentChangedRanges(byCommitSha[unit.commit.sha].files),
+                  codeScope: { sha: unit.commit.sha, type: 'commit' },
+                },
+              ]
+            : [],
+        )
+      : review.structure === 'commit-evolution'
+        ? (input.units ?? []).flatMap((unit) =>
+            unit.kind !== 'commit' && unit.reviewable && byUnitId[unit.unitId]
+              ? [
+                  {
+                    changedRanges: toAssessmentChangedRanges(byUnitId[unit.unitId].files),
+                    codeScope: { type: 'evolution-unit', unitId: unit.unitId },
+                    ...(versionContext
+                      ? {
+                          interval: {
+                            from: versionContext.from,
+                            to: versionContext.to,
+                          },
+                        }
+                      : {}),
+                  },
+                ]
+              : [],
+          )
+        : undefined;
   const selections = input.authoring.selectWalkthroughAssessmentCandidates(candidates, {
     changedRanges: toAssessmentChangedRanges(input.artifact.capturedContext.files),
     codeScope,
-    ...(review.structure === 'commit-by-commit'
-      ? {
-          unitRoutes: (input.units ?? []).flatMap((unit) => {
-            const unitState = input.byCommitSha?.[unit.commit.sha];
-            return unitState
-              ? [
-                  {
-                    changedRanges: toAssessmentChangedRanges(unitState.files),
-                    codeScope: { sha: unit.commit.sha, type: 'commit' },
-                  },
-                ]
-              : [];
-          }),
-        }
-      : {}),
+    ...(versionContext ? { from: versionContext.from, to: versionContext.to } : {}),
+    ...(unitRoutes ? { unitRoutes } : {}),
   });
   const demands = input.authoring.createAssessmentDemandsFromSelections({
     capturedThreadStateById: capturedThreadStateById(input.comments),

@@ -68,6 +68,34 @@
   font: 600 10px/1 var(--font-mono);
   text-transform: none;
 }
+.wt-evolution-kind {
+  background: color-mix(in srgb, var(--tree-selection-focus) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tree-selection-focus) 28%, transparent);
+  border-radius: 999px;
+  color: var(--tree-selection-focus);
+  font: 700 9px/1 var(--font-sans);
+  padding: 3px 6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.wt-evolution-kind.removed,
+.wt-evolution-kind.ambiguous {
+  background: color-mix(in srgb, var(--diff-deletion) 10%, transparent);
+  border-color: color-mix(in srgb, var(--diff-deletion) 28%, transparent);
+  color: var(--diff-deletion);
+}
+.wt-unit-regenerate {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: 700 13px/1 var(--font-sans);
+  margin-inline-start: auto;
+  padding: 2px;
+}
+.wt-unit-regenerate:hover {
+  color: var(--tree-selection-focus);
+}
 .wt-toc-stops {
   display: flex;
   flex-direction: column;

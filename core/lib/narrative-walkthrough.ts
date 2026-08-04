@@ -28,8 +28,9 @@ export type WalkthroughStopView = WalkthroughModel['chapters'][number]['stops'][
 };
 
 export type WalkthroughUnitBoundary = {
-  commit: NonNullable<NonNullable<WalkthroughModel['units']>[number]['commit']>;
+  commit?: NonNullable<NonNullable<WalkthroughModel['units']>[number]['commit']>;
   identity: NonNullable<WalkthroughModel['units']>[number]['identity'];
+  kind?: NonNullable<WalkthroughModel['units']>[number]['kind'];
 };
 
 /** A chapter with indexed stops. */
@@ -147,7 +148,10 @@ export const formatWalkthroughFileLineRows = (
 
   if (order.length > maxVisibleFiles) {
     const totals = [...totalsByPath.values()].reduce(
-      (sum, item) => ({ added: sum.added + item.added, deleted: sum.deleted + item.deleted }),
+      (sum, item) => ({
+        added: sum.added + item.added,
+        deleted: sum.deleted + item.deleted,
+      }),
       { added: 0, deleted: 0 },
     );
     return [
@@ -284,7 +288,10 @@ export const isWalkthroughCommittable = (walkthrough: WalkthroughModel): boolean
 const groupSupportByReason = (
   support: ReadonlyArray<WalkthroughSupportGroup>,
 ): ReadonlyArray<WalkthroughSupportReason> => {
-  const groups: Array<{ files: Array<WalkthroughSupportGroup>; reason: string }> = [];
+  const groups: Array<{
+    files: Array<WalkthroughSupportGroup>;
+    reason: string;
+  }> = [];
   const byReason = new Map<string, { files: Array<WalkthroughSupportGroup>; reason: string }>();
   for (const item of support) {
     let group = byReason.get(item.reason);
@@ -307,10 +314,11 @@ export const buildWalkthroughView = (walkthrough: WalkthroughModel): Walkthrough
   const boundaryByChapterId = new Map<string, WalkthroughUnitBoundary>();
   for (const unit of walkthrough.units ?? []) {
     const firstChapterId = unit.chapterIds[0];
-    if (firstChapterId && unit.commit) {
+    if (firstChapterId) {
       boundaryByChapterId.set(firstChapterId, {
-        commit: unit.commit,
+        ...(unit.commit ? { commit: unit.commit } : {}),
         identity: unit.identity,
+        ...(unit.kind ? { kind: unit.kind } : {}),
       });
     }
   }

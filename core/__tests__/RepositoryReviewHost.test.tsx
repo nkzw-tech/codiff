@@ -594,7 +594,9 @@ test('starts and cancels one shared version comparison run with progress', async
   const aggregate = deferred<Awaited<ReturnType<Window['codiff']['getReviewVersionAggregate']>>>();
   const evolution = deferred<Awaited<ReturnType<Window['codiff']['getReviewVersionEvolution']>>>();
   let progressListener: ((event: ReviewVersionEvolutionProgressEvent) => void) | null = null;
-  const cancelReviewVersionEvolution = vi.fn(async () => {});
+  const cancelReviewVersionEvolution = vi.fn<Window['codiff']['cancelReviewVersionEvolution']>(
+    async () => {},
+  );
   const getReviewVersionAggregate = vi.fn<Window['codiff']['getReviewVersionAggregate']>(
     () => aggregate.promise,
   );

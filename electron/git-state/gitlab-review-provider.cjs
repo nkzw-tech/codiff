@@ -34,6 +34,7 @@ const {
   loadGitLabReviewVersionTimeline,
 } = require('../gitlab-history-bridge.cjs');
 const {
+  canHydrateArtifactFile,
   createPullRequestSection,
   isBinaryDiffPatch,
   rangeArtifactToPullRequestFiles,
@@ -54,6 +55,9 @@ const { parseReviewUrl, readReviewRemotes } = require('../review-source.cjs');
  */
 const mergeRequestHydrationSnapshots = new Map();
 const MAX_MERGE_REQUEST_HYDRATION_SNAPSHOTS = 8;
+/** @type {Map<string, Promise<import('../../core/types.ts').DiffSectionsContentResult>>} */
+const mergeRequestBulkHydrations = new Map();
+const MAX_MERGE_REQUEST_BULK_HYDRATIONS = 8;
 const MAX_REVIEW_METADATA_BYTES = 2 * 1024 * 1024;
 const MAX_REVIEW_RANGE_BYTES = 8 * 1024 * 1024;
 const MAX_REVIEW_COMMENTS_BYTES = 8 * 1024 * 1024;
@@ -278,9 +282,10 @@ const readMergeRequestDiffs = (repoRoot, mergeRequest, transport) =>
 /**
  * @param {any} note
  * @param {string} url
- * @param {{isOutdated?: boolean, isResolved?: boolean, position?: any, threadId?: string, versions?: ReadonlyArray<any>}} [thread]
+ * @param {{isOutdated?: boolean, isResolved?: boolean, position?: any, threadId?: string, versions?: ReadonlyArray<any>} | string} [thread]
  */
 const normalizeGitLabReviewComment = (note, url, thread) => {
+  const threadId = typeof thread === 'string' ? thread : thread?.threadId;
   const position = note.position || note.original_position || thread?.position;
   const isFilePosition = position?.position_type === 'file';
   const lineNumber = position?.new_line ?? position?.old_line;
@@ -364,7 +369,7 @@ const normalizeGitLabReviewComment = (note, url, thread) => {
         }
       : {}),
     submittedAt: note.created_at,
-    ...(thread?.threadId ? { threadId: thread.threadId } : {}),
+    ...(threadId ? { threadId } : {}),
     url: `${url}#note_${note.id}`,
   };
 };
@@ -532,37 +537,121 @@ const resolveMergeRequestContentRefs = async (repoRoot, mergeRequest, metadata) 
 };
 
 /**
- * Hydrate only the explicitly requested MR file. The rest remain patch-only
- * until the renderer asks for their exact local contents.
- *
+ * Hydrate eligible files from one immutable MR range with one pair of batched
+ * Git object reads.
  * @param {string} repoRoot
  * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
  * @param {any} metadata
- * @param {ArtifactFile} file
+ * @param {import('../../core/lib/review-artifacts.ts').RangeArtifact} range
+ * @param {ReadonlyArray<ArtifactFile>} files
+ * @param {{force?: boolean}} [options]
  */
-const hydrateMergeRequestSection = async (repoRoot, mergeRequest, metadata, file) => {
+const hydrateMergeRequestSections = async (
+  repoRoot,
+  mergeRequest,
+  metadata,
+  range,
+  files,
+  options = {},
+) => {
+  const candidates = files.filter(
+    (file) => canHydrateArtifactFile(file) && !isBinaryDiffPatch(file.patch || ''),
+  );
   const refs = await resolveMergeRequestContentRefs(repoRoot, mergeRequest, metadata).catch(
     () => null,
   );
-  const oldPath = file.oldPath || file.path;
-  const canReadContents = Boolean(file.patch) && !isBinaryDiffPatch(file.patch);
-  const [oldFiles, newFiles] =
-    refs && canReadContents
-      ? await Promise.all([
-          readGitFiles(repoRoot, refs.base, [oldPath], { refScopedEmptyCacheKey: true }),
-          readGitFiles(repoRoot, refs.head, [file.path], { refScopedEmptyCacheKey: true }),
-        ])
-      : [new Map(), new Map()];
-  return createPullRequestSection(
+  if (!refs) {
+    return candidates.map((file) => ({
+      path: file.path,
+      section: createPullRequestSection(mergeRequest, file, undefined, undefined, {
+        base: range.baseSha,
+        contentAttempted: true,
+        contentError:
+          'Codiff could not resolve the immutable merge request range. Retry exact content loading.',
+        head: range.headSha,
+      }),
+    }));
+  }
+  const oldPaths = candidates.map((file) => file.oldPath || file.path);
+  const newPaths = candidates.map((file) => file.path);
+  const [oldFiles, newFiles] = await Promise.all([
+    readGitFiles(repoRoot, refs.base, oldPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+    readGitFiles(repoRoot, refs.head, newPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+  ]);
+  return candidates.map((file) => {
+    const oldPath = file.oldPath || file.path;
+    return {
+      path: file.path,
+      section: createPullRequestSection(
+        mergeRequest,
+        file,
+        oldFiles.get(oldPath),
+        newFiles.get(file.path),
+        { base: range.baseSha, head: range.headSha },
+      ),
+    };
+  });
+};
+
+const hydrateMergeRequestSection = async (
+  repoRoot,
+  mergeRequest,
+  metadata,
+  range,
+  file,
+  options = {},
+) => {
+  const [result] = await hydrateMergeRequestSections(
+    repoRoot,
     mergeRequest,
-    file,
-    oldFiles.get(oldPath),
-    newFiles.get(file.path),
-    {
-      base: metadata.diff_refs?.base_sha,
-      head: metadata.diff_refs?.head_sha || metadata.sha,
-    },
+    metadata,
+    range,
+    [file],
+    options,
   );
+  return (
+    result?.section ??
+    createPullRequestSection(mergeRequest, file, undefined, undefined, {
+      base: range.baseSha,
+      head: range.headSha,
+    })
+  );
+};
+
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
+const readMergeRequestSectionsContent = async (launchPath, source) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const mergeRequest = parseGitLabMergeRequestUrl(source.url);
+  selectMergeRequestRemote(repoRoot, mergeRequest);
+  const { metadata, range } = await readMergeRequestHydrationSnapshot(repoRoot, mergeRequest, {
+    expectedHeadSha: source.headSha,
+  });
+  const key = `${repoRoot}:${mergeRequest.url}:${range.headSha}`;
+  const existing = mergeRequestBulkHydrations.get(key);
+  if (existing) return existing;
+  const hydration = hydrateMergeRequestSections(
+    repoRoot,
+    mergeRequest,
+    metadata,
+    range,
+    range.files,
+  )
+    .then((sections) => ({ headSha: range.headSha, sections }))
+    .catch((error) => {
+      mergeRequestBulkHydrations.delete(key);
+      throw error;
+    });
+  mergeRequestBulkHydrations.set(key, hydration);
+  while (mergeRequestBulkHydrations.size > MAX_MERGE_REQUEST_BULK_HYDRATIONS) {
+    mergeRequestBulkHydrations.delete(mergeRequestBulkHydrations.keys().next().value);
+  }
+  return hydration;
 };
 
 /** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
@@ -608,7 +697,7 @@ const readMergeRequestReviewComments = async (launchPath, source) => {
  * @param {Extract<ReviewSource, {type: 'pull-request'}>} source
  * @param {string} requestedPath
  */
-const readMergeRequestSectionContent = async (launchPath, source, requestedPath) => {
+const readMergeRequestSectionContent = async (launchPath, source, requestedPath, options = {}) => {
   const path = validateRepositoryPath(requestedPath);
   const mergeRequest = parseGitLabMergeRequestUrl(source.url);
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
@@ -617,10 +706,8 @@ const readMergeRequestSectionContent = async (launchPath, source, requestedPath)
     expectedHeadSha: source.headSha,
   });
   const file = range.files.find((candidate) => candidate.path === path);
-  if (!file) {
-    throw new Error('File is not part of this merge request.');
-  }
-  return hydrateMergeRequestSection(repoRoot, mergeRequest, metadata, file);
+  if (!file) throw new Error('File is not part of this merge request.');
+  return hydrateMergeRequestSection(repoRoot, mergeRequest, metadata, range, file, options);
 };
 
 /** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source @param {string} requestedPath */
@@ -694,6 +781,7 @@ module.exports = {
   readMergeRequestImageContent,
   readMergeRequestReviewComments,
   readMergeRequestSectionContent,
+  readMergeRequestSectionsContent,
   recoverGitLabVersionId,
   resolveGitLabReviewTargets,
   resolveGitLabCommentTarget: extractedGitLabReviewMutations.resolveGitLabCommentTarget,

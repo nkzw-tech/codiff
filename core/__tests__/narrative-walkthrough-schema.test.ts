@@ -9,6 +9,7 @@ import { buildWalkthroughView } from '../lib/narrative-walkthrough.ts';
 import {
   hasCapturedContextCapability,
   hasGenerationRequestCapability,
+  type EvolutionUnitId,
   type GitSha,
   type GenerationMetadata,
   type NarrativeWalkthroughV4,
@@ -16,6 +17,17 @@ import {
 } from '../types.ts';
 
 const gitSha = (value: string) => value as GitSha;
+const evolutionUnitId = (value: string) => value as EvolutionUnitId;
+const range = {
+  base: {
+    label: { kind: 'commit' as const, text: 'base' },
+    sha: gitSha('a'.repeat(40)),
+  },
+  head: {
+    label: { kind: 'commit' as const, text: 'head' },
+    sha: gitSha('b'.repeat(40)),
+  },
+};
 
 const generationMetadata = (): GenerationMetadata => ({
   agent: 'codex',
@@ -553,10 +565,46 @@ test('preserves canonical commit ownership as walkthrough chapter boundaries', (
     { kind: 'commit', sha: firstSha },
     { kind: 'commit', sha: secondSha },
   ]);
-  expect(view.chapters.map((chapter) => chapter.boundary?.commit.shortSha)).toEqual([
+  expect(view.chapters.map((chapter) => chapter.boundary?.commit?.shortSha)).toEqual([
     firstSha.slice(0, 8),
     secondSha.slice(0, 8),
   ]);
+});
+
+test('keeps removed Evolution Unit boundaries without presenting a commit', () => {
+  const artifact = v5();
+  if (!('content' in artifact.narrative)) {
+    throw new Error('Expected a single-call narrative fixture.');
+  }
+  const model = parseWalkthroughModel({
+    ...artifact,
+    generationRequest: {
+      review: {
+        comparison: { after: range, before: range },
+        relation: 'version-comparison',
+        structure: 'commit-evolution',
+      },
+    },
+    narrative: {
+      reviewFocus: { content: 'Focus', generationMetadata: generationMetadata() },
+      structure: 'commit-evolution',
+      units: [
+        {
+          content: artifact.narrative.content,
+          generationMetadata: generationMetadata(),
+          kind: 'removed',
+          unitId: evolutionUnitId('removed-unit'),
+        },
+      ],
+    },
+  });
+  const boundary = buildWalkthroughView(model)?.chapters[0]?.boundary;
+
+  expect(boundary).toMatchObject({
+    identity: { kind: 'evolution-unit', unitId: evolutionUnitId('removed-unit') },
+    kind: 'removed',
+  });
+  expect(boundary?.commit).toBeUndefined();
 });
 
 test('rejects empty or incomplete commit narrative collections', () => {

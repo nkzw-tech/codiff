@@ -15,6 +15,7 @@ const {
 } = require('./common.cjs');
 const { readGitFiles } = require('./git-files.cjs');
 const {
+  canHydrateArtifactFile,
   createPullRequestSection,
   isBinaryDiffPatch,
   rangeArtifactToPullRequestFiles,
@@ -59,6 +60,9 @@ const { decodeHtmlEntities } = require('../html-entities.cjs');
  */
 const pullRequestHydrationSnapshots = new Map();
 const MAX_PULL_REQUEST_HYDRATION_SNAPSHOTS = 8;
+/** @type {Map<string, Promise<import('../../core/types.ts').DiffSectionsContentResult>>} */
+const pullRequestBulkHydrations = new Map();
+const MAX_PULL_REQUEST_BULK_HYDRATIONS = 8;
 const MAX_RESOLVED_REVIEW_THREADS_BYTES = 2 * 1024 * 1024;
 const MAX_RESOLVED_REVIEW_THREAD_PAGES = 4;
 const MAX_RESOLVED_REVIEW_COMMENT_IDS = 40_000;
@@ -772,34 +776,115 @@ const resolvePullRequestContentRefs = async (repoRoot, pullRequest, metadata) =>
 };
 
 /**
- * Hydrate one explicitly requested file. Off-screen files retain their
- * provider patch until the renderer asks for their exact local contents.
- *
+ * Hydrate eligible files from one immutable PR range with one pair of batched
+ * Git object reads.
  * @param {string} repoRoot
  * @param {PullRequestReference} pullRequest
  * @param {GitHubPullRequestMetadata} metadata
- * @param {ArtifactFile} file
+ * @param {import('../../core/lib/review-artifacts.ts').RangeArtifact} range
+ * @param {ReadonlyArray<ArtifactFile>} files
+ * @param {{force?: boolean}} [options]
  */
-const hydratePullRequestSection = async (repoRoot, pullRequest, metadata, file) => {
+const hydratePullRequestSections = async (
+  repoRoot,
+  pullRequest,
+  metadata,
+  range,
+  files,
+  options = {},
+) => {
+  const candidates = files.filter(
+    (file) => canHydrateArtifactFile(file) && !isBinaryDiffPatch(file.patch || ''),
+  );
   const refs = await resolvePullRequestContentRefs(repoRoot, pullRequest, metadata).catch(
     () => null,
   );
-  const oldPath = file.oldPath || file.path;
-  const canReadContents = Boolean(file.patch) && !isBinaryDiffPatch(file.patch);
-  const [oldFiles, newFiles] =
-    refs && canReadContents
-      ? await Promise.all([
-          readGitFiles(repoRoot, refs.base, [oldPath], { refScopedEmptyCacheKey: true }),
-          readGitFiles(repoRoot, refs.head, [file.path], { refScopedEmptyCacheKey: true }),
-        ])
-      : [new Map(), new Map()];
-  return createPullRequestSection(
+  if (!refs) {
+    return candidates.map((file) => ({
+      path: file.path,
+      section: createPullRequestSection(pullRequest, file, undefined, undefined, {
+        base: range.baseSha,
+        contentAttempted: true,
+        contentError:
+          'Codiff could not resolve the immutable pull request range. Retry exact content loading.',
+        head: range.headSha,
+      }),
+    }));
+  }
+  const oldPaths = candidates.map((file) => file.oldPath || file.path);
+  const newPaths = candidates.map((file) => file.path);
+  const [oldFiles, newFiles] = await Promise.all([
+    readGitFiles(repoRoot, refs.base, oldPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+    readGitFiles(repoRoot, refs.head, newPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+  ]);
+  return candidates.map((file) => {
+    const oldPath = file.oldPath || file.path;
+    return {
+      path: file.path,
+      section: createPullRequestSection(
+        pullRequest,
+        file,
+        oldFiles.get(oldPath),
+        newFiles.get(file.path),
+        { base: range.baseSha, head: range.headSha },
+      ),
+    };
+  });
+};
+
+const hydratePullRequestSection = async (
+  repoRoot,
+  pullRequest,
+  metadata,
+  range,
+  file,
+  options = {},
+) => {
+  const [result] = await hydratePullRequestSections(
+    repoRoot,
     pullRequest,
-    file,
-    oldFiles.get(oldPath),
-    newFiles.get(file.path),
-    { base: metadata.base?.sha, head: metadata.head?.sha },
+    metadata,
+    range,
+    [file],
+    options,
   );
+  return (
+    result?.section ??
+    createPullRequestSection(pullRequest, file, undefined, undefined, {
+      base: range.baseSha,
+      head: range.headSha,
+    })
+  );
+};
+
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
+const readPullRequestSectionsContent = async (launchPath, source) => {
+  const pullRequest = parseGitHubPullRequestUrl(source.url);
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  await assertPullRequestMatchesRepository(repoRoot, pullRequest);
+  const { metadata, range } = await readPullRequestHydrationSnapshot(repoRoot, pullRequest, {
+    expectedHeadSha: source.headSha,
+  });
+  const key = `${repoRoot}:${pullRequest.url}:${range.headSha}`;
+  const existing = pullRequestBulkHydrations.get(key);
+  if (existing) return existing;
+  const hydration = hydratePullRequestSections(repoRoot, pullRequest, metadata, range, range.files)
+    .then((sections) => ({ headSha: range.headSha, sections }))
+    .catch((error) => {
+      pullRequestBulkHydrations.delete(key);
+      throw error;
+    });
+  pullRequestBulkHydrations.set(key, hydration);
+  while (pullRequestBulkHydrations.size > MAX_PULL_REQUEST_BULK_HYDRATIONS) {
+    pullRequestBulkHydrations.delete(pullRequestBulkHydrations.keys().next().value);
+  }
+  return hydration;
 };
 
 /** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source @returns {Promise<RepositoryState>} */
@@ -844,7 +929,7 @@ const readPullRequestReviewComments = async (launchPath, source) => {
  * @param {Extract<ReviewSource, {type: 'pull-request'}>} source
  * @param {string} requestedPath
  */
-const readPullRequestSectionContent = async (launchPath, source, requestedPath) => {
+const readPullRequestSectionContent = async (launchPath, source, requestedPath, options = {}) => {
   const path = validateRepositoryPath(requestedPath);
   const pullRequest = parseGitHubPullRequestUrl(source.url);
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
@@ -853,10 +938,8 @@ const readPullRequestSectionContent = async (launchPath, source, requestedPath) 
     expectedHeadSha: source.headSha,
   });
   const file = range.files.find((candidate) => candidate.path === path);
-  if (!file) {
-    throw new Error('File is not part of this pull request.');
-  }
-  return hydratePullRequestSection(repoRoot, pullRequest, metadata, file);
+  if (!file) throw new Error('File is not part of this pull request.');
+  return hydratePullRequestSection(repoRoot, pullRequest, metadata, range, file, options);
 };
 
 /**
@@ -973,6 +1056,7 @@ module.exports = {
   readPullRequestImageContent,
   readPullRequestReviewComments,
   readPullRequestSectionContent,
+  readPullRequestSectionsContent,
   readPullRequestState,
   resolvePullRequestContentRefs,
   selectPullRequestRemote,
