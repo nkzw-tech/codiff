@@ -17,20 +17,11 @@ const {
   git,
   MAX_UNTRACKED_INITIAL_ITEMS,
   normalizeStatus,
-  parseStatus,
-  readFileStat,
-  readGitImageFile,
-  readIndexImageFile,
-  readWorkingTreeImageFile,
-  validateRepositoryPath,
 } = require('./common.cjs');
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
- * @typedef {import('../../core/types.ts').DiffImageContentRequest} DiffImageContentRequest
- * @typedef {import('../../core/types.ts').DiffImageContentResult} DiffImageContentResult
  * @typedef {import('../../core/types.ts').DiffSection} DiffSection
- * @typedef {import('../../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('./common.cjs').StatusItem} StatusItem
  * @typedef {'staged' | 'unstaged'} WorkingTreeSectionKind
@@ -407,90 +398,6 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
   );
 };
 
-/** @param {string} repoRoot @param {string} path @returns {Promise<StatusItem>} */
-const getStatusItemForPath = async (repoRoot, path) => {
-  const trackedStatus = parseStatus(
-    await git(repoRoot, ['status', '--porcelain=v1', '-z', '-uno']),
-  );
-  const trackedItem = trackedStatus.find((item) => item.path === path);
-  if (trackedItem) {
-    return trackedItem;
-  }
-
-  const stat = await readFileStat(repoRoot, path);
-  return {
-    directory: Boolean(stat?.isDirectory()),
-    path,
-    staged: false,
-    status: 'untracked',
-    unstaged: true,
-    untracked: true,
-  };
-};
-
-/** @param {string} launchPath @param {DiffSectionContentRequest} request */
-const readDiffSectionContent = async (launchPath, request) => {
-  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-  const path = validateRepositoryPath(request.path);
-  if (request.kind === 'commit' || request.source?.type === 'commit') {
-    throw new Error('Lazy loading commit diffs is not supported.');
-  }
-
-  const item = await getStatusItemForPath(repoRoot, path);
-  return createSection(repoRoot, item, /** @type {WorkingTreeSectionKind} */ (request.kind), {
-    force: request.force,
-    showWhitespace: request.showWhitespace,
-  });
-};
-
-/**
- * @param {string} launchPath
- * @param {DiffImageContentRequest} request
- * @returns {Promise<DiffImageContentResult>}
- */
-const readDiffImageContent = async (launchPath, request) => {
-  try {
-    const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-    const path = validateRepositoryPath(request.path);
-    if (request.kind === 'commit' || request.source?.type === 'commit') {
-      throw new Error('Commit image diffs are loaded through the commit reader.');
-    }
-
-    const item = await getStatusItemForPath(repoRoot, path);
-    const oldPath = item.oldPath || item.path;
-    const [oldImage, newImage] =
-      request.kind === 'staged'
-        ? await Promise.all([
-            readGitImageFile(repoRoot, 'HEAD', oldPath),
-            readIndexImageFile(repoRoot, item.path),
-          ])
-        : await Promise.all([
-            item.untracked
-              ? undefined
-              : readIndexImageFile(repoRoot, item.path, item.conflictStage),
-            readWorkingTreeImageFile(repoRoot, item.path),
-          ]);
-
-    if (!oldImage && !newImage) {
-      return {
-        reason: 'Codiff could not load either side of this image.',
-        status: 'unavailable',
-      };
-    }
-
-    return {
-      ...(newImage ? { newImage } : {}),
-      ...(oldImage ? { oldImage } : {}),
-      status: 'ready',
-    };
-  } catch (error) {
-    return {
-      reason: error instanceof Error ? error.message : 'Codiff could not load this image.',
-      status: 'unavailable',
-    };
-  }
-};
-
 /** @param {string} repoRoot @param {ReadonlyArray<string>} args */
 const gitOrEmpty = async (repoRoot, args) => {
   try {
@@ -532,8 +439,6 @@ const readGitIdentity = (launchPath) => {
 
 module.exports = {
   parsePorcelainV2Status,
-  readDiffSectionContent,
-  readDiffImageContent,
   readGitIdentity,
   readWorkingTreeState,
 };

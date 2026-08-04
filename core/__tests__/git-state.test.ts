@@ -9,9 +9,11 @@ import { fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
 import type { ArtifactFile } from '../lib/review-artifacts.ts';
 import type {
   DiffSection,
-  DiffSectionContentRequest,
   GitSha,
   RepositoryState,
+  Revision,
+  RevisionContentBatchRequest,
+  RevisionContentBatchResult,
   ReviewSource,
 } from '../types.ts';
 import { getGitTestEnvironmentForSubprocess, withGitTestEnvironment } from './helpers/git.ts';
@@ -39,7 +41,7 @@ type GeneratedFilesModule = {
   readRevisionGeneratedAttributeStates: (
     repoRoot: string,
     paths: ReadonlyArray<string>,
-    revision: import('../types.ts').Revision,
+    revision: Revision,
   ) => Promise<ReadonlyMap<string, boolean>>;
 };
 
@@ -76,16 +78,6 @@ type GitStateModule = {
       user?: { avatar_url?: string; html_url?: string; login?: string };
     },
   ) => Extract<ReviewSource, { type: 'pull-request' }>;
-  getPullRequestHeadImageSource: (
-    pullRequest: { number: number; owner: string; repo: string; url: string },
-    metadata: {
-      head?: {
-        ref?: string;
-        repo?: { full_name?: string; name?: string; owner?: { login?: string } } | null;
-        sha?: string;
-      };
-    },
-  ) => { owner: string; ref: string; repo: string };
   listRepositoryHistory: (
     launchPath: string,
     limit?: number,
@@ -102,15 +94,15 @@ type GitStateModule = {
   };
   parseStatus: (raw: string) => Array<StatusEntry>;
   PENDING_REVIEW_COMMENT_ERROR: string;
-  readDiffSectionContent: (
-    launchPath: string,
-    request: DiffSectionContentRequest,
-  ) => Promise<DiffSection>;
   readRepositoryState: (
     launchPath: string,
     source?: ReviewSource,
     options?: { repositoryRoot?: string; showWhitespace?: boolean },
   ) => Promise<RepositoryState>;
+  readRevisionContent: (
+    launchPath: string,
+    request: RevisionContentBatchRequest,
+  ) => Promise<RevisionContentBatchResult>;
   readWalkthroughRepositoryState: (
     launchPath: string,
     source?: ReviewSource,
@@ -120,12 +112,6 @@ type GitStateModule = {
     launchPath: string,
     options?: { eagerContents?: boolean; repositoryRoot?: string; showWhitespace?: boolean },
   ) => Promise<RepositoryState>;
-  resolvePullRequestContentRefs: (
-    repoRoot: string,
-    pullRequest: { number: number; owner: string; repo: string; url: string },
-    metadata: { base?: { ref?: string; sha?: string }; head?: { ref?: string; sha?: string } },
-    expectedBaseSha: string,
-  ) => Promise<{ base: string; head: string } | null>;
   selectUnresolvedReviewComments: (
     comments: ReadonlyArray<Record<string, unknown>>,
     resolvedCommentIds: ReadonlySet<number>,
@@ -153,6 +139,22 @@ type GitStateModule = {
 
 const execFileAsync = promisify(execFile);
 const gitSha = (value: string) => value as GitSha;
+const readRevisionText = async (
+  repo: string,
+  source: RepositoryState['source'],
+  path: string,
+  revision: Revision,
+) => {
+  const key = `${path}:${revision.kind ?? 'commit'}`;
+  const result = await readRevisionContent(repo, {
+    generation: 'test',
+    requests: [{ key, maxBytes: 2 * 1024 * 1024, path, revision }],
+    source,
+  });
+  const item = result.results[0];
+  expect(item?.status).toBe('ready');
+  return item?.status === 'ready' ? new TextDecoder().decode(item.value.bytes) : null;
+};
 const require = createRequire(import.meta.url);
 const { readRevisionGeneratedAttributeStates } =
   require('../../electron/generated-files.cjs') as GeneratedFilesModule;
@@ -161,7 +163,6 @@ const {
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSection,
   createPullRequestSource,
-  getPullRequestHeadImageSource,
   listRepositoryHistory,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
@@ -169,11 +170,10 @@ const {
   parseGitHubPullRequestUrl,
   parseStatus,
   PENDING_REVIEW_COMMENT_ERROR,
-  readDiffSectionContent,
   readRepositoryState,
+  readRevisionContent,
   readWalkthroughRepositoryState,
   readWorkingTreeState,
-  resolvePullRequestContentRefs,
   selectUnresolvedReviewComments,
   submitPullRequestComment,
   validateRepositoryPath,
@@ -420,6 +420,32 @@ exec git "$@"
   });
 });
 
+test('generated attributes dispatch index and working-copy revisions independently', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.api.ts -linguist-generated\n');
+    await writeRepoFile(repo, 'client.api.ts', 'export const client = 1;\n');
+    await commitAll(repo, 'authored client');
+
+    await writeRepoFile(repo, '.gitattributes', '*.api.ts linguist-generated\n');
+    await git(repo, ['add', '.gitattributes']);
+    await writeRepoFile(repo, '.gitattributes', '*.api.ts -linguist-generated\n');
+
+    const [index, workingCopy] = await Promise.all([
+      readRevisionGeneratedAttributeStates(repo, ['client.api.ts'], {
+        kind: 'index',
+        label: { kind: 'review-marker', text: 'Index' },
+      }),
+      readRevisionGeneratedAttributeStates(repo, ['client.api.ts'], {
+        kind: 'working-copy',
+        label: { kind: 'review-marker', text: 'Working copy' },
+      }),
+    ]);
+
+    expect(index.get('client.api.ts')).toBe(true);
+    expect(workingCopy.get('client.api.ts')).toBe(false);
+  });
+});
+
 test('working-tree ranges represent unborn staged additions with an absent base', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'first.txt', 'first\n');
@@ -430,6 +456,9 @@ test('working-tree ranges represent unborn staged additions with an absent base'
     const section = file?.sections.find((candidate) => candidate.kind === 'staged');
 
     expect(section?.range).toMatchObject({ base: null, head: { kind: 'index' } });
+    expect(await readRevisionText(repo, state.source, 'first.txt', section!.range!.head!)).toBe(
+      'first\n',
+    );
   });
 });
 
@@ -448,8 +477,12 @@ test('working-tree ranges preserve the selected conflict index stage', async () 
 
     const state = await readWorkingTreeState(repo);
     const file = state.files.find((candidate) => candidate.path === 'conflict.txt');
+    const section = file?.sections[0];
 
-    expect(file?.sections[0]?.range?.base).toMatchObject({ kind: 'index', stage: 2 });
+    expect(section?.range?.base).toMatchObject({ kind: 'index', stage: 2 });
+    expect(await readRevisionText(repo, state.source, 'conflict.txt', section!.range!.base!)).toBe(
+      'ours\n',
+    );
   });
 });
 
@@ -848,125 +881,6 @@ test('createPullRequestSection falls back to the patch when modified contents fa
   // Once a load has been attempted but could not produce usable contents, the
   // section is marked non-loadable so it is not requested again.
   expect(section.summary?.canLoad).toBe(false);
-});
-
-test('resolvePullRequestContentRefs resolves the diff against the merge base', async () => {
-  await withRepo(async (repo) => {
-    await writeRepoFile(repo, 'file.txt', 'base\n');
-    await commitAll(repo, 'base');
-    const mergeBase = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-
-    // The pull request head branches off the merge base.
-    await writeRepoFile(repo, 'file.txt', 'head change\n');
-    await commitAll(repo, 'head');
-    const headSha = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/head', headSha]);
-
-    // The base branch advances past the merge base after the PR was opened.
-    await git(repo, ['checkout', '-q', mergeBase]);
-    await writeRepoFile(repo, 'file.txt', 'base advanced\n');
-    await commitAll(repo, 'base advanced');
-    const baseTip = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/base', baseTip]);
-
-    const refs = await resolvePullRequestContentRefs(
-      repo,
-      pullRequestFixture,
-      {
-        base: { ref: 'main' },
-        head: { sha: headSha },
-      },
-      mergeBase,
-    );
-
-    expect(refs).toEqual({ base: mergeBase, head: 'refs/codiff/pull-requests/7/head' });
-    // The base tip is intentionally not used; only the PR's own changes show.
-    expect(refs?.base).not.toBe(baseTip);
-  });
-});
-
-test('resolvePullRequestContentRefs refetches when the fetched base no longer matches the base sha', async () => {
-  await withRepo(async (repo) => {
-    await writeRepoFile(repo, 'file.txt', 'base\n');
-    await commitAll(repo, 'base');
-    const mergeBase = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-
-    await writeRepoFile(repo, 'file.txt', 'head change\n');
-    await commitAll(repo, 'head');
-    const headSha = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/head', headSha]);
-    await git(repo, ['checkout', '-q', mergeBase]);
-    await writeRepoFile(repo, 'file.txt', 'base advanced\n');
-    await commitAll(repo, 'base advanced');
-    const baseTip = (await git(repo, ['rev-parse', 'HEAD'])).trim();
-    await git(repo, ['update-ref', 'refs/codiff/pull-requests/7/base', baseTip]);
-
-    // GitHub reports a base sha that no longer matches the fetched base ref (the
-    // base branch moved or the pull request was retargeted). Resolution must
-    // refetch rather than diff against the stale local base; with no remote
-    // configured here the refetch fails and resolution reports it cannot resolve.
-    const refs = await resolvePullRequestContentRefs(
-      repo,
-      pullRequestFixture,
-      {
-        base: { ref: 'main', sha: '0'.repeat(40) },
-        head: { sha: headSha },
-      },
-      mergeBase,
-    );
-
-    expect(refs).toBeNull();
-  });
-});
-
-test('getPullRequestHeadImageSource uses fork repository metadata', () => {
-  expect(
-    getPullRequestHeadImageSource(
-      {
-        number: 25,
-        owner: 'base-owner',
-        repo: 'base-repo',
-        url: 'https://github.com/base-owner/base-repo/pull/25',
-      },
-      {
-        head: {
-          repo: {
-            name: 'fork-repo',
-            owner: {
-              login: 'fork-owner',
-            },
-          },
-          sha: 'fork-head-sha',
-        },
-      },
-    ),
-  ).toEqual({
-    owner: 'fork-owner',
-    ref: 'fork-head-sha',
-    repo: 'fork-repo',
-  });
-});
-
-test('getPullRequestHeadImageSource falls back to the base repository PR head ref', () => {
-  expect(
-    getPullRequestHeadImageSource(
-      {
-        number: 25,
-        owner: 'base-owner',
-        repo: 'base-repo',
-        url: 'https://github.com/base-owner/base-repo/pull/25',
-      },
-      {
-        head: {
-          sha: 'fork-head-sha',
-        },
-      },
-    ),
-  ).toEqual({
-    owner: 'base-owner',
-    ref: 'refs/pull/25/head',
-    repo: 'base-repo',
-  });
 });
 
 test('normalizeGitHubReviewComment preserves multi-line ranges', () => {
@@ -1639,18 +1553,15 @@ test('readRepositoryState opens branch refs as current branch diffs against the 
     await writeRepoFile(repo, 'file.txt', 'feature three\n');
     await commitAll(repo, 'feature three');
 
-    const [section, staleHistory] = await Promise.all([
-      readDiffSectionContent(repo, {
-        force: true,
-        kind: state.files[0].sections[0].kind,
-        path: 'file.txt',
-        source,
-      }),
+    const range = state.files[0].sections[0].range!;
+    const [oldContents, newContents, staleHistory] = await Promise.all([
+      readRevisionText(repo, source, 'file.txt', range.base!),
+      readRevisionText(repo, source, 'file.txt', range.head!),
       listRepositoryHistory(repo, 10, source),
     ]);
 
-    expect(section.oldFile?.contents).toBe('base\n');
-    expect(section.newFile?.contents).toBe('feature two\n');
+    expect(oldContents).toBe('base\n');
+    expect(newContents).toBe('feature two\n');
     expect(staleHistory.entries.map((entry) => (entry as { subject: string }).subject)).toEqual([
       'feature two',
       'feature one',
@@ -1862,15 +1773,14 @@ test('readWorkingTreeState defers large untracked text files and loads them on d
     expect(section?.newFile).toBeUndefined();
     expect(section?.patch).toBe('');
 
-    const loadedSection = await readDiffSectionContent(repo, {
-      force: true,
-      kind: 'unstaged',
-      path: 'large.txt',
-    });
+    const loadedContents = await readRevisionText(
+      repo,
+      state.source,
+      'large.txt',
+      section!.range!.head!,
+    );
 
-    expect(loadedSection.loadState).toBe('ready');
-    expect(loadedSection.newFile?.contents).toBe(contents);
-    expect(loadedSection.patch).toContain('new file mode');
+    expect(loadedContents).toBe(contents);
   });
 });
 
@@ -2214,19 +2124,14 @@ test('readRepositoryState defers medium committed files and loads them on demand
     expect(section?.newFile).toBeUndefined();
     expect(section?.patch).toBe('');
 
-    const loadedSection = await readDiffSectionContent(repo, {
-      force: true,
-      kind: 'commit',
-      path: 'large.txt',
-      source: {
-        sha: gitSha(commit),
-        type: 'commit',
-      },
-    });
+    const loadedContents = await readRevisionText(
+      repo,
+      state.source,
+      'large.txt',
+      section!.range!.head!,
+    );
 
-    expect(loadedSection.loadState).toBe('ready');
-    expect(loadedSection.newFile?.contents).toBe(contents);
-    expect(loadedSection.patch).toContain('+large committed line');
+    expect(loadedContents).toBe(contents);
   });
 }, 15_000);
 

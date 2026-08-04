@@ -10,7 +10,7 @@ import type {
   WalkthroughSupportGroup,
   WalkthroughStop,
 } from '../types.ts';
-import { getDiffLineCount, getVisibleDiffSections } from './diff.ts';
+import { getDiffLineCount, getDiffSectionLineCount, getVisibleDiffSections } from './diff.ts';
 import {
   filterPatchToHunkIds,
   getSectionWalkthroughHunks,
@@ -20,6 +20,7 @@ import {
 type NarrativeLineCount = {
   added: number;
   deleted: number;
+  diffAvailable?: false;
 };
 
 /** A stop with a global position in the walkthrough. */
@@ -55,6 +56,7 @@ export type WalkthroughFileList = {
 export type WalkthroughFileLineRow = {
   added: number;
   deleted: number;
+  diffAvailable?: false;
   label: string;
   path?: string;
   title: string;
@@ -119,7 +121,12 @@ export const formatWalkthroughFileList = (
 };
 
 export const formatWalkthroughFileLineRows = (
-  items: ReadonlyArray<{ added: number; deleted: number; path: string }>,
+  items: ReadonlyArray<{
+    added: number;
+    deleted: number;
+    diffAvailable?: false;
+    path: string;
+  }>,
   maxVisibleFiles = 5,
 ): ReadonlyArray<WalkthroughFileLineRow> => {
   const order: Array<string> = [];
@@ -133,6 +140,9 @@ export const formatWalkthroughFileLineRows = (
     totalsByPath.set(item.path, {
       added: current.added + item.added,
       deleted: current.deleted + item.deleted,
+      ...(current.diffAvailable === false || item.diffAvailable === false
+        ? { diffAvailable: false as const }
+        : {}),
     });
   }
 
@@ -143,8 +153,11 @@ export const formatWalkthroughFileLineRows = (
   if (order.length > maxVisibleFiles) {
     const totals = [...totalsByPath.values()].reduce(
       (sum, item) => ({ added: sum.added + item.added, deleted: sum.deleted + item.deleted }),
-      { added: 0, deleted: 0 },
+      { added: 0, deleted: 0 } as NarrativeLineCount,
     );
+    if ([...totalsByPath.values()].some((item) => item.diffAvailable === false)) {
+      totals.diffAvailable = false;
+    }
     return [
       {
         ...totals,
@@ -161,6 +174,56 @@ export const formatWalkthroughFileLineRows = (
     title: path,
   }));
 };
+
+export const resolveWalkthroughFileLineItems = (
+  hunks: ReadonlyArray<WalkthroughHunk>,
+  files: ReadonlyArray<ChangedFile>,
+): ReadonlyArray<{ added: number; deleted: number; diffAvailable?: false; path: string }> =>
+  hunks.map((hunk) => {
+    if (!isSyntheticWalkthroughHunk(hunk)) {
+      return { added: hunk.added, deleted: hunk.deleted, path: hunk.path };
+    }
+
+    const resolved = resolveWalkthroughHunkFile(hunk, files);
+    if (!resolved) {
+      return { added: 0, deleted: 0, diffAvailable: false, path: hunk.path };
+    }
+    const { file, section } = resolved;
+    const hasExactContents =
+      (section.newFile != null &&
+        (section.oldFile != null || file.status === 'added' || file.status === 'untracked')) ||
+      (section.oldFile != null && file.status === 'deleted');
+    if (hasExactContents) {
+      const lineCount = getDiffSectionLineCount(file, section);
+      if (lineCount.countable) {
+        return {
+          added: lineCount.additions,
+          deleted: lineCount.deletions,
+          path: hunk.path,
+        };
+      }
+    }
+    if (section.patch.trim().length > 0) {
+      const materialized = getSectionWalkthroughHunks(file, section).find(
+        (candidate: { id: string }) => candidate.id === hunk.id,
+      ) as { added: number; deleted: number } | undefined;
+      if (materialized) {
+        return {
+          added: materialized.added,
+          deleted: materialized.deleted,
+          path: hunk.path,
+        };
+      }
+    }
+    if (section.lineCount != null) {
+      return {
+        added: section.lineCount.additions,
+        deleted: section.lineCount.deletions,
+        path: hunk.path,
+      };
+    }
+    return { added: 0, deleted: 0, diffAvailable: false, path: hunk.path };
+  });
 
 const walkthroughCoveredHunkIds = (view: WalkthroughView): ReadonlySet<string> =>
   new Set([...view.sequence, ...view.support].flatMap((item) => item.hunkIds));
@@ -263,12 +326,13 @@ export const getUncoveredWalkthroughFileLineItems = (
   files: ReadonlyArray<ChangedFile>,
   view: WalkthroughView,
   showWhitespace: boolean,
-): ReadonlyArray<{ added: number; deleted: number; path: string }> =>
+): ReadonlyArray<{ added: number; deleted: number; diffAvailable?: false; path: string }> =>
   getUncoveredWalkthroughFiles(files, view, showWhitespace).map((file) => {
     const lineCount = getDiffLineCount(file, showWhitespace);
     return {
       added: lineCount.countable ? lineCount.additions : 0,
       deleted: lineCount.countable ? lineCount.deletions : 0,
+      ...(!lineCount.countable ? { diffAvailable: false as const } : {}),
       path: file.path,
     };
   });

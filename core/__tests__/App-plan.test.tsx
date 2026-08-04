@@ -91,11 +91,6 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   })),
   getAgentSkillStatus: vi.fn(async () => ({ installed: true, path: '/skill' })),
   getConfig: vi.fn(async () => createDefaultConfig()),
-  getDiffImageContent: vi.fn(async () => ({ reason: 'Not used.', status: 'unavailable' as const })),
-  getDiffSectionContent: vi.fn(async () => {
-    throw new Error('Unexpected diff section load.');
-  }),
-  getDiffSectionsContent: vi.fn(async () => ({ sections: [] })),
   getFeatureFlags: vi.fn(async () => ({ planSharing: false, walkthroughSharing: false })),
   getGitIdentity: vi.fn(async () => ({ email: 'reviewer@example.com', name: 'Reviewer' })),
   getKeyboardLayout: vi.fn(async () => null),
@@ -153,6 +148,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   openFile: vi.fn(async () => {}),
   openReleasePage: vi.fn(async () => {}),
   openRepositoryFolder: vi.fn(async () => {}),
+  readRevisionContent: vi.fn(async () => ({ results: [] })),
   reportInitialLoadMilestone: vi.fn(),
   resetCodeFontSize: vi.fn(async () => {}),
   resolvePullRequestUrl: vi.fn(async (value) => value),

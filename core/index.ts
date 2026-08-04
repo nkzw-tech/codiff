@@ -14,6 +14,13 @@ export {
   type ReviewCommitStackItem,
 } from './lib/review-commit-stack.ts';
 export {
+  getReviewContextExpansionState,
+  reviewContextExpansionDigest,
+  reviewContextExpansionProjectionKey,
+  type ReviewContextExpansionRegion,
+  type ReviewContextExpansionState,
+} from './lib/review-context-expansion.ts';
+export {
   createCommitArtifactRequestKey,
   createFileBlobArtifactRequestKey,
   createReviewArtifactRun,

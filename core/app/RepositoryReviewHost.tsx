@@ -1,4 +1,3 @@
-import type { FileDiffLoadedFiles } from '@pierre/diffs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodiffConfig } from '../config/types.ts';
 import { HISTORY_PAGE_SIZE } from '../lib/app-constants.ts';
@@ -8,7 +7,11 @@ import {
   type ReviewIdentity,
   type SourceSession,
 } from '../lib/app-types.ts';
-import { isPatchOnlyDiffSection, shouldLoadDiffSectionContents } from '../lib/diff.ts';
+import {
+  getDiffSectionLineCount,
+  isPatchOnlyDiffSection,
+  shouldLoadDiffSectionContents,
+} from '../lib/diff.ts';
 import { sortFiles } from '../lib/files.ts';
 import {
   getChangedPaths,
@@ -25,6 +28,11 @@ import {
   toProviderSubmittedReviewComment,
   toPullRequestExistingReviewComment,
 } from '../lib/review-comments.ts';
+import {
+  createReviewContentRun,
+  type ReviewContentRun,
+  type ReviewContentTransport,
+} from '../lib/review-content.ts';
 import { getFileReviewIdentity } from '../lib/review-identity.ts';
 import {
   getHistorySource,
@@ -58,10 +66,7 @@ import type {
   OpenReviewSourceKind,
   RepositoryState,
   ReviewSource,
-  DiffImageContentRequest,
-  DiffImageContentResult,
   DiffSection,
-  DiffSectionContentRequest,
 } from '../types.ts';
 import { OpenReviewSourceDialog } from './components/OpenReviewSourceDialog.tsx';
 import { OpenReviewSourceMenu } from './components/OpenReviewSourceMenu.tsx';
@@ -93,6 +98,32 @@ const portableSurfaceCommandIds = new Set([
   'toggle-word-wrap',
 ]);
 const defaultReviewCommentsPrefix = '# Address these Review Comments';
+
+const createDiffContentRequestOwner = () => {
+  const requestIds = new Set<string>();
+  let revisionRequest = 0;
+
+  const readRevisionContent: ReviewContentTransport = (request) => {
+    revisionRequest += 1;
+    const requestId = `revision-content:${revisionRequest}`;
+    requestIds.add(requestId);
+    return window.codiff
+      .readRevisionContent({ ...request, requestId })
+      .finally(() => requestIds.delete(requestId));
+  };
+
+  return {
+    add: (requestId: string) => requestIds.add(requestId),
+    cancelAll: () => {
+      for (const requestId of requestIds) {
+        window.codiff.cancelDiffContentRequest(requestId);
+      }
+      requestIds.clear();
+    },
+    delete: (requestId: string) => requestIds.delete(requestId),
+    readRevisionContent,
+  };
+};
 
 type ReviewAuthoringMode = 'local-notes' | 'provider-comments' | 'read-only';
 
@@ -168,6 +199,62 @@ const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
         },
       };
 
+const hydrateSectionFromContents = (
+  file: ChangedFile,
+  section: DiffSection,
+  contents: Awaited<ReturnType<ReviewContentRun['resolveSectionContents']>>,
+): DiffSection => {
+  const { summary: _summary, ...rest } = section;
+  const loadedSection: DiffSection = {
+    ...rest,
+    binary: false,
+    loadState: 'ready',
+    newFile: contents.newFile,
+    oldFile: contents.oldFile ?? undefined,
+  };
+  const lineCount = getDiffSectionLineCount(file, loadedSection);
+  return lineCount.countable
+    ? {
+        ...loadedSection,
+        lineCount: { additions: lineCount.additions, deletions: lineCount.deletions },
+      }
+    : loadedSection;
+};
+
+type ReviewContentHydrationRequest = { file: ChangedFile; section: DiffSection };
+
+const hydrateReviewContentRequests = async (
+  run: ReviewContentRun,
+  requests: ReadonlyArray<ReviewContentHydrationRequest>,
+): Promise<
+  ReadonlyArray<{
+    contents?: Awaited<ReturnType<ReviewContentRun['resolveSectionContents']>>;
+    request: ReviewContentHydrationRequest;
+  }>
+> => {
+  if (requests.length === 0) {
+    return [];
+  }
+  try {
+    const contents = await run.resolveSectionContentsBatch(requests);
+    return requests.map((request, index) => ({ contents: contents[index]!, request }));
+  } catch {
+    if (requests.length === 1) {
+      return [{ request: requests[0]! }];
+    }
+    const midpoint = Math.ceil(requests.length / 2);
+    const [left, right] = await Promise.all([
+      hydrateReviewContentRequests(run, requests.slice(0, midpoint)),
+      hydrateReviewContentRequests(run, requests.slice(midpoint)),
+    ]);
+    return [...left, ...right];
+  }
+};
+
+const getReviewContentRunKey = (state: RepositoryState) =>
+  `${state.root}:${getSourceRevisionKey(state.source)}:${state.files
+    .map((file) => `${file.path}:${file.fingerprint}`)
+    .join('|')}`;
 const getPreferencesFromConfig = ({ settings }: CodiffConfig): CodiffPreferences => ({
   ...settings,
 });
@@ -249,6 +336,9 @@ export function RepositoryReviewHost({
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(false);
   const [pendingSource, setPendingSource] = useState<ReviewSource | null>(null);
   const [loadingSectionIds, setLoadingSectionIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [hydratedReviewContentRunKey, setHydratedReviewContentRunKey] = useState<string | null>(
+    null,
+  );
   const [, setSidebarCollapsed] = useState<boolean>(false);
   const [state, setState] = useState<RepositoryState | null>(() => ({
     ...initialState,
@@ -257,8 +347,7 @@ export function RepositoryReviewHost({
   const [updateStatus, setUpdateStatus] = useState<CodiffUpdateStatus | null>(null);
   const historyRequestRef = useRef(0);
   const historySourceRef = useRef<ReviewSource | null>(null);
-  const diffContentRequestCounterRef = useRef(0);
-  const diffContentRequestIdsRef = useRef<Set<string>>(new Set());
+  const [diffContentRequests] = useState(createDiffContentRequestOwner);
   const loadingSectionKeysRef = useRef<Set<string>>(new Set());
   const reviewCommentsRequestRef = useRef(0);
   const repositoryRefreshRequestRef = useRef(0);
@@ -326,14 +415,6 @@ export function RepositoryReviewHost({
     [toggleReviewViewed],
   );
 
-  useEffect(() => {
-    if (!state || firstUsableMilestoneReportedRef.current) {
-      return;
-    }
-    firstUsableMilestoneReportedRef.current = true;
-    window.codiff.reportInitialLoadMilestone?.('first-usable-review-rendered');
-  }, [state]);
-
   const {
     askCodex,
     localReviewNotes,
@@ -370,12 +451,12 @@ export function RepositoryReviewHost({
 
       if (inFlight) {
         window.codiff.cancelDiffContentRequest(inFlight.requestId);
-        diffContentRequestIdsRef.current.delete(inFlight.requestId);
+        diffContentRequests.delete(inFlight.requestId);
       }
       const request = reviewCommentsRequestRef.current + 1;
       const requestId = `review-comments:${request}`;
       reviewCommentsRequestRef.current = request;
-      diffContentRequestIdsRef.current.add(requestId);
+      diffContentRequests.add(requestId);
       reviewCommentsInFlightRef.current = { generation, request, requestId, sourceKey };
       const isCurrentState = () => {
         const current = stateRef.current;
@@ -434,13 +515,13 @@ export function RepositoryReviewHost({
           setState(failedState);
         })
         .finally(() => {
-          diffContentRequestIdsRef.current.delete(requestId);
+          diffContentRequests.delete(requestId);
           if (reviewCommentsInFlightRef.current?.request === request) {
             reviewCommentsInFlightRef.current = null;
           }
         });
     },
-    [setReviewComments],
+    [diffContentRequests, setReviewComments],
   );
   const {
     activeReviewCommandTargetRef,
@@ -537,12 +618,7 @@ export function RepositoryReviewHost({
     }
     deferredMilestoneReportedRef.current = true;
     window.codiff.reportInitialLoadMilestone?.('deferred-review-data-complete');
-  }, [
-    gitIdentityReady,
-    initialHistoryComplete,
-    state,
-    walkthroughLoading,
-  ]);
+  }, [gitIdentityReady, initialHistoryComplete, state, walkthroughLoading]);
   const [commentsMode, setCommentsMode] = useState(false);
   const activeSurfaceMode: ReviewMode = commentsMode ? 'comments' : sidebarMode;
   const changeSurfaceMode = useCallback(
@@ -564,34 +640,113 @@ export function RepositoryReviewHost({
     [changeSidebarMode, setMainMode, setSidebarMode, setWalkthroughUnread, walkthroughStale],
   );
 
-  const cancelDiffContentRequests = useCallback(() => {
-    for (const requestId of diffContentRequestIdsRef.current) {
-      window.codiff.cancelDiffContentRequest(requestId);
-    }
-    diffContentRequestIdsRef.current.clear();
-  }, []);
+  const cancelDiffContentRequests = useCallback(
+    () => diffContentRequests.cancelAll(),
+    [diffContentRequests],
+  );
   useEffect(() => cancelDiffContentRequests, [cancelDiffContentRequests]);
 
-  const requestDiffSectionContent = useCallback((request: DiffSectionContentRequest) => {
-    const requestId = `section:${diffContentRequestCounterRef.current + 1}`;
-    diffContentRequestCounterRef.current += 1;
-    diffContentRequestIdsRef.current.add(requestId);
-    return window.codiff
-      .getDiffSectionContent({ ...request, requestId })
-      .finally(() => diffContentRequestIdsRef.current.delete(requestId));
-  }, []);
-
-  const requestDiffImageContent = useCallback(
-    (request: DiffImageContentRequest): Promise<DiffImageContentResult> => {
-      const requestId = `image:${diffContentRequestCounterRef.current + 1}`;
-      diffContentRequestCounterRef.current += 1;
-      diffContentRequestIdsRef.current.add(requestId);
-      return window.codiff
-        .getDiffImageContent({ ...request, requestId })
-        .finally(() => diffContentRequestIdsRef.current.delete(requestId));
-    },
-    [],
+  const reviewContentRunKey = state ? getReviewContentRunKey(state) : null;
+  const reviewContentSource = state?.source ?? null;
+  const reviewContentRun = useMemo(
+    () =>
+      reviewContentRunKey && reviewContentSource
+        ? createReviewContentRun({
+            generation: reviewContentRunKey,
+            source: reviewContentSource,
+            transport: diffContentRequests.readRevisionContent,
+          })
+        : null,
+    [diffContentRequests, reviewContentRunKey, reviewContentSource],
   );
+  useEffect(
+    () => () => {
+      const error = new Error('The review content run was replaced.');
+      error.name = 'AbortError';
+      reviewContentRun?.abort(error);
+    },
+    [reviewContentRun],
+  );
+
+  const startupReviewContentRequests = useMemo(
+    () =>
+      state?.source.type === 'pull-request'
+        ? state.files.flatMap((file) =>
+            file.sections
+              .filter(
+                (section) =>
+                  !section.binary &&
+                  section.range != null &&
+                  section.summary?.canLoad !== false &&
+                  (shouldLoadDiffSectionContents(section) || isPatchOnlyDiffSection(section)),
+              )
+              .map((section) => ({ file, section })),
+          )
+        : [],
+    [state],
+  );
+  const reviewContentReady =
+    startupReviewContentRequests.length === 0 ||
+    hydratedReviewContentRunKey === reviewContentRunKey;
+
+  useEffect(() => {
+    if (
+      !state ||
+      !reviewContentRun ||
+      !reviewContentRunKey ||
+      startupReviewContentRequests.length === 0
+    ) {
+      return;
+    }
+
+    let canceled = false;
+    const requestedRunKey = reviewContentRunKey;
+    void hydrateReviewContentRequests(reviewContentRun, startupReviewContentRequests).then(
+      (results) => {
+        if (canceled || getReviewContentRunKey(stateRef.current ?? state) !== requestedRunKey) {
+          return;
+        }
+
+        const resultsBySectionId = new Map(
+          results.map((result) => [
+            `${result.request.file.path}\0${result.request.section.id}`,
+            result,
+          ]),
+        );
+        const current = stateRef.current ?? state;
+        const hydratedState: RepositoryState = {
+          ...current,
+          files: current.files.map((file) => ({
+            ...file,
+            sections: file.sections.map((section) => {
+              const result = resultsBySectionId.get(`${file.path}\0${section.id}`);
+              if (!result) {
+                return section;
+              }
+              return result.contents
+                ? hydrateSectionFromContents(file, section, result.contents)
+                : getFailedSectionLoadState(section);
+            }),
+          })),
+        };
+        stateRef.current = hydratedState;
+        setState(hydratedState);
+        setHydratedReviewContentRunKey(requestedRunKey);
+      },
+    );
+
+    return () => {
+      canceled = true;
+    };
+  }, [reviewContentRun, reviewContentRunKey, startupReviewContentRequests, state]);
+
+  useEffect(() => {
+    if (!state || !reviewContentReady || firstUsableMilestoneReportedRef.current) {
+      return;
+    }
+    firstUsableMilestoneReportedRef.current = true;
+    window.codiff.reportInitialLoadMilestone?.('first-usable-review-rendered');
+  }, [reviewContentReady, state]);
 
   const loadDiffSection = useCallback(
     (file: ChangedFile, section: DiffSection, repositoryState = stateRef.current) => {
@@ -599,7 +754,8 @@ export function RepositoryReviewHost({
       if (
         !currentState ||
         !supportsLazyDiffContent(currentState.source) ||
-        !shouldLoadDiffSectionContents(section)
+        (!shouldLoadDiffSectionContents(section) && !isPatchOnlyDiffSection(section)) ||
+        !reviewContentRun
       ) {
         return;
       }
@@ -615,14 +771,10 @@ export function RepositoryReviewHost({
       loadingSectionKeysRef.current.add(key);
       setLoadingSectionIds((current) => new Set(current).add(section.id));
 
-      return requestDiffSectionContent({
-        force: true,
-        kind: section.kind,
-        path: file.path,
-        showWhitespace: preferencesRef.current.showWhitespace,
-        source: currentState.source,
-      })
-        .then((loadedSection) => {
+      return reviewContentRun
+        .resolveSectionContents(file, section)
+        .then((contents) => {
+          const loadedSection = hydrateSectionFromContents(file, section, contents);
           if (
             stateGenerationRef.current !== stateGeneration ||
             stateRef.current?.root !== currentState.root ||
@@ -701,37 +853,27 @@ export function RepositoryReviewHost({
           });
         });
     },
-    [bumpItemVersion, requestDiffSectionContent],
+    [bumpItemVersion, reviewContentRun],
   );
 
-  // Fetches full file contents for a patch-only section so the CodeView
-  // `loadDiffFiles` option can hydrate the rendered diff in place. Unlike
-  // `loadDiffSection`, this must not touch React state: replacing the section
-  // would reset the hydrated diff object's identity.
-  const loadDiffSectionContents = useCallback(
-    async (file: ChangedFile, section: DiffSection): Promise<FileDiffLoadedFiles> => {
-      const currentState = stateRef.current;
-      if (!currentState || !supportsLazyDiffContent(currentState.source)) {
-        throw new Error(`Cannot load diff contents for '${file.path}'.`);
+  const resolveSectionContents = useCallback(
+    (file: ChangedFile, section: DiffSection) => {
+      if (!reviewContentRun) {
+        return Promise.reject(new Error(`Cannot load diff contents for '${file.path}'.`));
       }
-
-      const loadedSection = await requestDiffSectionContent({
-        force: true,
-        kind: section.kind,
-        path: file.path,
-        showWhitespace: preferencesRef.current.showWhitespace,
-        source: currentState.source,
-      });
-      if (!loadedSection.newFile) {
-        throw new Error(`No file contents available for '${file.path}'.`);
-      }
-
-      return {
-        newFile: loadedSection.newFile,
-        oldFile: loadedSection.oldFile ?? null,
-      };
+      return reviewContentRun.resolveSectionContents(file, section);
     },
-    [requestDiffSectionContent],
+    [reviewContentRun],
+  );
+
+  const resolveImage = useCallback(
+    (file: ChangedFile, section: DiffSection) =>
+      reviewContentRun?.resolveImage(file, section) ??
+      Promise.resolve({
+        reason: `Cannot load image contents for '${file.path}'.`,
+        status: 'unavailable' as const,
+      }),
+    [reviewContentRun],
   );
 
   const refreshMarkdownFile = useCallback(
@@ -1490,6 +1632,10 @@ export function RepositoryReviewHost({
     return null;
   }
 
+  if (!reviewContentReady) {
+    return <ReviewSourceLoading />;
+  }
+
   const source = state.source;
   const title =
     source.type === 'pull-request'
@@ -1594,10 +1740,10 @@ export function RepositoryReviewHost({
           initialScrollTarget: surfaceInitialScrollTarget,
           itemVersionByKey,
           loadingSectionIds,
-          onLoadImageContent: requestDiffImageContent,
           onLoadSection: loadDiffSection,
           onRefreshMarkdown: refreshMarkdownFile,
-          resolveSectionContents: loadDiffSectionContents,
+          resolveImage,
+          resolveSectionContents,
         },
         desktop: {
           beforeContent: (

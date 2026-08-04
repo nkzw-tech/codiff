@@ -84,11 +84,7 @@ import type {
   WalkthroughError,
 } from './lib/app-types.ts';
 import type { Command } from './lib/command-registry.ts';
-import {
-  getDiffLineCount,
-  getTotalDiffLineCount,
-  isMarkdownFilePath,
-} from './lib/diff.ts';
+import { getDiffLineCount, getTotalDiffLineCount, isMarkdownFilePath } from './lib/diff.ts';
 import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
@@ -129,7 +125,6 @@ import type {
   DefinitionCandidate,
   DefinitionSearchRequest,
   DefinitionSearchResult,
-  DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
   GitIdentity,
@@ -317,9 +312,9 @@ export type ReviewContentCapabilities = {
   initialScrollTarget?: ReviewScrollTarget | null;
   itemVersionByKey?: Readonly<Record<string, number>>;
   loadingSectionIds?: ReadonlySet<string>;
-  onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
   onLoadSection?: (file: ChangedFile, section: DiffSection) => Promise<void> | void;
   onRefreshMarkdown?: (file: ChangedFile, section: DiffSection) => Promise<boolean>;
+  resolveImage?: (file: ChangedFile, section: DiffSection) => Promise<DiffImageContentResult>;
   resolveSectionContents?: (
     file: ChangedFile,
     section: DiffSection,
@@ -908,7 +903,6 @@ export function ReviewSurface({
     activeMatch: activeDiffSearchMatch,
     activeMatchIndex: activeDiffSearchMatchIndex,
     closeSearch: closeDiffSearch,
-    fileFilteredFiles,
     filters: diffSearchFilters,
     focusRequest: diffSearchFocusRequest,
     matches: diffSearchMatches,
@@ -1705,7 +1699,6 @@ export function ReviewSurface({
     onCreateComment: createComment,
     onDeleteComment: deleteComment,
     onFindDefinitions: desktop?.onFindDefinitions,
-    onLoadImageContent: content?.onLoadImageContent,
     onLoadSection: content?.onLoadSection,
     onOpenDefinition: desktop?.onOpenDefinition,
     onOpenFile: desktop?.onOpenFile,
@@ -1721,6 +1714,7 @@ export function ReviewSurface({
     onUpdateSourceDescription: sourceNavigation?.onUpdateDescription,
     onUpdateSourceTitle: sourceNavigation?.onUpdateTitle,
     onUploadSourceDescriptionAsset: sourceNavigation?.onUploadDescriptionAsset,
+    resolveImage: content?.resolveImage,
     resolveSectionContents: content?.resolveSectionContents,
     searchQuery: diffSearchQuery,
     showWhitespace: snapshot.preferences.showWhitespace,

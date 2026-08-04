@@ -14,6 +14,7 @@ import {
   type CodeViewOptions,
   type CodeViewScrollTarget,
   type DiffLineAnnotation,
+  type ExpansionDirections,
   type FileDiffLoadedFiles,
   type FileDiffMetadata,
   type LineAnnotation,
@@ -107,6 +108,12 @@ import {
   shouldDiscardReviewCommentOnEscape,
   updateStickyHeaderState,
 } from '../../lib/review-comments.ts';
+import {
+  getReviewContextExpansionState,
+  reviewContextExpansionDigest,
+  reviewContextExpansionProjectionKey,
+  type ReviewContextExpansionState,
+} from '../../lib/review-context-expansion.ts';
 import { getReviewIdentity, isReviewIdentityViewed } from '../../lib/review-identity.ts';
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
 import { getSourceKey } from '../../lib/source.ts';
@@ -144,6 +151,15 @@ import { useCopiedState } from './useCopiedState.ts';
 
 const emptyMarkdownPreviewSectionIds = new Set<string>();
 const emptyExpandedGenerated = new Set<string>();
+const emptyPendingContextKeys: ReadonlySet<string> = new Set();
+const reviewContextExpansionByProjection = new Map<string, ReviewContextExpansionState>();
+type ContextExpansionInstance = {
+  expandHunk: (
+    hunkIndex: number,
+    direction: ExpansionDirections,
+    expansionLineCountOverride?: number,
+  ) => void;
+};
 const markdownPreviewPlugins = [
   frontmatterPlugin(),
   imagePlugin({
@@ -1047,19 +1063,17 @@ function ImageDiffPreview({
   loadImageContent,
   onLayoutReady,
   section,
-  source,
 }: {
   file: ChangedFile;
-  loadImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
+  loadImageContent: (file: ChangedFile, section: DiffSection) => Promise<DiffImageContentResult>;
   onLayoutReady: (sectionId: string) => void;
   section: DiffSection;
-  source: ResolvedReviewSource;
 }) {
   const loadingResult: DiffImageContentResult = {
     reason: 'Loading image...',
     status: 'unavailable',
   };
-  const requestKey = `${file.fingerprint}:${section.id}:${JSON.stringify(source)}`;
+  const requestKey = `${file.fingerprint}:${section.id}`;
   const [aspectRatio, setAspectRatio] = useState<number | null>(null);
   const [mode, setMode] = useState<ImagePreviewMode>('slider');
   const sliderStageRef = useRef<HTMLDivElement>(null);
@@ -1131,11 +1145,7 @@ function ImageDiffPreview({
     let canceled = false;
     const activeRequestKey = requestKey;
 
-    loadImageContent({
-      kind: section.kind,
-      path: file.path,
-      source,
-    })
+    loadImageContent(file, section)
       .then((nextResult) => {
         if (!canceled) {
           setLoadState({
@@ -1159,7 +1169,7 @@ function ImageDiffPreview({
     return () => {
       canceled = true;
     };
-  }, [file.path, loadImageContent, requestKey, section.kind, source]);
+  }, [file, loadImageContent, requestKey, section]);
 
   useEffect(() => {
     onLayoutReady(section.id);
@@ -2285,6 +2295,22 @@ const createFileReviewBlocks = (
     id: `file:${file.path}`,
   }));
 
+const getReviewCodeProjectionKey = (
+  blocks: ReadonlyArray<ReviewDiffBlock> | undefined,
+  files: ReadonlyArray<ChangedFile>,
+  showWhitespace: boolean,
+) => {
+  const projectedFiles = (blocks ?? createFileReviewBlocks(files))
+    .map((block) => block.file)
+    .filter((file): file is ChangedFile => file != null)
+    .map((file) => ({
+      fingerprint: file.fingerprint,
+      path: file.path,
+      sections: file.sections.map((section) => section.id),
+    }));
+  return JSON.stringify({ files: projectedFiles, showWhitespace });
+};
+
 const getBlockItemId = (block: FileReviewDiffBlock, section: DiffSection) =>
   block.itemIdPrefix ? `${block.itemIdPrefix}:${getItemId(section)}` : getItemId(section);
 
@@ -2527,6 +2553,23 @@ const getHunkSelectionRange = (
 const isSameSelection = (a: SelectedLineRange, b: SelectedLineRange) =>
   a.start === b.start && a.end === b.end && a.side === b.side;
 
+const isReviewContextCandidate = (section: DiffSection) =>
+  section.summary?.canLoad !== false &&
+  section.loadState !== 'error' &&
+  !section.binary &&
+  section.patch.trim().length > 0 &&
+  section.oldFile == null &&
+  section.newFile == null;
+
+const disableNonLoadablePartialDiff = (
+  fileDiff: FileDiffMetadata,
+  section: DiffSection,
+): FileDiffMetadata =>
+  fileDiff.isPartial &&
+  (section.summary?.canLoad === false || section.loadState === 'error' || section.binary)
+    ? { ...fileDiff, isPartial: false }
+    : fileDiff;
+
 export function ReviewCodeView({
   activeSearchMatch,
   agentId,
@@ -2575,6 +2618,7 @@ export function ReviewCodeView({
   onUpdateSourceDescription,
   onUpdateSourceTitle,
   onUploadSourceDescriptionAsset,
+  resolveImage,
   resolveSectionContents,
   reviewIdentityByPath,
   scrollTarget,
@@ -2640,6 +2684,7 @@ export function ReviewCodeView({
   onUpdateSourceDescription?: (body: string) => Promise<void> | void;
   onUpdateSourceTitle?: (title: string) => Promise<void> | void;
   onUploadSourceDescriptionAsset?: (file: File) => Promise<string> | string;
+  resolveImage?: (file: ChangedFile, section: DiffSection) => Promise<DiffImageContentResult>;
   resolveSectionContents?: (
     file: ChangedFile,
     section: DiffSection,
@@ -2770,6 +2815,20 @@ export function ReviewCodeView({
   const stickyHeaderFrameRef = useRef<number | null>(null);
 
   const reviewBlocks = useMemo(() => blocks ?? createFileReviewBlocks(files), [blocks, files]);
+  const codeProjectionKey = useMemo(
+    () => getReviewCodeProjectionKey(blocks, files, showWhitespace),
+    [blocks, files, showWhitespace],
+  );
+  const codeViewContainerRef = useRef<HTMLDivElement>(null);
+  const appliedExpansionDigestByInstanceRef = useRef(new WeakMap<object, string>());
+  const [pendingContextHydration, setPendingContextHydration] = useState<{
+    keys: ReadonlySet<string>;
+    projectionKey: string;
+  }>(() => ({ keys: new Set(), projectionKey: codeProjectionKey }));
+  const pendingContextHydrationKeys =
+    pendingContextHydration.projectionKey === codeProjectionKey
+      ? pendingContextHydration.keys
+      : emptyPendingContextKeys;
   const commentLookup = useMemo(() => {
     const map = new Map<string, ReviewComment>();
     for (const comment of comments) {
@@ -2885,7 +2944,8 @@ export function ReviewCodeView({
       const walkthroughNote = getBlockWalkthroughNote(block, walkthroughNotes);
       const blockCommentsBySection = groupReviewCommentsBySection(block.comments ?? []);
 
-      for (const [index, { fileDiff, section }] of sections.entries()) {
+      for (const [index, { fileDiff: parsedFileDiff, section }] of sections.entries()) {
+        const fileDiff = disableNonLoadablePartialDiff(parsedFileDiff, section);
         const baseItemId = getItemId(section);
         const id = getBlockItemId(block, section);
         nextItemBlockId.set(id, block.id);
@@ -2893,8 +2953,7 @@ export function ReviewCodeView({
         searchTargets.push({ fileDiff, itemId: id, path: file.path });
         nextSearchTargetsByBaseItemId.set(baseItemId, searchTargets);
         const markdownPreview = getMarkdownPreviewContents(file, section, fileDiff);
-        const canRenderImage =
-          onLoadImageContent != null && canRenderImagePreview(file.path, section);
+        const canRenderImage = resolveImage != null && canRenderImagePreview(file.path, section);
         const canRenderMarkdown = markdownPreview != null;
         const canEditMarkdown =
           canRenderMarkdown &&
@@ -3112,7 +3171,7 @@ export function ReviewCodeView({
     itemVersionByKey,
     markdownPreviewLayoutPassBySection,
     markdownPreviewSections,
-    onLoadImageContent,
+    resolveImage,
     reviewBlocks,
     selectedPath,
     showWhitespace,
@@ -3121,6 +3180,106 @@ export function ReviewCodeView({
     reviewIdentityByPath,
     walkthroughNotes,
   ]);
+
+  const getSectionExpansionKey = useCallback(
+    (itemId: string) => {
+      const meta = itemMetadata.get(itemId);
+      return meta
+        ? reviewContextExpansionProjectionKey(
+            codeProjectionKey,
+            meta.file.fingerprint,
+            meta.section.id,
+          )
+        : null;
+    },
+    [codeProjectionKey, itemMetadata],
+  );
+
+  const restoreExpansionForItem = useCallback(
+    (item: CodeViewItem<ReviewAnnotationMetadata>, instance: ContextExpansionInstance) => {
+      if (item.type !== 'diff') {
+        return;
+      }
+      const sectionKey = getSectionExpansionKey(item.id);
+      if (!sectionKey) {
+        return;
+      }
+      const state = reviewContextExpansionByProjection.get(sectionKey);
+      const marker = `${sectionKey}:${reviewContextExpansionDigest(state)}`;
+      if (appliedExpansionDigestByInstanceRef.current.get(instance) === marker) {
+        return;
+      }
+      appliedExpansionDigestByInstanceRef.current.set(instance, marker);
+      for (const [hunkIndex, region] of state ?? []) {
+        if (region.fromStart > 0) {
+          instance.expandHunk(hunkIndex, 'up', region.fromStart);
+        }
+        if (region.fromEnd > 0) {
+          instance.expandHunk(hunkIndex, 'down', region.fromEnd);
+        }
+      }
+    },
+    [getSectionExpansionKey],
+  );
+
+  const recordExpansionClick = useCallback(
+    (event: MouseEvent) => {
+      const path = event.composedPath();
+      const elements = path.filter(
+        (value): value is HTMLElement =>
+          typeof value === 'object' &&
+          value !== null &&
+          'hasAttribute' in value &&
+          typeof value.hasAttribute === 'function',
+      );
+      const separator = elements.find((element) => element.hasAttribute('data-expand-index'));
+      const hunkIndex = Number.parseInt(separator?.getAttribute('data-expand-index') ?? '', 10);
+      if (!Number.isFinite(hunkIndex)) {
+        return;
+      }
+      const direction = elements.some((element) => element.hasAttribute('data-expand-up'))
+        ? 'up'
+        : elements.some((element) => element.hasAttribute('data-expand-down'))
+          ? 'down'
+          : 'both';
+      const expandAll =
+        event.shiftKey ||
+        elements.some((element) => element.hasAttribute('data-expand-all-button'));
+      const viewer = codeViewRef.current?.getInstance();
+      const renderedItem = viewer
+        ?.getRenderedItems()
+        .find((candidate) => path.includes(candidate.element));
+      if (!renderedItem || renderedItem.type !== 'diff') {
+        return;
+      }
+      const sectionKey = getSectionExpansionKey(renderedItem.id);
+      if (!sectionKey) {
+        return;
+      }
+      const nextState = getReviewContextExpansionState(
+        reviewContextExpansionByProjection.get(sectionKey),
+        hunkIndex,
+        direction,
+        diffContextExpansionLineCount,
+        expandAll,
+      );
+      reviewContextExpansionByProjection.set(sectionKey, nextState);
+      appliedExpansionDigestByInstanceRef.current.set(
+        renderedItem.instance,
+        `${sectionKey}:${reviewContextExpansionDigest(nextState)}`,
+      );
+    },
+    [getSectionExpansionKey],
+  );
+
+  useEffect(() => {
+    const container = codeViewContainerRef.current;
+    if (!container) {
+      return;
+    }
+    container.addEventListener('click', recordExpansionClick);
+    return () => container.removeEventListener('click', recordExpansionClick);
+  }, [recordExpansionClick]);
 
   const codeViewItems = useMemo<ReadonlyArray<CodeViewItem<ReviewAnnotationMetadata>>>(() => {
     if (items.length > 0 || !sourceDescriptionItemId) {
@@ -3393,7 +3552,12 @@ export function ReviewCodeView({
   // context on a patch-only diff; the partial FileDiffMetadata is hydrated in
   // place (see `parseSectionDiffWithOptions` for the identity contract).
   const loadDiffFiles = useMemo(() => {
-    if (!resolveSectionContents) {
+    const hasSupportedPartialSection =
+      resolveSectionContents != null &&
+      reviewBlocks.some((block) =>
+        block.file?.sections.some((section) => isReviewContextCandidate(section)),
+      );
+    if (!hasSupportedPartialSection) {
       return undefined;
     }
 
@@ -3405,9 +3569,37 @@ export function ReviewCodeView({
         );
       }
 
-      return loadSectionContents(target.file, target.section, resolveSectionContents);
+      if (!resolveSectionContents) {
+        return Promise.reject(
+          new Error(`Full review context is unavailable for '${target.file.path}'.`),
+        );
+      }
+
+      return loadSectionContents(target.file, target.section, async (file, section) => {
+        const key = reviewContextExpansionProjectionKey(
+          codeProjectionKey,
+          file.fingerprint,
+          section.id,
+        );
+        setPendingContextHydration((current) => ({
+          keys: new Set(current.projectionKey === codeProjectionKey ? current.keys : []).add(key),
+          projectionKey: codeProjectionKey,
+        }));
+        try {
+          return await resolveSectionContents(file, section);
+        } finally {
+          setPendingContextHydration((current) => {
+            if (current.projectionKey !== codeProjectionKey) {
+              return current;
+            }
+            const next = new Set(current.keys);
+            next.delete(key);
+            return { keys: next, projectionKey: codeProjectionKey };
+          });
+        }
+      });
     };
-  }, [resolveSectionContents]);
+  }, [codeProjectionKey, resolveSectionContents, reviewBlocks]);
 
   const codeViewOptions: CodeViewOptions<ReviewAnnotationMetadata> = useMemo(
     () =>
@@ -3540,7 +3732,7 @@ export function ReviewCodeView({
 
           createCommentForRange(range, context);
         },
-        onPostRender: (node, _instance, _phase, context) => {
+        onPostRender: (node, instance, phase, context) => {
           const metadata = itemMetadata.get(context.item.id);
           const isWalkthroughHeaderItem = context.item.id.endsWith(':walkthrough-header');
           node.classList.toggle('codiff-walkthrough-header-item', isWalkthroughHeaderItem);
@@ -3565,6 +3757,22 @@ export function ReviewCodeView({
             'codiff-loading-summary-item',
             Boolean(metadata && loadingSectionIds.has(metadata.section.id)),
           );
+          node.classList.toggle(
+            'codiff-loading-context-item',
+            Boolean(
+              metadata &&
+              pendingContextHydrationKeys.has(
+                reviewContextExpansionProjectionKey(
+                  codeProjectionKey,
+                  metadata.file.fingerprint,
+                  metadata.section.id,
+                ),
+              ),
+            ),
+          );
+          if (phase !== 'unmount' && 'expandHunk' in instance) {
+            restoreExpansionForItem(context.item, instance);
+          }
           if (definitionModifierActiveRef.current) {
             window.requestAnimationFrame(() => {
               if (definitionModifierActiveRef.current && node.isConnected) {
@@ -3586,6 +3794,7 @@ export function ReviewCodeView({
     [
       bottomInset,
       cancelPendingEmptyCommentDeletes,
+      codeProjectionKey,
       createCommentForRange,
       diffStyle,
       isReadOnly,
@@ -3595,6 +3804,8 @@ export function ReviewCodeView({
       onCreateComment,
       onFindDefinitions,
       onLoadSection,
+      pendingContextHydrationKeys,
+      restoreExpansionForItem,
       selectedHeaderItemIds,
       source,
       sourceKey,
@@ -4341,13 +4552,12 @@ export function ReviewCodeView({
     ) => {
       if (annotation.metadata.type === 'image-preview') {
         const meta = itemMetadata.get(item.id);
-        return meta && onLoadImageContent ? (
+        return meta && resolveImage ? (
           <ImageDiffPreview
             file={meta.file}
-            loadImageContent={onLoadImageContent}
+            loadImageContent={resolveImage}
             onLayoutReady={markImagePreviewLayoutReady}
             section={meta.section}
-            source={source}
           />
         ) : null;
       }
@@ -4419,7 +4629,7 @@ export function ReviewCodeView({
       markCommentLayoutChanged,
       onAskCodex,
       onCommentDraftChange,
-      onLoadImageContent,
+      resolveImage,
       onResolveThread,
       onSaveCommentEdit,
       onSubmitComment,
@@ -4427,7 +4637,6 @@ export function ReviewCodeView({
       renderComments,
       replyToThread,
       setMarkdownEditorRef,
-      source,
       supportsReviewCommentActions,
     ],
   );
@@ -4472,6 +4681,7 @@ export function ReviewCodeView({
   const codeView = (
     <CodeView
       className="code-view"
+      containerRef={codeViewContainerRef}
       disableWorkerPool={disableWorkerPool}
       items={codeViewItems}
       onScroll={handleScroll}
@@ -4494,6 +4704,7 @@ export function ReviewCodeView({
     >
       <CodeView
         className="code-view"
+        containerRef={codeViewContainerRef}
         disableWorkerPool={false}
         items={codeViewItems}
         onScroll={handleScroll}

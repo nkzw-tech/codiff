@@ -2,9 +2,7 @@
 
 const revisionIdentity = (range) =>
   range
-    ? `${range.base.kind || 'commit'}:${range.base.sha || ''}:${
-        range.head.kind || 'commit'
-      }:${range.head.sha || ''}`
+    ? `${range.base?.kind || (range.base ? 'commit' : 'absent')}:${range.base?.sha || ''}:${range.head?.kind || (range.head ? 'commit' : 'absent')}:${range.head?.sha || ''}`
     : '';
 
 /**

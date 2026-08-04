@@ -25,9 +25,15 @@ const { readRepositoryState } = require('../../electron/git-state.cjs') as {
 };
 const { getSectionWalkthroughHunks } = require('../lib/narrative-walkthrough-diff.cjs') as {
   getSectionWalkthroughHunks: (
-    file: { path: string },
-    section: { id: string; patch: string },
-  ) => ReadonlyArray<{ id: string }>;
+    file: { path: string; status?: string },
+    section: {
+      id: string;
+      kind?: string;
+      lineCount?: { additions: number; deletions: number };
+      loadState?: string;
+      patch: string;
+    },
+  ) => ReadonlyArray<{ added: number; deleted: number; id: string; kind?: string }>;
 };
 const execFileAsync = promisify(execFile);
 
@@ -56,6 +62,33 @@ const git = (repositoryPath: string, args: ReadonlyArray<string>) =>
   execFileAsync('git', ['-c', 'commit.gpgsign=false', '-C', repositoryPath, ...args], {
     encoding: 'utf8',
   });
+
+test('patchless walkthrough hunks retain provider line counts including exact zero', () => {
+  expect(
+    getSectionWalkthroughHunks(
+      { path: 'src/removed.ts', status: 'modified' },
+      {
+        id: 'src/removed.ts:pull-request',
+        kind: 'pull-request',
+        lineCount: { additions: 0, deletions: 3767 },
+        loadState: 'deferred',
+        patch: '',
+      },
+    ),
+  ).toMatchObject([{ added: 0, deleted: 3767, kind: 'synthetic' }]);
+  expect(
+    getSectionWalkthroughHunks(
+      { path: 'src/zero.ts', status: 'modified' },
+      {
+        id: 'src/zero.ts:pull-request',
+        kind: 'pull-request',
+        lineCount: { additions: 0, deletions: 0 },
+        loadState: 'ready',
+        patch: '',
+      },
+    ),
+  ).toMatchObject([{ added: 0, deleted: 0, kind: 'synthetic' }]);
+});
 
 test('headless share uploads the canonical snapshot and prints its URL', async () => {
   await using directory = await createTemporaryDirectory('codiff-headless-share-');

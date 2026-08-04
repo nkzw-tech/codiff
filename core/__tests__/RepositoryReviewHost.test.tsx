@@ -8,12 +8,13 @@ import { RepositoryReviewHost } from '../app/RepositoryReviewHost.tsx';
 import { createDefaultConfig } from '../config/defaults.ts';
 import { resolveRepositoryReviewBootstrap } from '../lib/repository-review-bootstrap.ts';
 import type {
-  DiffImageContentRequest,
   GitSha,
   NarrativeWalkthrough,
   NarrativeWalkthroughResult,
   RepositoryHistory,
   RepositoryState,
+  RevisionContentBatchRequest,
+  RevisionContentBatchResult,
 } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
@@ -183,6 +184,114 @@ test('RepositoryReviewHost renders provider reviews through the shared surface',
   } finally {
     await view.cleanup();
   }
+});
+
+test('provider reviews load exact contents before their first usable render', async () => {
+  const content = deferred<RevisionContentBatchResult>();
+  const readRevisionContent = vi.fn((_request: RevisionContentBatchRequest) => content.promise);
+  const reportInitialLoadMilestone = vi.fn();
+  window.codiff = {
+    applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    cancelDiffContentRequest: vi.fn(),
+    dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    isWindowFullScreen: vi.fn(async () => false),
+    onConfigChanged: vi.fn(() => unsubscribe),
+    onCopyPendingCommentsRequest: vi.fn(() => unsubscribe),
+    onFindInDiffs: vi.fn(() => unsubscribe),
+    onOpenReviewSource: vi.fn(() => unsubscribe),
+    onRefreshRequest: vi.fn(() => unsubscribe),
+    onRepositoryChanged: vi.fn(() => unsubscribe),
+    onUpdateStatusChanged: vi.fn(() => unsubscribe),
+    onWalkthroughProgress: vi.fn(() => unsubscribe),
+    onWindowFullScreenChanged: vi.fn(() => unsubscribe),
+    openRepositoryFolder: vi.fn(async () => {}),
+    readRevisionContent,
+    reportInitialLoadMilestone,
+    resolvePullRequestUrl: vi.fn(async (value: string) => value),
+  } as unknown as Window['codiff'];
+  const baseSha = 'b'.repeat(40) as GitSha;
+  const headSha = 'c'.repeat(40) as GitSha;
+  const range = {
+    base: { label: { kind: 'commit' as const, text: 'base' }, sha: baseSha },
+    head: { label: { kind: 'commit' as const, text: 'head' }, sha: headSha },
+  };
+  const deferredFile = createChangedFile('src/deferred.ts', { kind: 'pull-request' });
+  const patchFile = createChangedFile('src/patch.ts', { kind: 'pull-request' });
+  const pullRequestState = {
+    ...state,
+    files: [
+      {
+        ...deferredFile,
+        sections: [
+          {
+            ...deferredFile.sections[0]!,
+            loadState: 'deferred' as const,
+            patch: '',
+            range,
+            summary: { canLoad: true, reason: 'Load exact contents.' },
+          },
+        ],
+      },
+      {
+        ...patchFile,
+        sections: [
+          {
+            ...patchFile.sections[0]!,
+            loadState: 'ready' as const,
+            newFile: undefined,
+            oldFile: undefined,
+            range,
+          },
+        ],
+      },
+    ],
+    reviewCommentsLoadState: 'loaded' as const,
+    source: {
+      headSha,
+      number: 42,
+      provider: 'github' as const,
+      targetBranch: 'main',
+      title: 'Exact review content',
+      type: 'pull-request' as const,
+      url: 'https://github.com/example/review/pull/42',
+    },
+  } satisfies RepositoryState;
+
+  await using view = await renderReact(
+    <RepositoryReviewHost
+      bootstrap={bootstrapFor(pullRequestState)}
+      config={createDefaultConfig()}
+      disableCodeViewWorkerPool
+      gitIdentity={null}
+      gitIdentityReady
+      launchOptions={{ repositoryPathProvided: true, walkthrough: false }}
+    />,
+  );
+
+  await waitFor(() => expect(readRevisionContent).toHaveBeenCalledOnce());
+  expect(readRevisionContent.mock.calls[0]![0].requests).toHaveLength(4);
+  expect(view.container.querySelector('.review-surface')).toBeNull();
+  expect(reportInitialLoadMilestone).not.toHaveBeenCalledWith('first-usable-review-rendered');
+
+  const request = readRevisionContent.mock.calls[0]![0];
+  await act(async () =>
+    content.resolve({
+      results: request.requests.map((item) => ({
+        key: item.key,
+        status: 'ready' as const,
+        value: {
+          bytes: new TextEncoder().encode(item.revision === range.head ? 'new\n' : 'old\n'),
+          cacheKey: item.key,
+          path: item.path,
+          provenance: 'native-git' as const,
+          size: 4,
+        },
+      })),
+    }),
+  );
+  await waitFor(() => expect(view.container.querySelector('.review-surface')).not.toBeNull());
+  expect(reportInitialLoadMilestone).toHaveBeenCalledWith('first-usable-review-rendered');
 });
 
 test('working-tree reviews open the standalone commit view with generated seed text', async () => {
@@ -431,10 +540,12 @@ test('RepositoryReviewHost hydrates deferred provider comments', async () => {
 });
 
 test('RepositoryReviewHost cancels active bulk provider hydration on unmount', async () => {
+  const baseFile = createChangedFile('src/lazy.ts', { kind: 'pull-request' });
   const file = {
-    ...createChangedFile('src/lazy.ts'),
+    ...baseFile,
     sections: [
       {
+        ...baseFile.sections[0]!,
         binary: false,
         id: 'src/lazy.ts:pull-request',
         kind: 'pull-request' as const,
@@ -458,13 +569,14 @@ test('RepositoryReviewHost cancels active bulk provider hydration on unmount', a
       url: 'https://github.com/example/review/pull/42',
     },
   } satisfies RepositoryState;
-  const getDiffSectionsContent = vi.fn((_request: { requestId?: string }) => new Promise(() => {}));
+  const readRevisionContent = vi.fn(
+    (_request: RevisionContentBatchRequest) => new Promise<RevisionContentBatchResult>(() => {}),
+  );
   const cancelDiffContentRequest = vi.fn();
   window.codiff = {
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest,
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
-    getDiffSectionsContent,
     getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     isWindowFullScreen: vi.fn(async () => false),
     onConfigChanged: vi.fn(() => unsubscribe),
@@ -477,6 +589,7 @@ test('RepositoryReviewHost cancels active bulk provider hydration on unmount', a
     onWalkthroughProgress: vi.fn(() => unsubscribe),
     onWindowFullScreenChanged: vi.fn(() => unsubscribe),
     openRepositoryFolder: vi.fn(async () => {}),
+    readRevisionContent,
     resolvePullRequestUrl: vi.fn(async (value: string) => value),
   } as unknown as Window['codiff'];
 
@@ -490,18 +603,20 @@ test('RepositoryReviewHost cancels active bulk provider hydration on unmount', a
       launchOptions={{ repositoryPathProvided: true, walkthrough: false }}
     />,
   );
-  await waitFor(() => expect(getDiffSectionsContent).toHaveBeenCalledOnce());
-  const requestId = getDiffSectionsContent.mock.calls[0]![0].requestId;
-  expect(requestId).toMatch(/^bulk-sections:/);
+  await waitFor(() => expect(readRevisionContent).toHaveBeenCalledOnce());
+  const requestId = readRevisionContent.mock.calls[0]![0].requestId;
+  expect(requestId).toMatch(/^revision-content:/);
   await view.cleanup();
   expect(cancelDiffContentRequest).toHaveBeenCalledWith(requestId);
 });
 
 test('RepositoryReviewHost cancels an active image request on unmount', async () => {
+  const baseFile = createChangedFile('image.png', { kind: 'pull-request' });
   const file = {
-    ...createChangedFile('image.png'),
+    ...baseFile,
     sections: [
       {
+        ...baseFile.sections[0]!,
         binary: true,
         id: 'image.png:pull-request',
         kind: 'pull-request' as const,
@@ -524,13 +639,14 @@ test('RepositoryReviewHost cancels an active image request on unmount', async ()
       url: 'https://github.com/example/review/pull/42',
     },
   } satisfies RepositoryState;
-  const getDiffImageContent = vi.fn((_request: DiffImageContentRequest) => new Promise(() => {}));
+  const readRevisionContent = vi.fn(
+    (_request: RevisionContentBatchRequest) => new Promise<RevisionContentBatchResult>(() => {}),
+  );
   const cancelDiffContentRequest = vi.fn();
   window.codiff = {
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest,
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
-    getDiffImageContent,
     getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     isWindowFullScreen: vi.fn(async () => false),
     onConfigChanged: vi.fn(() => unsubscribe),
@@ -543,6 +659,7 @@ test('RepositoryReviewHost cancels an active image request on unmount', async ()
     onWalkthroughProgress: vi.fn(() => unsubscribe),
     onWindowFullScreenChanged: vi.fn(() => unsubscribe),
     openRepositoryFolder: vi.fn(async () => {}),
+    readRevisionContent,
     resolvePullRequestUrl: vi.fn(async (value: string) => value),
   } as unknown as Window['codiff'];
 
@@ -556,9 +673,9 @@ test('RepositoryReviewHost cancels an active image request on unmount', async ()
       launchOptions={{ repositoryPathProvided: true, walkthrough: false }}
     />,
   );
-  await waitFor(() => expect(getDiffImageContent).toHaveBeenCalledOnce());
-  const requestId = getDiffImageContent.mock.calls[0]![0].requestId;
-  expect(requestId).toMatch(/^image:/);
+  await waitFor(() => expect(readRevisionContent).toHaveBeenCalledOnce());
+  const requestId = readRevisionContent.mock.calls[0]![0].requestId;
+  expect(requestId).toMatch(/^revision-content:/);
   await view.cleanup();
   expect(cancelDiffContentRequest).toHaveBeenCalledWith(requestId);
 });

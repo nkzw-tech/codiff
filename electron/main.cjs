@@ -18,11 +18,9 @@ const {
 const squirrelStartup = require('electron-squirrel-startup');
 const {
   listRepositoryHistory,
-  readDiffImageContent,
-  readDiffSectionContent,
-  readDiffSectionsContent,
   readGitIdentity,
   readRepositoryState,
+  readRevisionContent,
   readReviewComments,
   readWalkthroughRepositoryState,
   runWithCommandSignal,
@@ -1995,26 +1993,9 @@ ipcMain.handle('codiff:submitPullRequestReview', async (event, request) => {
   }
 });
 
-ipcMain.handle('codiff:getDiffSectionContent', async (event, request) => {
+ipcMain.handle('codiff:readRevisionContent', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return runDiffContentRequest(event, request, () =>
-    readDiffSectionContent(repositoryPath, {
-      ...request,
-      showWhitespace: request?.showWhitespace ?? config.settings.showWhitespace,
-    }),
-  );
-});
-
-ipcMain.handle('codiff:getDiffSectionsContent', async (event, request) => {
-  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return runDiffContentRequest(event, request, () =>
-    readDiffSectionsContent(repositoryPath, request),
-  );
-});
-
-ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
-  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return runDiffContentRequest(event, request, () => readDiffImageContent(repositoryPath, request));
+  return runDiffContentRequest(event, request, () => readRevisionContent(repositoryPath, request));
 });
 
 ipcMain.on('codiff:cancelDiffContentRequest', (event, requestId) => {

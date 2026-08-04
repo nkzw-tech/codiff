@@ -72,11 +72,6 @@ const createAppApi = (overrides: Record<string, unknown> = {}) => ({
   dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
   getAgentSkillStatus: vi.fn(async () => ({ installed: true, path: '/skill' })),
   getConfig: vi.fn(async () => createDefaultConfig()),
-  getDiffImageContent: vi.fn(async () => ({ reason: 'Not used.', status: 'unavailable' as const })),
-  getDiffSectionContent: vi.fn(async () => {
-    throw new Error('Unexpected diff section load.');
-  }),
-  getDiffSectionsContent: vi.fn(async () => ({ sections: [] })),
   getFeatureFlags: vi.fn(async () => ({ planSharing: false, walkthroughSharing: false })),
   getGitIdentity: vi.fn(async () => ({ email: 'reviewer@example.com', name: 'Reviewer' })),
   getLaunchOptions: vi.fn(async () => ({ repositoryPathProvided: true, walkthrough: false })),

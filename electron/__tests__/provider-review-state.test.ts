@@ -4,18 +4,24 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
+import type {
+  RepositoryState,
+  RevisionContentBatchRequest,
+  RevisionContentBatchResult,
+} from '../../core/types.ts';
 
-const { readPullRequestSectionsContent, readPullRequestState } =
-  require('../git-state/pull-request.cjs') as {
-    readPullRequestState: (
-      repoRoot: string,
-      source: { type: 'pull-request'; url: string },
-    ) => Promise<import('../../core/types.ts').RepositoryState>;
-    readPullRequestSectionsContent: (
-      repoRoot: string,
-      source: Extract<import('../../core/types.ts').ReviewSource, { type: 'pull-request' }>,
-    ) => Promise<import('../../core/types.ts').DiffSectionsContentResult>;
-  };
+const { readPullRequestState } = require('../git-state/pull-request.cjs') as {
+  readPullRequestState: (
+    repoRoot: string,
+    source: { type: 'pull-request'; url: string },
+  ) => Promise<RepositoryState>;
+};
+const { readRevisionContent } = require('../review-content.cjs') as {
+  readRevisionContent: (
+    repoRoot: string,
+    request: RevisionContentBatchRequest,
+  ) => Promise<RevisionContentBatchResult>;
+};
 const { rangeArtifactToPullRequestFiles } = require('../git-state/review-range-sections.cjs') as {
   rangeArtifactToPullRequestFiles: (
     artifact: import('../../core/index.ts').RangeArtifact,
@@ -192,17 +198,13 @@ test('renders a visible unavailable item for a wholly truncated Range Artifact',
   expect(files[0]?.sections[0]).not.toHaveProperty('range');
 });
 
-const { createGitLabPosition, readMergeRequestSectionsContent, readMergeRequestState } =
+const { createGitLabPosition, readMergeRequestState } =
   require('../git-state/merge-request.cjs') as {
     createGitLabPosition: (comment: unknown, metadata: unknown, diff?: unknown) => unknown;
     readMergeRequestState: (
       repoRoot: string,
       source: { provider: 'gitlab'; type: 'pull-request'; url: string },
-    ) => Promise<import('../../core/types.ts').RepositoryState>;
-    readMergeRequestSectionsContent: (
-      repoRoot: string,
-      source: Extract<import('../../core/types.ts').ReviewSource, { type: 'pull-request' }>,
-    ) => Promise<import('../../core/types.ts').DiffSectionsContentResult>;
+    ) => Promise<RepositoryState>;
   };
 
 const git = (directory: string, args: ReadonlyArray<string>) =>
@@ -236,11 +238,42 @@ const createReviewRange = async (
   return { baseSha, headSha };
 };
 
+const readStateRevisionContents = (directory: string, state: RepositoryState) => {
+  const requests = state.files.flatMap((file) =>
+    file.sections.flatMap((section) => [
+      ...(section.range?.base
+        ? [
+            {
+              key: `${file.path}:old`,
+              maxBytes: 2 * 1024 * 1024,
+              path: file.oldPath ?? file.path,
+              revision: section.range.base,
+            },
+          ]
+        : []),
+      ...(section.range?.head
+        ? [
+            {
+              key: `${file.path}:new`,
+              maxBytes: 2 * 1024 * 1024,
+              path: file.path,
+              revision: section.range.head,
+            },
+          ]
+        : []),
+    ]),
+  );
+  return readRevisionContent(directory, {
+    generation: 'provider-state-test',
+    requests,
+    source: state.source,
+  });
+};
+
 test('returns a GitHub Range Artifact before exact file hydration', async () => {
   const directory = await createRepository('https://github.com/nkzw-tech/codiff.git');
   const fakeGh = join(directory, 'gh');
   const callLog = join(directory, 'gh-calls.jsonl');
-  const gitTrace = join(directory, 'git-trace.log');
   const { baseSha, headSha } = await createReviewRange(
     directory,
     {
@@ -284,9 +317,7 @@ if (resource.includes('/compare/')) {
   );
   await chmod(fakeGh, 0o755);
   const previousPath = process.env.PATH;
-  const previousGitTrace = process.env.GIT_TRACE;
   process.env.PATH = `${directory}${delimiter}${previousPath ?? ''}`;
-  process.env.GIT_TRACE = gitTrace;
   try {
     const source = {
       type: 'pull-request',
@@ -309,19 +340,18 @@ if (resource.includes('/compare/')) {
     expect(state.files[0]?.sections[0]).not.toHaveProperty('newFile');
     expect(state.files[0]?.sections[0]).not.toHaveProperty('oldFile');
     expect(state.reviewComments).toBeUndefined();
-    const [hydrated, joinedHydration] = await Promise.all([
-      readPullRequestSectionsContent(directory, state.source),
-      readPullRequestSectionsContent(directory, state.source),
-    ]);
-    expect(joinedHydration).toBe(hydrated);
-    expect(hydrated.headSha).toBe(headSha);
-    expect(hydrated.sections).toHaveLength(2);
-    expect(hydrated.sections.map(({ path }) => path)).toEqual(['src/app.ts', 'src/other.ts']);
-    expect(hydrated.sections.every(({ section }) => section.loadState === 'ready')).toBe(true);
-    expect(hydrated.sections[0]?.section).toMatchObject({
-      newFile: { contents: 'new src/app.ts\n', name: 'src/app.ts' },
-      oldFile: { contents: 'old src/app.ts\n', name: 'src/app.ts' },
-    });
+    const contents = await readStateRevisionContents(directory, state);
+    expect(contents.results).toHaveLength(4);
+    expect(contents.results.every((result) => result.status === 'ready')).toBe(true);
+    const readyContents = new Map(
+      contents.results.flatMap((result) =>
+        result.status === 'ready'
+          ? [[result.key, new TextDecoder().decode(result.value.bytes)] as const]
+          : [],
+      ),
+    );
+    expect(readyContents.get('src/app.ts:old')).toBe('old src/app.ts\n');
+    expect(readyContents.get('src/app.ts:new')).toBe('new src/app.ts\n');
     const calls = (await readFile(callLog, 'utf8'))
       .trim()
       .split('\n')
@@ -332,17 +362,9 @@ if (resource.includes('/compare/')) {
     expect(calls.flat()).not.toContainEqual(
       expect.stringMatching(/comments|contents|graphql|application\/vnd\.github\.v3\.diff/),
     );
-    const trace = (await readFile(gitTrace, 'utf8')).split('\n');
-    expect(trace.filter((line) => line.includes('built-in: git ls-tree '))).toHaveLength(2);
-    expect(
-      trace.filter((line) => line.includes('git cat-file') && line.includes('--batch-check')),
-    ).toHaveLength(2);
-    expect(trace.filter((line) => line.endsWith('git cat-file --batch'))).toHaveLength(2);
   } finally {
     if (previousPath == null) delete process.env.PATH;
     else process.env.PATH = previousPath;
-    if (previousGitTrace == null) delete process.env.GIT_TRACE;
-    else process.env.GIT_TRACE = previousGitTrace;
   }
 }, 30_000);
 
@@ -429,14 +451,9 @@ if (resource.includes('/repository/compare?')) {
         { new_path: 'src/app.ts', old_path: 'src/app.ts' },
       ),
     ).toMatchObject({ base_sha: baseSha, head_sha: headSha, start_sha: startSha });
-    const hydrated = await readMergeRequestSectionsContent(directory, state.source);
-    expect(hydrated.headSha).toBe(headSha);
-    expect(hydrated.sections).toHaveLength(2);
-    expect(hydrated.sections.every(({ section }) => section.loadState === 'ready')).toBe(true);
-    expect(hydrated.sections[0]?.section).toMatchObject({
-      newFile: { contents: 'new src/app.ts\n', name: 'src/app.ts' },
-      oldFile: { contents: 'old src/app.ts\n', name: 'src/app.ts' },
-    });
+    const contents = await readStateRevisionContents(directory, state);
+    expect(contents.results).toHaveLength(4);
+    expect(contents.results.every((result) => result.status === 'ready')).toBe(true);
     const calls = (await readFile(callLog, 'utf8'))
       .trim()
       .split('\n')

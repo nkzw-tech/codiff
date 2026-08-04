@@ -72,6 +72,42 @@ test('pure renames are visible without content hunks', () => {
   expect(fileHasVisibleDiff(file, false)).toBe(true);
 });
 
+test('loaded added and deleted files reconstruct an exact absent side', () => {
+  const added = {
+    fingerprint: 'added',
+    path: 'added.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'added',
+        kind: 'pull-request',
+        loadState: 'ready',
+        newFile: { contents: 'one\ntwo\n', name: 'added.ts' },
+        patch: '',
+      },
+    ],
+    status: 'added',
+  } satisfies ChangedFile;
+  const deleted = {
+    fingerprint: 'deleted',
+    path: 'deleted.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'deleted',
+        kind: 'pull-request',
+        loadState: 'ready',
+        oldFile: { contents: 'one\ntwo\n', name: 'deleted.ts' },
+        patch: '',
+      },
+    ],
+    status: 'deleted',
+  } satisfies ChangedFile;
+
+  expect(getDiffLineCount(added, false)).toMatchObject({ additions: 2, deletions: 0 });
+  expect(getDiffLineCount(deleted, false)).toMatchObject({ additions: 0, deletions: 2 });
+});
+
 test('patch-only text sections hydrate lazily instead of eager loading', () => {
   const patchOnlySection = {
     binary: false,

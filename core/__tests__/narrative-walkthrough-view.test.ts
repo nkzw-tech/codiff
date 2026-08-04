@@ -17,6 +17,7 @@ import {
   getUncoveredWalkthroughFiles,
   getWalkthroughRunNote,
   isWalkthroughCommittable,
+  resolveWalkthroughFileLineItems,
   resolveWalkthroughHunkFile,
   resolveWalkthroughHunkRuns,
   walkthroughItemPaths,
@@ -521,7 +522,96 @@ test('uncovered walkthrough files keep visible non-hunk sections in support fall
     'public/logo.png:staged',
   ]);
   expect(getUncoveredWalkthroughFileLineItems(files, view, false)).toEqual([
-    { added: 0, deleted: 0, path: 'public/logo.png' },
+    { added: 0, deleted: 0, diffAvailable: false, path: 'public/logo.png' },
+  ]);
+});
+
+test('synthetic walkthrough counts prefer exact content and preserve unknown and exact zero', () => {
+  const synthetic = (path: string) =>
+    hunk({
+      added: 0,
+      deleted: 0,
+      display: path,
+      id: `${path}:pull-request:h1`,
+      kind: 'synthetic',
+      path,
+      sectionId: `${path}:pull-request`,
+      status: 'modified',
+    });
+  const files: ReadonlyArray<ChangedFile> = [
+    {
+      fingerprint: 'exact',
+      path: 'src/exact.ts',
+      sections: [
+        {
+          binary: false,
+          id: 'src/exact.ts:pull-request',
+          kind: 'pull-request',
+          lineCount: { additions: 50, deletions: 50 },
+          loadState: 'ready',
+          newFile: { contents: 'new\nkept', name: 'src/exact.ts' },
+          oldFile: { contents: 'old\nkept', name: 'src/exact.ts' },
+          patch: '',
+        },
+      ],
+      status: 'modified',
+    },
+    {
+      fingerprint: 'provider',
+      path: 'src/provider.ts',
+      sections: [
+        {
+          binary: false,
+          id: 'src/provider.ts:pull-request',
+          kind: 'pull-request',
+          lineCount: { additions: 0, deletions: 3767 },
+          loadState: 'deferred',
+          patch: '',
+        },
+      ],
+      status: 'modified',
+    },
+    {
+      fingerprint: 'zero',
+      path: 'src/zero.ts',
+      sections: [
+        {
+          binary: false,
+          id: 'src/zero.ts:pull-request',
+          kind: 'pull-request',
+          lineCount: { additions: 0, deletions: 0 },
+          loadState: 'deferred',
+          patch: '',
+        },
+      ],
+      status: 'modified',
+    },
+    {
+      fingerprint: 'unknown',
+      path: 'src/unknown.ts',
+      sections: [
+        {
+          binary: false,
+          id: 'src/unknown.ts:pull-request',
+          kind: 'pull-request',
+          loadState: 'error',
+          patch: '',
+        },
+      ],
+      status: 'modified',
+    },
+  ];
+
+  expect(
+    resolveWalkthroughFileLineItems(
+      files.map((file) => synthetic(file.path)),
+      files,
+    ),
+  ).toEqual([
+    { added: 1, deleted: 1, path: 'src/exact.ts' },
+    { added: 0, deleted: 3767, path: 'src/provider.ts' },
+    { added: 0, deleted: 0, path: 'src/zero.ts' },
+    { added: 0, deleted: 0, diffAvailable: false, path: 'src/unknown.ts' },
   ]);
 });
 

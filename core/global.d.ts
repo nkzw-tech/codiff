@@ -34,6 +34,8 @@ import type {
   ShareWalkthroughResult,
   SubmitPullRequestCommentRequest,
   PullRequestExistingReviewComment,
+  RevisionContentBatchRequest,
+  RevisionContentBatchResult,
   SubmitPullRequestReviewRequest,
   SubmitPullRequestReviewResult,
   TerminalHelperStatus,
@@ -62,11 +64,6 @@ declare global {
       findDefinitions: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
       getAgentSkillStatus: () => Promise<AgentSkillStatus>;
       getConfig: () => Promise<CodiffConfig>;
-      getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
-      getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
-      getDiffSectionsContent: (
-        request: DiffSectionsContentRequest,
-      ) => Promise<DiffSectionsContentResult>;
       getFeatureFlags: () => Promise<CodiffFeatureFlags>;
       getGitIdentity: () => Promise<GitIdentity>;
       getKeyboardLayout: () => Promise<NativeKeyboardLayout | null>;
@@ -117,6 +114,9 @@ declare global {
       openFile: (path: string, lineNumber?: number) => Promise<void>;
       openReleasePage: () => Promise<void>;
       openRepositoryFolder: () => Promise<void>;
+      readRevisionContent: (
+        request: RevisionContentBatchRequest,
+      ) => Promise<RevisionContentBatchResult>;
       reportInitialLoadMilestone: (
         name: 'deferred-review-data-complete' | 'first-usable-review-rendered',
       ) => void;

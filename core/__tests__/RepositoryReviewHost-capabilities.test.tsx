@@ -18,6 +18,8 @@ import type {
   RepositoryHistory,
   RepositoryState,
   ResolvedReviewSource,
+  RevisionContentBatchRequest,
+  RevisionContentBatchResult,
   WalkthroughProgressEvent,
 } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
@@ -158,6 +160,24 @@ const installWindowApi = (overrides: Record<string, unknown> = {}) => {
     openConfigFile: vi.fn(async () => {}),
     openFile: vi.fn(async () => {}),
     openRepositoryFolder: vi.fn(async () => {}),
+    readRevisionContent: vi.fn(
+      async (request: RevisionContentBatchRequest): Promise<RevisionContentBatchResult> => ({
+        results: request.requests.map((item) => {
+          const bytes = new TextEncoder().encode(`contents for ${item.path}`);
+          return {
+            key: item.key,
+            status: 'ready' as const,
+            value: {
+              bytes,
+              cacheKey: item.key,
+              path: item.path,
+              provenance: 'native-git' as const,
+              size: bytes.byteLength,
+            },
+          };
+        }),
+      }),
+    ),
     reportInitialLoadMilestone: vi.fn(),
     resolvePullRequestUrl: vi.fn(async (value: string) => value),
     resolveReviewContext: vi.fn(async () => ({ reason: 'Not used.', status: 'unavailable' })),
@@ -361,12 +381,10 @@ test('wires desktop commands, persistence, preferences, loading, and exact provi
       capabilities.desktop?.commands?.find((command) => command.id === 'copy-comments-and-close')
         ?.title,
     ).toBe('Copy Pending Review Comments and Close');
-    const imageRequest = { kind: 'pull-request' as const, path: 'image.png', source };
-    await capabilities.content?.onLoadImageContent?.(imageRequest);
-    expect(api.getDiffImageContent).toHaveBeenCalledWith({
-      ...imageRequest,
-      requestId: 'image:1',
-    });
+    const imageFile = createChangedFile('image.png', { kind: 'pull-request' });
+    await capabilities.content?.resolveImage?.(imageFile, imageFile.sections[0]!);
+    expect(api.readRevisionContent).toHaveBeenCalledOnce();
+    expect(api.readRevisionContent.mock.calls[0]![0].requests).toHaveLength(2);
     const comments = capabilities.comments;
     expect(comments?.destination).toBe('provider');
     if (!comments || comments.destination !== 'provider') {
@@ -511,7 +529,7 @@ test('asks the review assistant with the flushed note value supplied by the surf
   }
 });
 
-test('opening a provider review performs no automatic content reads', async () => {
+test('opening a provider review eagerly reads exact content before mounting the surface', async () => {
   surfaceProps.mockClear();
   const { api } = installWindowApi();
   const source = {
@@ -536,6 +554,51 @@ test('opening a provider review performs no automatic content reads', async () =
     await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
     expect(api.getDiffSectionsContent).not.toHaveBeenCalled();
     expect(api.getDiffSectionContent).not.toHaveBeenCalled();
+    expect(api.readRevisionContent).toHaveBeenCalledOnce();
+    expect(api.readRevisionContent.mock.calls[0]![0].requests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: deferredFile.path,
+          revision: file.sections[0]!.range!.base,
+        }),
+        expect.objectContaining({
+          path: deferredFile.path,
+          revision: file.sections[0]!.range!.head,
+        }),
+      ]),
+    );
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('explicit provider content loading reads and caches only the selected file range', async () => {
+  surfaceProps.mockClear();
+  const { api } = installWindowApi();
+  const source = {
+    headSha: gitSha('d'),
+    number: 14,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/14',
+  } as const;
+  const selected = createChangedFile('src/selected.ts', { kind: 'pull-request' });
+  const other = createChangedFile('src/other.ts', { kind: 'pull-request' });
+  const view = await renderHost(stateFor(source, [selected, other]));
+
+  try {
+    await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
+    const resolve = getSurfaceProps().capabilities?.content?.resolveSectionContents;
+    expect(resolve).toBeDefined();
+    await act(async () => {
+      await resolve?.(selected, selected.sections[0]!);
+      await resolve?.(selected, selected.sections[0]!);
+    });
+
+    expect(api.readRevisionContent).toHaveBeenCalledOnce();
+    const requests = api.readRevisionContent.mock.calls[0]![0].requests;
+    expect(requests).toHaveLength(2);
+    expect(requests.every((request) => request.path === selected.path)).toBe(true);
   } finally {
     await view.cleanup();
   }
@@ -557,13 +620,14 @@ test('loads deferred section content for supported Electron sources', async () =
 
   try {
     await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
-    await waitFor(() => expect(api.getDiffSectionContent).toHaveBeenCalledTimes(1));
-    expect(api.getDiffSectionContent).toHaveBeenCalledWith({
-      force: true,
-      kind: 'unstaged',
-      path: 'src/local.ts',
-      requestId: 'section:1',
-      showWhitespace: false,
+    await waitFor(() => expect(api.readRevisionContent).toHaveBeenCalledTimes(1));
+    expect(api.readRevisionContent).toHaveBeenCalledWith({
+      generation: expect.any(String),
+      requestId: expect.stringMatching(/^revision-content:/),
+      requests: expect.arrayContaining([
+        expect.objectContaining({ path: 'src/local.ts', revision: file.sections[0]!.range!.base }),
+        expect.objectContaining({ path: 'src/local.ts', revision: file.sections[0]!.range!.head }),
+      ]),
       source: { type: 'working-tree' },
     });
     await waitFor(() =>
@@ -579,7 +643,7 @@ test('loads deferred section content for supported Electron sources', async () =
 test('bumps the mounted review key when deferred loading fails', async () => {
   surfaceProps.mockClear();
   const { api } = installWindowApi();
-  api.getDiffSectionContent.mockRejectedValueOnce(new Error('content unavailable'));
+  api.readRevisionContent.mockRejectedValueOnce(new Error('content unavailable'));
   const file = createChangedFile('src/failure.ts');
   const deferredFile = {
     ...file,
@@ -592,7 +656,7 @@ test('bumps the mounted review key when deferred loading fails', async () => {
   const view = await renderHost(stateFor({ type: 'working-tree' }, [deferredFile]));
 
   try {
-    await waitFor(() => expect(api.getDiffSectionContent).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.readRevisionContent).toHaveBeenCalledTimes(1));
     await waitFor(() =>
       expect(getSurfaceProps().capabilities?.content?.itemVersionByKey).toEqual({
         'src/failure.ts': 1,
@@ -708,16 +772,10 @@ test('an unchanged refresh preserves hydrated files and in-flight content and wa
       summary: { canLoad: true, reason: 'Different hydration metadata.' },
     })),
   };
-  const content = deferred<{
-    binary: boolean;
-    id: string;
-    kind: string;
-    loadState: string;
-    patch: string;
-  }>();
+  const content = deferred<RevisionContentBatchResult>();
   const walkthrough = deferred<NarrativeWalkthroughResult>();
   api.getRepositoryState.mockResolvedValueOnce(stateFor({ type: 'working-tree' }, [refreshedFile]));
-  api.getDiffSectionContent.mockImplementationOnce(() => content.promise);
+  api.readRevisionContent.mockImplementationOnce(() => content.promise);
   api.getNarrativeWalkthrough.mockImplementationOnce(() => walkthrough.promise);
   const view = await renderHost(stateFor({ type: 'working-tree' }, [file]));
 
@@ -728,7 +786,7 @@ test('an unchanged refresh preserves hydrated files and in-flight content and wa
       void getSurfaceProps().capabilities?.walkthrough?.onGenerate?.();
       await Promise.resolve();
     });
-    expect(api.getDiffSectionContent).toHaveBeenCalledOnce();
+    expect(api.readRevisionContent).toHaveBeenCalledOnce();
     expect(api.getNarrativeWalkthrough).toHaveBeenCalledOnce();
 
     await act(async () => refreshRequest()?.());
@@ -738,12 +796,22 @@ test('an unchanged refresh preserves hydrated files and in-flight content and wa
     expect(api.getNarrativeWalkthrough).toHaveBeenCalledOnce();
 
     await act(async () => {
+      const request = api.readRevisionContent.mock.calls[0]![0];
       content.resolve({
-        binary: false,
-        id: file.sections[0].id,
-        kind: file.sections[0].kind,
-        loadState: 'ready',
-        patch: file.sections[0].patch,
+        results: request.requests.map((item) => {
+          const bytes = new TextEncoder().encode(`contents for ${item.path}`);
+          return {
+            key: item.key,
+            status: 'ready' as const,
+            value: {
+              bytes,
+              cacheKey: item.key,
+              path: item.path,
+              provenance: 'native-git' as const,
+              size: bytes.byteLength,
+            },
+          };
+        }),
       });
       await content.promise;
       walkthrough.resolve({

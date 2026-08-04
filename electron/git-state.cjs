@@ -9,18 +9,10 @@ const {
 } = require('./git-state/common.cjs');
 const {
   listRepositoryHistory,
-  readBranchImageContent,
-  readBranchSectionContent,
   readBranchState,
-  readBranchWorkingTreeImageContent,
-  readBranchWorkingTreeSectionContent,
   readBranchWorkingTreeState,
-  readCommitImageContent,
-  readCommitSectionContent,
   readCommitState,
   readResolvedCommitState,
-  readRangeImageContent,
-  readRangeSectionContent,
   readRangeState,
 } = require('./git-state/commit.cjs');
 const {
@@ -34,18 +26,13 @@ const {
   collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSource,
-  getPullRequestHeadImageSource,
   listPullRequestHistory,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,
-  readPullRequestImageContent,
   readPullRequestReviewComments,
-  readPullRequestSectionContent,
-  readPullRequestSectionsContent,
   readPullRequestState,
-  resolvePullRequestContentRefs,
   selectUnresolvedReviewComments,
   submitPullRequestComment,
   submitPullRequestReview,
@@ -57,28 +44,17 @@ const {
   listMergeRequestHistory,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
-  readMergeRequestImageContent,
   readMergeRequestReviewComments,
-  readMergeRequestSectionContent,
-  readMergeRequestSectionsContent,
   readMergeRequestState,
   submitMergeRequestComment,
   submitMergeRequestReview,
 } = require('./git-state/merge-request.cjs');
 const { parseReviewUrl } = require('./review-source.cjs');
-const {
-  readDiffSectionContent: readWorkingTreeDiffSectionContent,
-  readDiffImageContent: readWorkingTreeDiffImageContent,
-  readGitIdentity,
-  readWorkingTreeState,
-} = require('./git-state/working-tree.cjs');
+const { readGitIdentity, readWorkingTreeState } = require('./git-state/working-tree.cjs');
 const { annotateGeneratedFiles } = require('./generated-files.cjs');
+const { readRevisionContent } = require('./review-content.cjs');
 
 /**
- * @typedef {import('../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
- * @typedef {import('../core/types.ts').DiffSectionsContentRequest} DiffSectionsContentRequest
- * @typedef {import('../core/types.ts').DiffImageContentRequest} DiffImageContentRequest
- * @typedef {import('../core/types.ts').DiffImageContentResult} DiffImageContentResult
  * @typedef {import('../core/types.ts').RepositoryHistory} RepositoryHistory
  * @typedef {import('../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../core/types.ts').ReviewSource} ReviewSource
@@ -220,78 +196,6 @@ const readReviewComments = (launchPath, source) =>
     source,
   );
 
-/** @param {string} launchPath @param {DiffSectionContentRequest} request */
-const readDiffSectionContent = async (launchPath, request) =>
-  request.source?.type === 'pull-request'
-    ? (isGitLabReviewSource(request.source)
-        ? readMergeRequestSectionContent
-        : readPullRequestSectionContent)(launchPath, request.source, request.path, {
-        force: request.force,
-      })
-    : request.source?.type === 'range'
-      ? readRangeSectionContent(
-          launchPath,
-          request.source.base,
-          request.source.head,
-          request.source.symmetric,
-          request.path,
-          { force: request.force },
-        )
-      : request.source?.type === 'branch' || request.source?.type === 'branch-diff'
-        ? readBranchSectionContent(launchPath, request.source, request.path, {
-            force: request.force,
-          })
-        : request.source?.type === 'branch-working-tree'
-          ? readBranchWorkingTreeSectionContent(launchPath, request)
-          : request.kind === 'commit' || request.source?.type === 'commit'
-            ? readCommitSectionContent(
-                launchPath,
-                request.source?.type === 'commit' ? request.source.sha : 'HEAD',
-                request.path,
-                {
-                  force: request.force,
-                },
-              )
-            : readWorkingTreeDiffSectionContent(launchPath, request);
-
-/** @param {string} launchPath @param {DiffSectionsContentRequest} request */
-const readDiffSectionsContent = (launchPath, request) => {
-  if (request.source?.type !== 'pull-request') {
-    throw new Error('Bulk diff hydration requires a pull-request source.');
-  }
-  return (
-    isGitLabReviewSource(request.source)
-      ? readMergeRequestSectionsContent
-      : readPullRequestSectionsContent
-  )(launchPath, request.source);
-};
-
-/** @param {string} launchPath @param {DiffImageContentRequest} request @returns {Promise<DiffImageContentResult>} */
-const readDiffImageContent = (launchPath, request) =>
-  request.source?.type === 'pull-request'
-    ? (isGitLabReviewSource(request.source)
-        ? readMergeRequestImageContent
-        : readPullRequestImageContent)(launchPath, request.source, request.path)
-    : request.source?.type === 'range'
-      ? readRangeImageContent(
-          launchPath,
-          request.source.base,
-          request.source.head,
-          request.source.symmetric,
-          request.path,
-        )
-      : request.source?.type === 'branch' || request.source?.type === 'branch-diff'
-        ? readBranchImageContent(launchPath, request.source, request.path)
-        : request.source?.type === 'branch-working-tree'
-          ? readBranchWorkingTreeImageContent(launchPath, request)
-          : request.kind === 'commit' || request.source?.type === 'commit'
-            ? readCommitImageContent(
-                launchPath,
-                request.source?.type === 'commit' ? request.source.sha : 'HEAD',
-                request.path,
-              )
-            : readWorkingTreeDiffImageContent(launchPath, request);
-
 module.exports = {
   PENDING_REVIEW_COMMENT_ERROR,
   collectResolvedReviewCommentIds,
@@ -300,7 +204,6 @@ module.exports = {
   createMergeRequestFetchRefspecs,
   createPullRequestSection,
   createPullRequestSource,
-  getPullRequestHeadImageSource,
   listRepositoryHistory: readRepositoryHistory,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
@@ -311,17 +214,14 @@ module.exports = {
   parseGitLabMergeRequestUrl,
   selectUnresolvedReviewComments,
   readBranchState,
-  readDiffSectionContent,
-  readDiffSectionsContent,
-  readDiffImageContent,
   readGitIdentity,
   readReviewComments,
   readCommitState,
   readPullRequestState,
+  readRevisionContent,
   readRepositoryState,
   readWalkthroughRepositoryState,
   readWorkingTreeState,
-  resolvePullRequestContentRefs,
   runWithCommandSignal,
   submitPullRequestComment: (launchPath, request) =>
     (isGitLabReviewSource(request.source) ? submitMergeRequestComment : submitPullRequestComment)(

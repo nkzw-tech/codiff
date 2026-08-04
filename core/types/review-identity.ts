@@ -106,30 +106,43 @@ export type Revision =
 /** A null endpoint represents an absent file side, such as an unborn-repository addition. */
 export type DiffRange = { base: Revision | null; head: Revision | null };
 
-export type ReviewContextRequest = {
-  baseSha: GitSha;
-  filePath: string;
-  headSha: GitSha;
-  oldPath?: string;
-  range: DiffRange;
-  source: ResolvedReviewSource;
-  status: GitFileStatus;
+export type RevisionContentRequest = {
+  key: string;
+  maxBytes: number;
+  path: string;
+  revision: Revision;
 };
 
-/** Display-only result used to expand unchanged review context. */
-export type ReviewContextResult =
-  | {
-      newFile: NonNullable<DiffSection['newFile']>;
-      oldFile: NonNullable<DiffSection['oldFile']> | null;
-      status: 'ready';
-    }
-  | { reason: string; status: 'unavailable' };
+export type ResolvedRevisionBytes = {
+  bytes: Uint8Array;
+  cacheKey: string;
+  objectId?: string;
+  path: string;
+  provenance: 'filesystem' | 'git-index' | 'github-api' | 'gitlab-api' | 'native-git';
+  size: number;
+};
 
-/**
- * Host capability for resolving unchanged context without mutating captured
- * walkthrough provenance or generated-component reuse inputs.
- */
-export type ReviewContextResolver = (request: ReviewContextRequest) => Promise<ReviewContextResult>;
+export type RevisionContentItemResult =
+  | { key: string; status: 'missing' }
+  | { key: string; reason: string; status: 'unavailable' }
+  | { key: string; status: 'ready'; value: ResolvedRevisionBytes };
+
+export type RevisionContentBatchRequest = {
+  generation: string;
+  requestId?: string;
+  requests: ReadonlyArray<RevisionContentRequest>;
+  source: ResolvedReviewSource;
+};
+
+export type RevisionContentBatchResult = {
+  results: ReadonlyArray<RevisionContentItemResult>;
+};
+
+export type DiffImageRevision = { dataUrl: string; mimeType: string; name: string; size: number };
+
+export type DiffImageContentResult =
+  | { newImage?: DiffImageRevision; oldImage?: DiffImageRevision; status: 'ready' }
+  | { reason: string; status: 'unavailable' };
 
 export type GitIdentity = {
   email: string;
@@ -191,9 +204,3 @@ export type DiffImageContentRequest = {
   requestId?: string;
   source?: ResolvedReviewSource;
 };
-
-export type DiffImageRevision = { dataUrl: string; mimeType: string; name: string; size: number };
-
-export type DiffImageContentResult =
-  | { newImage?: DiffImageRevision; oldImage?: DiffImageRevision; status: 'ready' }
-  | { reason: string; status: 'unavailable' };

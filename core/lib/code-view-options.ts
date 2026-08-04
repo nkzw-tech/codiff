@@ -177,6 +177,28 @@ export const codeViewUnsafeCSS = `
     text-decoration-style: solid;
   }
 
+  :host(.codiff-loading-context-item) [data-expand-index] {
+    cursor: progress;
+    opacity: 0.72;
+    pointer-events: none;
+  }
+
+  :host(.codiff-loading-context-item) [data-expand-index]::after {
+    animation: codiff-context-spin 0.8s linear infinite;
+    border: 2px solid color-mix(in srgb, currentColor 24%, transparent);
+    border-radius: 50%;
+    border-top-color: currentColor;
+    content: '';
+    display: inline-block;
+    height: 10px;
+    margin-left: 6px;
+    vertical-align: -1px;
+    width: 10px;
+  }
+
+  @keyframes codiff-context-spin {
+    to { transform: rotate(360deg); }
+  }
   .codiff-search-mark {
     background: var(--diffs-find-highlight-bg, rgb(255 216 92 / 0.65));
     border-radius: 3px;

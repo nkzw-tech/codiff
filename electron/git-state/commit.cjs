@@ -1,28 +1,17 @@
 // @ts-check
 
 const { fileSort, getFingerprint, getGravatarHash, git, normalizeStatus } = require('./common.cjs');
-const {
-  readComparisonImageContent,
-  readComparisonSectionContent,
-  readComparisonState,
-} = require('./comparison.cjs');
+const { readComparisonState } = require('./comparison.cjs');
 const { readCommitMetadataForCommit } = require('./commit-metadata.cjs');
 const {
   applyGeneratedAttributeStates,
   readRevisionGeneratedAttributeStates,
 } = require('../generated-files.cjs');
-const {
-  readDiffImageContent: readWorkingTreeDiffImageContent,
-  readDiffSectionContent: readWorkingTreeDiffSectionContent,
-  readWorkingTreeState,
-} = require('./working-tree.cjs');
+const { readWorkingTreeState } = require('./working-tree.cjs');
 const { transferRepositoryWatcherInitialSnapshot } = require('../repository-watcher.cjs');
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
- * @typedef {import('../../core/types.ts').DiffImageContentRequest} DiffImageContentRequest
- * @typedef {import('../../core/types.ts').DiffImageContentResult} DiffImageContentResult
- * @typedef {import('../../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
  * @typedef {import('../../core/types.ts').GitSha} GitSha
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../../core/types.ts').ResolvedReviewSource} ResolvedReviewSource
@@ -369,55 +358,6 @@ const readComparisonSourceState = async (launchPath, source) => {
   return applyGeneratedAttributeStates(state, generatedAttributeStates);
 };
 
-/**
- * @param {string} launchPath
- * @param {ComparisonSource} source
- * @param {string} requestedPath
- * @param {{force?: boolean}} [options]
- */
-const readComparisonSourceSectionContent = async (
-  launchPath,
-  source,
-  requestedPath,
-  options = {},
-) => {
-  const comparison = await readResolvedComparison(launchPath, source);
-  return readComparisonSectionContent(
-    comparison.repoRoot,
-    comparison.newSha,
-    comparison.oldSha,
-    comparison.status,
-    requestedPath,
-    comparison.sourceLabel,
-    options,
-  );
-};
-
-/**
- * @param {string} launchPath
- * @param {ComparisonSource} source
- * @param {string} requestedPath
- * @returns {Promise<DiffImageContentResult>}
- */
-const readComparisonSourceImageContent = async (launchPath, source, requestedPath) => {
-  try {
-    const comparison = await readResolvedComparison(launchPath, source);
-    return await readComparisonImageContent(
-      comparison.repoRoot,
-      comparison.newSha,
-      comparison.oldSha,
-      comparison.status,
-      requestedPath,
-      comparison.sourceLabel,
-    );
-  } catch (error) {
-    return {
-      reason: error instanceof Error ? error.message : 'Codiff could not load this image.',
-      status: 'unavailable',
-    };
-  }
-};
-
 /** @param {string} launchPath @param {ResolvedComparison} comparison */
 const readCommitStateFromComparison = async (launchPath, comparison) => {
   const [commitMetadata, state, generatedAttributeStates] = await Promise.all([
@@ -454,24 +394,6 @@ const readResolvedCommitState = async (launchPath, repoRoot, commit) =>
   readCommitStateFromComparison(launchPath, await readResolvedCommitComparison(repoRoot, commit));
 
 /**
- * @param {string} launchPath
- * @param {string} ref
- * @param {string} requestedPath
- * @param {{force?: boolean}} [options]
- */
-const readCommitSectionContent = (launchPath, ref, requestedPath, options = {}) =>
-  readComparisonSourceSectionContent(launchPath, { ref, type: 'commit' }, requestedPath, options);
-
-/**
- * @param {string} launchPath
- * @param {string} ref
- * @param {string} requestedPath
- * @returns {Promise<DiffImageContentResult>}
- */
-const readCommitImageContent = (launchPath, ref, requestedPath) =>
-  readComparisonSourceImageContent(launchPath, { ref, type: 'commit' }, requestedPath);
-
-/**
  * @param {string} launchPath @param {string} base @param {string} head @param {boolean} symmetric
  * @returns {Promise<RepositoryState>}
  */
@@ -483,64 +405,9 @@ const readRangeState = (launchPath, base, head, symmetric) =>
     type: 'range',
   });
 
-/**
- * @param {string} launchPath @param {string} base @param {string} head @param {boolean} symmetric @param {string} requestedPath @param {{encoding?: BufferEncoding, force?: boolean}} [options]
- */
-const readRangeSectionContent = (launchPath, base, head, symmetric, requestedPath, options = {}) =>
-  readComparisonSourceSectionContent(
-    launchPath,
-    {
-      base,
-      head,
-      symmetric,
-      type: 'range',
-    },
-    requestedPath,
-    options,
-  );
-
-/**
- * @param {string} launchPath @param {string} base @param {string} head @param {boolean} symmetric @param {string} requestedPath
- * @returns {Promise<DiffImageContentResult>}
- */
-const readRangeImageContent = (launchPath, base, head, symmetric, requestedPath) =>
-  readComparisonSourceImageContent(
-    launchPath,
-    {
-      base,
-      head,
-      symmetric,
-      type: 'range',
-    },
-    requestedPath,
-  );
-
 /** @param {string} launchPath @param {string | BranchSource | BranchDiffSource} input @returns {Promise<RepositoryState>} */
 const readBranchState = (launchPath, input) =>
   readComparisonSourceState(launchPath, normalizeBranchSourceInput(input));
-
-/**
- * @param {string} launchPath
- * @param {string | BranchSource | BranchDiffSource} input
- * @param {string} requestedPath
- * @param {{force?: boolean}} [options]
- */
-const readBranchSectionContent = (launchPath, input, requestedPath, options = {}) =>
-  readComparisonSourceSectionContent(
-    launchPath,
-    normalizeBranchSourceInput(input),
-    requestedPath,
-    options,
-  );
-
-/**
- * @param {string} launchPath
- * @param {string | BranchSource | BranchDiffSource} input
- * @param {string} requestedPath
- * @returns {Promise<DiffImageContentResult>}
- */
-const readBranchImageContent = (launchPath, input, requestedPath) =>
-  readComparisonSourceImageContent(launchPath, normalizeBranchSourceInput(input), requestedPath);
 
 /**
  * Reduce a `branch-working-tree` input (which may or may not already carry a
@@ -652,48 +519,6 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
   return mergeBranchAndWorkingTreeState(branchState, workingTreeState);
 };
 
-/**
- * By the time a section/image content request comes in for a
- * `branch-working-tree` source, that source is always the fully resolved
- * copy round-tripped from `RepositoryState.source` (baseSha/headSha are only
- * absent momentarily, at CLI-argument construction time, before the initial
- * state has been read).
- * @param {BranchWorkingTreeSource} source
- * @returns {BranchDiffSource}
- */
-const toResolvedBranchDiffSource = (source) => {
-  if (!source.baseSha || !source.headSha) {
-    throw new Error('Cannot load branch-working-tree content before the branch diff is resolved.');
-  }
-
-  return { baseSha: source.baseSha, headSha: source.headSha, ref: source.ref, type: 'branch-diff' };
-};
-
-/**
- * @param {string} launchPath
- * @param {DiffSectionContentRequest} request
- */
-const readBranchWorkingTreeSectionContent = (launchPath, request) => {
-  const source = /** @type {BranchWorkingTreeSource} */ (request.source);
-  return request.kind === 'staged' || request.kind === 'unstaged'
-    ? readWorkingTreeDiffSectionContent(launchPath, request)
-    : readBranchSectionContent(launchPath, toResolvedBranchDiffSource(source), request.path, {
-        force: request.force,
-      });
-};
-
-/**
- * @param {string} launchPath
- * @param {DiffImageContentRequest} request
- * @returns {Promise<DiffImageContentResult>}
- */
-const readBranchWorkingTreeImageContent = (launchPath, request) => {
-  const source = /** @type {BranchWorkingTreeSource} */ (request.source);
-  return request.kind === 'staged' || request.kind === 'unstaged'
-    ? readWorkingTreeDiffImageContent(launchPath, request)
-    : readBranchImageContent(launchPath, toResolvedBranchDiffSource(source), request.path);
-};
-
 /** @param {string} launchPath @param {number} [limit] @param {string} [ref] */
 const listRepositoryHistory = async (launchPath, limit = 200, ref = 'HEAD') => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
@@ -746,17 +571,9 @@ const listRepositoryHistory = async (launchPath, limit = 200, ref = 'HEAD') => {
 
 module.exports = {
   listRepositoryHistory,
-  readBranchImageContent,
-  readBranchSectionContent,
   readBranchState,
-  readBranchWorkingTreeImageContent,
-  readBranchWorkingTreeSectionContent,
   readBranchWorkingTreeState,
-  readCommitImageContent,
-  readCommitSectionContent,
   readCommitState,
   readResolvedCommitState,
-  readRangeImageContent,
-  readRangeSectionContent,
   readRangeState,
 };

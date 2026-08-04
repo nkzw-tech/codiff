@@ -1,13 +1,6 @@
 // @ts-check
 
-const {
-  fileSort,
-  getFingerprint,
-  git,
-  readGitImageFile,
-  summarizeContent,
-  validateRepositoryPath,
-} = require('./common.cjs');
+const { fileSort, getFingerprint, git, summarizeContent } = require('./common.cjs');
 const { createEmptyFileContent, readGitFiles } = require('./git-files.cjs');
 
 /**
@@ -222,99 +215,6 @@ const readComparisonState = async ({ launchPath, newSha, oldSha, repoRoot, sourc
   };
 };
 
-/**
- * @param {string} repoRoot
- * @param {GitSha} newSha
- * @param {GitSha | undefined} oldSha
- * @param {ReadonlyArray<Pick<StatusItem, 'oldPath' | 'path' | 'status'>>} status
- * @param {string} requestedPath
- * @param {string} sourceLabel
- * @param {{force?: boolean}} [options]
- */
-const readComparisonSectionContent = async (
-  repoRoot,
-  newSha,
-  oldSha,
-  status,
-  requestedPath,
-  sourceLabel,
-  options = {},
-) => {
-  const path = validateRepositoryPath(requestedPath);
-  const item = status.find((candidate) => candidate.path === path);
-  if (!item) {
-    throw new Error(`File is not part of this ${sourceLabel}.`);
-  }
-
-  const { oldFiles, newFiles } = await readComparisonFiles(
-    repoRoot,
-    newSha,
-    oldSha,
-    [item],
-    options,
-  );
-  const oldFile = getOldComparisonFile(oldFiles, oldSha, item);
-  const newFile = newFiles.get(item.path) || createEmptyFileContent(item.path);
-  const summary = summarizeContent(oldFile, newFile);
-  const patch =
-    summary.loadState === 'ready'
-      ? await readComparisonPatch(repoRoot, newSha, oldSha, item.path)
-      : '';
-
-  return createComparisonSection(newSha, oldSha, item, oldFile, newFile, patch);
-};
-
-/**
- * @param {string} repoRoot
- * @param {GitSha} newSha
- * @param {GitSha | undefined} oldSha
- * @param {ReadonlyArray<Pick<StatusItem, 'oldPath' | 'path' | 'status'>>} status
- * @param {string} requestedPath
- * @param {string} sourceLabel
- * @returns {Promise<DiffImageContentResult>}
- */
-const readComparisonImageContent = async (
-  repoRoot,
-  newSha,
-  oldSha,
-  status,
-  requestedPath,
-  sourceLabel,
-) => {
-  try {
-    const path = validateRepositoryPath(requestedPath);
-    const item = status.find((candidate) => candidate.path === path);
-    if (!item) {
-      throw new Error(`File is not part of this ${sourceLabel}.`);
-    }
-
-    const [oldImage, newImage] = await Promise.all([
-      oldSha ? readGitImageFile(repoRoot, oldSha, item.oldPath || item.path) : undefined,
-      readGitImageFile(repoRoot, newSha, item.path),
-    ]);
-
-    if (!oldImage && !newImage) {
-      return {
-        reason: 'Codiff could not load either side of this image.',
-        status: 'unavailable',
-      };
-    }
-
-    return {
-      ...(newImage ? { newImage } : {}),
-      ...(oldImage ? { oldImage } : {}),
-      status: 'ready',
-    };
-  } catch (error) {
-    return {
-      reason: error instanceof Error ? error.message : 'Codiff could not load this image.',
-      status: 'unavailable',
-    };
-  }
-};
-
 module.exports = {
-  readComparisonImageContent,
-  readComparisonSectionContent,
   readComparisonState,
 };
