@@ -63,6 +63,7 @@ const repositoryState = {
 const createAppApi = (overrides: Record<string, unknown> = {}) => ({
   applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
   askReviewAssistant: vi.fn(async () => ({ reason: 'Not used.', status: 'unavailable' as const })),
+  cancelNarrativeWalkthrough: vi.fn(async () => {}),
   completePlan: vi.fn(async () => {}),
   createWalkthroughCommit: vi.fn(async () => ({
     sha: gitSha('a'),

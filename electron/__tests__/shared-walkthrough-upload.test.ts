@@ -2,18 +2,20 @@ import { createRequire } from 'node:module';
 import { expect, test, vi } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
-const { uploadSharedWalkthrough } = require('../shared-walkthrough-upload.cjs') as {
-  uploadSharedWalkthrough: (options: {
-    authenticate: () => Promise<void>;
-    fetchImpl: typeof fetch;
-    openExternal: (url: string) => Promise<void>;
-    openClaimPage?: boolean;
-    serviceUrl: string;
-    snapshot: unknown;
-    trustCertificates?: () => { reason?: string; status: string };
-    uploader?: { email: string; name: string };
-  }) => Promise<string>;
-};
+const { sanitizeSharedWalkthroughSnapshot, uploadSharedWalkthrough } =
+  require('../shared-walkthrough-upload.cjs') as {
+    sanitizeSharedWalkthroughSnapshot: (snapshot: any) => any;
+    uploadSharedWalkthrough: (options: {
+      authenticate: () => Promise<void>;
+      fetchImpl: typeof fetch;
+      openExternal: (url: string) => Promise<void>;
+      openClaimPage?: boolean;
+      serviceUrl: string;
+      snapshot: unknown;
+      trustCertificates?: () => { reason?: string; status: string };
+      uploader?: { email: string; name: string };
+    }) => Promise<string>;
+  };
 
 test('uploads git identity separately from the walkthrough snapshot', async () => {
   const authenticate = vi.fn(async () => {});
@@ -209,4 +211,32 @@ test('explains certificate trust status for certificate-chain failures', async (
   ).rejects.toThrow(
     'Codiff share upload intent request failed: fetch failed: SELF_SIGNED_CERT_IN_CHAIN - self signed certificate in certificate chain System certificate trust was not applied (this Node/Electron runtime does not expose system certificate APIs).',
   );
+});
+
+test('strips hidden session context and local repository paths from walkthrough uploads', () => {
+  const snapshot = {
+    kind: 'codiff-walkthrough-share',
+    repository: { root: '/Users/ada/private-repo', source: { type: 'working-tree' } },
+    version: 1,
+    walkthrough: {
+      context: {
+        messages: [{ role: 'user', text: 'Private implementation conversation.' }],
+        source: { threadId: 'private-session', type: 'codex-session-excerpt' },
+      },
+      repo: { branch: 'main', root: '/Users/ada/private-repo' },
+      title: 'Review',
+    },
+  };
+
+  expect(sanitizeSharedWalkthroughSnapshot(snapshot)).toEqual({
+    kind: 'codiff-walkthrough-share',
+    repository: { root: '[redacted]', source: { type: 'working-tree' } },
+    version: 1,
+    walkthrough: {
+      repo: { branch: 'main', root: '[redacted]' },
+      title: 'Review',
+    },
+  });
+  expect(snapshot.walkthrough.context.messages[0].text).toContain('Private');
+  expect(snapshot.repository.root).toContain('/Users/ada');
 });

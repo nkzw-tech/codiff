@@ -1718,6 +1718,7 @@ export function RepositoryReviewHost({
               }
             : {}),
           error: walkthroughError,
+          generationProgress: walkthroughProgress.generation,
           onGenerate: () => loadNarrativeWalkthrough(source),
           onShare: enabledShareWalkthrough,
           progress: (

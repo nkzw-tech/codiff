@@ -1569,7 +1569,6 @@ html[data-codiff-platform='darwin'] .sidebar {
 }
 
 .sidebar-walkthrough-status.codex .walkthrough-progress {
-  animation: codex-loading-pulse 1600ms ease-in-out infinite;
   color: var(--sidebar-text);
   user-select: none;
 }
@@ -1583,16 +1582,89 @@ html[data-codiff-platform='darwin'] .sidebar {
   width: 100%;
 }
 
+.walkthrough-progress-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.walkthrough-progress-heading {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 0.5ch;
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .walkthrough-progress-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.walkthrough-progress-units {
+  display: grid;
+  gap: 3px;
+  list-style: none;
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0;
+}
+
+.walkthrough-progress-unit {
+  align-items: baseline;
+  color: var(--muted, inherit);
+  display: grid;
+  font-size: 12px;
+  font-weight: 400;
+  gap: 8px;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  opacity: 0.9;
+}
+
+.walkthrough-progress-unit.is-generating {
+  color: inherit;
+  opacity: 1;
+}
+
+.walkthrough-progress-unit.is-generating .walkthrough-progress-unit-status {
+  animation: codex-loading-pulse 1600ms ease-in-out infinite;
+}
+
+.walkthrough-progress-unit.is-ready {
+  opacity: 0.75;
+}
+
+.walkthrough-progress-unit.is-failed {
+  color: var(--danger, #a33a3a);
+}
+
+.walkthrough-progress-unit-status {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  text-transform: lowercase;
+}
+
+.walkthrough-progress-unit-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.walkthrough-progress-unit-detail {
+  grid-column: 2;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .walkthrough-progress-timer {
   flex: 0 0 2ch;
   font-variant-numeric: tabular-nums;
-  margin-left: 0.5ch;
   text-align: left;
   visibility: hidden;
   width: 2ch;

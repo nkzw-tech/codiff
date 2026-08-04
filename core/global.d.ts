@@ -51,6 +51,7 @@ declare global {
       applyUpdate: () => Promise<CodiffUpdateStatus>;
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
       cancelDiffContentRequest: (requestId: string) => void;
+      cancelNarrativeWalkthrough: () => Promise<void>;
       completePlan: (review: PlanReview, status: PlanHandoffStatus) => Promise<void>;
       createWalkthroughCommit: (
         request: WalkthroughCommitRequest,

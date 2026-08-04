@@ -16,6 +16,8 @@
     "index.ts",
     "react.ts",
     "share.ts",
+    "walkthrough-generation.ts",
+    "walkthrough-progress.ts",
     "types.ts",
     "SharedPlanApp.tsx",
     "ReviewSurface.tsx",

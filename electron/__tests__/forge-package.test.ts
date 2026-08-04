@@ -24,11 +24,12 @@ test('Forge excludes provider sources and retains application entry points', () 
   expect(isIgnored('/dist/index.html')).toBe(false);
 });
 
-test('Forge restores built provider runtime artifacts after copy', async () => {
+test('Forge restores built runtime artifacts after copy', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'codiff-forge-runtime-'));
   try {
     await forge.hooks.packageAfterCopy({}, directory);
     for (const path of [
+      'core/dist/walkthrough-generation.mjs',
       'core/lib/narrative-walkthrough-diff.cjs',
       'github/dist/index.mjs',
       'gitlab/dist/index.mjs',

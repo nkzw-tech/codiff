@@ -92,6 +92,7 @@ export function Sidebar({
   walkthroughError: WalkthroughError | null;
   walkthroughLoading: boolean;
   walkthroughProgress: {
+    generation: import('../../types.ts').WalkthroughGenerationProgress | null;
     phase: import('../../types.ts').WalkthroughProgressPhase | null;
     responseLabelIndex: number;
     stageRevision: number;
@@ -168,6 +169,7 @@ export function Sidebar({
               <div className="sidebar-walkthrough-status codex">
                 <WalkthroughProgress
                   phase={walkthroughProgress.phase}
+                  progress={walkthroughProgress.generation}
                   responseLabelIndex={walkthroughProgress.responseLabelIndex}
                   stageRevision={walkthroughProgress.stageRevision}
                 />

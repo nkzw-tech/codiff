@@ -28,6 +28,7 @@ const CLAUDE_NOT_LOGGED_IN_MESSAGE =
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} ClaudeOptions
  */
@@ -270,6 +271,7 @@ const runClaude = async (
         const child = commandTransport.spawn(commandTransport.command, claudeArgs, {
           cwd: repoRoot,
           env: environment,
+          signal: options.signal,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         const streamParser = streamProgress ? createClaudeStreamParser(options.onProgress) : null;

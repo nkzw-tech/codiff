@@ -65,10 +65,11 @@ export function useAppWalkthrough({
   );
   const [walkthroughLoading, setWalkthroughLoadingState] = useState(initialWalkthroughLoading);
   const [walkthroughProgress, setWalkthroughProgress] = useState<{
-    phase: WalkthroughProgressEvent['phase'] | null;
+    generation: NonNullable<WalkthroughProgressEvent['generation']> | null;
+    phase: NonNullable<WalkthroughProgressEvent['phase']> | null;
     responseLabelIndex: number;
     stageRevision: number;
-  }>({ phase: null, responseLabelIndex: -1, stageRevision: 0 });
+  }>({ generation: null, phase: null, responseLabelIndex: -1, stageRevision: 0 });
   const [walkthroughSharing, setWalkthroughSharing] = useState(false);
   const [walkthroughUnread, setWalkthroughUnread] = useState(false);
   const activeReviewCommandTargetRef = useRef<ReviewCommandTarget | null>(null);
@@ -77,6 +78,7 @@ export function useAppWalkthrough({
   const sidebarModeRef = useRef<SidebarMode>(initialSidebarMode);
   const walkthroughErrorRef = useRef<WalkthroughError | null>(walkthroughError);
   const walkthroughLoadingRef = useRef(initialWalkthroughLoading);
+  const walkthroughProgressEnabledRef = useRef(true);
   const walkthroughRequestRef = useRef(0);
   const initialSourceKeyRef = useRef(state ? getSourceRevisionKey(state.source) : null);
   const initialStateGenerationRef = useRef(0);
@@ -160,21 +162,27 @@ export function useAppWalkthrough({
   useEffect(
     () =>
       window.codiff.onWalkthroughProgress((progress) => {
-        setWalkthroughProgress((current) =>
-          current.phase === progress.phase
-            ? current
-            : {
-                phase: progress.phase,
-                responseLabelIndex: current.responseLabelIndex,
-                stageRevision: current.stageRevision + 1,
-              },
-        );
+        if (!walkthroughProgressEnabledRef.current) {
+          return;
+        }
+        setWalkthroughProgress((current) => {
+          const phase = progress.phase ?? current.phase;
+          return {
+            generation: progress.generation ?? current.generation,
+            phase,
+            responseLabelIndex: current.responseLabelIndex,
+            stageRevision:
+              current.phase === phase ? current.stageRevision : current.stageRevision + 1,
+          };
+        });
       }),
     [],
   );
 
   const startWalkthroughLoading = useCallback(() => {
+    walkthroughProgressEnabledRef.current = true;
     setWalkthroughProgress((current) => ({
+      generation: null,
       phase: null,
       responseLabelIndex: nextWalkthroughResponseLabelIndex(current.responseLabelIndex),
       stageRevision: current.stageRevision + 1,
@@ -185,7 +193,12 @@ export function useAppWalkthrough({
 
   const cancelWalkthroughRequest = useCallback(() => {
     walkthroughRequestRef.current += 1;
+    walkthroughProgressEnabledRef.current = false;
+    const cancelMainProcess = walkthroughLoadingRef.current;
     setWalkthroughLoading(false);
+    if (cancelMainProcess) {
+      void window.codiff.cancelNarrativeWalkthrough().catch(() => {});
+    }
   }, [setWalkthroughLoading]);
 
   const commitWalkthrough = useCallback(

@@ -327,6 +327,7 @@ const getOpenCodeServerModel = (model) => {
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onPartialText?: (delta: string) => void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} [options]
  */
@@ -375,6 +376,7 @@ const runOpenCode = async (
             ...environment,
             OPENCODE_PERMISSION: JSON.stringify({ '*': 'deny' }),
           },
+          signal: options.signal,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
 
@@ -451,10 +453,18 @@ const runOpenCode = async (
           ...environment,
           OPENCODE_PERMISSION: JSON.stringify({ '*': 'deny' }),
         },
+        signal: options.signal,
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
     const abortController = new AbortController();
+    const abortFromCaller = () =>
+      abortController.abort(options.signal?.reason ?? new Error('Generation canceled.'));
+    if (options.signal?.aborted) {
+      abortFromCaller();
+    } else {
+      options.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    }
     let baseUrl = '';
     let sessionId = '';
     let startupOutput = '';
@@ -608,6 +618,7 @@ const runOpenCode = async (
       await eventStream;
       return normalizeStructuredOutput(output || streamedText, schema, 'OpenCode');
     } finally {
+      options.signal?.removeEventListener('abort', abortFromCaller);
       clearTimeout(timeout);
       if (baseUrl && sessionId) {
         await fetch(

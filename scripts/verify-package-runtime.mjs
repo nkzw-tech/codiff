@@ -12,9 +12,12 @@ const root = process.cwd();
 const runtimeFiles = [
   'electron/github-history-bridge.cjs',
   'electron/gitlab-history-bridge.cjs',
+  'electron/walkthrough-generation-bridge.cjs',
+  'core/dist/walkthrough-generation.mjs',
   'github/dist/index.mjs',
   'gitlab/dist/index.mjs',
 ];
+const runtimeDirectories = ['core/dist', 'github/dist', 'gitlab/dist'];
 const builtin = new Set([...builtinModules, ...builtinModules.map((name) => `node:${name}`)]);
 
 const run = (command, args) =>
@@ -99,22 +102,35 @@ for (const path of ['github/dist/index.mjs', 'gitlab/dist/index.mjs']) {
 
 const directory = await mkdtemp(join(tmpdir(), 'codiff-package-runtime-'));
 try {
-  for (const path of runtimeFiles) {
+  for (const path of runtimeFiles.filter((path) => path.startsWith('electron/'))) {
+    const destination = join(directory, path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(root, path), destination, { recursive: true });
+  }
+  for (const path of runtimeDirectories) {
     const destination = join(directory, path);
     await mkdir(dirname(destination), { recursive: true });
     await cp(join(root, path), destination, { recursive: true });
   }
   const require = createRequire(join(directory, 'package.json'));
-  const [{ loadGitHubHistory }, { loadGitLabHistory }] = [
+  const [{ loadGitHubHistory }, { loadGitLabHistory }, { loadWalkthroughGeneration }] = [
     require(join(directory, 'electron/github-history-bridge.cjs')),
     require(join(directory, 'electron/gitlab-history-bridge.cjs')),
+    require(join(directory, 'electron/walkthrough-generation-bridge.cjs')),
   ];
-  const [github, gitlab] = await Promise.all([loadGitHubHistory(), loadGitLabHistory()]);
+  const [github, gitlab, walkthroughGeneration] = await Promise.all([
+    loadGitHubHistory(),
+    loadGitLabHistory(),
+    loadWalkthroughGeneration(),
+  ]);
   if (typeof github.createGitHubArtifactSource !== 'function') {
     throw new Error('GitHub runtime bridge did not load createGitHubArtifactSource.');
   }
   if (typeof gitlab.createGitLabArtifactSource !== 'function') {
     throw new Error('GitLab runtime bridge did not load createGitLabArtifactSource.');
+  }
+  if (typeof walkthroughGeneration.runWalkthroughGenerationTasks !== 'function') {
+    throw new Error('Core walkthrough-generation runtime did not load the task runner.');
   }
 } finally {
   await rm(directory, { force: true, recursive: true });
