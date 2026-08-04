@@ -2,6 +2,8 @@
  * @vitest-environment jsdom
  */
 
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { act } from 'react';
 import { expect, test } from 'vite-plus/test';
 import { useDiffSearch } from '../app/hooks/useDiffSearch.ts';
@@ -140,4 +142,25 @@ test('diff search open, close, and reset preserve the existing panel lifecycle',
   expect(getState().query).toBe('');
   expect(getState().activeMatchIndex).toBe(0);
   expect(getState().visible).toBe(false);
+});
+
+test('narrow layouts keep active diff-search filters visible and changeable', async () => {
+  await using view = await renderDiffSearch([createChangedFile('src/needle.ts')]);
+  const { getState } = view;
+
+  await act(async () => {
+    getState().updateFilters({ additions: false, deletions: false, unchanged: true });
+  });
+  expect(getState().filters).toEqual({ additions: false, deletions: false, unchanged: true });
+
+  const css = await readFile(resolve(process.cwd(), 'core/App.css'), 'utf8');
+  const mediaStart = css.indexOf('@media (max-width: 880px)');
+  const mediaEnd = css.indexOf('@media ', mediaStart + 1);
+  const narrowLayout = css.slice(mediaStart, mediaEnd);
+  expect(narrowLayout).toContain(
+    'grid-template-columns: minmax(120px, 1fr) 48px minmax(0, auto) repeat(3, 28px);',
+  );
+  const filtersStart = narrowLayout.indexOf('.diff-search-filters');
+  const filtersEnd = narrowLayout.indexOf('}', filtersStart);
+  expect(narrowLayout.slice(filtersStart, filtersEnd)).not.toContain('display: none');
 });
