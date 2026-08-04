@@ -6,8 +6,8 @@ import {
 } from '@nkzw/codiff-core';
 import type { GitSha } from '@nkzw/codiff-core/types';
 import { expect, test } from 'vite-plus/test';
-import { createGitHubArtifactSource, createGitHubRangeArtifact } from '../src/current-review.ts';
 import { createFakeGitHubTransport } from '../../test/fake-provider-transports.ts';
+import { createGitHubArtifactSource, createGitHubRangeArtifact } from '../src/current-review.ts';
 
 const gitSha = (value: string) => value as GitSha;
 const project: ReviewArtifactProject = {
