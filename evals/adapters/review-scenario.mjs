@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { evaluateScenarioConformance } from '../../test-scenarios/conformance.mjs';
 import { materializeReviewScenario, reviewScenarios } from '../../test-scenarios/review/index.mjs';
 import { getWalkthroughMetrics, nowMs, readJson, roundMs, writeJson } from '../lib.mjs';
+import { loadGitHubScenarioMock, loadGitLabScenarioMock } from '../provider-mock-loader.mjs';
 import {
   buildEvalShareManifest,
   buildScenarioReviewTarget,
@@ -18,7 +19,33 @@ const execFileAsync = promisify(execFile);
 
 export const kind = 'review-scenario';
 
-const semanticFixture = (evalCase, definition, state) => ({
+export const normalizeScenarioFixtureRevisions = (value, revisions) => {
+  if (typeof value === 'string') {
+    return Object.entries(revisions)
+      .toSorted(([, left], [, right]) => right.length - left.length)
+      .reduce(
+        (normalized, [name, revision]) =>
+          normalized
+            .replaceAll(revision, `{{revision:${name}}}`)
+            .replaceAll(revision.slice(0, 8), `{{shortRevision:${name}}}`),
+        value,
+      );
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeScenarioFixtureRevisions(item, revisions));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        normalizeScenarioFixtureRevisions(item, revisions),
+      ]),
+    );
+  }
+  return value;
+};
+
+const semanticFixture = (evalCase, definition, providerTranscripts, revisions, state) => ({
   case: evalCase.id,
   description: definition.description,
   expectation: definition.walkthroughExpectations,
@@ -27,6 +54,7 @@ const semanticFixture = (evalCase, definition, state) => ({
     sections: file.sections.map((section) => ({ kind: section.kind, patch: section.patch })),
     status: file.status,
   })),
+  providerTranscripts: normalizeScenarioFixtureRevisions(providerTranscripts, revisions),
   rubric: evalCase.rubric,
   scenario: definition.id,
 });
@@ -120,12 +148,31 @@ Walkthrough evaluation expectation: use ${definition.walkthroughExpectations.rev
         url: `https://provider.example.test/codiff/${definition.id}/review/1`,
       },
     };
+    const providerTranscripts = {
+      github: (
+        await loadGitHubScenarioMock({
+          owner: 'fixture',
+          revisions: materialized.revisions,
+          scenarioId: evalCase.scenario,
+        })
+      ).transcript,
+      gitlab: (
+        await loadGitLabScenarioMock({
+          projectPath: `fixture/${evalCase.scenario}`,
+          revisions: materialized.revisions,
+          scenarioId: evalCase.scenario,
+        })
+      ).transcript,
+    };
     const stateMs = roundMs(nowMs() - stateStarted);
     const promptStarted = nowMs();
     const expectedPrompt = buildNarrativeWalkthroughPrompt(state, null, 'Codex');
     const promptBuildMs = roundMs(nowMs() - promptStarted);
-    const fixtureDigest = computeFixtureDigest(semanticFixture(evalCase, definition, state));
+    const fixtureDigest = computeFixtureDigest(
+      semanticFixture(evalCase, definition, providerTranscripts, materialized.revisions, state),
+    );
     await writeFile(join(attemptDir, 'prompt.txt'), expectedPrompt);
+    await writeJson(join(attemptDir, 'inputs', 'provider-transcripts.json'), providerTranscripts);
     await writeJson(join(attemptDir, 'inputs', 'review-state.json'), {
       branch: state.branch,
       files: state.files,

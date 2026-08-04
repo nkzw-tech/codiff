@@ -198,6 +198,95 @@ test('keeps provider transcript inputs synthetic and host-neutral', async () => 
   }
 });
 
+test('checked-in provider snapshots replay through the normal eval loader', async () => {
+  const scenarios = {
+    'current-commit-stack': {
+      head: 'e'.repeat(40),
+      revisions: {
+        base: 'a'.repeat(40),
+        'delivery-orchestration': 'c'.repeat(40),
+        'lifecycle-verification': 'e'.repeat(40),
+        'policy-contract': 'b'.repeat(40),
+        'preference-audit': 'd'.repeat(40),
+      },
+    },
+    'unstructured-commits': {
+      head: 'f'.repeat(40),
+      revisions: {
+        base: 'a'.repeat(40),
+        'bucket-1': 'b'.repeat(40),
+        'bucket-2': 'c'.repeat(40),
+        'bucket-3': 'd'.repeat(40),
+        'bucket-4': 'e'.repeat(40),
+        'bucket-5': 'f'.repeat(40),
+      },
+    },
+  };
+
+  for (const [checkedInScenario, definition] of Object.entries(scenarios)) {
+    const checkedInRevisions = definition.revisions;
+    const head = definition.head as GitSha;
+    const base = checkedInRevisions.base as GitSha;
+    const owner = 'fixture';
+    const github = await loadGitHubScenarioMock({
+      owner,
+      revisions: checkedInRevisions,
+      scenarioId: checkedInScenario,
+    });
+    const githubProfile = github.transcript.routes.find(
+      (route: { path: string; response?: unknown }) => route.path === '/user',
+    );
+    expect(githubProfile?.response).toEqual({
+      login: 'scenario-user',
+      username: 'scenario-user',
+    });
+    const githubSource = createGitHubArtifactSource({
+      project: {
+        host: 'github.example.test',
+        project: `${owner}/${checkedInScenario}`,
+        provider: 'github',
+      },
+      pull: { number: 1, owner, repo: checkedInScenario },
+      transport: github.transport,
+    });
+    await expect(
+      githubSource.readStackAndRange(
+        { headSha: head, requestedBaseSha: base },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ range: { files: expect.any(Array) } });
+
+    const projectPath = `fixture/${checkedInScenario}`;
+    const gitlab = await loadGitLabScenarioMock({
+      projectPath,
+      revisions: checkedInRevisions,
+      scenarioId: checkedInScenario,
+    });
+    const gitlabProfile = gitlab.transcript.routes.find(
+      (route: { path: string; response?: unknown }) => route.path === '/api/v4/user',
+    );
+    expect(gitlabProfile?.response).toEqual({
+      login: 'scenario-user',
+      username: 'scenario-user',
+    });
+    const gitlabSource = createGitLabArtifactSource({
+      project: {
+        host: 'gitlab.example.test',
+        project: projectPath,
+        provider: 'gitlab',
+      },
+      projectPath,
+      transport: gitlab.transport,
+    });
+    await expect(
+      gitlabSource.readStackAndRange(
+        { headSha: head, requestedBaseSha: base },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ range: { files: expect.any(Array) } });
+  }
+});
+
 test('capture normalization removes identities and replaces repository revisions', () => {
   expect(
     sanitizeProviderTranscript(
