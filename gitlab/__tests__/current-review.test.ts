@@ -1,5 +1,6 @@
 import {
   createCommitArtifactRequestKey,
+  createFileBlobArtifactRequestKey,
   createReviewArtifactRun,
   type ReviewArtifactProject,
 } from '@nkzw/codiff-core';
@@ -105,6 +106,37 @@ test('one GitLab source populates stack, range, commit, and blob caches', async 
   });
   expect(blobs.get(objectId)?.bytes).toEqual(new Uint8Array([0, 1, 255]));
   expect(run.diagnostics().sourceCalls).toEqual({ blobs: 1, commits: 1, stackAndRanges: 1 });
+});
+
+test('resolves GitLab ref paths as bounded Blob Artifacts', async () => {
+  const ref = gitSha('a'.repeat(40));
+  const objectId = gitSha('b'.repeat(40));
+  const request = { maxBytes: 32, path: 'images/logo.png', ref };
+  const transport = createFakeGitLabTransport([
+    {
+      path: '/api/v4/projects/group%2Fproject/repository/files/images%2Flogo.png',
+      query: { ref },
+      response: {
+        blob_id: objectId,
+        content: btoa(String.fromCharCode(0, 1, 255)),
+        encoding: 'base64',
+      },
+    },
+  ]);
+  const run = createReviewArtifactRun(
+    createGitLabArtifactSource({ project, projectPath: 'group/project', transport }),
+  );
+
+  const first = await run.readFileBlobs([request], run.signal);
+  const warm = await run.readFileBlobs([request], run.signal);
+
+  expect(first.get(createFileBlobArtifactRequestKey(request))).toMatchObject({
+    bytes: new Uint8Array([0, 1, 255]),
+    objectId,
+    provenance: { kind: 'gitlab-api', project },
+  });
+  expect(warm).toEqual(first);
+  expect(transport.calls).toHaveLength(1);
 });
 
 test('bounds GitLab Commit Artifact reads at eight concurrent requests', async () => {

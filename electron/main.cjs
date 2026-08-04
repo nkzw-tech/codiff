@@ -25,6 +25,7 @@ const {
   readRepositoryState,
   readReviewComments,
   readWalkthroughRepositoryState,
+  resolveReviewContext,
   runWithCommandSignal,
   submitPullRequestComment,
   submitPullRequestReview,
@@ -2019,6 +2020,13 @@ ipcMain.on('codiff:cancelDiffContentRequest', (event, requestId) => {
   }
   const requests = diffContentRequests.get(event.sender.id);
   requests?.get(requestId)?.abort(new DOMException('Diff content request canceled.', 'AbortError'));
+});
+
+ipcMain.handle('codiff:resolveReviewContext', async (event, request, requestId) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return runDiffContentRequest(event, { requestId }, () =>
+    resolveReviewContext(repositoryPath, request),
+  );
 });
 
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {

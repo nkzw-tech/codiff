@@ -1,5 +1,6 @@
 import {
   createCommitArtifactRequestKey,
+  createFileBlobArtifactRequestKey,
   orderReviewCommitStack,
   validateCommitArtifact,
   validateRangeArtifact,
@@ -9,6 +10,7 @@ import {
   type CommitArtifact,
   type CommitArtifactRequest,
   type CommitArtifactRequestKey,
+  type FileBlobArtifactRequest,
   type RangeArtifact,
   type ReviewArtifactProject,
   type ReviewArtifactSource,
@@ -72,6 +74,29 @@ const repositoryCommitDiffEndpoint = (projectPath: string, sha: string) =>
 
 const repositoryBlobRawEndpoint = (projectPath: string, objectId: string) =>
   `/api/v4/projects/${encodeURIComponent(projectPath)}/repository/blobs/${encodeURIComponent(objectId)}/raw`;
+
+const repositoryFileEndpoint = (projectPath: string, filePath: string) =>
+  `/api/v4/projects/${encodeURIComponent(projectPath)}/repository/files/${encodeURIComponent(filePath)}`;
+
+const decodeBase64File = (content: string, maxBytes: number) => {
+  const normalized = content.replaceAll(/\s/g, '');
+  if (normalized.length > Math.ceil(maxBytes / 3) * 4 + 4) {
+    return null;
+  }
+  try {
+    const decoded = atob(normalized);
+    if (decoded.length > maxBytes) {
+      return null;
+    }
+    const bytes = new Uint8Array(decoded.length);
+    for (let index = 0; index < decoded.length; index += 1) {
+      bytes[index] = decoded.charCodeAt(index);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+};
 
 const readPages = async (
   transport: GitLabTransport,
@@ -312,6 +337,60 @@ export const createGitLabRangeArtifact = ({
   });
 };
 
+/** Resolve one immutable GitLab ref+path coordinate to a normalized Blob Artifact. */
+export const readGitLabFileBlobArtifact = async ({
+  maxBytes,
+  path,
+  project,
+  projectPath: rawProjectPath,
+  ref,
+  signal,
+  transport,
+}: FileBlobArtifactRequest & {
+  maxBytes: number;
+  project: ReviewArtifactProject;
+  projectPath: string;
+  signal?: AbortSignal;
+  transport: GitLabTransport;
+}): Promise<BlobArtifact | null> => {
+  const projectPath = validateProjectPath(rawProjectPath);
+  const limit = normalizeBlobArtifactMaxBytes(maxBytes);
+  signal?.throwIfAborted();
+  const value = asRecord(
+    await transport.request<unknown>({
+      maxBytes: Math.ceil(limit / 3) * 4 + 64 * 1024,
+      path: repositoryFileEndpoint(projectPath, path),
+      query: { ref },
+      signal,
+    }),
+  );
+  signal?.throwIfAborted();
+  const objectId = asGitSha(value.blob_id);
+  if (!objectId) {
+    return null;
+  }
+  const content = asString(value.content);
+  const bytes =
+    asString(value.encoding).toLowerCase() === 'base64' && content
+      ? decodeBase64File(content, limit)
+      : null;
+  if (bytes) {
+    return { bytes, objectId, provenance: { kind: 'gitlab-api', project } };
+  }
+  if (!transport.requestBuffer) {
+    return null;
+  }
+  const raw = await transport.requestBuffer({
+    maxBytes: limit,
+    path: repositoryBlobRawEndpoint(projectPath, objectId),
+    signal,
+  });
+  signal?.throwIfAborted();
+  return raw.byteLength <= limit
+    ? { bytes: raw, objectId, provenance: { kind: 'gitlab-api', project } }
+    : null;
+};
+
 /** Create the bounded GitLab API source for one current merge request. */
 export const createGitLabArtifactSource = ({
   maxBlobArtifactBytes: requestedMaxBlobArtifactBytes,
@@ -366,6 +445,40 @@ export const createGitLabArtifactSource = ({
         signal,
         transport,
       }),
+    async readFileBlobs(requests, signal) {
+      const pending = [
+        ...new Map(
+          requests.map((request) => [createFileBlobArtifactRequestKey(request), request]),
+        ).values(),
+      ];
+      const blobs = new Map<string, BlobArtifact>();
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < pending.length) {
+          signal.throwIfAborted();
+          const request = pending[nextIndex++]!;
+          try {
+            const blob = await readGitLabFileBlobArtifact({
+              ...request,
+              maxBytes: Math.min(request.maxBytes ?? blobArtifactMaxBytes, blobArtifactMaxBytes),
+              project,
+              projectPath,
+              signal,
+              transport,
+            });
+            if (blob) {
+              blobs.set(createFileBlobArtifactRequestKey(request), blob);
+            }
+          } catch {
+            signal.throwIfAborted();
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(artifactReadConcurrency, pending.length) }, worker),
+      );
+      return blobs;
+    },
     async readStackAndRange({ headSha: head, requestedBaseSha: base }, signal) {
       if (base === head) {
         return {

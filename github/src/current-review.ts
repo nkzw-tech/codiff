@@ -1,5 +1,6 @@
 import {
   createCommitArtifactRequestKey,
+  createFileBlobArtifactRequestKey,
   orderReviewCommitStack,
   validateCommitArtifact,
   validateRangeArtifact,
@@ -10,6 +11,7 @@ import {
   type CommitArtifact,
   type CommitArtifactRequest,
   type CommitArtifactRequestKey,
+  type FileBlobArtifactRequest,
   type RangeArtifact,
   type ReviewArtifactProject,
   type ReviewArtifactSource,
@@ -60,6 +62,29 @@ const githubCommitPath = (pull: GitHubPullRequestRef, sha: GitSha) =>
 
 const githubBlobPath = (pull: GitHubPullRequestRef, objectId: string) =>
   `${githubRepositoryPath(pull)}/git/blobs/${encodeURIComponent(objectId)}`;
+
+const githubContentsPath = (pull: GitHubPullRequestRef, path: string) =>
+  `${githubRepositoryPath(pull)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+
+const decodeBase64File = (content: string, maxBytes: number) => {
+  const normalized = content.replaceAll(/\s/g, '');
+  if (normalized.length > Math.ceil(maxBytes / 3) * 4 + 4) {
+    return null;
+  }
+  try {
+    const decoded = atob(normalized);
+    if (decoded.length > maxBytes) {
+      return null;
+    }
+    const bytes = new Uint8Array(decoded.length);
+    for (let index = 0; index < decoded.length; index += 1) {
+      bytes[index] = decoded.charCodeAt(index);
+    }
+    return bytes;
+  } catch {
+    return null;
+  }
+};
 
 const quotePatchPath = (path: string) =>
   path.replaceAll('\\', String.raw`\\`).replaceAll('\n', String.raw`\n`);
@@ -251,6 +276,61 @@ const readGitHubCommitArtifact = async ({
   });
 };
 
+/** Resolve one immutable GitHub ref+path coordinate to a normalized Blob Artifact. */
+export const readGitHubFileBlobArtifact = async ({
+  maxBytes,
+  path,
+  project,
+  pull,
+  ref,
+  signal,
+  transport,
+}: FileBlobArtifactRequest & {
+  maxBytes: number;
+  project: ReviewArtifactProject;
+  pull: GitHubPullRequestRef;
+  signal?: AbortSignal;
+  transport: GitHubTransport;
+}): Promise<BlobArtifact | null> => {
+  const limit = normalizeBlobArtifactMaxBytes(maxBytes);
+  signal?.throwIfAborted();
+  const value = await transport.request<unknown>({
+    maxBytes: Math.ceil(limit / 3) * 4 + 64 * 1024,
+    path: githubContentsPath(pull, path),
+    query: { ref },
+    signal,
+  });
+  signal?.throwIfAborted();
+  if (!isRecord(value)) {
+    return null;
+  }
+  const objectId = gitSha(value.sha);
+  if (!objectId) {
+    return null;
+  }
+  const content = asString(value.content);
+  const bytes =
+    asString(value.encoding).toLowerCase() === 'base64' && content
+      ? decodeBase64File(content, limit)
+      : null;
+  if (bytes) {
+    return { bytes, objectId, provenance: { kind: 'github-api', project } };
+  }
+  if (!transport.requestBuffer) {
+    return null;
+  }
+  const raw = await transport.requestBuffer({
+    accept: 'application/vnd.github.raw+json',
+    maxBytes: limit,
+    path: githubBlobPath(pull, objectId),
+    signal,
+  });
+  signal?.throwIfAborted();
+  return raw.byteLength <= limit
+    ? { bytes: raw, objectId, provenance: { kind: 'github-api', project } }
+    : null;
+};
+
 /** Create the bounded GitHub API source for one current pull request. */
 export const createGitHubArtifactSource = ({
   maxBlobArtifactBytes: requestedMaxBlobArtifactBytes,
@@ -323,6 +403,40 @@ export const createGitHubArtifactSource = ({
         Array.from({ length: Math.min(artifactReadConcurrency, pending.length) }, worker),
       );
       return artifacts;
+    },
+    async readFileBlobs(requests, signal) {
+      const pending = [
+        ...new Map(
+          requests.map((request) => [createFileBlobArtifactRequestKey(request), request]),
+        ).values(),
+      ];
+      const blobs = new Map<string, BlobArtifact>();
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < pending.length) {
+          signal.throwIfAborted();
+          const request = pending[nextIndex++]!;
+          try {
+            const blob = await readGitHubFileBlobArtifact({
+              ...request,
+              maxBytes: Math.min(request.maxBytes ?? blobArtifactMaxBytes, blobArtifactMaxBytes),
+              project,
+              pull,
+              signal,
+              transport,
+            });
+            if (blob) {
+              blobs.set(createFileBlobArtifactRequestKey(request), blob);
+            }
+          } catch {
+            signal.throwIfAborted();
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(artifactReadConcurrency, pending.length) }, worker),
+      );
+      return blobs;
     },
     async readStackAndRange({ headSha: head, requestedBaseSha: base }, signal) {
       if (base === head) {

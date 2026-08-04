@@ -827,10 +827,8 @@ export function RepositoryReviewHost({
     [bumpItemVersion, requestDiffSectionContent],
   );
 
-  // Fetches full file contents for a patch-only section so the CodeView
-  // `loadDiffFiles` option can hydrate the rendered diff in place. Unlike
-  // `loadDiffSection`, this must not touch React state: replacing the section
-  // would reset the hydrated diff object's identity.
+  // Fetches full file contents for a mutable patch-only section so the
+  // CodeView `loadDiffFiles` option can hydrate the rendered diff in place.
   const loadDiffSectionContents = useCallback(
     async (file: ChangedFile, section: DiffSection): Promise<FileDiffLoadedFiles> => {
       const currentState = stateRef.current;
@@ -846,15 +844,28 @@ export function RepositoryReviewHost({
         source: currentState.source,
       });
       if (!loadedSection.newFile) {
-        throw new Error(`No file contents available for '${file.path}'.`);
+        throw new Error(`Loaded diff contents for '${file.path}' are unavailable.`);
       }
-
       return {
         newFile: loadedSection.newFile,
         oldFile: loadedSection.oldFile ?? null,
       };
     },
     [requestDiffSectionContent],
+  );
+
+  // Immutable context reads share the renderer/main request ownership used by
+  // section and image hydration, so source replacement and unmount abort them.
+  const requestReviewContext = useCallback(
+    (request: Parameters<Window['codiff']['resolveReviewContext']>[0]) => {
+      const requestId = `context:${diffContentRequestCounterRef.current + 1}`;
+      diffContentRequestCounterRef.current += 1;
+      diffContentRequestIdsRef.current.add(requestId);
+      return window.codiff
+        .resolveReviewContext(request, requestId)
+        .finally(() => diffContentRequestIdsRef.current.delete(requestId));
+    },
+    [],
   );
 
   const refreshMarkdownFile = useCallback(
@@ -1684,6 +1695,7 @@ export function RepositoryReviewHost({
           onLoadSection: loadDiffSection,
           onLoadSectionContents: loadDiffSectionContents,
           onRefreshMarkdown: refreshMarkdownFile,
+          resolveReviewContext: requestReviewContext,
         },
         desktop: {
           beforeContent: (
