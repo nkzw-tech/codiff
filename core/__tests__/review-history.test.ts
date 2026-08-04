@@ -14,6 +14,7 @@ import {
   versionRevisionLabel,
 } from '../lib/review-history.ts';
 import type {
+  DiffComparisonAnalysis,
   EvolutionUnitId,
   GitSha,
   ReviewCommitUnit,
@@ -62,6 +63,43 @@ const units: ReadonlyArray<ReviewEvolutionUnit> = [
     unitId: evolutionUnitId('retained-1'),
   },
 ];
+
+const analysisFor = (
+  evolutionUnits: ReadonlyArray<ReviewEvolutionUnit>,
+  completeCoverage: boolean,
+): DiffComparisonAnalysis => ({
+  commitEvolution: {
+    recommendation: {
+      rationale: 'Some units may be ambiguous.',
+      suggestedStructure: completeCoverage ? 'commit-evolution' : 'complete-comparison',
+    },
+    summary: {
+      absorbedIntoBase: 0,
+      added: 0,
+      ambiguous: completeCoverage ? 0 : 1,
+      completeCoverage,
+      pairingCoverage: completeCoverage ? 1 : 0,
+      removed: 0,
+      retained: 0,
+      reviewable: evolutionUnits.filter((unit) => unit.reviewable).length,
+      revised: 0,
+      rewrittenSamePatch: 0,
+      unreviewableAmbiguous: completeCoverage ? 0 : 1,
+    },
+    units: evolutionUnits,
+  },
+  summary: {
+    addedLines: 1,
+    baseMoved: false,
+    commentsAffected: 0,
+    conflictFiles: 0,
+    deletedLines: 0,
+    empty: false,
+    filesChanged: 1,
+    intentionalFiles: 1,
+    noiseFiles: 0,
+  },
+});
 
 test('keeps revision SHA identity separate from labels and non-commit markers', () => {
   expect(shaForRevision(base)).toBe(base.sha);
@@ -184,6 +222,7 @@ test('falls back to Complete Comparison when Evolution Unit coverage is partial'
 
   expect(
     resolveReviewPlan({
+      analysis: analysisFor([...units, ambiguous], true),
       comparison,
       recommendation: {
         rationale: 'Evolution would otherwise be preferred.',
@@ -196,6 +235,17 @@ test('falls back to Complete Comparison when Evolution Unit coverage is partial'
     reviewRelation: 'version-comparison',
     structure: 'complete-comparison',
   });
+});
+
+test('rejects an explicit Commit Evolution plan when analysis coverage is incomplete', () => {
+  expect(() =>
+    resolveReviewPlan({
+      analysis: analysisFor([], false),
+      comparison,
+      structure: 'commit-evolution',
+      units,
+    }),
+  ).toThrow('requires complete Evolution Unit coverage');
 });
 
 test('names target and version selections by review-version identity', () => {

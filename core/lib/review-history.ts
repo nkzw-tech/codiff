@@ -187,12 +187,19 @@ export const resolveReviewPlan = ({
   const partialCoverage = Boolean(
     units?.some((unit) => unit.kind === 'ambiguous' && !unit.reviewable),
   );
+  const completeCoverage =
+    (analysis?.commitEvolution?.summary.completeCoverage ?? true) && !partialCoverage;
+  if (structure === 'commit-evolution' && !completeCoverage) {
+    throw new Error(
+      'Commit Evolution requires complete Evolution Unit coverage. Choose Complete Comparison or resolve the ambiguous units.',
+    );
+  }
   const resolved =
     structure === 'complete-comparison'
       ? 'complete-comparison'
       : structure === 'commit-evolution'
         ? 'commit-evolution'
-        : !partialCoverage &&
+        : completeCoverage &&
             recommendation?.suggestedStructure === 'commit-evolution' &&
             evolutionUnits.length > 0
           ? 'commit-evolution'
