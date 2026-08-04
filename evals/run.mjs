@@ -1,34 +1,28 @@
 #!/usr/bin/env node
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, join } from 'node:path';
 import process from 'node:process';
 import {
-  getWalkthroughMetrics,
-  nowMs,
+  initializeEvalRun,
+  loadCaseAdapter,
   readCases,
   resolveRunDir,
   root,
-  roundMs,
   writeJson,
 } from './lib.mjs';
+import { assertEvalAttemptMeta } from './review-artifacts.mjs';
 
 const require = createRequire(import.meta.url);
-const { getAgent } = require('../electron/agent.cjs');
 const { readConfig } = require('../electron/config.cjs');
-const { readRepositoryState } = require('../electron/git-state.cjs');
-const {
-  buildNarrativeWalkthroughPrompt,
-  readNarrativeWalkthrough,
-} = require('../electron/narrative-walkthrough.cjs');
 
 const args = process.argv.slice(2);
 const readOption = (name, fallback) => {
   const index = args.indexOf(name);
   return index === -1 ? fallback : args[index + 1];
 };
-const optionNames = new Set(['--case', '--effort', '--model', '--repetitions']);
+const optionNames = new Set(['--case', '--effort', '--model', '--repetitions', '--suite']);
 let label = '';
 for (let index = 0; index < args.length; index += 1) {
   if (optionNames.has(args[index])) {
@@ -38,14 +32,21 @@ for (let index = 0; index < args.length; index += 1) {
     break;
   }
 }
+
 label ||= `run-${Date.now()}`;
 const repetitions = Number(readOption('--repetitions', '2'));
 const caseFilter = readOption('--case', '');
 const effort = readOption('--effort', 'high');
+const prepareOnly = args.includes('--prepare-only');
+const suite = readOption('--suite', 'single-commit');
 const configuredModel = readConfig().settings.openAIModel;
 const model = readOption('--model', configuredModel);
 const runDir = resolveRunDir(label);
-const cases = (await readCases()).filter((item) => !caseFilter || item.id === caseFilter);
+const allCases = await readCases();
+const knownSuites = new Set(allCases.map((item) => item.kind));
+const cases = allCases.filter(
+  (item) => (!caseFilter || item.id === caseFilter) && (suite === 'all' || item.kind === suite),
+);
 
 if (!Number.isInteger(repetitions) || repetitions < 1) {
   throw new Error('--repetitions must be a positive integer.');
@@ -53,121 +54,51 @@ if (!Number.isInteger(repetitions) || repetitions < 1) {
 if (!['low', 'medium', 'high'].includes(effort)) {
   throw new Error('--effort must be low, medium, or high.');
 }
+if (suite !== 'all' && !knownSuites.has(suite)) {
+  throw new Error(`Unknown eval suite ${JSON.stringify(suite)}.`);
+}
 if (cases.length === 0) {
-  throw new Error(`No eval case matched ${JSON.stringify(caseFilter)}.`);
+  throw new Error(`No eval case matched ${JSON.stringify(caseFilter)} in suite ${suite}.`);
 }
 
-await mkdir(runDir, { recursive: true });
-await writeJson(join(runDir, 'run.json'), {
-  effort,
+await initializeEvalRun({
   label,
-  model,
-  repetitions,
-  startedAt: new Date().toISOString(),
+  metadata: {
+    effort,
+    label,
+    model,
+    prepareOnly,
+    repetitions,
+    startedAt: new Date().toISOString(),
+    suite,
+  },
+  runDir,
 });
 
 for (const evalCase of cases) {
+  const adapter = await loadCaseAdapter(evalCase, 'runAttempt');
   for (let attempt = 1; attempt <= repetitions; attempt += 1) {
     const attemptDir = join(runDir, evalCase.id, `attempt-${attempt}`);
     await mkdir(attemptDir, { recursive: true });
     await writeJson(join(attemptDir, 'case.json'), evalCase);
-
-    const stateStarted = nowMs();
-    const state = await readRepositoryState(root, {
-      ref: evalCase.commit,
-      type: 'commit',
-    });
-    const stateMs = roundMs(nowMs() - stateStarted);
-    const promptStarted = nowMs();
-    const expectedPrompt = buildNarrativeWalkthroughPrompt(state, null, 'Codex');
-    const promptBuildMs = roundMs(nowMs() - promptStarted);
-    await writeFile(join(attemptDir, 'prompt.txt'), expectedPrompt);
-
-    const baseAgent = getAgent('codex');
-    let rawResponse = '';
-    let actualPrompt = '';
-    let agentStartedAt = 0;
-    let agentFinishedAt = 0;
-    let agentMetrics = null;
-    const phases = [];
-    const generationStarted = nowMs();
-    const agent = {
-      ...baseAgent,
-      run: async (...runArgs) => {
-        actualPrompt = runArgs[1];
-        agentStartedAt = nowMs();
-        try {
-          rawResponse = await baseAgent.run(...runArgs);
-          return rawResponse;
-        } finally {
-          agentFinishedAt = nowMs();
-        }
-      },
-    };
-
-    const result = await readNarrativeWalkthrough(
-      state,
-      agent,
-      {
-        fallbackModel: baseAgent.fallbackModel,
-        model,
-        onMetrics: (metrics) => {
-          agentMetrics = metrics;
-        },
-        onProgress: (phase) => {
-          phases.push({
-            elapsedMs: roundMs(nowMs() - generationStarted),
-            phase,
-          });
-        },
-        reasoningEffort: effort,
-      },
-      null,
-    );
-    const generationFinished = nowMs();
-    const firstResponse = phases.find((event) => event.phase === 'response-received');
-
-    if (actualPrompt && actualPrompt !== expectedPrompt) {
-      await writeFile(join(attemptDir, 'actual-prompt.txt'), actualPrompt);
-    }
-    if (rawResponse) {
-      await writeFile(join(attemptDir, 'raw-response.txt'), rawResponse);
-    }
-    if (result.status === 'ready') {
-      await writeJson(join(attemptDir, 'walkthrough.json'), result.walkthrough);
-    }
-
-    const meta = {
-      agentMs: agentStartedAt && agentFinishedAt ? roundMs(agentFinishedAt - agentStartedAt) : null,
-      commit: evalCase.commit,
+    const result = await adapter.runAttempt({
+      attempt,
+      attemptDir,
       effort,
-      exitStatus: result.status,
-      firstResponseMs: firstResponse?.elapsedMs ?? null,
-      generationMs: roundMs(generationFinished - generationStarted),
-      metrics: result.status === 'ready' ? getWalkthroughMetrics(state, result.walkthrough) : null,
+      evalCase,
       model,
-      phases,
-      postprocessMs: agentFinishedAt ? roundMs(generationFinished - agentFinishedAt) : null,
-      promptBuildMs,
-      promptChars: actualPrompt.length || expectedPrompt.length,
-      rawResponseChars: rawResponse.length,
-      reason: result.status === 'ready' ? null : result.reason,
-      stateMs,
-      transport: agentMetrics?.transport ?? null,
-      usage: agentMetrics?.usage ?? null,
-    };
-    await writeJson(join(attemptDir, 'meta.json'), meta);
-    process.stdout.write(
-      `${evalCase.id} attempt ${attempt}: ${result.status}, ${(meta.generationMs / 1000).toFixed(
-        2,
-      )}s, first response ${
-        meta.firstResponseMs == null ? 'n/a' : `${(meta.firstResponseMs / 1000).toFixed(2)}s`
-      }, ${meta.promptChars} prompt chars\n`,
-    );
+      prepareOnly,
+      root,
+    });
+    assertEvalAttemptMeta(result?.meta);
+    await writeJson(join(attemptDir, 'meta.json'), result.meta);
+    process.stdout.write(`${result.summary ?? `${evalCase.id} attempt ${attempt}: complete`}\n`);
   }
 }
 
-process.stdout.write(`Artifacts: ${runDir}\n`);
-process.stdout.write(
-  `Next: node evals/judge.mjs ${basename(runDir)} && node evals/report.mjs ${basename(runDir)}\n`,
-);
+process.stdout.write(`${prepareOnly ? 'Prepared inputs' : 'Artifacts'}: ${runDir}\n`);
+if (!prepareOnly) {
+  process.stdout.write(
+    `Next: node evals/judge.mjs ${basename(runDir)} && node evals/report.mjs ${basename(runDir)}\n`,
+  );
+}

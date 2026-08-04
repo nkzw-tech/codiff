@@ -1,6 +1,8 @@
 [
   {
     "id": "small",
+    "kind": "single-commit",
+    "adapter": "./adapters/single-commit.mjs",
     "size": "small",
     "commit": "c0adcf73452527dcbe0a75427a347182be5e687d",
     "rubric": [
@@ -12,6 +14,8 @@
   },
   {
     "id": "medium",
+    "kind": "single-commit",
+    "adapter": "./adapters/single-commit.mjs",
     "size": "medium",
     "commit": "7e71d5f498f8db1252bb5c1152abf29bb78b1f0a",
     "rubric": [
@@ -23,6 +27,8 @@
   },
   {
     "id": "large",
+    "kind": "single-commit",
+    "adapter": "./adapters/single-commit.mjs",
     "size": "large",
     "commit": "6354103ee1fa42ce4dfe38a4c83d2783a8279f8c",
     "rubric": [
@@ -30,6 +36,30 @@
       "Covers general comments, inline review comments, editing, submission, navigation, and review actions without flattening them into a file list.",
       "Connects the shared app changes to extracted reusable diff, markdown, preference, and review helpers.",
       "Distinguishes core behavior and tests from CSS, dependency, lockfile, and build-configuration support changes."
+    ]
+  },
+  {
+    "id": "scenario-unstructured-commits",
+    "kind": "review-scenario",
+    "adapter": "./adapters/review-scenario.mjs",
+    "scenario": "unstructured-commits",
+    "rubric": [
+      "Treats the current review as a whole diff rather than inventing a coherent commit narrative.",
+      "Explains the independently motivated audit persistence, policy parsing, delivery scheduling, and lifecycle coverage changes.",
+      "Uses at least three conceptual chapters and six stops without reducing the walkthrough to a file list.",
+      "Does not claim that the scenario's intentional defects are review findings."
+    ]
+  },
+  {
+    "id": "scenario-current-commit-stack",
+    "kind": "review-scenario",
+    "adapter": "./adapters/review-scenario.mjs",
+    "scenario": "current-commit-stack",
+    "rubric": [
+      "Treats the selected current review as one complete comparison.",
+      "Explains quiet-hour policy, delivery orchestration, audit persistence, and lifecycle verification in conceptual chapters.",
+      "Uses at least four chapters and seven stops without relying on later review modes.",
+      "Does not claim that the scenario's intentional defects are review findings."
     ]
   }
 ]

@@ -12,12 +12,22 @@ import {
   resolveRunDir,
   writeJson,
 } from './lib.mjs';
+import { assertEvalAttemptMeta, assertEvalContract } from './review-artifacts.mjs';
 
 const [label] = process.argv.slice(2);
 if (!label) {
   throw new Error('usage: node evals/report.mjs <run-label>');
 }
 
+const finiteMedian = (values, { positive = false } = {}) => {
+  const finite = values.filter((value) => Number.isFinite(value) && (!positive || value > 0));
+  return finite.length > 0 ? median(finite) : null;
+};
+const finiteAverage = (values) => {
+  const finite = values.filter(Number.isFinite);
+  return finite.length > 0 ? average(finite) : null;
+};
+const formatNumber = (value, render) => (Number.isFinite(value) ? render(value) : 'n/a');
 const runDir = resolveRunDir(label);
 const rows = [];
 
@@ -28,63 +38,109 @@ for (const evalCase of await readCases()) {
     if (!meta) {
       continue;
     }
+    const contract = await readJson(join(attemptDir, 'contract.json'));
     attempts.push({
+      contract: contract == null ? null : assertEvalContract(contract),
       judge: await readJson(join(attemptDir, 'judge.json')),
-      meta,
+      meta: assertEvalAttemptMeta(meta),
     });
   }
   if (attempts.length === 0) {
     continue;
   }
 
-  const successful = attempts.filter((attempt) => attempt.meta.exitStatus === 'ready');
-  const stateTimes = attempts
-    .map((attempt) => attempt.meta.stateMs)
-    .filter((value) => Number.isFinite(value) && value > 0);
+  const completed = attempts.filter(
+    (attempt) => attempt.meta.exitStatus === 'ready' || attempt.meta.exitStatus === 'prepared',
+  );
+  const generated = completed.filter((attempt) => attempt.meta.exitStatus === 'ready');
+  const metricAttempts = generated.length > 0 ? generated : completed;
+  const judged = attempts.filter((attempt) => attempt.judge);
+  const contracted = attempts.filter((attempt) => typeof attempt.contract?.pass === 'boolean');
+  const digests = new Set(completed.map((attempt) => attempt.meta.fixtureDigest).filter(Boolean));
+  const stateTimes = attempts.map((attempt) => attempt.meta.stateMs);
+  const contractMetricNames = new Set(
+    contracted.flatMap((attempt) =>
+      Object.entries(attempt.contract?.metrics ?? {}).flatMap(([name, value]) =>
+        Number.isFinite(value) ? [name] : [],
+      ),
+    ),
+  );
   rows.push({
     attempts: attempts.length,
     case: evalCase.id,
-    firstResponseMs: median(
-      successful.map((attempt) => attempt.meta.firstResponseMs).filter(Number.isFinite),
+    contractMetrics: Object.fromEntries(
+      [...contractMetricNames].map((name) => [
+        name,
+        average(
+          contracted.map((attempt) => attempt.contract?.metrics?.[name]).filter(Number.isFinite),
+        ),
+      ]),
     ),
-    generationMs: median(successful.map((attempt) => attempt.meta.generationMs)),
-    hunkCount: successful[0]?.meta.metrics?.hunkCount ?? 0,
-    inputTokens: median(
-      successful.map((attempt) => attempt.meta.usage?.inputTokens).filter(Number.isFinite),
+    contractPassRate:
+      contracted.length === 0
+        ? null
+        : contracted.filter((attempt) => attempt.contract.pass).length / contracted.length,
+    firstResponseMs: finiteMedian(generated.map((attempt) => attempt.meta.firstResponseMs)),
+    fixtureConsistent: digests.size === 1,
+    fixtureDigest: digests.size === 1 ? [...digests][0] : null,
+    generationMs: finiteMedian(
+      generated.map((attempt) => attempt.meta.generationMs),
+      { positive: true },
     ),
-    mainCoverage: average(successful.map((attempt) => attempt.meta.metrics?.mainCoverage ?? 0)),
-    outputTokens: median(
-      successful.map((attempt) => attempt.meta.usage?.outputTokens).filter(Number.isFinite),
+    hunkCount: metricAttempts[0]?.meta.metrics?.hunkCount ?? 0,
+    inputTokens: finiteMedian(generated.map((attempt) => attempt.meta.usage?.inputTokens)),
+    mainCoverage: finiteAverage(
+      metricAttempts.map((attempt) => attempt.meta.metrics?.mainCoverage),
     ),
-    promptChars: median(successful.map((attempt) => attempt.meta.promptChars)),
-    quality: average(attempts.map((attempt) => attempt.judge?.total).filter(Number.isFinite)),
-    stateMs: stateTimes.length > 0 ? median(stateTimes) : null,
-    successRate: successful.length / attempts.length,
-    transport: successful[0]?.meta.transport ?? 'unknown',
+    modelCalls: finiteMedian(completed.map((attempt) => attempt.meta.modelCalls)) ?? 0,
+    outputTokens: finiteMedian(generated.map((attempt) => attempt.meta.usage?.outputTokens)),
+    promptChars: finiteMedian(completed.map((attempt) => attempt.meta.promptChars)),
+    quality:
+      judged.length === 0
+        ? null
+        : average(judged.map((attempt) => attempt.judge.total).filter(Number.isFinite)),
+    stateMs: finiteMedian(stateTimes, { positive: true }),
+    successRate: completed.length / attempts.length,
+    transport: generated[0]?.meta.transport ?? 'unknown',
+    variant: completed[0]?.meta.variant ?? evalCase.kind,
   });
 }
 
-const stateTimes = rows
-  .map((row) => row.stateMs)
-  .filter((value) => Number.isFinite(value) && value > 0);
 const summary = {
-  averageQuality: average(rows.map((row) => row.quality).filter(Number.isFinite)),
+  averageContractPassRate: finiteAverage(rows.map((row) => row.contractPassRate)),
+  averageQuality: finiteAverage(rows.map((row) => row.quality)),
   averageSuccessRate: average(rows.map((row) => row.successRate)),
   cases: rows.length,
-  medianFirstResponseMs: median(rows.map((row) => row.firstResponseMs)),
-  medianGenerationMs: median(rows.map((row) => row.generationMs)),
-  medianStateMs: stateTimes.length > 0 ? median(stateTimes) : null,
+  contractMetrics: Object.fromEntries(
+    [...new Set(rows.flatMap((row) => Object.keys(row.contractMetrics)))].map((name) => [
+      name,
+      average(rows.map((row) => row.contractMetrics[name]).filter(Number.isFinite)),
+    ]),
+  ),
+  medianFirstResponseMs: finiteMedian(rows.map((row) => row.firstResponseMs)),
+  medianGenerationMs: finiteMedian(
+    rows.map((row) => row.generationMs),
+    { positive: true },
+  ),
+  medianStateMs: finiteMedian(
+    rows.map((row) => row.stateMs),
+    { positive: true },
+  ),
 };
 await writeJson(join(runDir, 'summary.json'), { rows, summary });
 
 const lines = [
   `# Walkthrough eval: ${label}`,
   '',
-  '| Case | Attempts | Success | Hunks | State | Prompt | First response | Generation | Input | Output | Main coverage | Quality | Transport |',
-  '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|',
+  '| Case | Variant | Attempts | Success | Contract | Contract metrics | Calls | Hunks | State | Prompt | First response | Generation | Input | Output | Main coverage | Quality | Transport |',
+  '|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|',
   ...rows.map(
     (row) =>
-      `| ${row.case} | ${row.attempts} | ${(row.successRate * 100).toFixed(0)}% | ${row.hunkCount} | ${Number.isFinite(row.stateMs) ? `${row.stateMs.toFixed(1)}ms` : 'n/a'} | ${Math.round(row.promptChars / 1000)}k | ${(row.firstResponseMs / 1000).toFixed(2)}s | ${(row.generationMs / 1000).toFixed(2)}s | ${Math.round(row.inputTokens)} | ${Math.round(row.outputTokens)} | ${(row.mainCoverage * 100).toFixed(0)}% | ${row.quality.toFixed(1)}/100 | ${row.transport} |`,
+      `| ${row.case} | ${row.variant} | ${row.attempts} | ${(row.successRate * 100).toFixed(0)}% | ${formatNumber(row.contractPassRate, (value) => `${(value * 100).toFixed(0)}%`)} | ${
+        Object.entries(row.contractMetrics)
+          .map(([name, value]) => `${name}=${value.toFixed(3)}`)
+          .join(', ') || 'n/a'
+      } | ${row.modelCalls} | ${row.hunkCount} | ${formatNumber(row.stateMs, (value) => `${value.toFixed(1)}ms`)} | ${formatNumber(row.promptChars, (value) => `${Math.round(value / 1000)}k`)} | ${formatNumber(row.firstResponseMs, (value) => `${(value / 1000).toFixed(2)}s`)} | ${formatNumber(row.generationMs, (value) => `${(value / 1000).toFixed(2)}s`)} | ${formatNumber(row.inputTokens, Math.round)} | ${formatNumber(row.outputTokens, Math.round)} | ${formatNumber(row.mainCoverage, (value) => `${(value * 100).toFixed(0)}%`)} | ${formatNumber(row.quality, (value) => `${value.toFixed(1)}/100`)} | ${row.transport} |`,
   ),
   '',
   '## Summary',
