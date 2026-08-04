@@ -51,6 +51,7 @@ import type {
   CodeViewItemMetadata,
   CodeQualityAnnotationMetadata,
   DiffSearchMatch,
+  RegionalReplayAnnotationMetadata,
   ReviewAnnotationMetadata,
   ReviewComment,
   ReviewCommentAnnotationMetadata,
@@ -135,6 +136,7 @@ import type {
   PullRequestCodeQualityFinding,
   PullRequestExistingReviewComment,
   ReviewContextResolver,
+  ReviewVersionId,
   ResolvedReviewSource,
   ReviewSource,
   WalkthroughRegion,
@@ -2292,6 +2294,150 @@ function WalkthroughRegionAnnotation({
   );
 }
 
+const formatReplayLineRange = ({ end, start }: { end: number; start: number }) => {
+  const firstLine = start + 1;
+  const lastLine = end;
+  if (start === end) {
+    return `at boundary before line ${firstLine}`;
+  }
+  return firstLine === lastLine ? `line ${firstLine}` : `lines ${firstLine}–${lastLine}`;
+};
+
+const formatPriorPatchEvidence = (
+  preimage: ReadonlyArray<string>,
+  postimage: ReadonlyArray<string>,
+) => {
+  const lines = [...preimage.map((line) => `-${line}`), ...postimage.map((line) => `+${line}`)];
+  return lines.length > 0 ? lines.join('\n') : '(empty patch)';
+};
+
+function RegionalReplayAnnotation({
+  annotation,
+}: {
+  annotation: DiffLineAnnotation<RegionalReplayAnnotationMetadata>;
+}) {
+  const { fragment, pairId, placement, region, regionIndex, regionIndexes, regions } =
+    annotation.metadata;
+  const cleanRegions = regions.filter(
+    (candidate): candidate is Extract<typeof candidate, { kind: 'replay-clean' }> =>
+      candidate.kind === 'replay-clean',
+  );
+  const conflictRegions = regions.filter(
+    (candidate): candidate is Extract<typeof candidate, { kind: 'replay-conflict' }> =>
+      candidate.kind === 'replay-conflict',
+  );
+  const incompleteRegions = regions.filter(
+    (candidate): candidate is Extract<typeof candidate, { kind: 'incomplete' }> =>
+      candidate.kind === 'incomplete',
+  );
+  const allRegionsHaveKind = (kind: typeof region.kind) =>
+    regions.every((candidate) => candidate.kind === kind);
+  const sourceLabel = allRegionsHaveKind('replay-clean')
+    ? 'Expected Replay → Later HEAD'
+    : allRegionsHaveKind('replay-conflict')
+      ? 'Later Base → Later HEAD'
+      : allRegionsHaveKind('incomplete')
+        ? 'Regional replay incomplete'
+        : 'Regional replay sources';
+  const sourceBadge = allRegionsHaveKind('replay-clean')
+    ? 'Expected Replay · synthetic left side'
+    : allRegionsHaveKind('replay-conflict')
+      ? 'Later Base · real left side'
+      : allRegionsHaveKind('incomplete')
+        ? 'Evidence unavailable'
+        : 'Mixed regional sources';
+  const priorEditIds = [
+    ...new Set(conflictRegions.flatMap((candidate) => candidate.priorEditIds)),
+  ].toSorted();
+  const currentEditIds = [
+    ...new Set(conflictRegions.flatMap((candidate) => candidate.affectedCurrentEditIds)),
+  ].toSorted();
+  const priorEdits = [
+    ...new Map(
+      conflictRegions
+        .flatMap((candidate) => candidate.priorEdits)
+        .map((edit) => [edit.id, edit] as const),
+    ).values(),
+  ];
+  const missingEvidence = [
+    ...new Set(incompleteRegions.flatMap((candidate) => candidate.missingEvidence)),
+  ];
+  const primaryCleanRegion = cleanRegions[0];
+  const isHiddenSplitDuplicate = pairId != null && fragment === 'additions';
+
+  return (
+    <section
+      aria-hidden={isHiddenSplitDuplicate ? true : undefined}
+      aria-label={`Regional replay ${regionIndex + 1}: ${sourceLabel}`}
+      className="regional-replay-annotation"
+      data-replay-fragment={fragment}
+      data-replay-kind={region.kind}
+      data-replay-placement={placement}
+      data-replay-regions={regionIndexes.join(',')}
+      inert={isHiddenSplitDuplicate ? true : undefined}
+      {...(pairId ? { 'data-replay-pair': pairId } : {})}
+      slot={`annotation-${annotation.side}-${annotation.lineNumber}`}
+    >
+      <header className="regional-replay-annotation-header">
+        <strong>{sourceLabel}</strong>
+        <span className="regional-replay-source-badge">{sourceBadge}</span>
+        <span>
+          {regionIndexes.length === 1
+            ? `Region ${regionIndex + 1}`
+            : `Regions ${regionIndexes.map((index) => index + 1).join(', ')}`}
+        </span>
+      </header>
+      {placement === 'leading-context' ? <p>Applies to the following conflict region.</p> : null}
+      {placement === 'trailing-context' ? <p>Anchored after shared conflict context.</p> : null}
+      {allRegionsHaveKind('replay-clean') && primaryCleanRegion ? (
+        <p>
+          Expected Replay rows are synthetic and read-only. Later HEAD
+          {primaryCleanRegion.laterHead.path ? ` (${primaryCleanRegion.laterHead.path})` : ''} rows
+          retain their real endpoint coordinates.
+        </p>
+      ) : null}
+      {conflictRegions.length > 0 ? (
+        <>
+          {conflictRegions.map((conflict, index) => (
+            <p key={`${conflict.priorEditIds.join(':')}:${conflict.laterBaseRange.start}:${index}`}>
+              Later Base{conflict.laterBase.path ? ` (${conflict.laterBase.path})` : ''}{' '}
+              {formatReplayLineRange(conflict.laterBaseRange)} is compared with Later HEAD
+              {conflict.laterHead.path ? ` (${conflict.laterHead.path})` : ''}.
+            </p>
+          ))}
+          {currentEditIds.length === 0 ? (
+            <p>
+              No Current Patch edit overlaps this conflict; the card applies to shared Later
+              Base/HEAD context.
+            </p>
+          ) : null}
+          <div className="regional-replay-annotation-ids">
+            <span>Prior Patch: {priorEditIds.join(', ') || 'none'}</span>
+            <span>Current Patch: {currentEditIds.join(', ') || 'none'}</span>
+          </div>
+          <details className="regional-replay-prior-evidence" open>
+            <summary>Prior Patch evidence ({priorEdits.length}, read-only)</summary>
+            {priorEdits.map((edit) => (
+              <article key={edit.id}>
+                <div>
+                  <code>{edit.id}</code>
+                  <span>
+                    {edit.beforePath ?? 'Earlier Base'} {formatReplayLineRange(edit.beforeRange)}
+                    {' → '}
+                    {edit.afterPath ?? 'Earlier HEAD'} {formatReplayLineRange(edit.afterRange)}
+                  </span>
+                </div>
+                <pre>{formatPriorPatchEvidence(edit.preimage, edit.postimage)}</pre>
+              </article>
+            ))}
+          </details>
+        </>
+      ) : null}
+      {incompleteRegions.length > 0 ? <p>Missing evidence: {missingEvidence.join(' ')}</p> : null}
+    </section>
+  );
+}
+
 const scrollTargetRetryFrameLimit = 90;
 
 const getEffectiveScrollBehavior = (behavior: ReviewScrollBehavior) =>
@@ -2406,6 +2552,299 @@ const firstVisibleRegionLine = (fileDiff: FileDiffMetadata, region: WalkthroughR
   return null;
 };
 
+type ReplayAnnotationRow = {
+  additionLineNumber: number | null;
+  deletionLineNumber: number | null;
+  isContext: boolean;
+};
+
+const visibleReplayRows = (fileDiff: FileDiffMetadata): ReadonlyArray<ReplayAnnotationRow> => {
+  const rows: Array<ReplayAnnotationRow> = [];
+  for (const hunk of fileDiff.hunks) {
+    let additionLine = hunk.additionStart;
+    let deletionLine = hunk.deletionStart;
+    for (const content of hunk.hunkContent) {
+      if (content.type === 'context') {
+        for (let offset = 0; offset < content.lines; offset += 1) {
+          rows.push({
+            additionLineNumber: additionLine + offset,
+            deletionLineNumber: deletionLine + offset,
+            isContext: true,
+          });
+        }
+        additionLine += content.lines;
+        deletionLine += content.lines;
+        continue;
+      }
+      const lineCount = Math.max(content.additions, content.deletions);
+      for (let offset = 0; offset < lineCount; offset += 1) {
+        rows.push({
+          additionLineNumber: offset < content.additions ? additionLine + offset : null,
+          deletionLineNumber: offset < content.deletions ? deletionLine + offset : null,
+          isContext: false,
+        });
+      }
+      additionLine += content.additions;
+      deletionLine += content.deletions;
+    }
+  }
+  return rows;
+};
+
+type RegionalReplayAnnotationPlacement = {
+  additionLineNumber: number | null;
+  deletionLineNumber: number | null;
+  placement: RegionalReplayAnnotationMetadata['placement'];
+};
+
+const annotationPlacementForRow = (
+  row: ReplayAnnotationRow,
+  placement: RegionalReplayAnnotationMetadata['placement'],
+): RegionalReplayAnnotationPlacement => ({
+  additionLineNumber: row.additionLineNumber,
+  deletionLineNumber: row.deletionLineNumber,
+  placement,
+});
+
+const fileReplayAnnotationPlacement = (
+  status: ChangedFile['status'],
+): RegionalReplayAnnotationPlacement => ({
+  additionLineNumber: status === 'deleted' ? null : 0,
+  deletionLineNumber: status === 'added' ? null : 0,
+  placement: 'file',
+});
+
+const replayRangeIncludesLine = (
+  lineNumber: number | null,
+  range: { end: number; start: number },
+) => lineNumber != null && lineNumber > range.start && lineNumber <= range.end;
+
+const stableReplayContextPlacement = (
+  rows: ReadonlyArray<ReplayAnnotationRow>,
+  side: 'additions' | 'deletions',
+  range: { end: number; start: number },
+  bounds?: { end: number; start: number },
+): RegionalReplayAnnotationPlacement | null => {
+  const lineForSide = (row: ReplayAnnotationRow) =>
+    side === 'additions' ? row.additionLineNumber : row.deletionLineNumber;
+  const trailing = rows.find(
+    (row) =>
+      row.isContext &&
+      (lineForSide(row) ?? 0) > range.end &&
+      (bounds == null || (lineForSide(row) ?? Infinity) <= bounds.end),
+  );
+  if (trailing) {
+    return annotationPlacementForRow(trailing, 'trailing-context');
+  }
+  const leading = rows
+    .filter(
+      (row) =>
+        row.isContext &&
+        (lineForSide(row) ?? Infinity) <= range.start &&
+        (bounds == null || (lineForSide(row) ?? 0) > bounds.start),
+    )
+    .at(-1);
+  return leading ? annotationPlacementForRow(leading, 'leading-context') : null;
+};
+
+const firstVisibleReplayPlacement = (
+  rows: ReadonlyArray<ReplayAnnotationRow>,
+  side: 'additions' | 'deletions',
+  range: { end: number; start: number },
+) => {
+  const row = rows.find((candidate) =>
+    replayRangeIncludesLine(
+      side === 'additions' ? candidate.additionLineNumber : candidate.deletionLineNumber,
+      range,
+    ),
+  );
+  return row ? annotationPlacementForRow(row, 'region') : null;
+};
+
+const currentPatchRangeForConflict = (
+  replay: NonNullable<ChangedFile['regionalReplay']>,
+  region: Extract<
+    NonNullable<ChangedFile['regionalReplay']>['regions'][number],
+    { kind: 'replay-conflict' }
+  >,
+) => {
+  const affectedIds = new Set(region.affectedCurrentEditIds);
+  const ranges = replay.currentEdits
+    .filter((edit) => affectedIds.has(edit.id))
+    .map((edit) => edit.afterRange);
+  if (ranges.length === 0) {
+    return region.laterHead.range;
+  }
+  return ranges.reduce(
+    (combined, candidate) => ({
+      end: Math.max(combined.end, candidate.end),
+      start: Math.min(combined.start, candidate.start),
+    }),
+    ranges[0]!,
+  );
+};
+
+const getRegionalReplayAnnotationPlacement = (
+  file: ChangedFile,
+  fileDiff: FileDiffMetadata,
+  replay: NonNullable<ChangedFile['regionalReplay']>,
+  region: NonNullable<ChangedFile['regionalReplay']>['regions'][number],
+): RegionalReplayAnnotationPlacement | null => {
+  // A one-sided file has no real counterpart row for an aligned split card.
+  // Keep every regional card in its sole file-level slot, even when the
+  // projection happens to contain a visible changed row. This prevents an
+  // added/deleted file from growing an invented empty-side annotation.
+  if (file.status === 'added' || file.status === 'deleted') {
+    return fileReplayAnnotationPlacement(file.status);
+  }
+  if (region.kind === 'incomplete') {
+    return fileReplayAnnotationPlacement(file.status);
+  }
+
+  const rows = visibleReplayRows(fileDiff);
+  if (region.kind === 'replay-conflict') {
+    // Conflict ranges are intentionally expanded to stable anchors. The
+    // card, however, belongs beside the actual Current Patch change when one
+    // exists, so an anchor row retained inside the expanded conflict remains
+    // eligible as trailing or leading shared context.
+    const currentPatchRange = currentPatchRangeForConflict(replay, region);
+    const laterHeadContext = stableReplayContextPlacement(
+      rows,
+      'additions',
+      currentPatchRange,
+      region.laterHead.range,
+    );
+    if (laterHeadContext) {
+      return laterHeadContext;
+    }
+    const laterBaseContext = stableReplayContextPlacement(
+      rows,
+      'deletions',
+      region.laterBaseRange,
+      region.laterBaseRange,
+    );
+    if (laterBaseContext) {
+      return laterBaseContext;
+    }
+  }
+
+  const laterHeadPlacement = firstVisibleReplayPlacement(
+    rows,
+    'additions',
+    region.kind === 'replay-conflict'
+      ? currentPatchRangeForConflict(replay, region)
+      : region.laterHead.range,
+  );
+  if (laterHeadPlacement) {
+    return laterHeadPlacement;
+  }
+
+  if (region.kind === 'replay-conflict') {
+    const laterBasePlacement = firstVisibleReplayPlacement(
+      rows,
+      'deletions',
+      region.laterBaseRange,
+    );
+    if (laterBasePlacement) {
+      return laterBasePlacement;
+    }
+    return fileReplayAnnotationPlacement(file.status);
+  }
+
+  // Clean regions with no rendered difference have no rows to label. They are
+  // intentionally absent rather than becoming a misleading file-level card.
+  return null;
+};
+
+const getRegionalReplayAnnotations = (
+  file: ChangedFile,
+  fileDiff: FileDiffMetadata,
+  diffStyle: CodiffDiffStyle,
+  annotatedRegionKeys: Set<string>,
+): ReadonlyArray<DiffLineAnnotation<RegionalReplayAnnotationMetadata>> => {
+  const replay = file.regionalReplay;
+  if (!replay) {
+    return [];
+  }
+  const candidates = replay.regions.flatMap((region, regionIndex) => {
+    const key = `${file.fingerprint}:${regionIndex}`;
+    if (annotatedRegionKeys.has(key)) {
+      return [];
+    }
+    const placement = getRegionalReplayAnnotationPlacement(file, fileDiff, replay, region);
+    if (!placement) {
+      return [];
+    }
+    annotatedRegionKeys.add(key);
+    return [{ placement, region, regionIndex }];
+  });
+  const groups = new Map<
+    string,
+    Array<{
+      placement: RegionalReplayAnnotationPlacement;
+      region: NonNullable<ChangedFile['regionalReplay']>['regions'][number];
+      regionIndex: number;
+    }>
+  >();
+  for (const candidate of candidates) {
+    // The two coordinates identify a real Pierre anchor. Coalescing happens
+    // only after each projection region chose its own anchor, so it cannot
+    // widen a region or search patch text to manufacture a common location.
+    const key = `${candidate.placement.deletionLineNumber ?? '_'}:${
+      candidate.placement.additionLineNumber ?? '_'
+    }`;
+    const group = groups.get(key);
+    if (group) {
+      group.push(candidate);
+    } else {
+      groups.set(key, [candidate]);
+    }
+  }
+  return [...groups.values()].flatMap((group) => {
+    const first = group[0];
+    if (!first) {
+      return [];
+    }
+    const { placement } = first;
+    const regions = group.map((candidate) => candidate.region);
+    const regionIndexes = group.map((candidate) => candidate.regionIndex);
+    const createAnnotation = (
+      side: 'additions' | 'deletions',
+      lineNumber: number,
+      fragment: RegionalReplayAnnotationMetadata['fragment'],
+      pairId?: string,
+    ) =>
+      ({
+        lineNumber,
+        metadata: {
+          fragment,
+          ...(pairId ? { pairId } : {}),
+          placement: placement.placement,
+          region: first.region,
+          regionIndex: first.regionIndex,
+          regionIndexes,
+          regions,
+          type: 'regional-replay',
+        },
+        side,
+      }) satisfies DiffLineAnnotation<RegionalReplayAnnotationMetadata>;
+    if (
+      diffStyle === 'split' &&
+      placement.additionLineNumber != null &&
+      placement.deletionLineNumber != null
+    ) {
+      const pairId = `${file.fingerprint}:${regionIndexes.join(',')}:${placement.placement}:${placement.deletionLineNumber}:${placement.additionLineNumber}`;
+      return [
+        createAnnotation('deletions', placement.deletionLineNumber, 'deletions', pairId),
+        createAnnotation('additions', placement.additionLineNumber, 'additions', pairId),
+      ];
+    }
+    const side = placement.additionLineNumber != null ? 'additions' : 'deletions';
+    const lineNumber = placement.additionLineNumber ?? placement.deletionLineNumber ?? 0;
+    return [createAnnotation(side, lineNumber, diffStyle === 'split' ? side : 'unified')];
+  });
+};
+
 const reviewCommentAnchorIsVisibleInFileDiff = (
   comment: ReviewComment,
   fileDiff: FileDiffMetadata,
@@ -2487,6 +2926,44 @@ const resolveRenderedSearchMatch = (
     candidates[0];
 
   return candidate ? { ...match, itemId: candidate.itemId } : null;
+};
+
+const selectionLacksReplayEndpointProvenance = (
+  replay: ChangedFile['regionalReplay'],
+  side: 'additions' | 'deletions',
+  startLine: number,
+  endLine: number,
+) => {
+  if (!replay) {
+    return false;
+  }
+  // Incomplete projections deliberately retain no row-level endpoint text.
+  // Their file-level card may be visible, but a line callback cannot safely
+  // name either revision, so it must not create a mutable review target.
+  if (replay.regions.some((region) => region.kind === 'incomplete')) {
+    return true;
+  }
+  if (side !== 'deletions') {
+    return false;
+  }
+  for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
+    const usesSyntheticExpectedReplay = replay.regions.some(
+      (region) =>
+        region.kind === 'replay-clean' &&
+        replayRangeIncludesLine(lineNumber, region.expectedReplay.range),
+    );
+    // A synthetic Expected Replay coordinate can numerically overlap a real
+    // Later Base coordinate after an applied insertion/deletion changes the
+    // left-side offset. Pierre's line callback intentionally carries only a
+    // line number, not its source hunk, so the safe interpretation is
+    // read-only whenever that number may name a synthetic row. This can
+    // conservatively withhold a conflicting B1 row in the overlap, but never
+    // lets a reviewer comment on fabricated provenance.
+    if (usesSyntheticExpectedReplay) {
+      return true;
+    }
+  }
+  return false;
 };
 
 // Estimate the rendered row index of a file line inside a diff item so comment
@@ -2696,6 +3173,7 @@ export function ReviewCodeView({
   sourceDescriptionFooter,
   sourceDescriptionFooterAside,
   supportsReviewCommentActions,
+  targetVersionId,
   theme = 'system',
   viewed,
   walkthroughNotes,
@@ -2762,6 +3240,7 @@ export function ReviewCodeView({
   sourceDescriptionFooter?: ReactNode;
   sourceDescriptionFooterAside?: ReactNode;
   supportsReviewCommentActions: boolean;
+  targetVersionId?: ReviewVersionId;
   theme?: CodiffPreferences['theme'];
   viewed: Record<string, string>;
   walkthroughNotes: ReadonlyMap<string, WalkthroughNote>;
@@ -2857,6 +3336,7 @@ export function ReviewCodeView({
   const stickyHeaderFrameRef = useRef<number | null>(null);
 
   const reviewBlocks = useMemo(() => blocks ?? createFileReviewBlocks(files), [blocks, files]);
+  const hasRegionalReplay = reviewBlocks.some((block) => block.file?.regionalReplay != null);
   const codeProjectionKey = useMemo(
     () => getReviewCodeProjectionKey(blocks, files, showWhitespace),
     [blocks, files, showWhitespace],
@@ -2924,6 +3404,7 @@ export function ReviewCodeView({
     const nextItemBlockId = new Map<string, string>();
     const nextItemMetadata = new Map<string, CodeViewItemMetadata>();
     const nextSearchTargetsByBaseItemId = new Map<string, Array<RenderedSearchTarget>>();
+    const annotatedRegionalReplayKeys = new Set<string>();
     const annotatedRegionIds = new Set<string>();
     const fontLayoutKey = `line-height:${diffLineHeight}`;
 
@@ -3061,6 +3542,12 @@ export function ReviewCodeView({
                 side: 'additions',
               }) satisfies DiffLineAnnotation<ReviewAnnotationMetadata>,
           );
+        const regionalReplayAnnotations = getRegionalReplayAnnotations(
+          file,
+          fileDiff,
+          diffStyle,
+          annotatedRegionalReplayKeys,
+        );
         const visibleRegions = (block.regions ?? []).filter(
           (region) => firstVisibleRegionLine(fileDiff, region) != null,
         );
@@ -3098,6 +3585,7 @@ export function ReviewCodeView({
           isSelected,
           isViewed,
           lineCount,
+          ...(file.regionalReplay ? { regionalReplay: file.regionalReplay } : {}),
           reviewIdentity,
           section,
           sectionCount: file.sections.length,
@@ -3175,7 +3663,12 @@ export function ReviewCodeView({
           continue;
         }
         nextItems.push({
-          annotations: [...annotationMap.values(), ...codeQualityAnnotations, ...regionAnnotations],
+          annotations: [
+            ...regionalReplayAnnotations,
+            ...annotationMap.values(),
+            ...codeQualityAnnotations,
+            ...regionAnnotations,
+          ],
           collapsed: isCollapsed,
           fileDiff,
           id,
@@ -3188,6 +3681,10 @@ export function ReviewCodeView({
                 metadata.type === 'code-quality'
                   ? `${metadata.finding.fingerprint}:${metadata.finding.status}`
                   : '',
+              )
+              .join(',')}:${regionalReplayAnnotations
+              .map(
+                ({ metadata }) => `${metadata.regionIndex}:${JSON.stringify(file.regionalReplay)}`,
               )
               .join(',')}:${visibleRegions
               .map(
@@ -3253,6 +3750,9 @@ export function ReviewCodeView({
       if (item.type !== 'diff') {
         return;
       }
+      if (itemMetadata.get(item.id)?.regionalReplay) {
+        return;
+      }
       const sectionKey = getSectionExpansionKey(item.id);
       if (!sectionKey) {
         return;
@@ -3272,7 +3772,7 @@ export function ReviewCodeView({
         }
       }
     },
-    [getSectionExpansionKey],
+    [getSectionExpansionKey, itemMetadata],
   );
 
   const recordExpansionClick = useCallback(
@@ -3305,6 +3805,9 @@ export function ReviewCodeView({
       if (!renderedItem || renderedItem.type !== 'diff') {
         return;
       }
+      if (itemMetadata.get(renderedItem.id)?.regionalReplay) {
+        return;
+      }
       const sectionKey = getSectionExpansionKey(renderedItem.id);
       if (!sectionKey) {
         return;
@@ -3322,7 +3825,7 @@ export function ReviewCodeView({
         `${sectionKey}:${reviewContextExpansionDigest(nextState)}`,
       );
     },
-    [getSectionExpansionKey],
+    [getSectionExpansionKey, itemMetadata],
   );
 
   useEffect(() => {
@@ -3437,7 +3940,14 @@ export function ReviewCodeView({
       onCreateComment({
         anchor: 'file',
         filePath: meta.file.path,
-        ...(meta.section.range ? { position: { range: meta.section.range } } : {}),
+        ...(meta.section.range
+          ? {
+              position: {
+                range: meta.section.range,
+                ...(targetVersionId ? { versionId: targetVersionId } : {}),
+              },
+            }
+          : {}),
         sectionId: meta.section.id,
       });
       clearCommentLineHighlight();
@@ -3449,6 +3959,7 @@ export function ReviewCodeView({
       onCreateComment,
       onToggleCollapsed,
       scrollFileItemToTop,
+      targetVersionId,
     ],
   );
 
@@ -3478,11 +3989,22 @@ export function ReviewCodeView({
 
       const start = Math.min(range.start, range.end);
       const end = Math.max(range.start, range.end);
+      if (selectionLacksReplayEndpointProvenance(meta.regionalReplay, endSide, start, end)) {
+        clearCommentLineHighlight();
+        return;
+      }
       cancelPendingEmptyCommentDeletes();
       onCreateComment({
         filePath: meta.file.path,
         lineNumber: end,
-        ...(meta.section.range ? { position: { range: meta.section.range } } : {}),
+        ...(meta.section.range
+          ? {
+              position: {
+                range: meta.section.range,
+                ...(targetVersionId ? { versionId: targetVersionId } : {}),
+              },
+            }
+          : {}),
         sectionId: meta.section.id,
         side: endSide,
         ...(end !== start ? { startLineNumber: start } : {}),
@@ -3491,10 +4013,12 @@ export function ReviewCodeView({
     },
     [
       cancelPendingEmptyCommentDeletes,
+      clearCommentLineHighlight,
       deferCommentLineHighlightClear,
       isReadOnly,
       itemMetadata,
       onCreateComment,
+      targetVersionId,
     ],
   );
 
@@ -3512,7 +4036,7 @@ export function ReviewCodeView({
             : mutableSource && onLoadSectionContents != null),
       ),
     );
-    if (!hasSupportedPartialSection) {
+    if (hasRegionalReplay || !hasSupportedPartialSection) {
       return undefined;
     }
 
@@ -3566,7 +4090,14 @@ export function ReviewCodeView({
         }
       });
     };
-  }, [codeProjectionKey, onLoadSectionContents, resolveReviewContext, reviewBlocks, source]);
+  }, [
+    codeProjectionKey,
+    hasRegionalReplay,
+    onLoadSectionContents,
+    resolveReviewContext,
+    reviewBlocks,
+    source,
+  ]);
 
   const codeViewOptions: CodeViewOptions<ReviewAnnotationMetadata> = useMemo(
     () =>
@@ -3576,7 +4107,10 @@ export function ReviewCodeView({
         diffStyle,
         enableGutterUtility: !isReadOnly,
         enableLineSelection: !isReadOnly,
-        expandUnchanged: false,
+        // A replay card can deliberately live on shared context rather than
+        // a changed row. Keep that chosen coordinate rendered instead of
+        // letting Pierre collapse it behind a context separator.
+        expandUnchanged: hasRegionalReplay,
         expansionLineCount: diffContextExpansionLineCount,
         hunkSeparators: 'line-info-basic',
         itemMetrics: codeViewItemMetrics,
@@ -3619,12 +4153,30 @@ export function ReviewCodeView({
           if (!side) {
             return;
           }
+          if (
+            selectionLacksReplayEndpointProvenance(
+              meta.regionalReplay,
+              side,
+              line.lineNumber,
+              line.lineNumber,
+            )
+          ) {
+            clearCommentLineHighlight();
+            return;
+          }
 
           cancelPendingEmptyCommentDeletes();
           onCreateComment({
             filePath: meta.file.path,
             lineNumber: line.lineNumber,
-            ...(meta.section.range ? { position: { range: meta.section.range } } : {}),
+            ...(meta.section.range
+              ? {
+                  position: {
+                    range: meta.section.range,
+                    ...(targetVersionId ? { versionId: targetVersionId } : {}),
+                  },
+                }
+              : {}),
             sectionId: meta.section.id,
             side,
           });
@@ -3687,6 +4239,7 @@ export function ReviewCodeView({
               ),
             ),
           );
+          node.classList.toggle('codiff-regional-replay-item', metadata?.regionalReplay != null);
           if (phase !== 'unmount' && 'expandHunk' in instance) {
             restoreExpansionForItem(context.item, instance);
           }
@@ -3704,9 +4257,11 @@ export function ReviewCodeView({
     [
       bottomInset,
       cancelPendingEmptyCommentDeletes,
+      clearCommentLineHighlight,
       codeProjectionKey,
       createCommentForRange,
       diffStyle,
+      hasRegionalReplay,
       isReadOnly,
       itemMetadata,
       loadDiffFiles,
@@ -3715,6 +4270,7 @@ export function ReviewCodeView({
       onLoadSection,
       pendingContextHydrationKeys,
       restoreExpansionForItem,
+      targetVersionId,
       theme,
       wordWrap,
     ],
@@ -4392,6 +4948,14 @@ export function ReviewCodeView({
 
       if (annotation.metadata.type === 'walkthrough-header') {
         return annotation.metadata.header;
+      }
+
+      if (annotation.metadata.type === 'regional-replay') {
+        return (
+          <RegionalReplayAnnotation
+            annotation={annotation as DiffLineAnnotation<RegionalReplayAnnotationMetadata>}
+          />
+        );
       }
 
       if (annotation.metadata.type === 'code-quality') {

@@ -6,6 +6,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import type { ReviewComment, ReviewIdentity } from '../lib/app-types.ts';
+import { projectRegionAwareReplay } from '../lib/region-aware-replay.ts';
 import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
@@ -138,6 +139,19 @@ beforeEach(() => {
 const getCodeViewItemVersion = (id: string) =>
   (codeViewMock.lastItems.find((item) => item.id === id) as { version?: number } | undefined)
     ?.version;
+
+type RegionalReplayAnnotation = {
+  lineNumber: number;
+  metadata: { type?: string };
+  side: 'additions' | 'deletions';
+};
+
+const regionalReplayAnnotationsFor = (path: string) => {
+  const item = codeViewMock.lastItems.find((candidate) => candidate.id.includes(path)) as
+    | { annotations?: ReadonlyArray<RegionalReplayAnnotation> }
+    | undefined;
+  return item?.annotations?.filter((annotation) => annotation.metadata.type === 'regional-replay');
+};
 
 const createLoadedMarkdownFile = (contents: string, fingerprint: string) => {
   const file = createChangedFileWithPatch(
@@ -1735,6 +1749,25 @@ test('file comments can be created for GitLab merge requests and GitHub pull req
     position: { range },
     sectionId: 'src/comment.ts:unstaged',
   });
+  await view.rerender(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onCreateComment={onCreateComment}
+      source={gitHubSource}
+      supportsReviewCommentActions
+      targetVersionId={'version-2' as never}
+    />,
+  );
+  const versionFileCommentButton = view.container.querySelector<HTMLButtonElement>(
+    '.codiff-file-comment-button',
+  );
+  await act(async () => versionFileCommentButton?.click());
+  expect(onCreateComment).toHaveBeenLastCalledWith({
+    anchor: 'file',
+    filePath: 'src/comment.ts',
+    position: { range, versionId: 'version-2' },
+    sectionId: 'src/comment.ts:unstaged',
+  });
 });
 
 test('file-level review comments render as measured file annotations', async () => {
@@ -2442,6 +2475,732 @@ test('unavailable host context leaves the origin-independent patch review intact
       "GitLab could not load before contents for 'src/unavailable-context.ts'.",
     );
     expect(codeViewMock.lastItems.some((candidate) => candidate.type === 'diff')).toBe(true);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay annotations retain source provenance and precede review annotations', async () => {
+  const cleanProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'old\n',
+    laterHead: 'current\n',
+    path: 'src/clean.ts',
+  });
+  const conflictProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/conflict.ts',
+  });
+  const incompleteProjection = projectRegionAwareReplay({
+    earlierBase: undefined,
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/incomplete.ts',
+  });
+  const cleanFile = {
+    ...createChangedFileWithPatch(
+      'src/clean.ts',
+      'diff --git a/src/clean.ts b/src/clean.ts\n@@ -1 +1 @@\n-prior\n+current\n',
+    ),
+    regionalReplay: cleanProjection,
+  } satisfies ChangedFile;
+  const conflictFile = {
+    ...createChangedFileWithPatch(
+      'src/conflict.ts',
+      'diff --git a/src/conflict.ts b/src/conflict.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    regionalReplay: conflictProjection,
+  } satisfies ChangedFile;
+  const incompleteFile = {
+    ...createChangedFileWithPatch(
+      'src/incomplete.ts',
+      'diff --git a/src/incomplete.ts b/src/incomplete.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    regionalReplay: incompleteProjection,
+  } satisfies ChangedFile;
+  const comment = {
+    body: 'Check the final value.',
+    filePath: cleanFile.path,
+    id: 'regional-comment',
+    kind: 'local-note' as const,
+    lineNumber: 1,
+    sectionId: cleanFile.sections[0]!.id,
+    side: 'additions' as const,
+  } satisfies ReviewComment;
+  const finding = {
+    description: 'Explain the update.',
+    filePath: cleanFile.path,
+    fingerprint: 'regional-quality',
+    lineNumber: 1,
+    severity: 'info' as const,
+    status: 'new' as const,
+  } satisfies PullRequestCodeQualityFinding;
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      codeQualityFindings={[finding]}
+      comments={[comment]}
+      disableWorkerPool
+      files={[cleanFile, conflictFile, incompleteFile]}
+    />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('[data-replay-kind="replay-clean"]')?.textContent,
+      ).toContain('Expected Replay → Later HEAD');
+    });
+    const conflict = view.container.querySelector<HTMLDetailsElement>(
+      '[data-replay-kind="replay-conflict"] details',
+    );
+    expect(conflict?.open).toBe(true);
+    expect(conflict?.textContent).toContain('prior-patch:0');
+    expect(view.container.querySelector('[data-replay-kind="incomplete"]')?.textContent).toContain(
+      'Earlier Base content is unavailable.',
+    );
+    const splitCleanCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-clean"]'),
+    ];
+    expect(splitCleanCards).toHaveLength(2);
+    expect(splitCleanCards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(splitCleanCards[0]?.dataset.replayPair).toBe(splitCleanCards[1]?.dataset.replayPair);
+
+    const cleanCard = view.container.querySelector('[data-replay-kind="replay-clean"]');
+    const reviewComment = view.container.querySelector(
+      '.review-comment-thread:not(.code-quality-finding-thread)',
+    );
+    const codeQuality = view.container.querySelector('.code-quality-finding');
+    expect(cleanCard?.compareDocumentPosition(reviewComment!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(cleanCard?.compareDocumentPosition(codeQuality!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(codeViewMock.lastOptions?.loadDiffFiles).toBeUndefined();
+    expect(codeViewMock.lastOptions?.expandUnchanged).toBe(true);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay uses one unified annotation and one extant-side file slot', async () => {
+  const cleanProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'old\n',
+    laterHead: 'current\n',
+    path: 'src/unified.ts',
+  });
+  const incompleteAddedProjection = projectRegionAwareReplay({
+    earlierBase: undefined,
+    earlierHead: undefined,
+    laterBase: undefined,
+    laterHead: 'current\n',
+    path: 'src/added.ts',
+  });
+  const unifiedFile = {
+    ...createChangedFileWithPatch(
+      'src/unified.ts',
+      'diff --git a/src/unified.ts b/src/unified.ts\n@@ -1 +1 @@\n-prior\n+current\n',
+    ),
+    regionalReplay: cleanProjection,
+  } satisfies ChangedFile;
+  const addedFile = {
+    ...createChangedFileWithPatch(
+      'src/added.ts',
+      'diff --git a/src/added.ts b/src/added.ts\n@@ -0,0 +1 @@\n+current\n',
+    ),
+    regionalReplay: incompleteAddedProjection,
+    status: 'added' as const,
+  } satisfies ChangedFile;
+  const unified = await renderReact(
+    <ReviewCodeViewHarness diffStyle="unified" disableWorkerPool files={[unifiedFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(unified.container.querySelectorAll('[data-replay-kind="replay-clean"]')).toHaveLength(
+        1,
+      );
+    });
+    const card = unified.container.querySelector<HTMLElement>('[data-replay-kind="replay-clean"]');
+    expect(card?.dataset.replayFragment).toBe('unified');
+    expect(card?.dataset.replayPair).toBeUndefined();
+  } finally {
+    await unified.cleanup();
+  }
+
+  const split = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[addedFile]} />);
+  try {
+    await waitFor(() => {
+      expect(split.container.querySelectorAll('[data-replay-kind="incomplete"]')).toHaveLength(1);
+    });
+    const card = split.container.querySelector<HTMLElement>('[data-replay-kind="incomplete"]');
+    expect(card?.dataset.replayFragment).toBe('additions');
+    expect(card?.dataset.replayPair).toBeUndefined();
+  } finally {
+    await split.cleanup();
+  }
+});
+
+test('regional replay coalesces cards that resolve to one Pierre anchor', async () => {
+  const sourceProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/coalesced.ts',
+  });
+  const first = sourceProjection.regions[0];
+  if (!first || first.kind !== 'replay-conflict') {
+    throw new Error('Expected a replay conflict fixture.');
+  }
+  const second = {
+    ...first,
+    affectedCurrentEditIds: ['current-patch:1'],
+    priorEditIds: ['prior-patch:1'],
+    priorEdits: first.priorEdits.map((edit) => ({ ...edit, id: 'prior-patch:1' })),
+  };
+  const projection = { ...sourceProjection, regions: [first, second] };
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/coalesced.ts',
+      'diff --git a/src/coalesced.ts b/src/coalesced.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        2,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayRegions)).toEqual(['0,1', '0,1']);
+    expect(cards[0]?.dataset.replayPair).toBe(cards[1]?.dataset.replayPair);
+    expect(cards[0]?.textContent).toContain('prior-patch:0');
+    expect(cards[0]?.textContent).toContain('prior-patch:1');
+    const replayAnnotations = codeViewMock.lastItems.flatMap((item) =>
+      'annotations' in item && Array.isArray(item.annotations)
+        ? item.annotations.filter(
+            (
+              annotation,
+            ): annotation is {
+              metadata: { regionIndexes?: ReadonlyArray<number>; type?: string };
+            } =>
+              typeof annotation === 'object' &&
+              annotation != null &&
+              'metadata' in annotation &&
+              (annotation as { metadata?: { type?: string } }).metadata?.type === 'regional-replay',
+          )
+        : [],
+    );
+    expect(replayAnnotations).toHaveLength(2);
+    expect(replayAnnotations[0]?.metadata.regionIndexes).toEqual([0, 1]);
+    expect(replayAnnotations[1]?.metadata.regionIndexes).toEqual([0, 1]);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('separated replay conflicts do not borrow a later island as stable context', async () => {
+  const sourceProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/islands.ts',
+  });
+  const first = sourceProjection.regions[0];
+  if (!first || first.kind !== 'replay-conflict') {
+    throw new Error('Expected a replay conflict fixture.');
+  }
+  const second = {
+    ...first,
+    affectedCurrentEditIds: [],
+    laterBase: {
+      ...first.laterBase,
+      content: 'base two\nshared two\n',
+      range: { end: 6, start: 4 },
+    },
+    laterBaseRange: { end: 6, start: 4 },
+    laterHead: {
+      ...first.laterHead,
+      content: 'current two\nshared two\n',
+      range: { end: 6, start: 4 },
+    },
+    priorEditIds: ['prior-patch:1'],
+    priorEdits: first.priorEdits.map((edit) => ({ ...edit, id: 'prior-patch:1' })),
+  };
+  const projection = { ...sourceProjection, regions: [first, second] };
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/islands.ts',
+      [
+        'diff --git a/src/islands.ts b/src/islands.ts',
+        '@@ -1 +1 @@',
+        '-base',
+        '+current',
+        '@@ -5,2 +5,2 @@',
+        '-base two',
+        '+current two',
+        ' shared two',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const firstCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="0"]'),
+    ];
+    const secondCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="1"]'),
+    ];
+    expect(firstCards).toHaveLength(2);
+    expect(firstCards.map((card) => card.dataset.replayPlacement)).toEqual(['region', 'region']);
+    expect(secondCards).toHaveLength(2);
+    expect(secondCards.map((card) => card.dataset.replayPlacement)).toEqual(['region', 'region']);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('an incomplete projection keeps a line-zero slot without inventing a code line', async () => {
+  const projection = projectRegionAwareReplay({
+    earlierBase: undefined,
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/incomplete-slot.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/incomplete-slot.ts',
+      'diff --git a/src/incomplete-slot.ts b/src/incomplete-slot.ts\n@@ -0,0 +0,0 @@\n',
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="incomplete"]')).toHaveLength(2);
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="incomplete"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(cards[0]?.dataset.replayPair).toBe(cards[1]?.dataset.replayPair);
+    expect(cards[0]?.textContent).toContain('Earlier Base content is unavailable.');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay anchors beginning and EOF conflicts against their nearest shared context', async () => {
+  const beginningProjection = projectRegionAwareReplay({
+    earlierBase: 'old\ntail\n',
+    earlierHead: 'prior\ntail\n',
+    laterBase: 'base\ntail\n',
+    laterHead: 'current\ntail\n',
+    path: 'src/beginning.ts',
+  });
+  const eofProjection = projectRegionAwareReplay({
+    earlierBase: 'keep\nold\n',
+    earlierHead: 'keep\nprior\n',
+    laterBase: 'keep\nbase\n',
+    laterHead: 'keep\ncurrent\n',
+    path: 'src/eof.ts',
+  });
+  const beginningFile = {
+    ...createChangedFileWithPatch(
+      'src/beginning.ts',
+      'diff --git a/src/beginning.ts b/src/beginning.ts\n@@ -1,2 +1,2 @@\n-base\n+current\n tail\n',
+    ),
+    regionalReplay: beginningProjection,
+  } satisfies ChangedFile;
+  const eofFile = {
+    ...createChangedFileWithPatch(
+      'src/eof.ts',
+      'diff --git a/src/eof.ts b/src/eof.ts\n@@ -1,2 +1,2 @@\n keep\n-base\n+current\n',
+    ),
+    regionalReplay: eofProjection,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[beginningFile, eofFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    expect(
+      [...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]')]
+        .map((card) => card.dataset.replayPlacement)
+        .toSorted(),
+    ).toEqual(['leading-context', 'leading-context', 'trailing-context', 'trailing-context']);
+    expect(view.container.textContent).toContain('Applies to the following conflict region.');
+    expect(view.container.textContent).toContain('Anchored after shared conflict context.');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay anchors insertion-only and deletion-only Current Patch edits on surviving context', async () => {
+  const insertionProjection = projectRegionAwareReplay({
+    earlierBase: 'keep\nold\ntail\n',
+    earlierHead: 'keep\nold\nprior\ntail\n',
+    laterBase: 'keep\nbase\ntail\n',
+    laterHead: 'keep\nbase\ncurrent\ntail\n',
+    path: 'src/insertion.ts',
+  });
+  const deletionProjection = projectRegionAwareReplay({
+    earlierBase: 'keep\nold\ntail\n',
+    earlierHead: 'keep\nprior\ntail\n',
+    laterBase: 'keep\nbase\ntail\n',
+    laterHead: 'keep\ntail\n',
+    path: 'src/deletion.ts',
+  });
+  const insertionFile = {
+    ...createChangedFileWithPatch(
+      'src/insertion.ts',
+      'diff --git a/src/insertion.ts b/src/insertion.ts\n@@ -1,3 +1,4 @@\n keep\n base\n+current\n tail\n',
+    ),
+    regionalReplay: insertionProjection,
+  } satisfies ChangedFile;
+  const deletionFile = {
+    ...createChangedFileWithPatch(
+      'src/deletion.ts',
+      'diff --git a/src/deletion.ts b/src/deletion.ts\n@@ -1,3 +1,2 @@\n keep\n-base\n tail\n',
+    ),
+    regionalReplay: deletionProjection,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[insertionFile, deletionFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayPlacement)).toEqual([
+      'trailing-context',
+      'trailing-context',
+      'trailing-context',
+      'trailing-context',
+    ]);
+    expect(cards.map((card) => card.dataset.replayPair)).toEqual([
+      cards[1]?.dataset.replayPair,
+      cards[0]?.dataset.replayPair,
+      cards[3]?.dataset.replayPair,
+      cards[2]?.dataset.replayPair,
+    ]);
+    expect(cards[0]?.textContent).toContain('Prior Patch: prior-patch:0');
+    expect(cards[0]?.textContent).toContain('Current Patch: current-patch:0');
+    expect(cards[2]?.textContent).toContain('Prior Patch: prior-patch:0');
+    expect(cards[2]?.textContent).toContain('Current Patch: current-patch:0');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay renders a zero-current conflict in one paired shared row', async () => {
+  const projection = projectRegionAwareReplay({
+    earlierBase: 'before\nsubject old\nafter\n',
+    earlierHead: 'before\nsubject prior\nafter\n',
+    laterBase: 'before\nsubject base\nafter\n',
+    laterHead: 'before\nsubject base\nafter\n',
+    path: 'src/zero-current.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/zero-current.ts',
+      'diff --git a/src/zero-current.ts b/src/zero-current.ts\n@@ -1,3 +1,3 @@\n before\n subject base\n after\n',
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        2,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(cards[0]?.dataset.replayPair).toBe(cards[1]?.dataset.replayPair);
+    expect(cards.map((card) => card.dataset.replayPlacement)).toEqual(['region', 'region']);
+    expect(cards[0]?.textContent).toContain('No Current Patch edit overlaps this conflict');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay keeps real separated conflict islands in file order', async () => {
+  const middle = Array.from({ length: 8 }, (_, index) => `middle ${index + 1}`);
+  const projection = projectRegionAwareReplay({
+    earlierBase: `start\nold one\n${middle.join('\n')}\nold two\nend\n`,
+    earlierHead: `start\nprior one\n${middle.join('\n')}\nprior two\nend\n`,
+    laterBase: `start\nbase one\n${middle.join('\n')}\nbase two\nend\n`,
+    laterHead: `start\ncurrent one\n${middle.join('\n')}\ncurrent two\nend\n`,
+    path: 'src/real-islands.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/real-islands.ts',
+      [
+        'diff --git a/src/real-islands.ts b/src/real-islands.ts',
+        '@@ -1,3 +1,3 @@',
+        ' start',
+        '-base one',
+        '+current one',
+        ' middle 1',
+        '@@ -9,4 +9,4 @@',
+        ' middle 7',
+        ' middle 8',
+        '-base two',
+        '+current two',
+        ' end',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const firstIslandCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="0"]'),
+    ];
+    const secondIslandCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="2"]'),
+    ];
+    expect(firstIslandCards).toHaveLength(2);
+    expect(secondIslandCards).toHaveLength(2);
+    expect(firstIslandCards[0]?.dataset.replayPair).toBe(firstIslandCards[1]?.dataset.replayPair);
+    expect(secondIslandCards[0]?.dataset.replayPair).toBe(secondIslandCards[1]?.dataset.replayPair);
+    expect(firstIslandCards[0]?.dataset.replayPair).not.toBe(
+      secondIslandCards[0]?.dataset.replayPair,
+    );
+    expect(firstIslandCards[0]?.compareDocumentPosition(secondIslandCards[0]!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(firstIslandCards[0]?.textContent).toContain('prior-patch:0');
+    expect(secondIslandCards[0]?.textContent).toContain('prior-patch:1');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay cards retain every coalesced Prior Patch and Current Patch ID', async () => {
+  const severalCurrentProjection = projectRegionAwareReplay({
+    earlierBase: 'start\nold one\nold two\nmid\ntail\n',
+    earlierHead: 'start\nprior one\nprior two\nmid\ntail\n',
+    laterBase: 'start\nbase one\nbase two\nmid\ntail\n',
+    laterHead: 'start\ncurrent one\nbase two\ncurrent two\ntail\n',
+    path: 'src/several-current.ts',
+  });
+  const severalPriorProjection = projectRegionAwareReplay({
+    earlierBase: 'start\nfirst old\nbridge\nsecond old\nend\n',
+    earlierHead: 'start\nfirst prior\nbridge\nsecond prior\nend\n',
+    laterBase: 'start\nfirst base\nbridge\nsecond base\nend\n',
+    laterHead: 'start\nfirst base\nbridge current\nsecond base\nend\n',
+    path: 'src/several-prior.ts',
+  });
+  const severalCurrentFile = {
+    ...createChangedFileWithPatch(
+      'src/several-current.ts',
+      [
+        'diff --git a/src/several-current.ts b/src/several-current.ts',
+        '@@ -1,5 +1,5 @@',
+        ' start',
+        '-base one',
+        '+current one',
+        ' base two',
+        '-mid',
+        '+current two',
+        ' tail',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: severalCurrentProjection,
+  } satisfies ChangedFile;
+  const severalPriorFile = {
+    ...createChangedFileWithPatch(
+      'src/several-prior.ts',
+      [
+        'diff --git a/src/several-prior.ts b/src/several-prior.ts',
+        '@@ -1,5 +1,5 @@',
+        ' start',
+        ' first base',
+        '-bridge',
+        '+bridge current',
+        ' second base',
+        ' end',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: severalPriorProjection,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[severalCurrentFile, severalPriorFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    const severalCurrentCards = cards.filter((card) =>
+      card.textContent?.includes('Current Patch: current-patch:0, current-patch:1'),
+    );
+    const severalPriorCards = cards.filter((card) =>
+      card.textContent?.includes('Prior Patch: prior-patch:0, prior-patch:1'),
+    );
+    expect(severalCurrentCards).toHaveLength(2);
+    expect(severalCurrentCards[0]?.textContent).toContain('Prior Patch: prior-patch:0');
+    expect(severalPriorCards).toHaveLength(2);
+    expect(severalPriorCards[0]?.textContent).toContain('Current Patch: current-patch:0');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay puts added and deleted files only in their extant file-level slots', async () => {
+  const addedProjection = projectRegionAwareReplay({
+    earlierBase: null,
+    earlierHead: 'prior\n',
+    laterBase: null,
+    laterHead: 'current\n',
+    path: 'src/added.ts',
+  });
+  const deletedProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: null,
+    path: 'src/deleted.ts',
+  });
+  const addedFile = {
+    ...createChangedFileWithPatch(
+      'src/added.ts',
+      'diff --git a/src/added.ts b/src/added.ts\n@@ -0,0 +1 @@\n+current\n',
+    ),
+    regionalReplay: addedProjection,
+    status: 'added' as const,
+  } satisfies ChangedFile;
+  const deletedFile = {
+    ...createChangedFileWithPatch(
+      'src/deleted.ts',
+      'diff --git a/src/deleted.ts b/src/deleted.ts\n@@ -1 +0,0 @@\n-base\n',
+    ),
+    regionalReplay: deletedProjection,
+    status: 'deleted' as const,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[addedFile, deletedFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-placement="file"]')).toHaveLength(2);
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-placement="file"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(cards.every((card) => card.dataset.replayPair == null)).toBe(true);
+    expect(regionalReplayAnnotationsFor('src/added.ts')).toEqual([
+      expect.objectContaining({ lineNumber: 0, side: 'additions' }),
+    ]);
+    expect(regionalReplayAnnotationsFor('src/deleted.ts')).toEqual([
+      expect.objectContaining({ lineNumber: 0, side: 'deletions' }),
+    ]);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay labels both paths for a renamed conflict while anchoring the later path', async () => {
+  const projection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierBasePath: 'src/old.ts',
+    earlierHead: 'prior\n',
+    earlierHeadPath: 'src/old.ts',
+    laterBase: 'base\n',
+    laterBasePath: 'src/old.ts',
+    laterHead: 'current\n',
+    laterHeadPath: 'src/new.ts',
+    oldPath: 'src/old.ts',
+    path: 'src/new.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/new.ts',
+      'diff --git a/src/old.ts b/src/new.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    oldPath: 'src/old.ts',
+    regionalReplay: projection,
+    status: 'renamed' as const,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        2,
+      );
+    });
+    const card = view.container.querySelector<HTMLElement>('[data-replay-kind="replay-conflict"]');
+    expect(card?.textContent).toContain('Later Base (src/old.ts)');
+    expect(card?.textContent).toContain('Later HEAD (src/new.ts)');
+    expect(card?.dataset.replayPlacement).toBe('region');
   } finally {
     await view.cleanup();
   }

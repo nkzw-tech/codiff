@@ -15,6 +15,8 @@ import type {
   NarrativeWalkthroughResult,
   RepositoryHistory,
   RepositoryState,
+  ReviewVersionEvolutionProgressEvent,
+  ReviewVersionOption,
 } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
@@ -38,6 +40,13 @@ const bootstrapFor = (
     reloadSelection: null,
     state: repositoryState,
   });
+const createVersionBridge = () => ({
+  cancelReviewVersionEvolution: vi.fn(async () => {}),
+  getReviewVersions: vi.fn(async () => ({ versions: [] })),
+  getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+  onReviewVersionEvolutionProgress: vi.fn(() => unsubscribe),
+  onUpdateStatusChanged: vi.fn(() => unsubscribe),
+});
 const deferred = <Value,>() => {
   let resolve!: (value: Value) => void;
   const promise = new Promise<Value>((next) => {
@@ -48,6 +57,7 @@ const deferred = <Value,>() => {
 
 const installCommitWindowApi = () => {
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest: vi.fn(),
     createWalkthroughCommit: vi.fn(async () => ({ status: 'committed' })),
@@ -73,6 +83,7 @@ const installCommitWindowApi = () => {
 
 test('RepositoryReviewHost renders local reviews through the shared surface', async () => {
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest: vi.fn(),
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
@@ -113,10 +124,10 @@ test('RepositoryReviewHost renders local reviews through the shared surface', as
 
 test('RepositoryReviewHost renders provider reviews through the shared surface', async () => {
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest: vi.fn(),
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
-    getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     isWindowFullScreen: vi.fn(async () => false),
     onConfigChanged: vi.fn(() => unsubscribe),
     onCopyPendingCommentsRequest: vi.fn(() => unsubscribe),
@@ -317,6 +328,7 @@ test('requests commit-by-commit generation with canonical commits and the immuta
     status: 'unavailable' as const,
   }));
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest: vi.fn(),
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
@@ -428,6 +440,7 @@ test('loads an oldest-first commit range after host-side ancestry validation', a
     }),
   );
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest: vi.fn(),
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
@@ -560,11 +573,132 @@ test('loads an oldest-first commit range after host-side ancestry validation', a
   }
 });
 
+test('starts and cancels one shared version comparison run with progress', async () => {
+  const baseSha = '0'.repeat(40) as GitSha;
+  const beforeSha = 'a'.repeat(40) as GitSha;
+  const afterSha = 'b'.repeat(40) as GitSha;
+  const version = (number: number, headSha: GitSha) => ({
+    createdAt: `2026-08-0${number}T12:00:00.000Z`,
+    isHead: number === 2,
+    number,
+    range: {
+      base: { label: { kind: 'version' as const, text: 'Base' }, sha: baseSha },
+      head: { label: { kind: 'version' as const, text: `v${number}` }, sha: headSha },
+    },
+    versionId: `version-${number}` as ReviewVersionOption['versionId'],
+  });
+  const versions = [
+    version(1, beforeSha),
+    version(2, afterSha),
+  ] satisfies ReadonlyArray<ReviewVersionOption>;
+  const aggregate = deferred<Awaited<ReturnType<Window['codiff']['getReviewVersionAggregate']>>>();
+  const evolution = deferred<Awaited<ReturnType<Window['codiff']['getReviewVersionEvolution']>>>();
+  let progressListener: ((event: ReviewVersionEvolutionProgressEvent) => void) | null = null;
+  const cancelReviewVersionEvolution = vi.fn(async () => {});
+  const getReviewVersionAggregate = vi.fn<Window['codiff']['getReviewVersionAggregate']>(
+    () => aggregate.promise,
+  );
+  const getReviewVersionEvolution = vi.fn<Window['codiff']['getReviewVersionEvolution']>(
+    () => evolution.promise,
+  );
+  window.codiff = {
+    applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    cancelDiffContentRequest: vi.fn(),
+    cancelReviewVersionEvolution,
+    dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    getReviewComments: vi.fn(async () => []),
+    getReviewVersionAggregate,
+    getReviewVersionEvolution,
+    getReviewVersions: vi.fn(async () => ({ versions })),
+    getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    isWindowFullScreen: vi.fn(async () => false),
+    onConfigChanged: vi.fn(() => unsubscribe),
+    onCopyPendingCommentsRequest: vi.fn(() => unsubscribe),
+    onFindInDiffs: vi.fn(() => unsubscribe),
+    onNarrativeWalkthroughUpdated: vi.fn(() => unsubscribe),
+    onOpenReviewSource: vi.fn(() => unsubscribe),
+    onRefreshRequest: vi.fn(() => unsubscribe),
+    onRepositoryChanged: vi.fn(() => unsubscribe),
+    onReviewVersionEvolutionProgress: vi.fn((listener) => {
+      progressListener = listener;
+      return unsubscribe;
+    }),
+    onUpdateStatusChanged: vi.fn(() => unsubscribe),
+    onWalkthroughProgress: vi.fn(() => unsubscribe),
+    onWindowFullScreenChanged: vi.fn(() => unsubscribe),
+    openRepositoryFolder: vi.fn(async () => {}),
+    resolvePullRequestUrl: vi.fn(async (value: string) => value),
+  } as unknown as Window['codiff'];
+  const file = createChangedFile('src/version.ts');
+  const pullRequestState = {
+    ...state,
+    files: [file],
+    source: {
+      headSha: afterSha,
+      number: 42,
+      provider: 'github',
+      targetBranch: 'main',
+      title: 'Review versions',
+      type: 'pull-request',
+      url: 'https://github.com/example/review/pull/42',
+    },
+  } satisfies RepositoryState;
+  const view = await renderReact(
+    <RepositoryReviewHost
+      bootstrap={bootstrapFor(pullRequestState)}
+      config={createDefaultConfig()}
+      disableCodeViewWorkerPool
+      gitIdentity={null}
+      gitIdentityReady
+      launchOptions={{ repositoryPathProvided: true, walkthrough: false }}
+    />,
+  );
+
+  try {
+    await waitFor(() => {
+      const button = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+        ({ textContent }) => textContent?.trim() === 'Compare versions',
+      );
+      expect(button?.disabled).toBe(false);
+    });
+    const compareVersions = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent?.trim() === 'Compare versions',
+    )!;
+    await act(async () => compareVersions.click());
+    await waitFor(() => expect(getReviewVersionAggregate).toHaveBeenCalledOnce());
+    expect(getReviewVersionEvolution).toHaveBeenCalledOnce();
+    const aggregateRequest = getReviewVersionAggregate.mock.calls[0]![0];
+    expect(aggregateRequest).toMatchObject({
+      fromVersionId: versions[0].versionId,
+      source: pullRequestState.source,
+      toVersionId: versions[1].versionId,
+    });
+    expect(getReviewVersionEvolution.mock.calls[0]![0]).toEqual(aggregateRequest);
+
+    await act(async () => {
+      progressListener?.({
+        progress: { message: 'Matching commit evidence', phase: 'reading-mr-evidence' },
+        requestId: aggregateRequest.requestId!,
+      });
+    });
+    expect(view.container.textContent).toContain('Matching commit evidence');
+
+    const compareTarget = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent?.includes('Compare to main'),
+    );
+    await act(async () => compareTarget?.click());
+    expect(cancelReviewVersionEvolution).toHaveBeenCalledWith(aggregateRequest.requestId);
+  } finally {
+    await view.cleanup();
+  }
+});
+
 test('reports first usable before initial history and deferred completion after it', async () => {
   const history = deferred<RepositoryHistory>();
   const getRepositoryHistory = vi.fn(() => history.promise);
   const reportInitialLoadMilestone = vi.fn();
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest: vi.fn(),
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
@@ -649,6 +783,7 @@ test('RepositoryReviewHost hydrates deferred provider comments', async () => {
     },
   ]);
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest: vi.fn(),
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
@@ -723,6 +858,7 @@ test('RepositoryReviewHost cancels active bulk provider hydration on unmount', a
   const getDiffSectionsContent = vi.fn((_request: { requestId?: string }) => new Promise(() => {}));
   const cancelDiffContentRequest = vi.fn();
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest,
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
@@ -790,6 +926,7 @@ test('RepositoryReviewHost cancels an active image request on unmount', async ()
   const getDiffImageContent = vi.fn((_request: DiffImageContentRequest) => new Promise(() => {}));
   const cancelDiffContentRequest = vi.fn();
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest,
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
@@ -855,6 +992,7 @@ test('RepositoryReviewHost cancels provider comment enrichment on source replace
   const getRepositoryState = vi.fn(async () => secondState);
   const cancelDiffContentRequest = vi.fn();
   window.codiff = {
+    ...createVersionBridge(),
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     cancelDiffContentRequest,
     cancelNarrativeWalkthrough: vi.fn(async () => {}),

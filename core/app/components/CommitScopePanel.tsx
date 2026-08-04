@@ -1,20 +1,41 @@
 import { useState } from 'react';
 import { reviewCommitRange } from '../../lib/review-commit-stack.ts';
-import type { GitSha, ReviewCommitListEntry } from '../../types.ts';
-import { ReviewCommitRef } from './CommitRefTooltip.tsx';
+import { evolutionUnitCommit } from '../../lib/review-history.ts';
+import type {
+  EvolutionUnitId,
+  GitSha,
+  ReviewCommitEvolution,
+  ReviewCommitListEntry,
+  ReviewEvolutionUnit,
+} from '../../types.ts';
+import { CommitRefTooltip, ReviewCommitRef } from './CommitRefTooltip.tsx';
+
+type VersionEvolutionUnit = Exclude<ReviewEvolutionUnit, { kind: 'commit' }>;
 
 export type CommitScopePanelProps = {
   commits: ReadonlyArray<ReviewCommitListEntry>;
+  mode?: 'merge-request' | 'version-compare';
   onClear: () => void;
   onSelectCommitRange: (range: { fromSha: GitSha; toSha: GitSha } | null) => void;
+  onToggleVersionUnit?: (unit: VersionEvolutionUnit) => void;
   selectedCommitRange?: { fromSha: GitSha; toSha: GitSha } | null;
+  selectedVersionUnitIds?: ReadonlySet<EvolutionUnitId>;
+  versionCommitEvolution?: ReviewCommitEvolution | null;
+  versionUnitError?: string | null;
+  versionUnitLoading?: boolean;
 };
 
 export function CommitScopePanel({
   commits,
+  mode = 'merge-request',
   onClear,
   onSelectCommitRange,
+  onToggleVersionUnit,
   selectedCommitRange = null,
+  selectedVersionUnitIds = new Set(),
+  versionCommitEvolution,
+  versionUnitError,
+  versionUnitLoading = false,
 }: CommitScopePanelProps) {
   const [rangePickerOpen, setRangePickerOpen] = useState(selectedCommitRange != null);
   const [rangeStartSha, setRangeStartSha] = useState<GitSha | null>(
@@ -36,6 +57,70 @@ export function CommitScopePanel({
     : rangeStartSha
       ? 'Choose To'
       : 'All merge request changes';
+
+  if (mode === 'version-compare') {
+    const selectedUnits =
+      versionCommitEvolution?.units.filter(
+        (unit): unit is VersionEvolutionUnit =>
+          unit.kind !== 'commit' && selectedVersionUnitIds.has(unit.unitId),
+      ) ?? [];
+    return (
+      <section className="version-tree-commit-scope">
+        <div className="version-tree-commit-scope-header">
+          <div className="commit-scope-heading">
+            <span className="commit-scope-heading-label">Commit stack</span>
+            <small>
+              {selectedUnits.length > 0
+                ? `${selectedUnits.length} selected commit${selectedUnits.length === 1 ? '' : 's'}`
+                : 'All commit changes'}
+            </small>
+          </div>
+          <button disabled={selectedUnits.length === 0} onClick={onClear} type="button">
+            View all commit changes
+          </button>
+        </div>
+        <div className="version-tree-commit-options">
+          {versionCommitEvolution?.units
+            .filter(
+              (unit): unit is VersionEvolutionUnit => unit.kind !== 'commit' && unit.reviewable,
+            )
+            .map((unit) => {
+              const commit = evolutionUnitCommit(unit);
+              if (!commit || !onToggleVersionUnit) {
+                return null;
+              }
+              return (
+                <label
+                  key={unit.unitId}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement | null)?.closest?.('a')) {
+                      return;
+                    }
+                    event.preventDefault();
+                    onToggleVersionUnit(unit);
+                  }}
+                >
+                  <input
+                    checked={selectedVersionUnitIds.has(unit.unitId)}
+                    name="version-commit-scope"
+                    readOnly
+                    type="radio"
+                  />
+                  <CommitRefTooltip commit={commit} focusable={false} linkTrigger={false} />
+                  <span>{commit.subject}</span>
+                </label>
+              );
+            })}
+          {versionUnitLoading ? (
+            <div className="sidebar-scope-status">Loading selected commit changes…</div>
+          ) : null}
+          {versionUnitError ? (
+            <div className="sidebar-scope-status error">{versionUnitError}</div>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="version-tree-commit-scope">

@@ -12,6 +12,7 @@ import type {
   ReviewSource,
   WalkthroughRegion,
 } from '../types.ts';
+import type { RegionReplayProjectionRegion } from './region-aware-replay.ts';
 
 export type WalkthroughError = Extract<NarrativeWalkthroughResult, { status: 'unavailable' }>;
 
@@ -23,6 +24,26 @@ export type ReviewCommentAnnotationMetadata = {
 export type CodeQualityAnnotationMetadata = {
   finding: PullRequestCodeQualityFinding;
   type: 'code-quality';
+};
+
+/** Provenance card for one exact region of a regional replay projection. */
+export type RegionalReplayAnnotationMetadata = {
+  /** One visual half in split mode, or the sole unified annotation. */
+  fragment: 'additions' | 'deletions' | 'unified';
+  /** Identifies the two clipped split-mode halves of one shared card. */
+  pairId?: string;
+  placement: 'file' | 'leading-context' | 'region' | 'trailing-context';
+  /** First member, retained for consumers that only need the primary region. */
+  region: RegionReplayProjectionRegion;
+  regionIndex: number;
+  regionIndexes: ReadonlyArray<number>;
+  /**
+   * Every exact projection region represented by this one visible card.
+   * Regions are coalesced only after their independently determined anchors
+   * collide; their membership and source semantics remain unchanged.
+   */
+  regions: ReadonlyArray<RegionReplayProjectionRegion>;
+  type: 'regional-replay';
 };
 
 export type WalkthroughRegionAnnotationMetadata = {
@@ -56,6 +77,7 @@ export type ReviewAnnotationMetadata =
   | CodeQualityAnnotationMetadata
   | ImagePreviewAnnotationMetadata
   | MarkdownPreviewAnnotationMetadata
+  | RegionalReplayAnnotationMetadata
   | ReviewCommentAnnotationMetadata
   | WalkthroughRegionAnnotationMetadata
   | WalkthroughHeaderAnnotationMetadata;
@@ -221,6 +243,7 @@ export type CodeViewItemMetadata = {
   isSelected: boolean;
   isViewed: boolean;
   lineCount: DiffLineCount;
+  regionalReplay?: ChangedFile['regionalReplay'];
   reviewIdentity: ReviewIdentity;
   section: DiffSection;
   sectionCount: number;

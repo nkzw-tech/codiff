@@ -1,3 +1,4 @@
+import { Select } from '@base-ui/react/select';
 import { ArrowSquareOutIcon as ArrowSquareOut } from '@phosphor-icons/react/ArrowSquareOut';
 import { ChatCircleIcon as ChatCircle } from '@phosphor-icons/react/ChatCircle';
 import { ClockCounterClockwiseIcon as ClockCounterClockwise } from '@phosphor-icons/react/ClockCounterClockwise';
@@ -18,7 +19,7 @@ import {
 } from 'react';
 import { Button } from './app/components/Button.tsx';
 import { CommandBar } from './app/components/CommandBar.tsx';
-import { ReviewCommitRef } from './app/components/CommitRefTooltip.tsx';
+import { CommitRefTooltip, ReviewCommitRef } from './app/components/CommitRefTooltip.tsx';
 import { CommitScopePanel } from './app/components/CommitScopePanel.tsx';
 import { ReviewFileTree } from './app/components/FileTree.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
@@ -119,6 +120,13 @@ import {
   toRenderedSubmittedReviewComment,
   toShareCommentSubmission,
 } from './lib/review-comments.ts';
+import {
+  evolutionUnitCommit,
+  evolutionUnitRebaseOverlaps,
+  suggestReviewComparison,
+  versionOptionHeadSha,
+  versionOptionLabelText,
+} from './lib/review-history.ts';
 import { getSelectedPathFromScroll } from './lib/review-scroll.ts';
 import {
   SIDEBAR_COLLAPSE_THRESHOLD,
@@ -141,9 +149,12 @@ import {
 } from './lib/walkthrough-assessment-display.ts';
 import type {
   ChangedFile,
+  DiffComparisonBaseMovement,
+  DiffComparisonView,
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
+  EvolutionUnitId,
   GitSha,
   GitIdentity,
   HistoryEntry,
@@ -157,8 +168,13 @@ import type {
   ResolvedReviewSource,
   ReviewCommenting,
   ReviewContextResolver,
+  ReviewCommitEvolution,
   ReviewCommitListEntry,
+  ReviewEvolutionUnit,
   ReviewSource,
+  ReviewVersionEvolutionProgress,
+  ReviewVersionId,
+  ReviewVersionOption,
   RepositoryState,
   ShareCommentSubmission,
   SharedWalkthroughSnapshot,
@@ -173,9 +189,11 @@ import type {
 export { ReadOnlyGeneralCommentCard } from './app/components/merge-request/GeneralComments.tsx';
 export type { ReviewCommenting } from './types.ts';
 
+const emptyChangedFiles: ReadonlyArray<ChangedFile> = [];
 const emptyReviewComments: ReadonlyArray<RenderedSubmittedReviewComment> = [];
 const emptyReviewDrafts: ReadonlyArray<ReviewDraft> = [];
 const emptyGeneralCommentThreads: ReadonlyArray<PullRequestGeneralCommentThread> = [];
+const emptyReviewVersions: ReadonlyArray<ReviewVersionOption> = [];
 const emptyPaths = new Set<string>();
 const emptyWalkthroughNotes = new Map();
 const agentUnavailableCodes = new Set<NonNullable<WalkthroughError['code']>>([
@@ -313,6 +331,26 @@ export type ReviewDesktopCapabilities = {
   reloadDeltaPaths?: ReadonlySet<string>;
   sidebarFooter?: ReactNode;
   sourceMenu?: ReactNode;
+  versionComparison?: {
+    commitEvolution?: ReviewCommitEvolution | null;
+    commitEvolutionError?: string | null;
+    commitEvolutionLoading?: boolean;
+    commitEvolutionProgress?: ReviewVersionEvolutionProgress | null;
+    enabled?: boolean;
+    error?: string | null;
+    fromVersionId?: ReviewVersionId | null;
+    historyLoading?: boolean;
+    loading?: boolean;
+    onExit?: () => void;
+    onLoadUnitDiff?: (
+      unitId: EvolutionUnitId,
+    ) => Promise<ReadonlyArray<ChangedFile>> | ReadonlyArray<ChangedFile>;
+    onOpen?: () => void;
+    onRangeChange?: (fromVersionId: ReviewVersionId, toVersionId: ReviewVersionId) => void;
+    result?: DiffComparisonView | null;
+    toVersionId?: ReviewVersionId | null;
+    versions?: ReadonlyArray<ReviewVersionOption>;
+  };
   viewed?: Readonly<Record<string, string>>;
 };
 
@@ -463,6 +501,261 @@ const disabledCommitMessage = async (): Promise<WalkthroughCommitMessageResult> 
   status: 'unavailable',
 });
 
+type VersionEvolutionUnit = Exclude<ReviewEvolutionUnit, { kind: 'commit' }>;
+
+const shortVersionAge = (value: string) => {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return '—';
+  }
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / (60 * 1000)));
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 14) {
+    return `${days}d`;
+  }
+  if (days < 60) {
+    return `${Math.floor(days / 7)}w`;
+  }
+  if (days < 365) {
+    return `${Math.floor(days / 30)}mo`;
+  }
+  return `${Math.floor(days / 365)}y`;
+};
+
+export const formatVersionElapsedDuration = (from: string, to: string) => {
+  const fromTimestamp = Date.parse(from);
+  const toTimestamp = Date.parse(to);
+  if (
+    !Number.isFinite(fromTimestamp) ||
+    !Number.isFinite(toTimestamp) ||
+    toTimestamp < fromTimestamp
+  ) {
+    return '—';
+  }
+  const minutes = Math.floor((toTimestamp - fromTimestamp) / (60 * 1000));
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 14) {
+    return `${days}d`;
+  }
+  if (days < 60) {
+    return `${Math.floor(days / 7)}w`;
+  }
+  if (days < 365) {
+    return `${Math.floor(days / 30)}mo`;
+  }
+  return `${Math.floor(days / 365)}y`;
+};
+
+const formatSignedBaseInterval = (delta: number | null) => {
+  if (delta == null) {
+    return null;
+  }
+  const duration = formatVersionElapsedDuration(
+    new Date(0).toISOString(),
+    new Date(Math.abs(delta)).toISOString(),
+  );
+  return `new base is ${duration} ${delta >= 0 ? 'newer' : 'older'}`;
+};
+
+const formatBaseMovementRelationship = (
+  relationship: DiffComparisonBaseMovement['relationship'],
+) => {
+  switch (relationship) {
+    case 'forward':
+      return 'fast-forward';
+    case 'backward':
+      return 'rewound';
+    case 'divergent':
+      return 'divergent histories';
+    default:
+      return 'relationship unknown';
+  }
+};
+
+const formatBaseMovementCommitCount = (
+  movement: Pick<DiffComparisonBaseMovement, 'commits' | 'commitsBetween' | 'truncated'>,
+) => {
+  const listed = movement.commits?.length ?? 0;
+  const count = movement.commitsBetween ?? (listed > 0 ? listed : null);
+  if (count == null) {
+    return 'Commit count unavailable';
+  }
+  const approximate = movement.truncated || (movement.commitsBetween == null && listed > 0);
+  return `${approximate ? '≈' : ''}${count} commit${count === 1 ? '' : 's'}`;
+};
+
+const VersionPicker = ({
+  endpoint,
+  label,
+  onChange,
+  otherId,
+  value,
+  versions,
+}: {
+  endpoint: 'from' | 'to';
+  label: string;
+  onChange: (id: ReviewVersionId) => void;
+  otherId: ReviewVersionId | null;
+  value: ReviewVersionId;
+  versions: ReadonlyArray<ReviewVersionOption>;
+}) => {
+  const selected = versions.find((version) => version.versionId === value);
+  return (
+    <Select.Root
+      modal={false}
+      onValueChange={(nextValue) => {
+        const nextVersion = versions.find((version) => version.versionId === nextValue);
+        if (nextVersion) {
+          onChange(nextVersion.versionId);
+        }
+      }}
+      value={value}
+    >
+      <div className="version-picker">
+        <span className="version-picker-label">{label}</span>
+        <Select.Trigger aria-label={`${label} version`} className="version-picker-trigger">
+          <Select.Value>
+            {() => <span>{selected ? versionOptionLabelText(selected) : 'Version'}</span>}
+          </Select.Value>
+          <Select.Icon aria-hidden>⌄</Select.Icon>
+        </Select.Trigger>
+      </div>
+      <Select.Portal>
+        <Select.Positioner
+          align="start"
+          className="version-picker-positioner"
+          side="bottom"
+          sideOffset={4}
+        >
+          <Select.Popup aria-label={`${label} version options`} className="version-picker-popover">
+            <Select.List>
+              {versions.map((version, optionIndex) => {
+                const otherIndex = versions.findIndex(
+                  (candidate) => candidate.versionId === otherId,
+                );
+                const disabled =
+                  Boolean(version.unavailableReason) ||
+                  (otherIndex >= 0 &&
+                    (endpoint === 'from' ? optionIndex >= otherIndex : optionIndex <= otherIndex));
+                const stat = version.diffStat;
+                const headSha = versionOptionHeadSha(version);
+                const age = version.number === 0 ? null : shortVersionAge(version.createdAt);
+                const elapsed =
+                  version.previousCreatedAt && version.previousNumber != null
+                    ? formatVersionElapsedDuration(version.previousCreatedAt, version.createdAt)
+                    : null;
+                const timing = [
+                  age ? `${age} old` : null,
+                  elapsed ? `${elapsed} since v${version.previousNumber}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ');
+                return (
+                  <Select.Item
+                    className="version-picker-option"
+                    disabled={disabled}
+                    key={version.versionId}
+                    label={`${versionOptionLabelText(version)} ${headSha}`}
+                    title={
+                      version.unavailableReason ?? new Date(version.createdAt).toLocaleString()
+                    }
+                    value={version.versionId}
+                  >
+                    <span>{versionOptionLabelText(version)}</span>
+                    <span className="version-picker-head">{version.isHead ? 'HEAD' : ''}</span>
+                    {version.number === 0 ? (
+                      <code>base</code>
+                    ) : (
+                      <CommitRefTooltip
+                        commit={{
+                          additions: stat?.additions,
+                          authoredAt: version.createdAt,
+                          deletions: stat?.deletions,
+                          sha: headSha,
+                          shortSha: headSha.slice(0, 7),
+                          subject: `${versionOptionLabelText(version)} head`,
+                          webUrl: version.range.head.label.url,
+                        }}
+                        linkTrigger={false}
+                      />
+                    )}
+                    <span className="version-picker-additions">
+                      {version.number === 0 ? '' : `+${stat?.additions ?? '…'}`}
+                    </span>
+                    <span className="version-picker-deletions">
+                      {version.number === 0 ? '' : `−${stat?.deletions ?? '…'}`}
+                    </span>
+                    <span>
+                      {version.number === 0
+                        ? ''
+                        : `${stat?.filesChanged ?? '…'} ${stat?.filesChanged === 1 ? 'file' : 'files'}`}
+                    </span>
+                    <span className="version-picker-timing">
+                      {version.number === 0 ? 'MR base' : timing || '—'}
+                    </span>
+                    {version.activity?.reasons.length ? (
+                      <span
+                        className="version-review-activity-pill"
+                        title={version.activity.reasons
+                          .map(
+                            (reason) =>
+                              `${reason.kind} · ${new Date(reason.occurredAt).toLocaleString()}`,
+                          )
+                          .join('\n')}
+                      >
+                        Review activity
+                      </span>
+                    ) : null}
+                  </Select.Item>
+                );
+              })}
+            </Select.List>
+          </Select.Popup>
+        </Select.Positioner>
+      </Select.Portal>
+    </Select.Root>
+  );
+};
+
+function VersionComparisonEndpoint({ version }: { version?: ReviewVersionOption | null }) {
+  if (!version) {
+    return <span>Version</span>;
+  }
+  const label = versionOptionLabelText(version);
+  const headSha = versionOptionHeadSha(version);
+  return (
+    <span className="version-comparison-endpoint">
+      <span>{label}</span>
+      <CommitRefTooltip
+        commit={{
+          additions: version.diffStat?.additions,
+          authoredAt: version.createdAt,
+          deletions: version.diffStat?.deletions,
+          sha: headSha,
+          shortSha: headSha.slice(0, 7),
+          subject: `${label} head`,
+          webUrl: version.range.head.label.url,
+        }}
+        linkTrigger={false}
+      />
+    </span>
+  );
+}
+
 type ReviewSurfaceBaseProps = {
   capabilities?: ReviewSurfaceCapabilities;
   externalUrl?: string;
@@ -513,6 +806,19 @@ export function ReviewSurface({
   const content = capabilities?.content;
   const desktop = capabilities?.desktop;
   const history = capabilities?.history;
+  const versionComparison = desktop?.versionComparison;
+  const versionCommitEvolution = versionComparison?.commitEvolution ?? null;
+  const versionCommitEvolutionError = versionComparison?.commitEvolutionError ?? null;
+  const versionCommitEvolutionLoading = versionComparison?.commitEvolutionLoading ?? false;
+  const versionCommitEvolutionProgress = versionComparison?.commitEvolutionProgress ?? null;
+  const versionCompare = versionComparison?.result ?? null;
+  const versionCompareEnabled = versionComparison?.enabled ?? false;
+  const versionCompareError = versionComparison?.error ?? null;
+  const versionCompareFromVersionId = versionComparison?.fromVersionId ?? null;
+  const versionCompareLoading = versionComparison?.loading ?? false;
+  const versionCompareToVersionId = versionComparison?.toVersionId ?? null;
+  const versionHistoryLoading = versionComparison?.historyLoading ?? false;
+  const versions = versionComparison?.versions ?? emptyReviewVersions;
   const localReviewNotes = capabilities?.localReviewNotes;
   const comments = capabilities?.comments;
   const providerComments = comments?.destination === 'provider' ? comments : undefined;
@@ -588,6 +894,7 @@ export function ReviewSurface({
   );
   const defaultKeymap = useMemo(() => createDefaultConfig().keymap, []);
   const keymap = keymapProp ?? defaultKeymap;
+  const onVersionCompareRangeChange = versionComparison?.onRangeChange;
   const [uncontrolledWordWrap, setUncontrolledWordWrap] = useState(snapshot.preferences.wordWrap);
   const wordWrap = controlledPreferences?.wordWrap?.value ?? uncontrolledWordWrap;
   const [fileSearchQuery, setFileSearchQuery] = useState('');
@@ -605,6 +912,47 @@ export function ReviewSurface({
   const [treeCommitDiffError, setTreeCommitDiffError] = useState<string | null>(null);
   const [treeCommitDiffLoading, setTreeCommitDiffLoading] = useState(false);
   const treeCommitLoadRequestRef = useRef(0);
+  const [versionSectionExpanded, setVersionSectionExpanded] = useState(true);
+  const [selectedVersionUnitIds, setSelectedVersionUnitIds] = useState<
+    ReadonlySet<EvolutionUnitId>
+  >(() => new Set());
+  const [versionUnitFiles, setVersionUnitFiles] = useState<
+    Readonly<Record<EvolutionUnitId, ReadonlyArray<ChangedFile>>>
+  >({});
+  const [versionUnitLoadingIds, setVersionUnitLoadingIds] = useState<ReadonlySet<EvolutionUnitId>>(
+    () => new Set(),
+  );
+  const [versionUnitErrors, setVersionUnitErrors] = useState<
+    Readonly<Record<EvolutionUnitId, string>>
+  >({});
+  const versionUnitScopeRef = useRef(0);
+  const versionCompareActive =
+    versionCompareEnabled ||
+    versionCompare != null ||
+    versionCompareLoading ||
+    Boolean(versionCompareError);
+  const selectedVersionUnits = useMemo(
+    () =>
+      (versionCommitEvolution?.units ?? []).filter(
+        (unit): unit is VersionEvolutionUnit =>
+          unit.kind !== 'commit' && selectedVersionUnitIds.has(unit.unitId),
+      ),
+    [selectedVersionUnitIds, versionCommitEvolution],
+  );
+  const selectedVersionUnit = selectedVersionUnits[0] ?? null;
+  const selectedVersionUnitFiles = useMemo(
+    () =>
+      selectedVersionUnit
+        ? (versionUnitFiles[selectedVersionUnit.unitId] ?? emptyChangedFiles)
+        : [],
+    [selectedVersionUnit, versionUnitFiles],
+  );
+  const versionUnitLoading = selectedVersionUnits.some((unit) =>
+    versionUnitLoadingIds.has(unit.unitId),
+  );
+  const versionUnitError = selectedVersionUnits
+    .map((unit) => versionUnitErrors[unit.unitId])
+    .find((error): error is string => Boolean(error));
   const [treeScrollTarget, setTreeScrollTarget] = useState<ReviewScrollTarget | null>(
     () => content?.initialScrollTarget ?? null,
   );
@@ -628,19 +976,107 @@ export function ReviewSurface({
   });
   const itemVersionByKey = content?.itemVersionByKey ?? uncontrolledItemVersionByKey;
   const selectedPath = controlledPreferences?.selectedPath?.value ?? uncontrolledSelectedPath;
+  const selectPath = useCallback(
+    (path: string | null) => {
+      setUncontrolledSelectedPath(path);
+      controlledPreferences?.selectedPath?.onChange(path);
+    },
+    [controlledPreferences?.selectedPath, setUncontrolledSelectedPath],
+  );
   const commitScope = desktop?.commitScope;
   const commits = commitScope?.commits ?? [];
   const targetBaseCommit = commitScope?.targetBaseCommit ?? null;
+  useEffect(() => {
+    versionUnitScopeRef.current += 1;
+    let canceled = false;
+    queueMicrotask(() => {
+      if (!canceled) {
+        setSelectedVersionUnitIds(new Set());
+        setVersionUnitFiles({});
+        setVersionUnitLoadingIds(new Set());
+        setVersionUnitErrors({});
+        selectPath(versionCompare?.files[0]?.path ?? snapshot.files[0]?.path ?? null);
+      }
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [
+    selectPath,
+    snapshot.files,
+    versionCompare?.files,
+    versionCompare?.from.versionId,
+    versionCompare?.to.versionId,
+  ]);
+
+  const loadVersionUnit = useCallback(
+    (unit: VersionEvolutionUnit) => {
+      if (
+        versionUnitFiles[unit.unitId] ||
+        versionUnitLoadingIds.has(unit.unitId) ||
+        !versionComparison?.onLoadUnitDiff
+      ) {
+        return;
+      }
+      const scope = versionUnitScopeRef.current;
+      setVersionUnitLoadingIds((current) => new Set([...current, unit.unitId]));
+      setVersionUnitErrors((current) => {
+        const { [unit.unitId]: _error, ...rest } = current;
+        return rest;
+      });
+      void Promise.resolve(versionComparison.onLoadUnitDiff(unit.unitId))
+        .then((files) => {
+          if (versionUnitScopeRef.current !== scope) {
+            return;
+          }
+          setVersionUnitFiles((current) => ({ ...current, [unit.unitId]: files }));
+          selectPath(files[0]?.path ?? null);
+        })
+        .catch((error: unknown) => {
+          if (versionUnitScopeRef.current !== scope) {
+            return;
+          }
+          setVersionUnitErrors((current) => ({
+            ...current,
+            [unit.unitId]: error instanceof Error ? error.message : String(error),
+          }));
+        })
+        .finally(() => {
+          if (versionUnitScopeRef.current !== scope) {
+            return;
+          }
+          setVersionUnitLoadingIds((current) => {
+            const next = new Set(current);
+            next.delete(unit.unitId);
+            return next;
+          });
+        });
+    },
+    [selectPath, versionComparison, versionUnitFiles, versionUnitLoadingIds],
+  );
+
+  const selectOnlyVersionUnit = useCallback(
+    (unit: VersionEvolutionUnit) => {
+      setSelectedVersionUnitIds(new Set([unit.unitId]));
+      selectPath(null);
+      loadVersionUnit(unit);
+    },
+    [loadVersionUnit, selectPath],
+  );
+
+  const clearVersionUnits = useCallback(() => {
+    setSelectedVersionUnitIds(new Set());
+    selectPath(versionCompare?.files[0]?.path ?? null);
+  }, [selectPath, versionCompare?.files]);
+
   const clearTreeCommitRange = useCallback(() => {
     treeCommitLoadRequestRef.current += 1;
     setSelectedTreeCommitRange(null);
     setTreeCommitFiles(null);
     setTreeCommitDiffError(null);
     setTreeCommitDiffLoading(false);
-    const nextPath = snapshot.files[0]?.path ?? null;
-    setUncontrolledSelectedPath(nextPath);
-    controlledPreferences?.selectedPath?.onChange(nextPath);
-  }, [controlledPreferences?.selectedPath, setUncontrolledSelectedPath, snapshot.files]);
+    selectPath((versionCompare?.files ?? snapshot.files)[0]?.path ?? null);
+  }, [selectPath, snapshot.files, versionCompare?.files]);
   const sourceRevisionKey = getSourceRevisionKey(snapshot.repository.source);
   const previousSourceRevisionKeyRef = useRef(sourceRevisionKey);
   useEffect(() => {
@@ -954,10 +1390,25 @@ export function ReviewSurface({
 
   const reviewFiles = useMemo(
     () =>
-      sidebarMode === 'tree' && selectedTreeCommitRange != null
-        ? (treeCommitFiles ?? [])
-        : snapshot.files,
-    [selectedTreeCommitRange, sidebarMode, snapshot.files, treeCommitFiles],
+      versionCompare
+        ? selectedVersionUnitIds.size > 0
+          ? selectedVersionUnitFiles
+          : versionCompare.files
+        : versionCompareActive
+          ? []
+          : sidebarMode === 'tree' && selectedTreeCommitRange != null
+            ? (treeCommitFiles ?? [])
+            : snapshot.files,
+    [
+      selectedTreeCommitRange,
+      selectedVersionUnitFiles,
+      selectedVersionUnitIds.size,
+      sidebarMode,
+      snapshot.files,
+      treeCommitFiles,
+      versionCompare,
+      versionCompareActive,
+    ],
   );
   const orderedFiles = useMemo(() => sortFiles(reviewFiles), [reviewFiles]);
   const {
@@ -1543,13 +1994,6 @@ export function ReviewSurface({
     generalCommentEditSubmitting,
     updateGeneralDiscussion,
   ]);
-  const selectPath = useCallback(
-    (path: string | null) => {
-      setUncontrolledSelectedPath(path);
-      controlledPreferences?.selectedPath?.onChange(path);
-    },
-    [controlledPreferences?.selectedPath, setUncontrolledSelectedPath],
-  );
   const activateTreePath = useCallback(
     (path: string) => {
       setFocusedReviewCommentPath(null);
@@ -1786,6 +2230,7 @@ export function ReviewSurface({
     source: snapshot.repository.source,
     sourceDescriptionCollapsed,
     supportsReviewCommentActions: submitReviewComment != null,
+    targetVersionId: versionCompareActive ? versionCompare?.to.versionId : undefined,
     theme: snapshot.preferences.theme,
     viewed,
     wordWrap,
@@ -1925,6 +2370,124 @@ export function ReviewSurface({
         subject: 'Head',
       })
     : null;
+  const versionCompareFrom =
+    versions.find((version) => version.versionId === versionCompareFromVersionId) ??
+    versionCompare?.from;
+  const versionCompareTo =
+    versions.find((version) => version.versionId === versionCompareToVersionId) ??
+    versionCompare?.to;
+  const defaultVersionPair = suggestReviewComparison(versions);
+  const pickerFromVersionId =
+    versionCompareFromVersionId ?? defaultVersionPair?.fromVersionId ?? null;
+  const pickerToVersionId = versionCompareToVersionId ?? defaultVersionPair?.toVersionId ?? null;
+  const pairSessionKey = `codiff:review-comparison:${getSourceKey(snapshot.repository.source)}`;
+  const isValidVersionPair = useCallback(
+    (
+      fromVersionId: ReviewVersionId | null | undefined,
+      toVersionId: ReviewVersionId | null | undefined,
+    ) => {
+      const fromIndex = versions.findIndex((version) => version.versionId === fromVersionId);
+      const toIndex = versions.findIndex((version) => version.versionId === toVersionId);
+      return fromIndex >= 0 && toIndex > fromIndex;
+    },
+    [versions],
+  );
+  useEffect(() => {
+    if (
+      !versionCompareActive ||
+      versionHistoryLoading ||
+      !onVersionCompareRangeChange ||
+      isValidVersionPair(versionCompareFromVersionId, versionCompareToVersionId)
+    ) {
+      return;
+    }
+
+    let restored: { fromVersionId?: ReviewVersionId; toVersionId?: ReviewVersionId } | null = null;
+    try {
+      restored = JSON.parse(sessionStorage.getItem(pairSessionKey) ?? 'null');
+    } catch {
+      restored = null;
+    }
+    if (isValidVersionPair(restored?.fromVersionId, restored?.toVersionId)) {
+      onVersionCompareRangeChange(restored!.fromVersionId!, restored!.toVersionId!);
+      return;
+    }
+    const suggested = suggestReviewComparison(versions);
+    if (suggested && isValidVersionPair(suggested.fromVersionId, suggested.toVersionId)) {
+      onVersionCompareRangeChange(suggested.fromVersionId, suggested.toVersionId);
+    }
+  }, [
+    onVersionCompareRangeChange,
+    isValidVersionPair,
+    pairSessionKey,
+    versionCompareActive,
+    versionCompareFromVersionId,
+    versionCompareToVersionId,
+    versionHistoryLoading,
+    versions,
+  ]);
+  const selectVersionPair = (fromVersionId: ReviewVersionId, toVersionId: ReviewVersionId) => {
+    if (!isValidVersionPair(fromVersionId, toVersionId)) {
+      return;
+    }
+    try {
+      sessionStorage.setItem(pairSessionKey, JSON.stringify({ fromVersionId, toVersionId }));
+    } catch {
+      // Session restoration is optional in restricted shared/browser contexts.
+    }
+    onVersionCompareRangeChange?.(fromVersionId, toVersionId);
+  };
+  const renderTargetComparisonEndpoints = () => (
+    <>
+      <span className="version-comparison-endpoint">
+        <span>From · {targetBranch}</span>
+        {targetBaseCommitSummary ? (
+          <ReviewCommitRef commit={targetBaseCommitSummary} linkTrigger={false} />
+        ) : null}
+      </span>
+      {' → '}
+      <span className="version-comparison-endpoint">
+        <span>To · Head</span>
+        {targetHeadCommitSummary ? (
+          <ReviewCommitRef commit={targetHeadCommitSummary} linkTrigger={false} />
+        ) : null}
+      </span>
+    </>
+  );
+  const selectedEvolutionKind = selectedVersionUnit?.kind;
+  const diffScopeSummary = versionCompareActive ? (
+    versionCompareFrom && versionCompareTo ? (
+      <>
+        <VersionComparisonEndpoint version={versionCompareFrom} />
+        {' → '}
+        <VersionComparisonEndpoint version={versionCompareTo} />
+        {selectedEvolutionKind ? (
+          <span className={`comparison-kind-pill ${selectedEvolutionKind}`}>
+            {selectedEvolutionKind.replaceAll('-', ' ')}
+          </span>
+        ) : null}
+      </>
+    ) : (
+      <span>Choose versions</span>
+    )
+  ) : (
+    <>
+      {renderTargetComparisonEndpoints()}
+      <span className="comparison-range-pill">
+        {selectedTreeCommitRange
+          ? `${selectedTreeCommitRange.fromSha.slice(0, 7)} → ${selectedTreeCommitRange.toSha.slice(0, 7)}`
+          : 'All commit changes'}
+      </span>
+    </>
+  );
+  const selectVersionComparisonScope = () => {
+    if (versionCompareActive) {
+      return;
+    }
+    clearTreeCommitRange();
+    setVersionSectionExpanded(true);
+    versionComparison?.onOpen?.();
+  };
   const walkthroughStatus =
     walkthroughRequestPending && walkthrough?.status !== 'ready'
       ? 'generating'
@@ -2168,52 +2731,327 @@ export function ReviewSurface({
             />
           ) : null}
           {sidebarMode === 'tree' &&
-          commitScope &&
-          snapshot.repository.source.type === 'pull-request' &&
-          commits.length > 0 ? (
-            <section className="target-comparison-scope">
-              <div className="target-comparison-header">
-                <strong>
-                  Compare to <code>{targetBranch}</code>
-                </strong>
-                <div className="comparison-endpoint-row">
-                  <span className="version-comparison-endpoint">
-                    <span>From · {targetBranch}</span>
-                    {targetBaseCommitSummary ? (
-                      <ReviewCommitRef commit={targetBaseCommitSummary} linkTrigger={false} />
-                    ) : null}
+          (versionComparison || commitScope) &&
+          snapshot.repository.source.type === 'pull-request' ? (
+            <section
+              className={`history-section version-comparison-section${
+                versionSectionExpanded ? '' : ' collapsed'
+              }`}
+            >
+              <div className="version-comparison-header">
+                <button
+                  aria-controls="version-comparison-body"
+                  aria-expanded={versionSectionExpanded}
+                  className="version-comparison-toggle"
+                  onClick={() => setVersionSectionExpanded((expanded) => !expanded)}
+                  type="button"
+                >
+                  <span aria-hidden className="version-comparison-toggle-caret">
+                    {versionSectionExpanded ? '▾' : '▸'}
                   </span>
-                  {' → '}
-                  <span className="version-comparison-endpoint">
-                    <span>To · Head</span>
-                    {targetHeadCommitSummary ? (
-                      <ReviewCommitRef commit={targetHeadCommitSummary} linkTrigger={false} />
-                    ) : null}
+                  <span className="version-comparison-toggle-copy">
+                    <strong>Comparison</strong>
+                    <span className="version-comparison-summary">{diffScopeSummary}</span>
                   </span>
-                </div>
+                </button>
+                {versionComparison ? (
+                  <div aria-label="Comparison" className="diff-scope-control" role="radiogroup">
+                    <button
+                      aria-checked={!versionCompareActive}
+                      className={!versionCompareActive ? 'selected' : ''}
+                      onClick={() => versionComparison.onExit?.()}
+                      role="radio"
+                      type="button"
+                    >
+                      Compare to <code>{targetBranch}</code>
+                    </button>
+                    <button
+                      aria-checked={versionCompareActive}
+                      className={versionCompareActive ? 'selected' : ''}
+                      disabled={!versionComparison.onOpen}
+                      onClick={selectVersionComparisonScope}
+                      role="radio"
+                      type="button"
+                    >
+                      Compare versions
+                    </button>
+                  </div>
+                ) : null}
               </div>
-              <CommitScopePanel
-                commits={commits}
-                onClear={clearTreeCommitRange}
-                onSelectCommitRange={(range) => {
-                  setSelectedTreeCommitRange(range);
-                  setTreeCommitFiles(null);
-                  setTreeCommitDiffError(null);
-                }}
-                selectedCommitRange={selectedTreeCommitRange}
-              />
+              {versionSectionExpanded && !versionCompareActive ? (
+                <div className="version-comparison-body" id="version-comparison-body">
+                  <div className="comparison-endpoint-row">{renderTargetComparisonEndpoints()}</div>
+                  {commits.length > 0 ? (
+                    <CommitScopePanel
+                      commits={commits}
+                      onClear={clearTreeCommitRange}
+                      onSelectCommitRange={(range) => {
+                        setSelectedTreeCommitRange(range);
+                        setTreeCommitFiles(null);
+                        setTreeCommitDiffError(null);
+                      }}
+                      selectedCommitRange={selectedTreeCommitRange}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              {versionSectionExpanded && versionCompareActive ? (
+                <div className="version-comparison-body" id="version-comparison-body">
+                  {versionHistoryLoading ? (
+                    <div aria-live="polite" className="version-comparison-status" role="status">
+                      <span aria-hidden className="version-comparison-spinner" />
+                      Loading version history…
+                    </div>
+                  ) : versions.length >= 2 &&
+                    pickerFromVersionId &&
+                    pickerToVersionId &&
+                    onVersionCompareRangeChange ? (
+                    <div className="version-picker-pair">
+                      <VersionPicker
+                        endpoint="from"
+                        label="From"
+                        onChange={(fromVersionId) =>
+                          selectVersionPair(fromVersionId, pickerToVersionId)
+                        }
+                        otherId={versionCompareToVersionId}
+                        value={pickerFromVersionId}
+                        versions={versions}
+                      />
+                      <VersionPicker
+                        endpoint="to"
+                        label="To"
+                        onChange={(toVersionId) =>
+                          selectVersionPair(pickerFromVersionId, toVersionId)
+                        }
+                        otherId={versionCompareFromVersionId}
+                        value={pickerToVersionId}
+                        versions={versions}
+                      />
+                    </div>
+                  ) : null}
+                  {versionCompare?.analysis.baseMovement?.changed ? (
+                    <div className="version-base-movement" role="status">
+                      <div>
+                        <strong>Base changed</strong>{' '}
+                        <CommitRefTooltip
+                          commit={{
+                            authoredAt: versionCompare.analysis.baseMovement.from.committedAt,
+                            sha: versionCompare.analysis.baseMovement.from.sha,
+                            shortSha: versionCompare.analysis.baseMovement.from.shortSha,
+                            subject: 'From target base',
+                            webUrl: versionCompare.analysis.baseMovement.from.webUrl,
+                          }}
+                        />{' '}
+                        →{' '}
+                        <CommitRefTooltip
+                          commit={{
+                            authoredAt: versionCompare.analysis.baseMovement.to.committedAt,
+                            sha: versionCompare.analysis.baseMovement.to.sha,
+                            shortSha: versionCompare.analysis.baseMovement.to.shortSha,
+                            subject: 'To target base',
+                            webUrl: versionCompare.analysis.baseMovement.to.webUrl,
+                          }}
+                        />
+                      </div>
+                      {versionCompare.analysis.baseMovement.diffStat ? (
+                        <div className="version-base-movement-stat">
+                          {formatBaseMovementCommitCount(versionCompare.analysis.baseMovement)} ·{' '}
+                          {versionCompare.analysis.baseMovement.diffStat.filesChanged} files ·{' '}
+                          <span className="diffstat-additions">
+                            +{versionCompare.analysis.baseMovement.diffStat.additions}
+                          </span>{' '}
+                          <span className="diffstat-deletions">
+                            −{versionCompare.analysis.baseMovement.diffStat.deletions}
+                          </span>{' '}
+                          ·{' '}
+                          {formatBaseMovementRelationship(
+                            versionCompare.analysis.baseMovement.relationship,
+                          )}
+                          {formatSignedBaseInterval(
+                            versionCompare.analysis.baseMovement.commitTimestampDeltaMs,
+                          )
+                            ? ` · ${formatSignedBaseInterval(
+                                versionCompare.analysis.baseMovement.commitTimestampDeltaMs,
+                              )}`
+                            : ''}
+                        </div>
+                      ) : null}
+                      {(versionCompare.analysis.baseMovement.commits?.length ?? 0) > 0 ? (
+                        <details className="version-base-movement-commits">
+                          <summary>
+                            {versionCompare.analysis.baseMovement.relationship === 'backward'
+                              ? 'Show previous base commits'
+                              : 'Show new base commits'}{' '}
+                            ({formatBaseMovementCommitCount(versionCompare.analysis.baseMovement)})
+                          </summary>
+                          <div className="version-commit-evolution-list version-base-movement-commit-list">
+                            {(versionCompare.analysis.baseMovement.commits ?? []).map((commit) => (
+                              <div
+                                className="version-commit-unit version-base-movement-commit"
+                                key={commit.sha}
+                              >
+                                <CommitRefTooltip commit={commit} />
+                                <span>{commit.subject}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                      {versionCompare.analysis.baseMovement.warning ? (
+                        <small>{versionCompare.analysis.baseMovement.warning}</small>
+                      ) : null}
+                      <small>
+                        Base branch changes are context only and excluded from this review.
+                      </small>
+                    </div>
+                  ) : null}
+                  {versionCompareLoading ? (
+                    <div aria-live="polite" className="version-comparison-status" role="status">
+                      <span aria-hidden className="version-comparison-spinner" />
+                      Computing changes between versions…
+                    </div>
+                  ) : null}
+                  {versionCompareError ? (
+                    <div className="version-comparison-status error">{versionCompareError}</div>
+                  ) : null}
+                  <div className="version-commit-stack-header">
+                    <strong>Commit stack</strong>
+                    <button
+                      disabled={selectedVersionUnitIds.size === 0}
+                      onClick={clearVersionUnits}
+                      type="button"
+                    >
+                      View all commit changes
+                    </button>
+                  </div>
+                  {versionCommitEvolutionLoading ? (
+                    <div aria-live="polite" className="version-comparison-status" role="status">
+                      <span aria-hidden className="version-comparison-spinner" />
+                      {versionCommitEvolutionProgress?.message ?? 'Analyzing commit evolution…'}
+                    </div>
+                  ) : null}
+                  {versionCommitEvolutionError ? (
+                    <details className="version-comparison-status error">
+                      <summary>Commit evolution could not be analyzed</summary>
+                      <small>{versionCommitEvolutionError}</small>
+                    </details>
+                  ) : null}
+                  {versionCommitEvolution ? (
+                    <div className="version-commit-evolution">
+                      <div className="version-commit-evolution-list">
+                        {versionCommitEvolution.warnings?.map((warning) => (
+                          <div className="version-commit-warning" key={warning}>
+                            {warning}
+                          </div>
+                        ))}
+                        {versionCommitEvolution.units.map((unit) => {
+                          if (unit.kind === 'commit') {
+                            return null;
+                          }
+                          const commit = evolutionUnitCommit(unit);
+                          if (!commit) {
+                            return null;
+                          }
+                          const unchanged =
+                            unit.kind === 'retained' ||
+                            unit.kind === 'rewritten-same-patch' ||
+                            unit.kind === 'absorbed-into-base';
+                          const symbol =
+                            unit.kind === 'introduced'
+                              ? '+'
+                              : unit.kind === 'removed'
+                                ? '−'
+                                : unit.kind === 'revised'
+                                  ? '~'
+                                  : unit.kind === 'absorbed-into-base'
+                                    ? '↳'
+                                    : unit.kind === 'ambiguous'
+                                      ? '?'
+                                      : '·';
+                          const kindClass = unchanged ? 'unchanged' : unit.kind;
+                          const overlaps = evolutionUnitRebaseOverlaps(unit);
+                          return (
+                            <div className="version-commit-unit-block" key={unit.unitId}>
+                              <button
+                                aria-pressed={selectedVersionUnitIds.has(unit.unitId)}
+                                className={`version-commit-unit ${kindClass}`}
+                                disabled={!unit.reviewable}
+                                onClick={() => {
+                                  if (unit.reviewable) {
+                                    selectOnlyVersionUnit(unit);
+                                  }
+                                }}
+                                type="button"
+                              >
+                                <span className={`version-commit-kind ${kindClass}`}>{symbol}</span>
+                                <ReviewCommitRef
+                                  commit={commit}
+                                  focusable={false}
+                                  linkTrigger={false}
+                                />
+                                <span>{commit.subject}</span>
+                              </button>
+                              {overlaps.length > 0 ? (
+                                <div className="version-commit-rebase-overlaps">
+                                  <span className="version-commit-rebase-overlaps-label">
+                                    Rebase overlap
+                                  </span>
+                                  {overlaps.map((overlap) => (
+                                    <div
+                                      className="version-commit-unit version-base-movement-commit"
+                                      key={`${unit.unitId}:${overlap.sha}`}
+                                    >
+                                      <CommitRefTooltip commit={overlap} />
+                                      <span>{overlap.subject}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                  {selectedVersionUnit ? (
+                    <div className="version-unit-scope">
+                      <span>Viewing one commit change</span>
+                      <button onClick={clearVersionUnits} type="button">
+                        View all commit changes
+                      </button>
+                    </div>
+                  ) : null}
+                  {versionCompare && versionCompare.analysis.summary.empty ? (
+                    <div className="version-comparison-status">
+                      {versionCommitEvolution?.summary.reviewable
+                        ? 'The final patch is equivalent, but the commit stack changed.'
+                        : 'These versions have no intentional review changes.'}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
           ) : null}
           {sidebarMode === 'tree' ? (
-            <ReviewFileTree
-              files={visibleFiles}
-              onActivatePath={activateTreePath}
-              reloadDeltaPaths={desktop?.reloadDeltaPaths}
-              scrollSelectedPathIntoView={content?.initialScrollTarget != null}
-              selectedPath={visibleSelectedPath}
-              showWhitespace={snapshot.preferences.showWhitespace}
-              viewed={viewed}
-            />
+            versionCompareActive && selectedVersionUnit && versionUnitLoading ? (
+              <div className="sidebar-scope-status">Loading selected commit changes…</div>
+            ) : versionCompareActive && selectedVersionUnit && versionUnitError ? (
+              <div className="sidebar-scope-status error">{versionUnitError}</div>
+            ) : treeCommitDiffLoading && selectedTreeCommitRange != null ? (
+              <div className="sidebar-scope-status">Loading selected commit changes…</div>
+            ) : treeCommitDiffError ? (
+              <div className="sidebar-scope-status error">{treeCommitDiffError}</div>
+            ) : (
+              <ReviewFileTree
+                files={visibleFiles}
+                onActivatePath={activateTreePath}
+                reloadDeltaPaths={desktop?.reloadDeltaPaths}
+                scrollSelectedPathIntoView={content?.initialScrollTarget != null}
+                selectedPath={visibleSelectedPath}
+                showWhitespace={snapshot.preferences.showWhitespace}
+                viewed={viewed}
+              />
+            )
           ) : sidebarMode === 'comments' ? (
             <>
               <SidebarCommentSection count={generalComments.length} title="Overview comments">
@@ -2360,6 +3198,25 @@ export function ReviewSurface({
               submitting={generalCommentSubmitting}
               threads={generalCommentThreads}
             />
+          ) : sidebarMode === 'tree' && versionCompareLoading && !versionCompare ? (
+            <div className="loading codex italic">Computing changes between versions…</div>
+          ) : sidebarMode === 'tree' &&
+            versionCompareActive &&
+            selectedVersionUnit != null &&
+            versionUnitLoading &&
+            selectedVersionUnitFiles.length === 0 ? (
+            <div className="loading codex italic">Loading selected commit changes…</div>
+          ) : sidebarMode === 'tree' &&
+            versionCompareActive &&
+            selectedVersionUnit != null &&
+            versionUnitError &&
+            selectedVersionUnitFiles.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-panel squircle">
+                <strong>Unable to load selected commit changes</strong>
+                <p>{versionUnitError}</p>
+              </div>
+            </div>
           ) : sidebarMode === 'tree' && treeCommitDiffLoading && selectedTreeCommitRange != null ? (
             <div className="loading codex italic">Loading selected commit changes…</div>
           ) : sidebarMode === 'tree' && treeCommitDiffError ? (
@@ -2387,7 +3244,11 @@ export function ReviewSurface({
               <div className="empty-state">
                 <div className="empty-panel squircle">
                   <strong>
-                    {hasDiffSearchQuery ? 'No matches in diffs' : 'No matching files'}
+                    {hasDiffSearchQuery
+                      ? 'No matches in diffs'
+                      : fileSearchQuery
+                        ? 'No matching files'
+                        : 'No files in this diff'}
                   </strong>
                   <span>
                     {diffSearchQuery ||
@@ -2405,9 +3266,11 @@ export function ReviewSurface({
                 files={visibleFiles}
                 forceExpandedPaths={forceExpandedPaths}
                 key={
-                  selectedTreeCommitRange
-                    ? `commits:${selectedTreeCommitRange.fromSha}:${selectedTreeCommitRange.toSha}`
-                    : 'commits:all'
+                  versionCompareActive
+                    ? `version:${selectedVersionUnit?.unitId ?? 'all'}`
+                    : selectedTreeCommitRange
+                      ? `commits:${selectedTreeCommitRange.fromSha}:${selectedTreeCommitRange.toSha}`
+                      : 'commits:all'
                 }
                 onSelectPathFromScroll={updateSelectedPathFromScroll}
                 scrollTarget={treeScrollTarget}
