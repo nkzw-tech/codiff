@@ -110,6 +110,10 @@ import {
 import { getReviewIdentity, isReviewIdentityViewed } from '../../lib/review-identity.ts';
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
 import { getSourceKey } from '../../lib/source.ts';
+import {
+  buildSourceDescriptionModel,
+  type SourceDescriptionAuthor,
+} from '../../lib/source-description.ts';
 import type {
   ChangedFile,
   CodiffPreferences,
@@ -124,7 +128,6 @@ import type {
   PullRequestCodeQualityFinding,
   PullRequestExistingReviewComment,
   ResolvedReviewSource,
-  ReviewAuthor,
   ReviewSource,
 } from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
@@ -506,27 +509,6 @@ function ReadOnlyMarkdown({
   );
 }
 
-const getPullRequestDescriptionLabel = (source: Extract<ReviewSource, { type: 'pull-request' }>) =>
-  source.provider === 'github'
-    ? 'PR description'
-    : source.provider === 'gitlab'
-      ? 'MR description'
-      : 'Description';
-type SourceDescriptionAuthor = {
-  avatarUrl?: string;
-  displayName: string;
-  title?: string;
-};
-const getPullRequestDescriptionAuthor = (author: ReviewAuthor): SourceDescriptionAuthor => ({
-  avatarUrl: author.avatarUrl,
-  displayName: author.name || `@${author.login}`,
-  title: `@${author.login}`,
-});
-const getCommitDescriptionAuthor = (author: CommitMetadata['author']): SourceDescriptionAuthor => ({
-  avatarUrl: author.gravatarUrl,
-  displayName: author.name || author.email || 'Unknown author',
-  title: author.email || undefined,
-});
 const htmlCommentPattern = /<!--[\s\S]*?-->/g;
 const stripHtmlComments = (value: string) => value.replaceAll(htmlCommentPattern, '');
 type PullRequestSource = Extract<ReviewSource, { type: 'pull-request' }>;
@@ -962,62 +944,96 @@ function SourceDescriptionBody({
 
 export function PullRequestSourceDescription({
   actions,
+  collapsed,
   footer,
+  footerAside,
   keymap,
+  onCollapsedChange,
   onUpdateDescription,
   onUpdateTitle,
   onUploadDescriptionAsset,
   source,
 }: {
   actions?: ReactNode;
+  collapsed?: boolean;
   footer?: ReactNode;
+  footerAside?: ReactNode;
   keymap?: CodiffKeymap;
+  onCollapsedChange?: (collapsed: boolean) => void;
   onUpdateDescription?: (body: string) => Promise<void> | void;
   onUpdateTitle?: (title: string) => Promise<void> | void;
   onUploadDescriptionAsset?: (file: File) => Promise<string> | string;
   source: PullRequestSource;
 }) {
-  const sourceDescription = source.description?.trim() ?? '';
-  const sourceTitle = source.title?.trim() ?? '';
-  const sourceDescriptionHasBody = sourceDescription.length > 0;
-  const sourceAuthor = source.author ? getPullRequestDescriptionAuthor(source.author) : undefined;
-  const canEditDescription = source.canEditDescription === true && onUpdateDescription != null;
-  const canEditTitle =
-    (source.canEditTitle === true || source.canEditDescription === true) && onUpdateTitle != null;
-  const [collapsed, setCollapsed] = useState(false);
-
-  if (!sourceDescription && !sourceTitle) {
+  const model = buildSourceDescriptionModel({ commitMetadata: null, source });
+  const [collapseState, setCollapseState] = useState(() => ({
+    collapsed: model?.defaultCollapsed ?? false,
+    identity: model?.identity ?? '',
+  }));
+  if (!model) {
     return null;
   }
-
-  const isCollapsed = (!sourceDescriptionHasBody && !canEditDescription) || collapsed;
-  const layoutKey = `source-description-panel:${source.provider ?? ''}:${source.url}:${sourceTitle}:${sourceDescription}:${source.author?.login ?? ''}:${source.author?.avatarUrl ?? ''}:${isCollapsed ? 'collapsed' : 'open'}`;
+  const canEditDescription = model.allowsBodyEdit && onUpdateDescription != null;
+  const canEditTitle = model.allowsTitleEdit && onUpdateTitle != null;
+  const uncontrolledCollapsed =
+    collapseState.identity === model.identity ? collapseState.collapsed : model.defaultCollapsed;
+  const isCollapsed = collapsed ?? uncontrolledCollapsed;
+  const toggleCollapsed = () => {
+    const next = !isCollapsed;
+    if (onCollapsedChange) {
+      onCollapsedChange(next);
+    } else {
+      setCollapseState({ collapsed: next, identity: model.identity });
+    }
+  };
+  const layoutKey = `${model.identity}:${model.title}:${model.body}:${model.author?.displayName ?? ''}:${model.author?.avatarUrl ?? ''}:${isCollapsed ? 'collapsed' : 'open'}`;
+  const sourceDescriptionContent = (
+    <SourceDescriptionBody
+      author={model.author}
+      canEdit={canEditDescription}
+      description={model.body}
+      keymap={keymap}
+      layoutKey={layoutKey}
+      onLayoutReady={() => {}}
+      onUpdateDescription={onUpdateDescription}
+      onUploadDescriptionAsset={onUploadDescriptionAsset}
+    />
+  );
+  const overviewAside =
+    footer || footerAside ? (
+      <aside className="codiff-source-description-overview-aside">
+        {footer}
+        {footerAside}
+      </aside>
+    ) : null;
 
   return (
     <div className="codiff-source-description-panel">
       <SourceDescriptionHeader
         actions={actions}
-        canCollapse={sourceDescriptionHasBody || canEditDescription}
+        canCollapse={model.body.length > 0 || canEditDescription}
         canEditTitle={canEditTitle}
         isCollapsed={isCollapsed}
-        label={getPullRequestDescriptionLabel(source)}
-        onToggleCollapsed={() => setCollapsed((current) => !current)}
+        label={model.label}
+        onToggleCollapsed={toggleCollapsed}
         onUpdateTitle={onUpdateTitle}
-        title={sourceTitle}
+        title={model.title}
       />
       {!isCollapsed ? (
         <div className="codiff-source-description-panel-body">
-          <SourceDescriptionBody
-            author={sourceAuthor}
-            canEdit={canEditDescription}
-            description={sourceDescription}
-            keymap={keymap}
-            layoutKey={layoutKey}
-            onLayoutReady={() => {}}
-            onUpdateDescription={onUpdateDescription}
-            onUploadDescriptionAsset={onUploadDescriptionAsset}
-          />
-          {footer ? <div className="codiff-source-description-footer">{footer}</div> : null}
+          {overviewAside ? (
+            <div className="codiff-source-description-overview">
+              <div className="codiff-source-description-overview-main">
+                {sourceDescriptionContent}
+              </div>
+              {overviewAside}
+            </div>
+          ) : (
+            <>
+              {sourceDescriptionContent}
+              {footer ? <div className="codiff-source-description-footer">{footer}</div> : null}
+            </>
+          )}
         </div>
       ) : null}
     </div>
@@ -2551,6 +2567,7 @@ export function ReviewCodeView({
   onResolveThread = noopResolveThread,
   onSaveCommentEdit,
   onSelectPathFromScroll,
+  onSourceDescriptionCollapsedChange,
   onSubmitComment,
   onToggleCollapsed,
   onToggleViewed,
@@ -2567,7 +2584,9 @@ export function ReviewCodeView({
   showWhitespace,
   source,
   sourceDescriptionActions,
+  sourceDescriptionCollapsed: controlledSourceDescriptionCollapsed,
   sourceDescriptionFooter,
+  sourceDescriptionFooterAside,
   supportsReviewCommentActions,
   theme = 'system',
   viewed,
@@ -2613,6 +2632,7 @@ export function ReviewCodeView({
   onResolveThread?: (threadId: string, resolved: boolean) => Promise<void> | void;
   onSaveCommentEdit: (commentId: string, body: string) => Promise<void> | void;
   onSelectPathFromScroll: (viewer: CodeViewInstance) => void;
+  onSourceDescriptionCollapsedChange?: (collapsed: boolean) => void;
   onSubmitComment: (commentId: string) => void;
   onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean, reviewKey: string) => void;
   onToggleViewed: (file: ChangedFile, isViewed: boolean, reviewIdentity: ReviewIdentity) => void;
@@ -2632,7 +2652,9 @@ export function ReviewCodeView({
   showWhitespace: boolean;
   source: ResolvedReviewSource;
   sourceDescriptionActions?: ReactNode;
+  sourceDescriptionCollapsed?: boolean;
   sourceDescriptionFooter?: ReactNode;
+  sourceDescriptionFooterAside?: ReactNode;
   supportsReviewCommentActions: boolean;
   theme?: CodiffPreferences['theme'];
   viewed: Record<string, string>;
@@ -2699,59 +2721,52 @@ export function ReviewCodeView({
     setDefinitionLookup(null);
   }
   const selectedLinesRef = useRef<CodeViewLineSelection | null>(null);
-  const commitMessageMetadata = source.type === 'commit' ? commitMetadata : null;
-  const shouldShowCommitMessage = commitMessageMetadata != null;
-  const shouldShowSourceDescription = showSourceDescription && source.type === 'pull-request';
-  const sourceDescription = shouldShowCommitMessage
-    ? commitMessageMetadata.body.trim()
-    : shouldShowSourceDescription
-      ? (source.description?.trim() ?? '')
-      : '';
-  const sourceDescriptionHasBody = sourceDescription.length > 0;
-  const sourceDescriptionHasContent = sourceDescriptionHasBody || shouldShowCommitMessage;
+  const sourceDescriptionModel = buildSourceDescriptionModel({
+    commitMetadata,
+    showPullRequestDescription: showSourceDescription,
+    source,
+  });
+  const shouldShowCommitMessage = sourceDescriptionModel?.kind === 'commit';
+  const sourceDescription = sourceDescriptionModel?.body ?? '';
+  const sourceDescriptionHasContent = sourceDescriptionModel != null;
   const canEditSourceDescription =
-    shouldShowSourceDescription &&
-    source.canEditDescription === true &&
+    sourceDescriptionModel?.kind === 'pull-request' &&
+    sourceDescriptionModel.allowsBodyEdit &&
     onUpdateSourceDescription != null;
   const canEditSourceTitle =
-    shouldShowSourceDescription &&
-    (source.canEditTitle === true || source.canEditDescription === true) &&
+    sourceDescriptionModel?.kind === 'pull-request' &&
+    sourceDescriptionModel.allowsTitleEdit &&
     onUpdateSourceTitle != null;
-  const sourceAuthor = shouldShowCommitMessage
-    ? getCommitDescriptionAuthor(commitMessageMetadata.author)
-    : shouldShowSourceDescription && source.author
-      ? getPullRequestDescriptionAuthor(source.author)
-      : undefined;
-  const sourceTitle = shouldShowCommitMessage
-    ? commitMessageMetadata.subject.trim() || commitMessageMetadata.shortSha
-    : shouldShowSourceDescription
-      ? (source.title?.trim() ?? '')
-      : '';
-  const sourceDescriptionItemId =
-    shouldShowCommitMessage && source.type === 'commit'
-      ? `commit-message:${source.sha}`
-      : shouldShowSourceDescription && (sourceDescription || sourceTitle)
-        ? `source-description:${source.provider ?? ''}:${source.url}`
-        : null;
-  const sourceDescriptionLabel = shouldShowCommitMessage
-    ? 'Commit'
-    : source.type === 'pull-request'
-      ? getPullRequestDescriptionLabel(source)
-      : '';
-  const sourceDescriptionAriaLabel = shouldShowCommitMessage
-    ? 'Preview commit message'
-    : 'Preview source description';
-  const [collapsedSourceDescriptionItemId, setCollapsedSourceDescriptionItemId] = useState<
-    string | null
-  >(null);
+  const sourceAuthor = sourceDescriptionModel?.author;
+  const sourceTitle = sourceDescriptionModel?.title ?? '';
+  const sourceDescriptionItemId = sourceDescriptionModel?.identity ?? null;
+  const sourceDescriptionLabel = sourceDescriptionModel?.label ?? '';
+  const sourceDescriptionAriaLabel = sourceDescriptionModel?.ariaLabel ?? '';
+  const [sourceDescriptionCollapseState, setSourceDescriptionCollapseState] = useState(() => ({
+    collapsed: sourceDescriptionModel?.defaultCollapsed ?? false,
+    identity: sourceDescriptionModel?.identity ?? '',
+  }));
+  const uncontrolledSourceDescriptionCollapsed = sourceDescriptionModel
+    ? sourceDescriptionCollapseState.identity === sourceDescriptionModel.identity
+      ? sourceDescriptionCollapseState.collapsed
+      : sourceDescriptionModel.defaultCollapsed
+    : true;
   const sourceDescriptionCollapsed =
-    (!sourceDescriptionHasContent && !canEditSourceDescription) ||
-    collapsedSourceDescriptionItemId === sourceDescriptionItemId;
+    controlledSourceDescriptionCollapsed ?? uncontrolledSourceDescriptionCollapsed;
   const toggleSourceDescriptionCollapsed = useCallback(() => {
-    setCollapsedSourceDescriptionItemId((current) =>
-      current === sourceDescriptionItemId ? null : sourceDescriptionItemId,
-    );
-  }, [sourceDescriptionItemId]);
+    if (!sourceDescriptionModel) {
+      return;
+    }
+    const next = !sourceDescriptionCollapsed;
+    if (onSourceDescriptionCollapsedChange) {
+      onSourceDescriptionCollapsedChange(next);
+    } else {
+      setSourceDescriptionCollapseState({
+        collapsed: next,
+        identity: sourceDescriptionModel.identity,
+      });
+    }
+  }, [onSourceDescriptionCollapsedChange, sourceDescriptionCollapsed, sourceDescriptionModel]);
   const stickyHeaderFrameRef = useRef<number | null>(null);
 
   const reviewBlocks = useMemo(() => blocks ?? createFileReviewBlocks(files), [blocks, files]);
@@ -4225,20 +4240,39 @@ export function ReviewCodeView({
         {!sourceDescriptionCollapsed &&
         (sourceDescriptionHasContent || canEditSourceDescription) ? (
           <div className="codiff-source-description-panel-body">
-            <SourceDescriptionBody
-              ariaLabel={sourceDescriptionAriaLabel}
-              author={sourceAuthor}
-              canEdit={canEditSourceDescription}
-              description={sourceDescription}
-              keymap={keymap}
-              layoutKey="code-view-header"
-              onLayoutReady={noopLayoutReady}
-              onUpdateDescription={onUpdateSourceDescription}
-              onUploadDescriptionAsset={onUploadSourceDescriptionAsset}
-            />
-            {sourceDescriptionFooter ? (
-              <div className="codiff-source-description-footer">{sourceDescriptionFooter}</div>
-            ) : null}
+            {sourceDescriptionFooter || sourceDescriptionFooterAside ? (
+              <div className="codiff-source-description-overview">
+                <div className="codiff-source-description-overview-main">
+                  <SourceDescriptionBody
+                    ariaLabel={sourceDescriptionAriaLabel}
+                    author={sourceAuthor}
+                    canEdit={canEditSourceDescription}
+                    description={sourceDescription}
+                    keymap={keymap}
+                    layoutKey="code-view-header"
+                    onLayoutReady={noopLayoutReady}
+                    onUpdateDescription={onUpdateSourceDescription}
+                    onUploadDescriptionAsset={onUploadSourceDescriptionAsset}
+                  />
+                </div>
+                <aside className="codiff-source-description-overview-aside">
+                  {sourceDescriptionFooter}
+                  {sourceDescriptionFooterAside}
+                </aside>
+              </div>
+            ) : (
+              <SourceDescriptionBody
+                ariaLabel={sourceDescriptionAriaLabel}
+                author={sourceAuthor}
+                canEdit={canEditSourceDescription}
+                description={sourceDescription}
+                keymap={keymap}
+                layoutKey="code-view-header"
+                onLayoutReady={noopLayoutReady}
+                onUpdateDescription={onUpdateSourceDescription}
+                onUploadDescriptionAsset={onUploadSourceDescriptionAsset}
+              />
+            )}
           </div>
         ) : null}
       </div>
@@ -4256,6 +4290,7 @@ export function ReviewCodeView({
       sourceDescriptionAriaLabel,
       sourceDescriptionCollapsed,
       sourceDescriptionFooter,
+      sourceDescriptionFooterAside,
       sourceDescriptionHasContent,
       sourceDescriptionLabel,
       sourceTitle,

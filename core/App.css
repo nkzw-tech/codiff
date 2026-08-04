@@ -2009,23 +2009,28 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding: 0 8px 8px 50px;
 }
 
-.codiff-source-description-footer-row {
-  align-items: stretch;
+.codiff-source-description-overview {
+  align-items: start;
   display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-}
-
-.codiff-source-description-footer-main,
-.codiff-source-description-footer-aside {
-  display: flex;
-  flex-direction: column;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
   min-width: 0;
 }
 
-.codiff-source-description-footer-main > *,
-.codiff-source-description-footer-aside > * {
-  flex: 1;
+.codiff-source-description-overview-main,
+.codiff-source-description-overview-aside {
+  min-width: 0;
+}
+
+.codiff-source-description-overview-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 8px 8px 0;
+}
+
+.codiff-source-description-overview-aside > * {
+  min-width: 0;
 }
 
 .source-description-comment-anonymous + .codiff-source-description-footer {
@@ -2235,8 +2240,12 @@ html[data-codiff-platform='darwin'] .sidebar {
 }
 
 @media (max-width: 1024px) {
-  .codiff-source-description-footer-row {
+  .codiff-source-description-overview {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .codiff-source-description-overview-aside {
+    padding: 0 8px 8px;
   }
 
   .pull-request-merge-controls,

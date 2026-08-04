@@ -473,6 +473,175 @@ test('dispatches neutral GitLab review sessions with pending drafts and summarie
   });
 });
 
+
+test('keeps title-only source footer actions reachable', async () => {
+  const onMergePullRequest = vi.fn(async () => {});
+  const source = {
+    ...providerSnapshot.repository.source,
+    description: undefined,
+    mergeState: {
+      autoMergeEnabled: false,
+      canCancelAutoMerge: false,
+      canMerge: true,
+      canSetAutoMerge: false,
+      checks: [],
+      forceRemoveSourceBranch: false,
+      options: { removeSourceBranch: false, squash: false },
+      sha: 'a'.repeat(40),
+      status: 'ready' as const,
+      statusLabel: 'Ready to merge',
+    },
+    title: 'Title-only source',
+  };
+  await using view = await renderSurface({
+    capabilities: { sourceNavigation: { onMergePullRequest } },
+    initialMode: 'tree',
+    snapshot: {
+      ...providerSnapshot,
+      repository: { ...providerSnapshot.repository, source },
+      walkthrough: { ...providerSnapshot.walkthrough, source },
+    },
+  });
+
+  expect(view.container.textContent).toContain('Title-only source');
+  expect(view.container.querySelector('button[aria-label="Expand description"]')).toBeNull();
+  const merge = findButton(view.container, 'Merge');
+  expect(merge).not.toBeUndefined();
+  await act(async () => merge?.click());
+  expect(onMergePullRequest).toHaveBeenCalledWith({
+    autoMerge: false,
+    removeSourceBranch: false,
+    squash: false,
+  });
+});
+
+test('keeps provider source-description collapse state across Tree and Comments', async () => {
+  const richSnapshot = {
+    ...providerSnapshot,
+    repository: {
+      ...providerSnapshot.repository,
+      source: {
+        ...providerSnapshot.repository.source,
+        author: { login: 'ada', name: 'Ada Lovelace' },
+        description: 'Shared source-description body.',
+        headSha: 'a'.repeat(40) as HistoryEntry['sha'],
+        title: 'Shared source-description title',
+      },
+    },
+    walkthrough: {
+      ...providerSnapshot.walkthrough,
+      source: {
+        ...providerSnapshot.walkthrough.source,
+        author: { login: 'ada', name: 'Ada Lovelace' },
+        description: 'Shared source-description body.',
+        headSha: 'a'.repeat(40) as HistoryEntry['sha'],
+        title: 'Shared source-description title',
+      },
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  await using view = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'tree',
+    snapshot: richSnapshot,
+  });
+
+  const collapse = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Collapse description"]',
+  );
+  expect(collapse).not.toBeNull();
+  await act(async () => collapse?.click());
+  expect(view.container.querySelector('button[aria-label="Expand description"]')).not.toBeNull();
+
+  await act(async () => findButton(view.container, 'Comments')?.click());
+  expect(view.container.querySelector('button[aria-label="Expand description"]')).not.toBeNull();
+  expect(view.container.textContent).toContain('Shared source-description title');
+  expect(view.container.textContent).not.toContain('Shared source-description body.');
+
+  await act(async () => findButton(view.container, 'Tree')?.click());
+  expect(view.container.querySelector('button[aria-label="Expand description"]')).not.toBeNull();
+});
+
+test('renders the same source-description semantics once in Tree, Walkthrough, and Comments', async () => {
+  const file = providerSnapshot.files[0]!;
+  const source = {
+    ...providerSnapshot.repository.source,
+    author: { login: 'ada', name: 'Ada Lovelace' },
+    description: 'Cross-mode source-description body.',
+    headSha: 'b'.repeat(40) as HistoryEntry['sha'],
+    title: 'Cross-mode source-description title',
+  };
+  const walkthrough = {
+    ...providerSnapshot.walkthrough,
+    chapters: [
+      {
+        blurb: 'Review the source overview.',
+        icon: 'gear' as const,
+        id: 'overview',
+        stops: [
+          {
+            added: 1,
+            deleted: 1,
+            hunkIds: [`${file.sections[0]!.id}:h1`],
+            hunks: [
+              {
+                added: 1,
+                anchor: {
+                  display: file.path,
+                  sectionId: file.sections[0]!.id,
+                  side: 'both' as const,
+                },
+                deleted: 1,
+                id: `${file.sections[0]!.id}:h1`,
+                path: file.path,
+                status: file.status,
+              },
+            ],
+            id: 'overview-stop',
+            importance: 'critical' as const,
+            prose: 'Review the source overview.',
+            title: 'Overview stop',
+          },
+        ],
+        title: 'Overview',
+      },
+    ],
+    source,
+  } satisfies NarrativeWalkthrough;
+  await using view = await renderSurface({
+    capabilities: {
+      comments: createProviderComments({
+        reviewSession: {
+          drafts: { onChange: vi.fn(), value: [] },
+          submit: async () => ({ status: 'submitted', submittedDraftIds: [] }),
+        },
+      }),
+    },
+    initialMode: 'walkthrough',
+    snapshot: {
+      ...providerSnapshot,
+      repository: { ...providerSnapshot.repository, source },
+      walkthrough,
+    },
+  });
+  const assertSourceDescriptionOnce = () => {
+    expect(view.container.textContent?.match(/Cross-mode source-description title/g)).toHaveLength(
+      1,
+    );
+    expect(view.container.textContent?.match(/Cross-mode source-description body\./g)).toHaveLength(
+      1,
+    );
+    expect(view.container.textContent?.match(/Ada Lovelace/g)).toHaveLength(1);
+    expect(view.container.textContent?.match(/Approve/g)).toHaveLength(1);
+  };
+
+  await waitFor(assertSourceDescriptionOnce);
+  await act(async () => findButton(view.container, 'Tree')?.click());
+  await waitFor(assertSourceDescriptionOnce);
+  await act(async () => findButton(view.container, 'Comments')?.click());
+  await waitFor(assertSourceDescriptionOnce);
+});
+
+>>>>>>> conflict 1 of 1 ends
 test('copies local notes with the local label and Markdown heading', async () => {
   const file = snapshot.files[0]!;
   const draft = {
