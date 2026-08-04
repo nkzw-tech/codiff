@@ -8,6 +8,7 @@ import { RepositoryReviewHost } from '../app/RepositoryReviewHost.tsx';
 import { createDefaultConfig } from '../config/defaults.ts';
 import { resolveRepositoryReviewBootstrap } from '../lib/repository-review-bootstrap.ts';
 import type {
+  CodiffLaunchOptions,
   DiffImageContentRequest,
   GitSha,
   NarrativeWalkthrough,
@@ -30,7 +31,7 @@ const state = {
 const unsubscribe = () => {};
 const bootstrapFor = (
   repositoryState: RepositoryState,
-  launchOptions = { repositoryPathProvided: true, walkthrough: false } as const,
+  launchOptions: CodiffLaunchOptions = { repositoryPathProvided: true, walkthrough: false },
 ) =>
   resolveRepositoryReviewBootstrap({
     launchOptions,
@@ -300,6 +301,116 @@ test('standalone commit preparation remains available without a ready walkthroug
     } finally {
       await view.cleanup();
     }
+  }
+});
+
+test('requests commit-by-commit generation with canonical commits and the immutable range', async () => {
+  const baseSha = '0'.repeat(40) as GitSha;
+  const firstSha = 'a'.repeat(40) as GitSha;
+  const secondSha = 'b'.repeat(40) as GitSha;
+  const range = {
+    base: { label: { kind: 'commit' as const, text: 'main' }, sha: baseSha },
+    head: { label: { kind: 'commit' as const, text: 'Head' }, sha: secondSha },
+  };
+  const getNarrativeWalkthrough = vi.fn(async () => ({
+    reason: 'Stop after capturing the request.',
+    status: 'unavailable' as const,
+  }));
+  window.codiff = {
+    applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    cancelDiffContentRequest: vi.fn(),
+    dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    getNarrativeWalkthrough,
+    getReviewComments: vi.fn(async () => []),
+    getUpdateStatus: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
+    isWindowFullScreen: vi.fn(async () => false),
+    onConfigChanged: vi.fn(() => unsubscribe),
+    onCopyPendingCommentsRequest: vi.fn(() => unsubscribe),
+    onFindInDiffs: vi.fn(() => unsubscribe),
+    onNarrativeWalkthroughUpdated: vi.fn(() => unsubscribe),
+    onOpenReviewSource: vi.fn(() => unsubscribe),
+    onRefreshRequest: vi.fn(() => unsubscribe),
+    onRepositoryChanged: vi.fn(() => unsubscribe),
+    onUpdateStatusChanged: vi.fn(() => unsubscribe),
+    onWalkthroughProgress: vi.fn(() => unsubscribe),
+    onWindowFullScreenChanged: vi.fn(() => unsubscribe),
+    openRepositoryFolder: vi.fn(async () => {}),
+    resolvePullRequestUrl: vi.fn(async (value: string) => value),
+  } as unknown as Window['codiff'];
+  const file = createChangedFile('src/review.ts');
+  const source = {
+    description: 'Please review each commit.',
+    headSha: secondSha,
+    number: 42,
+    provider: 'github',
+    targetBranch: 'main',
+    title: 'Review the commit stack',
+    type: 'pull-request',
+    url: 'https://github.com/example/review/pull/42',
+  } as const;
+  const pullRequestState = {
+    ...state,
+    files: [
+      {
+        ...file,
+        sections: file.sections.map((section) => ({ ...section, range })),
+      },
+    ],
+    source,
+  } satisfies RepositoryState;
+
+  const view = await renderReact(
+    <RepositoryReviewHost
+      bootstrap={bootstrapFor(pullRequestState, {
+        repositoryPathProvided: true,
+        walkthrough: true,
+      })}
+      config={createDefaultConfig()}
+      disableCodeViewWorkerPool
+      gitIdentity={null}
+      gitIdentityReady
+      initialHistory={[
+        {
+          author: 'Ada',
+          committedAt: 0,
+          parentShas: [],
+          scope: 'base',
+          sha: baseSha,
+          subject: 'Prepare main',
+        },
+        {
+          author: 'Ada',
+          committedAt: 1,
+          parentShas: [baseSha],
+          scope: 'pull-request',
+          sha: firstSha,
+          subject: 'Add model',
+        },
+        {
+          author: 'Ada',
+          committedAt: 2,
+          parentShas: [firstSha],
+          scope: 'pull-request',
+          sha: secondSha,
+          subject: 'Test model',
+        },
+      ]}
+      launchOptions={{ repositoryPathProvided: true, walkthrough: true }}
+    />,
+  );
+  try {
+    await waitFor(() => expect(getNarrativeWalkthrough).toHaveBeenCalledOnce());
+    expect(getNarrativeWalkthrough).toHaveBeenCalledWith({
+      commits: [
+        expect.objectContaining({ sha: firstSha, subject: 'Add model' }),
+        expect.objectContaining({ sha: secondSha, subject: 'Test model' }),
+      ],
+      kind: 'target-comparison',
+      selection: { range, relation: 'target-comparison', structure: 'commit-by-commit' },
+      source,
+    });
+  } finally {
+    await view.cleanup();
   }
 });
 

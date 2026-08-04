@@ -69,7 +69,7 @@ test('retains partial components only for matching non-forced retries', () => {
 
 test('walkthrough state loading runs inside the coordinator command signal', async () => {
   const mainSource = await readFile(new URL('../main.cjs', import.meta.url), 'utf8');
-  const handlerStart = mainSource.indexOf("ipcMain.handle('codiff:getNarrativeWalkthrough'");
+  const handlerStart = mainSource.indexOf('const getSingleDiffNarrativeWalkthrough');
   const handlerEnd = mainSource.indexOf("ipcMain.handle('codiff:shareWalkthrough'", handlerStart);
   const handler = mainSource.slice(handlerStart, handlerEnd);
 

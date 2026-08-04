@@ -26,6 +26,7 @@ import {
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { ChangedFile, WalkthroughHunkGroup, WalkthroughModel } from '../../../types.ts';
+import { CommitRefTooltip } from '../CommitRefTooltip.tsx';
 import { ReadOnlyMarkdownView } from '../ReadOnlyMarkdownView.tsx';
 import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import {
@@ -227,11 +228,13 @@ const emptyWalkthroughBlockSet: WalkthroughBlockSet = {
 };
 
 function StopHeader({
+  boundary,
   codeIssues,
   current,
   onRegionLink,
   stop,
 }: {
+  boundary?: WalkthroughView['chapters'][number]['boundary'];
   codeIssues: ReadonlyArray<WalkthroughCodeIssue>;
   current: boolean;
   onRegionLink: (regionId: string) => void;
@@ -239,6 +242,12 @@ function StopHeader({
 }) {
   return (
     <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
+      {boundary ? (
+        <div className="wt-unit-boundary">
+          <span>Commit</span>
+          <CommitRefTooltip className="wt-unit-commit-ref" commit={boundary.commit} />
+        </div>
+      ) : null}
       <div className="wt-stage-title-row">
         <h2 className="wt-stage-title">{stop.title ?? walkthroughItemTitleFallback(stop)}</h2>
         <ImportancePill importance={stop.importance} />
@@ -310,6 +319,8 @@ const createWalkthroughBlocks = (
   };
 
   for (const stop of walkthroughView.sequence) {
+    const chapter = walkthroughView.chapters.find((candidate) => candidate.id === stop.chapterId);
+    const boundary = chapter?.stops[0]?.id === stop.id ? chapter.boundary : undefined;
     const focusedRuns = getFocusedRunDiffs(stop, files);
     const codeIssues = getWalkthroughCodeIssues(stop, files, focusedRuns);
     if (focusedRuns.length === 0) {
@@ -319,6 +330,7 @@ const createWalkthroughBlocks = (
       blocks.push({
         header: (
           <StopHeader
+            boundary={boundary}
             codeIssues={codeIssues}
             current={stop.index === currentIndex}
             onRegionLink={routeRegionLink}
@@ -364,6 +376,7 @@ const createWalkthroughBlocks = (
         header:
           runIndex === 0 ? (
             <StopHeader
+              boundary={boundary}
               codeIssues={codeIssues}
               current={stop.index === currentIndex}
               onRegionLink={routeRegionLink}
@@ -566,6 +579,12 @@ function Arc({
               <span className="wt-arc-chapter-label">
                 <ChapterIcon icon={chapter.icon} size={13} />
                 {chapter.title}
+                {chapter.boundary ? (
+                  <CommitRefTooltip
+                    className="wt-unit-commit-ref"
+                    commit={chapter.boundary.commit}
+                  />
+                ) : null}
               </span>
               <div className="wt-arc-nodes">
                 {chapter.stops.map((stop) => {

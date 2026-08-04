@@ -15,6 +15,7 @@ import type {
   DiffSectionsContentResult,
   GitIdentity,
   NarrativeWalkthroughRequestOptions,
+  NarrativeWalkthroughRequest,
   NarrativeWalkthroughResult,
   NarrativeWalkthroughUpdate,
   OpenReviewSourceKind,
@@ -76,8 +77,7 @@ declare global {
         path: string;
       }) => Promise<CodiffMarkdownDocument>;
       getNarrativeWalkthrough: (
-        source?: ResolvedReviewSource,
-        options?: NarrativeWalkthroughRequestOptions,
+        request: NarrativeWalkthroughRequest,
       ) => Promise<NarrativeWalkthroughResult>;
       getPlanReview: () => Promise<PlanReview | null>;
       getPreferences: () => Promise<CodiffPreferences>;

@@ -45,8 +45,8 @@ const codiff = {
     ipcRenderer.invoke('codiff:getReviewComments', source, requestId),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getUpdateStatus: () => ipcRenderer.invoke('codiff:getUpdateStatus'),
-  getNarrativeWalkthrough: (source, options) =>
-    ipcRenderer.invoke('codiff:getNarrativeWalkthrough', source, options),
+  getNarrativeWalkthrough: (request) =>
+    ipcRenderer.invoke('codiff:getNarrativeWalkthrough', request),
   installAgentSkill: () => ipcRenderer.invoke('codiff:installAgentSkill'),
   installTerminalHelper: () => ipcRenderer.invoke('codiff:installTerminalHelper'),
   increaseCodeFontSize: () => ipcRenderer.invoke('codiff:increaseCodeFontSize'),

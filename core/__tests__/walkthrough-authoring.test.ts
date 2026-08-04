@@ -129,6 +129,41 @@ test('uses source-aware terminology and applies custom instructions once', () =>
   expect(prompt).toContain('Custom walkthrough instructions:');
 });
 
+test('authors commit prompts from only that commit diff and canonical identity', () => {
+  const commitSha = gitSha('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+  const commitContext = { sha: commitSha, subject: 'Add request routing' };
+  const capturedContext = captureWalkthroughContext({
+    ...state,
+    source: {
+      ...state.source,
+      description: 'Summarize the entire merge request as one change.',
+      title: 'Complete merge request',
+    },
+  });
+  const request = createWalkthroughGenerationRequest({
+    range: {
+      base: {
+        label: { kind: 'commit', text: 'base' },
+        sha: gitSha('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),
+      },
+      head: { label: { kind: 'commit', text: 'head' }, sha: commitSha },
+    },
+    relation: 'target-comparison',
+    structure: 'commit-by-commit',
+  });
+  const options = { commitContext, scope: { kind: 'commit' as const, sha: commitSha } };
+  const { digest } = buildWalkthroughPromptInput(capturedContext, request, options);
+  const prompt = buildWalkthroughPrompt(capturedContext, request, options);
+
+  expect(digest.commitContext).toEqual(commitContext);
+  expect(digest.scope).toEqual({ kind: 'commit', sha: commitSha });
+  expect(digest.source).toMatchObject({ title: commitContext.subject });
+  expect(digest.source).not.toHaveProperty('description');
+  expect(prompt).toContain(`independent walkthrough for commit ${commitSha}`);
+  expect(prompt).toContain('Explain only the changes introduced by this commit');
+  expect(prompt).not.toContain('Summarize the entire merge request as one change.');
+});
+
 test('normalizes draft aliases back onto live hunk ids and fills support', () => {
   const index = indexWalkthroughHunks(state.files);
   const walkthrough = normalizeWalkthroughDraft(
@@ -316,8 +351,8 @@ test('authors a sanitized V5 artifact from authoritative inputs', () => {
     capturedContext: { branch: state.branch, files: [{ path: 'src/app.ts' }] },
     generationRequest: { customInstructions: 'Prioritize the request path.' },
     narrative: {
+      content: { repo: { branch: state.branch } },
       generationMetadata,
-      repo: { branch: state.branch },
       structure: 'single-diff',
     },
     version: 5,

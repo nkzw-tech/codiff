@@ -1,4 +1,10 @@
-import type { RepositoryState, ReviewUnit, TargetComparisonReviewPlan } from './review-history.ts';
+import type {
+  RepositoryState,
+  ReviewCommitSummary,
+  ReviewUnit,
+  TargetComparisonReviewPlan,
+  TargetComparisonReviewStructure,
+} from './review-history.ts';
 import type { DiffRange, GitSha, ResolvedReviewSource } from './review-identity.ts';
 import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
@@ -55,6 +61,12 @@ export type WalkthroughProgressEvent = {
   phase?: WalkthroughProgressPhase;
 };
 
+export type WalkthroughGenerationFailure = {
+  error: string;
+  identity: 'single' | { kind: 'commit'; sha: GitSha };
+  label: string;
+};
+
 export type NarrativeWalkthroughResult =
   | {
       cacheKey?: string;
@@ -64,13 +76,35 @@ export type NarrativeWalkthroughResult =
     }
   | {
       code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'OPENCODE_NOT_FOUND' | 'PI_NOT_FOUND';
+      failures?: ReadonlyArray<WalkthroughGenerationFailure>;
       reason: string;
       status: 'unavailable';
     };
+
 export type NarrativeWalkthroughRequestOptions = {
   force?: boolean;
   previousWalkthrough?: PersistedWalkthrough;
 };
+
+export type SingleDiffNarrativeWalkthroughRequest = NarrativeWalkthroughRequestOptions & {
+  kind: 'single-diff';
+  source: ResolvedReviewSource;
+};
+
+export type TargetComparisonNarrativeWalkthroughRequest = NarrativeWalkthroughRequestOptions & {
+  commits: ReadonlyArray<ReviewCommitSummary>;
+  kind: 'target-comparison';
+  selection: {
+    range: DiffRange;
+    relation: 'target-comparison';
+    structure: TargetComparisonReviewStructure;
+  };
+  source: Extract<ResolvedReviewSource, { type: 'pull-request' }>;
+};
+
+export type NarrativeWalkthroughRequest =
+  | SingleDiffNarrativeWalkthroughRequest
+  | TargetComparisonNarrativeWalkthroughRequest;
 
 export type WalkthroughCommitRequest = {
   body: string;

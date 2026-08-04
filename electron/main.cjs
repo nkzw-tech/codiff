@@ -108,7 +108,11 @@ const {
   normalizeNarrativeWalkthrough,
   resolveNarrativeWalkthroughModel,
 } = require('./narrative-walkthrough.cjs');
-const { runWalkthroughGenerationTasks } = require('./walkthrough-generation-bridge.cjs');
+const {
+  createCommitWalkthroughUnits,
+  runStructuredWalkthroughGeneration,
+  runWalkthroughGenerationTasks,
+} = require('./walkthrough-generation-bridge.cjs');
 const {
   createWalkthroughGenerationCoordinator,
 } = require('./walkthrough-generation-coordinator.cjs');
@@ -148,6 +152,7 @@ const {
 const { getPlanReviewPath, readPlanReview, writePlanReview } = require('./plan-review.cjs');
 const { createSharedPlanSnapshot } = require('./shared-plan.cjs');
 const { createWalkthroughProgressReporter } = require('./walkthrough-progress.cjs');
+const { getLocalReviewWalkthroughCacheKey } = require('./local-review-walkthrough-cache-key.cjs');
 
 /**
  * @typedef {import('../core/config/types.ts').CodiffConfig} CodiffConfig
@@ -1749,7 +1754,9 @@ const broadcastNarrativeWalkthroughUpdate = (update) => {
   }
 };
 
-ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) => {
+const getSingleDiffNarrativeWalkthrough = async (event, request) => {
+  const source = request?.source;
+  const options = request;
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   const abortController = walkthroughGenerationCoordinator.begin(event.sender.id);
   const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
@@ -2069,7 +2076,10 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
             walkthrough: walkthroughContext
               ? {
                   ...walkthrough,
-                  narrative: { ...walkthrough.narrative, context: walkthroughContext },
+                  narrative: {
+                    ...walkthrough.narrative,
+                    content: { ...walkthrough.narrative.content, context: walkthroughContext },
+                  },
                 }
               : walkthrough,
           });
@@ -2083,7 +2093,13 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       walkthrough: walkthroughContext
         ? {
             ...assessmentPlan.artifact,
-            narrative: { ...assessmentPlan.artifact.narrative, context: walkthroughContext },
+            narrative: {
+              ...assessmentPlan.artifact.narrative,
+              content: {
+                ...assessmentPlan.artifact.narrative.content,
+                context: walkthroughContext,
+              },
+            },
           }
         : assessmentPlan.artifact,
     };
@@ -2105,7 +2121,256 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
   } finally {
     walkthroughGenerationCoordinator.finish(event.sender.id, abortController);
   }
-});
+};
+
+/** @param {ReadonlyArray<any>} values @param {number} limit @param {(value: any) => Promise<void>} visit */
+const forEachWalkthroughUnit = async (values, limit, visit) => {
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < values.length) {
+      const value = values[nextIndex];
+      nextIndex += 1;
+      await visit(value);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
+};
+
+const getTargetComparisonNarrativeWalkthrough = async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
+  walkthroughProgressGenerations.set(event.sender.id, progressGeneration);
+  const reportProgress = createWalkthroughProgressReporter(
+    event.sender,
+    () => walkthroughProgressGenerations.get(event.sender.id) === progressGeneration,
+  );
+  if (
+    request?.kind !== 'target-comparison' ||
+    !request.source ||
+    request.source.type !== 'pull-request'
+  ) {
+    return { reason: 'A structured pull request request is required.', status: 'unavailable' };
+  }
+  const abortController = walkthroughGenerationCoordinator.begin(event.sender.id);
+
+  try {
+    reportProgress({ phase: 'preparing', summary: 'Loading target comparison.' });
+    const whole = await runWithCommandSignal(abortController.signal, () =>
+      readRepositoryStateWithConfig(repositoryPath, request.source),
+    );
+    abortController.signal.throwIfAborted();
+    const authoring = await loadAuthoring();
+    const agent = resolveWindowAgent(event.sender.id);
+    const agentOptions = getAgentOptions(agent);
+    const modelCandidates = [
+      ...new Set([
+        agent.normalizeModel(agentOptions.model),
+        agent.normalizeModel(agentOptions.fallbackModel ?? agent.fallbackModel),
+      ]),
+    ];
+    const profileForScope = (scope) =>
+      authoring.createWalkthroughGenerationProfile({
+        agent: agent.id,
+        modelCandidates,
+        settings: {
+          scope: scope.kind,
+          ...('sha' in scope ? { sha: scope.sha } : {}),
+        },
+      });
+    const selection = request.selection;
+    const units =
+      selection.structure === 'commit-by-commit'
+        ? createCommitWalkthroughUnits(request.commits)
+        : undefined;
+    /** @type {Record<string, import('../core/types.ts').RepositoryState>} */
+    const byCommitSha = {};
+    if (units) {
+      reportProgress({
+        completed: 0,
+        phase: 'preparing',
+        summary: `Preparing ${units.length} commit diffs.`,
+        total: units.length,
+      });
+      await forEachWalkthroughUnit(units, 3, async (unit) => {
+        const parentSha = unit.commit.parentShas[0];
+        byCommitSha[unit.commit.sha] = await runWithCommandSignal(abortController.signal, () =>
+          readRepositoryStateWithConfig(
+            repositoryPath,
+            parentSha
+              ? {
+                  base: parentSha,
+                  head: unit.commit.sha,
+                  symmetric: false,
+                  type: 'range',
+                }
+              : { ref: unit.commit.sha, type: 'commit' },
+          ),
+        );
+      });
+      abortController.signal.throwIfAborted();
+    }
+
+    const generationRequest = authoring.createWalkthroughGenerationRequest(
+      {
+        range: selection.range,
+        relation: 'target-comparison',
+        structure: selection.structure,
+      },
+      config.settings.walkthroughPrompt,
+    );
+    const cacheKey = getLocalReviewWalkthroughCacheKey({
+      generationRequest,
+      profile: profileForScope({ kind: 'complete-diff' }),
+      state: whole,
+    });
+    /** @type {import('../core/types.ts').WalkthroughArtifactV5 | null} */
+    let artifact = null;
+    if (!request.force) {
+      const cached = readStoredWalkthrough(cacheKey);
+      if (cached?.version === 5) {
+        try {
+          artifact = await parsePersistedWalkthrough(cached);
+        } catch {
+          // Ignore malformed cache entries and regenerate from authoritative inputs.
+        }
+      }
+    }
+
+    const runModel = async ({ profile, prompt, signal }) => {
+      const result = await invokeWalkthroughModel({
+        agent,
+        agentOptions,
+        outputName: 'walkthrough.json',
+        profile,
+        prompt,
+        repoRoot: whole.root,
+        schema: narrativeWalkthroughResponseSchema,
+        signal,
+        timeoutMessage: `${agent.label} walkthrough generation timed out.`,
+        timeoutMs: agent.defaultTimeoutMs || 600_000,
+      });
+      return {
+        generationMetadata: result.generationMetadata,
+        response: parseStructuredModelResponse(result.response),
+      };
+    };
+
+    if (!artifact) {
+      const result = await runStructuredWalkthroughGeneration({
+        customInstructions: config.settings.walkthroughPrompt,
+        narrativeProfile: profileForScope,
+        onProgress: reportProgress,
+        reusableComponents: walkthroughGenerationCoordinator.getReusable(
+          event.sender.id,
+          cacheKey,
+          request.force,
+        ),
+        runModel,
+        selection,
+        states: { byCommitSha, whole },
+        units,
+      });
+      walkthroughGenerationCoordinator.retain(
+        event.sender.id,
+        abortController,
+        cacheKey,
+        result.reusableComponents,
+      );
+      if (result.status !== 'ready') {
+        return { failures: result.failures, reason: result.reason, status: 'unavailable' };
+      }
+      artifact = result.artifact;
+    }
+
+    const assessmentProfile = authoring.createAssessmentGenerationProfile({
+      agent: agent.id,
+      modelCandidates,
+      settings: { scope: 'target-comparison-assessment' },
+    });
+    const assessmentPlan = buildWalkthroughAssessmentPlan({
+      artifact,
+      authoring,
+      byCommitSha,
+      comments: whole.reviewComments ?? [],
+      profile: assessmentProfile,
+      units,
+    });
+    let assessmentStorageReady = readStoredWalkthrough(cacheKey)?.version === 5;
+    try {
+      if (!authoring.assessmentValuesEqual(artifact, assessmentPlan.artifact)) {
+        writeStoredWalkthrough(cacheKey, assessmentPlan.artifact);
+      } else if (!assessmentStorageReady) {
+        writeStoredWalkthrough(cacheKey, artifact);
+      }
+      assessmentStorageReady = true;
+    } catch {
+      // Caching is optional; narrative publication remains successful.
+    }
+    const pendingAssessmentThreadIds = new Set(
+      assessmentStorageReady
+        ? assessmentPlan.tasks.map((task) => task.demand.identity.threadId)
+        : [],
+    );
+    for (const task of assessmentStorageReady ? assessmentPlan.tasks : []) {
+      void walkthroughAssessmentScheduler.schedule({
+        cacheKey,
+        demand: task.demand,
+        expectedComponent: task.expectedComponent,
+        generate: () =>
+          authoring.generateAssessmentComponent({
+            capturedContext: assessmentPlan.artifact.capturedContext,
+            demand: task.demand,
+            profile: assessmentProfile,
+            runModel: async ({ profile, prompt }) => {
+              const result = await invokeWalkthroughModel({
+                agent,
+                agentOptions: getAgentOptions(agent),
+                outputName: 'walkthrough-assessment.json',
+                profile,
+                prompt,
+                repoRoot: whole.root,
+                schema: walkthroughAssessmentResponseSchema,
+                timeoutMessage: `${agent.label} assessment timed out.`,
+              });
+              return {
+                generationMetadata: result.generationMetadata,
+                response: parseStructuredModelResponse(result.response),
+              };
+            },
+          }),
+        onUpdate: (walkthrough) => {
+          pendingAssessmentThreadIds.delete(task.demand.identity.threadId);
+          broadcastNarrativeWalkthroughUpdate({
+            cacheKey,
+            pendingAssessmentThreadIds: [...pendingAssessmentThreadIds],
+            walkthrough,
+          });
+        },
+      });
+    }
+    return {
+      cacheKey,
+      pendingAssessmentThreadIds: [...pendingAssessmentThreadIds],
+      status: 'ready',
+      walkthrough: assessmentPlan.artifact,
+    };
+  } catch (error) {
+    const agent = resolveWindowAgent(event.sender.id);
+    return {
+      ...(agent.isNotFoundError?.(error) ? { code: agent.notFoundCode } : {}),
+      reason: error instanceof Error ? error.message : String(error),
+      status: 'unavailable',
+    };
+  } finally {
+    walkthroughGenerationCoordinator.finish(event.sender.id, abortController);
+  }
+};
+
+ipcMain.handle('codiff:getNarrativeWalkthrough', (event, request) =>
+  request?.kind === 'target-comparison'
+    ? getTargetComparisonNarrativeWalkthrough(event, request)
+    : getSingleDiffNarrativeWalkthrough(event, request),
+);
 
 ipcMain.handle('codiff:shareWalkthrough', async (event, snapshot) => {
   return shareSnapshot(getWalkthroughShareContext(event.sender.id), snapshot);

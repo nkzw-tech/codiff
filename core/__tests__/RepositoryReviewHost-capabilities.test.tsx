@@ -1076,7 +1076,10 @@ test('cancels active walkthrough work when History switches sources', async () =
       void getSurfaceProps().capabilities?.walkthrough?.onGenerate?.();
       await Promise.resolve();
     });
-    expect(api.getNarrativeWalkthrough).toHaveBeenCalledWith({ type: 'working-tree' }, undefined);
+    expect(api.getNarrativeWalkthrough).toHaveBeenCalledWith({
+      kind: 'single-diff',
+      source: { type: 'working-tree' },
+    });
     await act(async () =>
       walkthroughProgress()?.({
         generation: { phase: 'generating', summary: 'Source A progress.' },

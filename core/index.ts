@@ -82,6 +82,18 @@ export {
   type WalkthroughGenerationTask,
 } from './lib/walkthrough-generation-tasks.ts';
 export {
+  generateReviewWalkthrough,
+  type GenerateReviewWalkthroughInput,
+  type GenerateReviewWalkthroughResult,
+  type NarrativeIdentity,
+  type NarrativeSemanticInput,
+  type ResolvedWalkthroughGenerationPlan,
+  type ReusableWalkthroughComponent,
+  type ReviewWalkthroughModelResult,
+  type ReviewWalkthroughRunModel,
+  type WalkthroughGenerationSelection,
+} from './lib/generate-review-walkthrough.ts';
+export {
   eligibleWalkthroughAssessmentCandidates,
   selectWalkthroughAssessmentCandidates,
   type AssessmentChangedRange,
@@ -89,6 +101,7 @@ export {
   type AssessmentRoutingContext,
   type AssessmentSelection,
   type AssessmentThreadCandidate,
+  type AssessmentUnitRoute,
 } from './lib/walkthrough-assessment-relevance.ts';
 export {
   assessmentValuesEqual,
@@ -156,6 +169,10 @@ export type {
   GenerationMetadata,
   GenerationProfile,
   GenerationSettings,
+  NarrativeWalkthroughRequest,
+  NarrativeWalkthroughRequestOptions,
+  SingleDiffNarrativeWalkthroughRequest,
+  TargetComparisonNarrativeWalkthroughRequest,
   GitIdentity,
   GitSha,
   LiveReviewState,
@@ -215,7 +232,10 @@ export type {
   WalkthroughGenerationRequest,
   WalkthroughGenerationUnitProgress,
   WalkthroughModel,
+  WalkthroughCommitNarrativeUnitV5,
+  WalkthroughNarrativeContentV5,
   WalkthroughNarrativeV5,
+  WalkthroughSingleCallNarrativeV5,
   WalkthroughProgressEvent,
   WalkthroughProgressPhase,
   WalkthroughRegion,

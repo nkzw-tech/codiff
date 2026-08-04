@@ -138,9 +138,9 @@ const normalizeNarrativeWalkthrough = async (
     },
     hunkIdByAlias,
   );
-  const narrative = walkthrough.narrative;
-  if (facts.context && typeof facts.context === 'object' && !narrative.context) {
-    narrative.context = facts.context;
+  const content = walkthrough.narrative.content;
+  if (facts.context && typeof facts.context === 'object' && !content.context) {
+    content.context = facts.context;
   }
 
   // A commit composer only makes sense for a live staging set — never a past
@@ -165,9 +165,9 @@ const normalizeNarrativeWalkthrough = async (
     if (title) commit.title = title;
     const body = stripLeadingCommitTitle(rawBody, title);
     if (body) commit.body = body;
-    narrative.commit = commit;
+    content.commit = commit;
   } else {
-    delete narrative.commit;
+    delete content.commit;
   }
 
   return walkthrough;
@@ -195,7 +195,7 @@ const buildPreviousWalkthroughInput = (previousWalkthrough) => {
   }
 
   const persisted = /** @type {any} */ (previousWalkthrough);
-  const walkthrough = persisted.version === 5 ? persisted.narrative : persisted;
+  const walkthrough = persisted.version === 5 ? persisted.narrative?.content : persisted;
   if (!walkthrough || typeof walkthrough !== 'object') {
     return '';
   }
@@ -435,8 +435,8 @@ const readNarrativeWalkthrough = async (
       },
       request.hunkIdByAlias,
     );
-    if (context && !walkthrough.narrative.context) {
-      walkthrough.narrative.context = context;
+    if (context && !walkthrough.narrative.content.context) {
+      walkthrough.narrative.content.context = context;
     }
 
     return {

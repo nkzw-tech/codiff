@@ -161,9 +161,11 @@ import type {
   ReviewSource,
   RepositoryState,
   ShareCommentSubmission,
+  SharedWalkthroughReviewScope,
   SharedWalkthroughSnapshot,
   SubmittedReviewComment,
   SubmitPullRequestReviewResult,
+  TargetComparisonReviewStructure,
   WalkthroughCommitMessageResult,
   WalkthroughCommitResult,
   WalkthroughGenerationProgress,
@@ -350,7 +352,10 @@ export type ReviewWalkthroughCapabilities = {
   commitOutput?: CommitOutputSubscriber;
   error?: Pick<WalkthroughError, 'code' | 'reason'> | null;
   generationProgress?: WalkthroughGenerationProgress | null;
-  onGenerate?: () => Promise<void> | void;
+  onGenerate?: (options?: {
+    force?: boolean;
+    reviewStructure?: TargetComparisonReviewStructure;
+  }) => Promise<void> | void;
   onShare?: () => Promise<void> | void;
   progress?: ReactNode;
   status?: ReviewWalkthroughStatus;
@@ -383,11 +388,13 @@ export type ReviewSurfaceCapabilities = ReviewAnnotationCapabilities & {
 
 export const buildSharedReviewSnapshot = ({
   preferences,
+  reviewStructure,
   state,
   title,
   walkthrough,
 }: {
   preferences: SharedWalkthroughSnapshot['preferences'];
+  reviewStructure?: SharedWalkthroughReviewScope['structure'];
   state: RepositoryState;
   title: string;
   walkthrough: PersistedWalkthrough;
@@ -407,6 +414,7 @@ export const buildSharedReviewSnapshot = ({
     title,
   },
   reviewComments: state.reviewComments,
+  reviewScope: { kind: 'merge-request', structure: reviewStructure ?? 'net-change' },
   version: 1,
   walkthrough,
 });
@@ -938,6 +946,10 @@ export function ReviewSurface({
   const [pullRequestMergeSubmitting, setPullRequestMergeSubmitting] = useState(false);
   const [walkthroughRequestPending, setWalkthroughRequestPending] = useState(false);
   const walkthroughRequestPendingRef = useRef(false);
+  const walkthroughGenerationOptionsRef = useRef<{
+    force?: boolean;
+    reviewStructure?: TargetComparisonReviewStructure;
+  } | null>(null);
   const [walkthroughRequestId, setWalkthroughRequestId] = useState(0);
   const walkthroughRef = useRef(walkthrough);
 
@@ -1408,7 +1420,9 @@ export function ReviewSurface({
     }
 
     let cancelled = false;
-    void Promise.resolve(walkthroughRef.current?.onGenerate?.())
+    const options = walkthroughGenerationOptionsRef.current;
+    walkthroughGenerationOptionsRef.current = null;
+    void Promise.resolve(walkthroughRef.current?.onGenerate?.(options ?? undefined))
       .catch(() => {})
       .finally(() => {
         if (cancelled) {
@@ -1422,19 +1436,23 @@ export function ReviewSurface({
     };
   }, [walkthroughRequestId, walkthroughRequestPending]);
 
-  const startWalkthroughGeneration = useCallback(() => {
-    if (
-      !walkthrough?.onGenerate ||
-      walkthrough.status === 'generating' ||
-      walkthroughRequestPendingRef.current
-    ) {
-      return;
-    }
+  const startWalkthroughGeneration = useCallback(
+    (options?: { force?: boolean; reviewStructure?: TargetComparisonReviewStructure }) => {
+      if (
+        !walkthrough?.onGenerate ||
+        walkthrough.status === 'generating' ||
+        walkthroughRequestPendingRef.current
+      ) {
+        return;
+      }
 
-    walkthroughRequestPendingRef.current = true;
-    setWalkthroughRequestPending(true);
-    setWalkthroughRequestId((current) => current + 1);
-  }, [walkthrough]);
+      walkthroughGenerationOptionsRef.current = options ?? null;
+      walkthroughRequestPendingRef.current = true;
+      setWalkthroughRequestPending(true);
+      setWalkthroughRequestId((current) => current + 1);
+    },
+    [walkthrough],
+  );
   useEffect(() => {
     if (sidebarMode === 'walkthrough' && walkthrough?.status === 'idle') {
       startWalkthroughGeneration();
@@ -1944,9 +1962,19 @@ export function ReviewSurface({
     : (walkthroughGenerationProgress?.summary ?? null);
   const shellTheme =
     snapshot.preferences.theme === 'system' ? undefined : snapshot.preferences.theme;
-  const requestWalkthrough = () => {
-    startWalkthroughGeneration();
+  const requestWalkthrough = (options?: {
+    force?: boolean;
+    reviewStructure?: TargetComparisonReviewStructure;
+  }) => {
+    startWalkthroughGeneration(options);
   };
+  const walkthroughReviewStructure: TargetComparisonReviewStructure =
+    sharedWalkthrough.structure === 'commit-by-commit' ||
+    sharedWalkthrough.structure === 'net-change'
+      ? sharedWalkthrough.structure
+      : (snapshot.reviewScope?.structure ?? 'net-change');
+  const alternateReviewStructure: TargetComparisonReviewStructure =
+    walkthroughReviewStructure === 'commit-by-commit' ? 'net-change' : 'commit-by-commit';
   const reviewModes = [
     {
       icon: <Path aria-hidden size={14} weight="bold" />,
@@ -2210,14 +2238,39 @@ export function ReviewSurface({
               </SidebarCommentSection>
             </>
           ) : walkthroughReady ? (
-            <NarrativeSidebar
-              allowCommit={walkthrough?.commit != null}
-              files={visibleFiles}
-              navigation={navigation}
-              onShareWalkthrough={walkthrough?.onShare}
-              showWhitespace={snapshot.preferences.showWhitespace}
-              walkthrough={sharedWalkthrough}
-            />
+            <>
+              {walkthrough?.onGenerate ? (
+                <div className="history-section walkthrough-structure-controls">
+                  <span>
+                    {walkthroughReviewStructure === 'commit-by-commit'
+                      ? 'Structured by commits'
+                      : 'Net-change walkthrough'}
+                  </span>
+                  <button
+                    disabled={walkthroughStatus === 'generating' || walkthroughRequestPending}
+                    onClick={() =>
+                      requestWalkthrough({
+                        force: true,
+                        reviewStructure: alternateReviewStructure,
+                      })
+                    }
+                    type="button"
+                  >
+                    {alternateReviewStructure === 'commit-by-commit'
+                      ? 'Use commit-by-commit'
+                      : 'Use net change'}
+                  </button>
+                </div>
+              ) : null}
+              <NarrativeSidebar
+                allowCommit={walkthrough?.commit != null}
+                files={visibleFiles}
+                navigation={navigation}
+                onShareWalkthrough={walkthrough?.onShare}
+                showWhitespace={snapshot.preferences.showWhitespace}
+                walkthrough={sharedWalkthrough}
+              />
+            </>
           ) : (
             <div className="sidebar-walkthrough-status-shell">
               <div
@@ -2400,7 +2453,7 @@ export function ReviewSurface({
                       />
                     ) : null}
                     <div className="empty-panel-actions">
-                      <button onClick={requestWalkthrough} type="button">
+                      <button onClick={() => requestWalkthrough()} type="button">
                         {failedGenerationUnits.length > 0 ? 'Retry failed tasks' : 'Try again'}
                       </button>
                     </div>

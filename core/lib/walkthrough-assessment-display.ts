@@ -56,9 +56,30 @@ const hunkOwnsAnchor = (
   );
 };
 
+const scopeOwnsGroup = (
+  walkthrough: WalkthroughModel,
+  scope: ThreadAssessmentComponent['identity']['codeScope'] | undefined,
+  chapterId: string | undefined,
+  supportId: string | undefined,
+) => {
+  if (!scope || scope.type !== 'commit') {
+    return true;
+  }
+  const matchingUnit = walkthrough.units?.find((unit) => unit.identity.sha === scope.sha);
+  if (!matchingUnit) {
+    return true;
+  }
+  return chapterId
+    ? matchingUnit.chapterIds.includes(chapterId)
+    : supportId
+      ? matchingUnit.supportIds.includes(supportId)
+      : false;
+};
+
 const resolveAssessmentDestination = (
   walkthrough: WalkthroughModel,
   anchors: ReadonlyArray<AssessmentDestinationAnchor>,
+  scope?: ThreadAssessmentComponent['identity']['codeScope'],
 ): AssessmentDestination | null => {
   const candidates: Array<{
     destination: AssessmentDestination;
@@ -67,18 +88,22 @@ const resolveAssessmentDestination = (
   let stopIndex = 0;
   for (const chapter of walkthrough.chapters) {
     for (const stop of chapter.stops) {
-      candidates.push({
-        destination: { kind: 'stop', stopId: stop.id, stopIndex },
-        hunks: stop.hunks,
-      });
+      if (scopeOwnsGroup(walkthrough, scope, chapter.id, undefined)) {
+        candidates.push({
+          destination: { kind: 'stop', stopId: stop.id, stopIndex },
+          hunks: stop.hunks,
+        });
+      }
       stopIndex += 1;
     }
   }
   for (const support of walkthrough.support) {
-    candidates.push({
-      destination: { kind: 'support', supportId: support.id },
-      hunks: support.hunks,
-    });
+    if (scopeOwnsGroup(walkthrough, scope, undefined, support.id)) {
+      candidates.push({
+        destination: { kind: 'support', supportId: support.id },
+        hunks: support.hunks,
+      });
+    }
   }
 
   for (const requireLine of [true, false]) {
@@ -104,6 +129,7 @@ export const buildAssessmentDestinationIndex = (
       component.input.thread.comments.flatMap((comment) =>
         comment.anchor ? [comment.anchor] : [],
       ),
+      component.identity.codeScope,
     );
     if (!destination) {
       throw new Error(

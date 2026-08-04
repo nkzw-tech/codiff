@@ -3,7 +3,10 @@ import { expect, test } from 'vite-plus/test';
 import type {
   AssessmentComponent,
   GenerationProfile,
+  GitSha,
   PullRequestExistingReviewComment,
+  RepositoryState,
+  ReviewCommitUnit,
   WalkthroughArtifactV5,
 } from '../../core/types.ts';
 import {
@@ -129,4 +132,93 @@ test('a failed assessment remains visible until its independent retry replaces i
 
   expect(result.artifact.assessments?.items).toEqual([failed]);
   expect(result.tasks[0]?.expectedComponent).toEqual(failed);
+});
+
+const targetRange = {
+  base: { label: { kind: 'commit' as const, text: 'base' }, sha: 'a'.repeat(40) as GitSha },
+  head: { label: { kind: 'commit' as const, text: 'head' }, sha: 'b'.repeat(40) as GitSha },
+};
+const changedState = (path: string): RepositoryState => ({
+  branch: 'feature',
+  files: [
+    {
+      fingerprint: path,
+      path,
+      sections: [
+        {
+          binary: false,
+          id: `${path}:commit`,
+          kind: 'commit',
+          patch: `diff --git a/${path} b/${path}\n@@ -1 +1 @@\n-old\n+new\n`,
+        },
+      ],
+      status: 'modified',
+    },
+  ],
+  generatedAt: 1,
+  launchPath: '/repo',
+  root: '/repo',
+  source: { base: 'base', head: 'head', symmetric: false, type: 'range' },
+});
+const commitUnit = (value: string, order: number): ReviewCommitUnit => {
+  const sha = value.repeat(40) as GitSha;
+  return {
+    commit: {
+      authoredAt: '2026-01-01T00:00:00.000Z',
+      authorName: 'Ada',
+      parentShas: [],
+      sha,
+      shortSha: sha.slice(0, 8),
+      subject: `Commit ${order + 1}`,
+    },
+    kind: 'commit',
+    order,
+    reviewable: true,
+  };
+};
+const targetArtifact = (): WalkthroughArtifactV5 => ({
+  ...artifact([]),
+  capturedContext: { ...artifact([]).capturedContext, files: changedState('src/app.ts').files },
+  generationRequest: {
+    review: { range: targetRange, relation: 'target-comparison', structure: 'commit-by-commit' },
+  },
+});
+
+test('the assessment plan routes uniquely owned threads to their commit scope', () => {
+  const units = [commitUnit('1', 0), commitUnit('2', 1)];
+  const result = buildWalkthroughAssessmentPlan({
+    artifact: targetArtifact(),
+    authoring,
+    byCommitSha: {
+      [units[0]!.commit.sha]: changedState('src/app.ts'),
+      [units[1]!.commit.sha]: changedState('src/other.ts'),
+    },
+    comments: [comment('Check this.')],
+    profile,
+    units,
+  });
+
+  expect(result.tasks[0]?.demand.identity.codeScope).toEqual({
+    sha: units[0]!.commit.sha,
+    type: 'commit',
+  });
+});
+
+test('the assessment plan keeps ambiguous ownership on the aggregate target scope', () => {
+  const units = [commitUnit('1', 0), commitUnit('2', 1)];
+  const result = buildWalkthroughAssessmentPlan({
+    artifact: targetArtifact(),
+    authoring,
+    byCommitSha: Object.fromEntries(
+      units.map((unit) => [unit.commit.sha, changedState('src/app.ts')]),
+    ),
+    comments: [comment('Check this.')],
+    profile,
+    units,
+  });
+
+  expect(result.tasks[0]?.demand.identity.codeScope).toEqual({
+    range: targetRange,
+    type: 'target-comparison',
+  });
 });

@@ -30,6 +30,20 @@ export {
 } from './lib/walkthrough-authoring.ts';
 
 export {
+  generateReviewWalkthrough,
+  type GenerateReviewWalkthroughInput,
+  type GenerateReviewWalkthroughResult,
+  type NarrativeIdentity,
+  type NarrativeSemanticInput,
+  type ResolvedWalkthroughGenerationPlan,
+  type ReusableWalkthroughComponent,
+  type ReviewWalkthroughModelResult,
+  type ReviewWalkthroughRunModel,
+  type WalkthroughGenerationFailure,
+  type WalkthroughGenerationSelection,
+} from './lib/generate-review-walkthrough.ts';
+
+export {
   buildWalkthroughAssessmentPrompt,
   createAssessmentDemand,
   createAssessmentDemandsFromSelections,

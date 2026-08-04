@@ -113,25 +113,27 @@ test('reports only the long-running walkthrough generation phases', async () => 
     status: 'ready',
     walkthrough: {
       narrative: {
-        chapters: [
-          {
-            stops: [
-              { hunkIds: ['src/App.tsx:staged:h1'] },
-              { hunkIds: ['src/__tests__/hunkNavigation.test.ts:staged:h1'] },
-            ],
-          },
-        ],
-        support: [
-          { hunkIds: ['pnpm-lock.yaml:staged:h1'] },
-          {
-            hunkIds: [
-              'wide.py:staged:h1',
-              'wide.py:staged:h2',
-              'wide.py:staged:h3',
-              'wide.py:staged:h4',
-            ],
-          },
-        ],
+        content: {
+          chapters: [
+            {
+              stops: [
+                { hunkIds: ['src/App.tsx:staged:h1'] },
+                { hunkIds: ['src/__tests__/hunkNavigation.test.ts:staged:h1'] },
+              ],
+            },
+          ],
+          support: [
+            { hunkIds: ['pnpm-lock.yaml:staged:h1'] },
+            {
+              hunkIds: [
+                'wide.py:staged:h1',
+                'wide.py:staged:h2',
+                'wide.py:staged:h3',
+                'wide.py:staged:h4',
+              ],
+            },
+          ],
+        },
       },
     },
   });
@@ -819,22 +821,28 @@ test('normalizes a well-formed narrative walkthrough', async () => {
     generationMetadata: { agent: 'claude', model: 'unknown' },
     structure: 'single-diff',
   });
-  expect(result.narrative.kind).toBe('narrative');
-  expect(result.narrative.agent).toBe('claude');
-  expect(result.narrative.generatedAt).toBe('1970-01-01T00:00:00.001Z');
-  expect(result.narrative.repo).toEqual({ branch: 'fix/hunk-nav' });
-  expect(result.narrative.source).toEqual({ type: 'working-tree' });
-  expect(result.narrative.meta).toBe('2 stops · 1 chapters');
-  expect(result.narrative.chapters).toHaveLength(1);
-  expect(result.narrative.chapters[0].stops.map((stop: any) => stop.id)).toEqual(['s1', 's6']);
-  expect(result.narrative.support.map((item: any) => item.id)).toEqual(['lock', 'support-2']);
-  expect(result.narrative.chapters[0].stops[0]).toMatchObject({
+  expect(result.narrative.content.kind).toBe('narrative');
+  expect(result.narrative.content.agent).toBe('claude');
+  expect(result.narrative.content.generatedAt).toBe('1970-01-01T00:00:00.001Z');
+  expect(result.narrative.content.repo).toEqual({ branch: 'fix/hunk-nav' });
+  expect(result.narrative.content.source).toEqual({ type: 'working-tree' });
+  expect(result.narrative.content.meta).toBe('2 stops · 1 chapters');
+  expect(result.narrative.content.chapters).toHaveLength(1);
+  expect(result.narrative.content.chapters[0].stops.map((stop: any) => stop.id)).toEqual([
+    's1',
+    's6',
+  ]);
+  expect(result.narrative.content.support.map((item: any) => item.id)).toEqual([
+    'lock',
+    'support-2',
+  ]);
+  expect(result.narrative.content.chapters[0].stops[0]).toMatchObject({
     added: 1,
     deleted: 1,
     hunkIds: ['src/App.tsx:staged:h1'],
     title: 'Collapsed file ordering',
   });
-  expect(result.narrative.chapters[0].stops[0].hunks[0]).toMatchObject({
+  expect(result.narrative.content.chapters[0].stops[0].hunks[0]).toMatchObject({
     added: 1,
     additionEnd: 312,
     additionStart: 310,
@@ -849,8 +857,8 @@ test('normalizes a well-formed narrative walkthrough', async () => {
     path: 'src/App.tsx',
     status: 'modified',
   });
-  expect(result.narrative.chapters[0].stops[1]).toMatchObject({ added: 14, deleted: 0 });
-  expect(result.narrative.chapters[0].stops[1].hunks[0].anchor.startLine).toBe(1);
+  expect(result.narrative.content.chapters[0].stops[1]).toMatchObject({ added: 14, deleted: 0 });
+  expect(result.narrative.content.chapters[0].stops[1].hunks[0].anchor.startLine).toBe(1);
 });
 
 test('preserves Pi as the narrative walkthrough agent', async () => {
@@ -859,7 +867,7 @@ test('preserves Pi as the narrative walkthrough agent', async () => {
     source: { type: 'working-tree' },
   });
 
-  expect(result.narrative.agent).toBe('pi');
+  expect(result.narrative.content.agent).toBe('pi');
 });
 
 test('preserves OpenCode as the narrative walkthrough agent', async () => {
@@ -878,8 +886,8 @@ test('preserves OpenCode as the narrative walkthrough agent', async () => {
     source: { type: 'working-tree' },
   });
 
-  expect(result.narrative.agent).toBe('opencode');
-  expect(result.narrative.context).toBe(context);
+  expect(result.narrative.content.agent).toBe('opencode');
+  expect(result.narrative.content.context).toBe(context);
 });
 
 test('requires chapter ids in authored walkthrough drafts', async () => {
@@ -955,7 +963,9 @@ test('normalizes walkthroughs made only of synthetic hunks', async () => {
     syntheticFiles as any,
   );
 
-  expect(result.narrative.chapters[0].stops.map((stop: any) => stop.hunks[0])).toMatchObject([
+  expect(
+    result.narrative.content.chapters[0].stops.map((stop: any) => stop.hunks[0]),
+  ).toMatchObject([
     {
       added: 0,
       anchor: { display: 'public/logo.png', sectionId: 'public/logo.png:staged' },
@@ -969,7 +979,7 @@ test('normalizes walkthroughs made only of synthetic hunks', async () => {
       kind: 'synthetic',
     },
   ]);
-  expect(result.narrative.support).toEqual([]);
+  expect(result.narrative.content.support).toEqual([]);
 });
 
 test('computes line counts and status from hunkIds instead of trusting agent math', async () => {
@@ -980,11 +990,11 @@ test('computes line counts and status from hunkIds instead of trusting agent mat
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.chapters[0].stops[0]).toMatchObject({
+  expect(result.narrative.content.chapters[0].stops[0]).toMatchObject({
     added: 1,
     deleted: 1,
   });
-  expect(result.narrative.chapters[0].stops[0].hunks[0].status).toBe('modified');
+  expect(result.narrative.content.chapters[0].stops[0].hunks[0].status).toBe('modified');
 });
 
 test('normalizes hunk header notes only for selected hunks', async () => {
@@ -997,7 +1007,7 @@ test('normalizes hunk header notes only for selected hunks', async () => {
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.chapters[0].stops[0].notes).toEqual([
+  expect(result.narrative.content.chapters[0].stops[0].notes).toEqual([
     { body: 'Explain the exact root-cause line.', hunkId: 'src/App.tsx:staged:h1' },
   ]);
 });
@@ -1014,8 +1024,14 @@ test('drops stops and support items with unresolvable hunk ids', async () => {
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.chapters[0].stops.map((stop: any) => stop.id)).toEqual(['s1', 's6']);
-  expect(result.narrative.support.map((item: any) => item.id)).toEqual(['lock', 'support-2']);
+  expect(result.narrative.content.chapters[0].stops.map((stop: any) => stop.id)).toEqual([
+    's1',
+    's6',
+  ]);
+  expect(result.narrative.content.support.map((item: any) => item.id)).toEqual([
+    'lock',
+    'support-2',
+  ]);
 });
 
 test('drops hunk groups that overlap already-covered hunks', async () => {
@@ -1034,13 +1050,13 @@ test('drops hunk groups that overlap already-covered hunks', async () => {
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.chapters[0].stops.map((stop: any) => stop.id)).toEqual([
+  expect(result.narrative.content.chapters[0].stops.map((stop: any) => stop.id)).toEqual([
     's1',
     's6',
     'overlap',
   ]);
   expect(
-    result.narrative.chapters[0].stops.find((stop: any) => stop.id === 'overlap')?.hunkIds,
+    result.narrative.content.chapters[0].stops.find((stop: any) => stop.id === 'overlap')?.hunkIds,
   ).toEqual(['wide.py:staged:h1']);
 });
 
@@ -1050,11 +1066,11 @@ test('adds unreferenced live hunks to support so changed code remains visible', 
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.support.map((item: any) => item.reason)).toEqual([
+  expect(result.narrative.content.support.map((item: any) => item.reason)).toEqual([
     'Other changes',
     'Other changes',
   ]);
-  expect(result.narrative.support.map((item: any) => item.hunkIds)).toEqual([
+  expect(result.narrative.content.support.map((item: any) => item.hunkIds)).toEqual([
     ['pnpm-lock.yaml:staged:h1'],
     ['wide.py:staged:h1', 'wide.py:staged:h2', 'wide.py:staged:h3', 'wide.py:staged:h4'],
   ]);
@@ -1070,7 +1086,7 @@ test('adds unreferenced generated files to support as one review unit', async ()
   };
 
   const result = await normalizeNarrativeWalkthrough(input, [...files, generatedFile]);
-  const generatedSupport = result.narrative.support.find(
+  const generatedSupport = result.narrative.content.support.find(
     (item: any) => item.hunks[0]?.path === 'src/__generated__/api.ts',
   );
 
@@ -1094,7 +1110,7 @@ test('uses generated metadata for files without generated-looking paths', async 
   };
 
   const result = await normalizeNarrativeWalkthrough(input, [...files, generatedFile]);
-  const generatedSupport = result.narrative.support.find(
+  const generatedSupport = result.narrative.content.support.find(
     (item: any) => item.hunks[0]?.path === 'api/client.ts',
   );
 
@@ -1117,7 +1133,7 @@ test('groups authored generated support under the generated-files reason', async
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.support.find((item: any) => item.id === 'lockfile')?.reason).toBe(
+  expect(result.narrative.content.support.find((item: any) => item.id === 'lockfile')?.reason).toBe(
     'Dependency updates',
   );
 });
@@ -1134,9 +1150,13 @@ test('keeps explicitly selected generated files in the main walkthrough path', a
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.chapters[0].stops.map((stop: any) => stop.id)).toContain('lockfile-stop');
+  expect(result.narrative.content.chapters[0].stops.map((stop: any) => stop.id)).toContain(
+    'lockfile-stop',
+  );
   expect(
-    result.narrative.support.some((item: any) => item.hunkIds.includes('pnpm-lock.yaml:staged:h1')),
+    result.narrative.content.support.some((item: any) =>
+      item.hunkIds.includes('pnpm-lock.yaml:staged:h1'),
+    ),
   ).toBe(false);
 });
 
@@ -1152,7 +1172,7 @@ test('normalizes ordered cross-file hunk groups under one stop', async () => {
   ];
 
   const result = await normalizeNarrativeWalkthrough(input, files);
-  const stop = result.narrative.chapters[0].stops[0];
+  const stop = result.narrative.content.chapters[0].stops[0];
 
   expect(stop).toMatchObject({
     added: 15,
@@ -1252,8 +1272,8 @@ test('normalizes per-item commit tags', async () => {
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.chapters[0].stops[0].changeType).toBe('fix');
-  expect(result.narrative.chapters[0].stops[0].commitNote).toBe(
+  expect(result.narrative.content.chapters[0].stops[0].changeType).toBe('fix');
+  expect(result.narrative.content.chapters[0].stops[0].commitNote).toBe(
     'derive a collapse-independent hunk order',
   );
 });
@@ -1267,7 +1287,7 @@ test('keeps the commit composer for a working-tree staging set', async () => {
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.commit).toEqual({
+  expect(result.narrative.content.commit).toEqual({
     body: 'Hunk order is now collapse-independent.\n\nNavigation expands a collapsed target before scrolling.',
     title: 'Fix hunk nav',
   });
@@ -1281,7 +1301,7 @@ test('derives a missing commit title from a title-like body first line', async (
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.commit).toEqual({
+  expect(result.narrative.content.commit).toEqual({
     body: 'Navigation expands a collapsed target before scrolling.',
     title: 'Fix hunk nav',
   });
@@ -1296,7 +1316,7 @@ test('strips a duplicated commit title from the body', async () => {
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.commit).toEqual({
+  expect(result.narrative.content.commit).toEqual({
     body: 'Navigation expands a collapsed target before scrolling.',
     title: 'Fix hunk nav',
   });
@@ -1308,7 +1328,7 @@ test('adds an empty commit composer for a working-tree walkthrough without commi
 
   const result = await normalizeNarrativeWalkthrough(input, files);
 
-  expect(result.narrative.commit).toEqual({});
+  expect(result.narrative.content.commit).toEqual({});
 });
 
 test('strips the commit composer when the source is not a working tree', async () => {
@@ -1319,5 +1339,5 @@ test('strips the commit composer when the source is not a working tree', async (
     source: { sha: 'a'.repeat(40), type: 'commit' },
   });
 
-  expect(result.narrative.commit).toBeUndefined();
+  expect(result.narrative.content.commit).toBeUndefined();
 });

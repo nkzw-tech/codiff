@@ -23,9 +23,15 @@ export type AssessmentChangedRange = {
   startLine: number;
 };
 
+export type AssessmentUnitRoute = {
+  changedRanges: ReadonlyArray<AssessmentChangedRange>;
+  codeScope: Extract<AssessmentCodeScope, { type: 'commit' }>;
+};
+
 export type AssessmentRoutingContext = {
   changedRanges: ReadonlyArray<AssessmentChangedRange>;
   codeScope: AssessmentCodeScope;
+  unitRoutes?: ReadonlyArray<AssessmentUnitRoute>;
 };
 
 export type AssessmentSelection =
@@ -70,7 +76,14 @@ export const selectWalkthroughAssessmentCandidates = (
     if (!context.changedRanges.some((range) => anchorTouchesRange(candidate.anchor!, range))) {
       return { candidate, kind: 'diagnostic', reason: 'no-code-scope' };
     }
-    return { candidate, codeScope: context.codeScope, kind: 'eligible' };
+    const owners = context.unitRoutes?.filter((route) =>
+      route.changedRanges.some((range) => anchorTouchesRange(candidate.anchor!, range)),
+    );
+    return {
+      candidate,
+      codeScope: owners?.length === 1 ? owners[0]!.codeScope : context.codeScope,
+      kind: 'eligible',
+    };
   });
 
 export const eligibleWalkthroughAssessmentCandidates = (

@@ -27,6 +27,8 @@ import type {
   NarrativeWalkthroughV4,
   WalkthroughArtifactV5,
   WalkthroughModel,
+  WalkthroughNarrativeContentV5,
+  WalkthroughNarrativeV5,
 } from '../types.ts';
 
 const gitShaSchema = pipe(string(), regex(/^(?:[\da-f]{40}|[\da-f]{64})$/i));
@@ -339,7 +341,11 @@ const generationMetadataSchema = strictObject({
   model: string(),
   profile: generationProfileSchema,
 });
-const assessmentCodeScopeSchema = strictObject({ type: literal('single-diff') });
+const assessmentCodeScopeSchema = variant('type', [
+  strictObject({ type: literal('single-diff') }),
+  strictObject({ range: diffRangeSchema, type: literal('target-comparison') }),
+  strictObject({ sha: gitShaSchema, type: literal('commit') }),
+]);
 const assessmentThreadAnchorSchema = strictObject({
   filePath: string(),
   lineNumber: optional(number()),
@@ -397,7 +403,14 @@ const assessmentComponentSchema = strictObject({
 const assessmentCollectionSchema = strictObject({ items: array(assessmentComponentSchema) });
 const generationRequestSchema = strictObject({
   customInstructions: optional(string()),
-  review: strictObject({ relation: literal('single-diff'), structure: literal('single-diff') }),
+  review: union([
+    strictObject({ relation: literal('single-diff'), structure: literal('single-diff') }),
+    strictObject({
+      range: diffRangeSchema,
+      relation: literal('target-comparison'),
+      structure: picklist(['commit-by-commit', 'net-change']),
+    }),
+  ]),
 });
 
 /** Exact released V4 persisted fields. Keep this object and its schema frozen. */
@@ -422,19 +435,48 @@ export const narrativeWalkthroughV4Schema = strictObject({
   version: literal(4),
 });
 
-/** Strict single-call V5 envelope with captured inputs and generation provenance. */
+const narrativeContentV5Schema = strictObject({
+  ...narrativeFields,
+  chapters: array(chapterV5Schema),
+  repo: strictObject({ branch: union([string(), null_()]) }),
+  source: capturedSourceSchema,
+});
+const reviewCommitSummarySchema = strictObject({
+  authoredAt: string(),
+  authorName: string(),
+  diffStat: optional(
+    strictObject({ additions: number(), deletions: number(), filesChanged: number() }),
+  ),
+  parentShas: array(gitShaSchema),
+  sha: gitShaSchema,
+  shortSha: string(),
+  subject: string(),
+  webUrl: optional(string()),
+});
+const commitNarrativeUnitSchema = strictObject({
+  commit: optional(reviewCommitSummarySchema),
+  content: narrativeContentV5Schema,
+  generationMetadata: generationMetadataSchema,
+  sha: gitShaSchema,
+});
+const walkthroughNarrativeV5Schema = variant('structure', [
+  strictObject({
+    content: narrativeContentV5Schema,
+    generationMetadata: generationMetadataSchema,
+    structure: picklist(['net-change', 'single-diff']),
+  }),
+  strictObject({
+    structure: literal('commit-by-commit'),
+    units: pipe(array(commitNarrativeUnitSchema), minLength(1)),
+  }),
+]);
+
+/** Strict V5 envelope with captured inputs and per-call generation provenance. */
 export const walkthroughArtifactV5Schema = strictObject({
   assessments: optional(assessmentCollectionSchema),
   capturedContext: capturedContextSchema,
   generationRequest: generationRequestSchema,
-  narrative: strictObject({
-    ...narrativeFields,
-    chapters: array(chapterV5Schema),
-    generationMetadata: generationMetadataSchema,
-    repo: strictObject({ branch: union([string(), null_()]) }),
-    source: capturedSourceSchema,
-    structure: literal('single-diff'),
-  }),
+  narrative: walkthroughNarrativeV5Schema,
   version: literal(5),
 });
 
@@ -466,23 +508,65 @@ const stableValue = (value: unknown): unknown => {
 const valuesEqual = (left: unknown, right: unknown) =>
   JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 
-const assessmentScopeResolves = (artifact: WalkthroughArtifactV5, scope: AssessmentCodeScope) =>
-  scope.type === 'single-diff' &&
-  artifact.generationRequest.review.relation === 'single-diff' &&
-  artifact.narrative.structure === 'single-diff';
+const validateArtifactStructure = (artifact: WalkthroughArtifactV5) => {
+  if (artifact.generationRequest.review.structure !== artifact.narrative.structure) {
+    throw new Error('Walkthrough narrative structure does not match its generation request.');
+  }
+  if (artifact.narrative.structure !== 'commit-by-commit') {
+    return artifact;
+  }
+  const shas = new Set<string>();
+  for (const unit of artifact.narrative.units) {
+    if (shas.has(unit.sha)) {
+      throw new Error('Commit narrative unit identities must be unique.');
+    }
+    shas.add(unit.sha);
+    if (unit.commit && unit.commit.sha !== unit.sha) {
+      throw new Error('Commit narrative metadata must match its unit identity.');
+    }
+  }
+  return artifact;
+};
+
+const assessmentScopeResolves = (artifact: WalkthroughArtifactV5, scope: AssessmentCodeScope) => {
+  const request = artifact.generationRequest.review;
+  switch (scope.type) {
+    case 'single-diff':
+      return request.relation === 'single-diff' && artifact.narrative.structure === 'single-diff';
+    case 'target-comparison':
+      return request.relation === 'target-comparison' && valuesEqual(scope.range, request.range);
+    case 'commit':
+      return (
+        artifact.narrative.structure === 'commit-by-commit' &&
+        artifact.narrative.units.some((unit) => unit.sha === scope.sha)
+      );
+  }
+};
 
 const assessmentAnchorMatchesScope = (
   artifact: WalkthroughArtifactV5,
   anchor: AssessmentThreadAnchor,
-) =>
-  !anchor.position ||
-  artifact.capturedContext.files.some(
-    (file) =>
-      (file.path === anchor.filePath || file.oldPath === anchor.filePath) &&
-      file.sections.some(
-        (section) => section.range != null && valuesEqual(section.range, anchor.position?.range),
-      ),
-  );
+  scope: AssessmentCodeScope,
+) => {
+  if (!anchor.position) {
+    return true;
+  }
+  switch (scope.type) {
+    case 'single-diff':
+      return artifact.capturedContext.files.some(
+        (file) =>
+          (file.path === anchor.filePath || file.oldPath === anchor.filePath) &&
+          file.sections.some(
+            (section) =>
+              section.range != null && valuesEqual(section.range, anchor.position?.range),
+          ),
+      );
+    case 'target-comparison':
+      return valuesEqual(anchor.position.range, scope.range);
+    case 'commit':
+      return 'sha' in anchor.position.range.head && anchor.position.range.head.sha === scope.sha;
+  }
+};
 
 const validateAssessmentCollection = (artifact: WalkthroughArtifactV5) => {
   if (!artifact.assessments) {
@@ -518,8 +602,11 @@ const validateAssessmentCollection = (artifact: WalkthroughArtifactV5) => {
       if (comment.anchor && !paths.has(comment.anchor.filePath)) {
         throw new Error('Assessment thread anchor references unknown captured code.');
       }
-      if (comment.anchor && !assessmentAnchorMatchesScope(artifact, comment.anchor)) {
-        throw new Error('Assessment thread anchor does not match the captured single diff.');
+      if (
+        comment.anchor &&
+        !assessmentAnchorMatchesScope(artifact, comment.anchor, component.identity.codeScope)
+      ) {
+        throw new Error('Assessment thread anchor does not match its exact code scope.');
       }
     }
   }
@@ -527,7 +614,9 @@ const validateAssessmentCollection = (artifact: WalkthroughArtifactV5) => {
 };
 
 export const parseWalkthroughArtifactV5 = (value: unknown): WalkthroughArtifactV5 =>
-  validateAssessmentCollection(parse(walkthroughArtifactV5Schema, value) as WalkthroughArtifactV5);
+  validateAssessmentCollection(
+    validateArtifactStructure(parse(walkthroughArtifactV5Schema, value) as WalkthroughArtifactV5),
+  );
 
 const modelFromV4 = (walkthrough: NarrativeWalkthroughV4): WalkthroughModel => {
   const { version: _version, ...narrative } = walkthrough;
@@ -541,6 +630,58 @@ const modelFromV4 = (walkthrough: NarrativeWalkthroughV4): WalkthroughModel => {
 export const walkthroughModelFromV4 = (walkthrough: NarrativeWalkthroughV4): WalkthroughModel =>
   modelFromV4(walkthrough);
 
+const prefixNarrativeContent = (
+  content: WalkthroughNarrativeContentV5,
+  identity: string,
+): WalkthroughNarrativeContentV5 => ({
+  ...content,
+  chapters: content.chapters.map((chapter) => ({
+    ...chapter,
+    id: `${identity}:${chapter.id}`,
+    stops: chapter.stops.map((stop) => ({
+      ...stop,
+      id: `${identity}:${stop.id}`,
+      ...(stop.regions
+        ? {
+            prose: stop.prose.replaceAll(/\]\(#([^)]+)\)/g, `](#${identity}:$1)`),
+            regions: stop.regions.map((region) => ({
+              ...region,
+              id: `${identity}:${region.id}`,
+            })),
+          }
+        : {}),
+    })),
+  })),
+  support: content.support.map((group) => ({ ...group, id: `${identity}:${group.id}` })),
+});
+
+const contentFromV5Narrative = (narrative: WalkthroughNarrativeV5) => {
+  if ('content' in narrative) {
+    return { content: narrative.content, units: undefined };
+  }
+  const contents = narrative.units.map((unit) => prefixNarrativeContent(unit.content, unit.sha));
+  const first = contents[0];
+  if (!first) {
+    throw new Error('A commit-by-commit V5 narrative requires at least one unit.');
+  }
+  return {
+    content: {
+      ...first,
+      chapters: contents.flatMap((content) => content.chapters),
+      support: contents.flatMap((content) => content.support),
+    },
+    units: narrative.units.map((unit, index) => {
+      const prefixed = contents[index]!;
+      return {
+        chapterIds: prefixed.chapters.map((chapter) => chapter.id),
+        ...(unit.commit ? { commit: unit.commit } : {}),
+        identity: { kind: 'commit', sha: unit.sha } as const,
+        supportIds: prefixed.support.map((group) => group.id),
+      };
+    }),
+  };
+};
+
 /**
  * Core's sole trust boundary for unknown persisted walkthrough JSON. It
  * strictly validates V4 or V5 and returns the non-persisted immutable model
@@ -552,14 +693,22 @@ export const parseWalkthroughModel = (value: unknown): WalkthroughModel => {
     return modelFromV4(persisted as NarrativeWalkthroughV4);
   }
 
-  const artifact = validateAssessmentCollection(persisted as WalkthroughArtifactV5);
+  const artifact = validateAssessmentCollection(
+    validateArtifactStructure(persisted as WalkthroughArtifactV5),
+  );
+  const { content, units } = contentFromV5Narrative(artifact.narrative);
   return {
-    ...artifact.narrative,
+    ...content,
     ...(artifact.assessments ? { assessments: artifact.assessments } : {}),
     capturedContext: artifact.capturedContext,
+    ...('generationMetadata' in artifact.narrative
+      ? { generationMetadata: artifact.narrative.generationMetadata }
+      : {}),
     generationRequest: artifact.generationRequest,
-    repo: { branch: artifact.narrative.repo.branch, root: '' },
+    repo: { branch: content.repo.branch, root: '' },
     sourceVersion: 5,
+    structure: artifact.narrative.structure,
+    ...(units ? { units } : {}),
   };
 };
 
