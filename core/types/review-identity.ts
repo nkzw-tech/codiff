@@ -1,3 +1,4 @@
+import type { RegionReplayFileProjection } from '../lib/region-aware-replay.ts';
 import type {
   PullRequestMergeState,
   PullRequestReviewStatus,
@@ -37,6 +38,12 @@ export type ChangedFile = {
   generated?: boolean;
   oldPath?: string;
   path: string;
+  /**
+   * Exact regional replay provenance for a version-comparison file. This stays
+   * alongside the rendered patch so consumers can preserve source semantics
+   * instead of reconstructing them from diff colors or hunk layout.
+   */
+  regionalReplay?: RegionReplayFileProjection;
   sections: ReadonlyArray<DiffSection>;
   status: GitFileStatus;
 };
