@@ -35,6 +35,7 @@ export function WalkthroughDiffSurface({
   scrollTarget,
   sourceDescriptionActions,
   sourceDescriptionFooter,
+  sourceDescriptionFooterAside,
 }: {
   allowViewedToggle?: boolean;
   blocks: ReadonlyArray<ReviewDiffBlock>;
@@ -44,6 +45,7 @@ export function WalkthroughDiffSurface({
   scrollTarget: WalkthroughBlockScrollTarget | null;
   sourceDescriptionActions?: ReviewCodeViewProps['sourceDescriptionActions'];
   sourceDescriptionFooter?: ReviewCodeViewProps['sourceDescriptionFooter'];
+  sourceDescriptionFooterAside?: ReviewCodeViewProps['sourceDescriptionFooterAside'];
 }) {
   return (
     <div className="wt-stop wt-diff-surface">
@@ -62,6 +64,9 @@ export function WalkthroughDiffSurface({
         showSourceDescription
         sourceDescriptionActions={sourceDescriptionActions ?? reviewProps.sourceDescriptionActions}
         sourceDescriptionFooter={sourceDescriptionFooter ?? reviewProps.sourceDescriptionFooter}
+        sourceDescriptionFooterAside={
+          sourceDescriptionFooterAside ?? reviewProps.sourceDescriptionFooterAside
+        }
         walkthroughNotes={emptyWalkthroughNotes}
       />
     </div>
