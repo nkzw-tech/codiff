@@ -55,6 +55,7 @@ const TIMEOUT_MS_PER_EXTRA_FILE = 1_000;
 const TIMEOUT_MS_PER_EXTRA_HUNK = 2_000;
 const LARGE_WALKTHROUGH_HUNK_THRESHOLD = 100;
 const WALKTHROUGH_CACHE_KEY_VERSION = 1;
+const NARRATIVE_WALKTHROUGH_AUTHORING_VERSION = 'narrative-v4';
 
 /** @param {unknown} value @param {string} [fallback] */
 const cleanRich = (value, fallback = '') => {
@@ -846,6 +847,31 @@ const buildNarrativeWalkthroughPrompt = (
   buildNarrativeWalkthroughRequest(state, context, agentLabel, customPrompt, previousWalkthrough)
     .prompt;
 
+const createNarrativeWalkthroughGenerationRequest = (
+  state,
+  agent,
+  context,
+  customPrompt,
+  previousWalkthrough,
+) => {
+  const { fileCount, hunkCount } = getWalkthroughSize(state);
+  const request = buildNarrativeWalkthroughRequest(
+    state,
+    context,
+    agent.label,
+    customPrompt,
+    previousWalkthrough,
+  );
+  const timeoutMs = getNarrativeWalkthroughTimeoutMs(state, agent.defaultTimeoutMs);
+  return {
+    ...request,
+    outputName: 'walkthrough.json',
+    schema: narrativeWalkthroughResponseSchema,
+    timeoutMessage: `${agent.label} walkthrough timed out after ${Math.ceil(timeoutMs / 1_000)} seconds while processing ${fileCount} files and ${hunkCount} reviewable hunks.`,
+    timeoutMs,
+  };
+};
+
 /**
  * Cache identity for the exact model input. The previous walkthrough is
  * intentionally excluded: forced regeneration replaces the cached result for
@@ -892,25 +918,23 @@ const readNarrativeWalkthrough = async (
   previousWalkthrough,
 ) => {
   try {
-    const timeoutMs = getNarrativeWalkthroughTimeoutMs(state, agent.defaultTimeoutMs);
-    const { fileCount, hunkCount } = getWalkthroughSize(state);
-    const { hunkIdByAlias, prompt } = buildNarrativeWalkthroughRequest(
+    const request = createNarrativeWalkthroughGenerationRequest(
       state,
+      agent,
       context,
-      agent.label,
       customPrompt,
       previousWalkthrough,
     );
     agentOptions?.onProgress?.('agent-generation');
     const response = await agent.run(
       state.root,
-      prompt,
-      narrativeWalkthroughResponseSchema,
-      'walkthrough.json',
-      `${agent.label} walkthrough timed out after ${Math.ceil(timeoutMs / 1_000)} seconds while processing ${fileCount} files and ${hunkCount} reviewable hunks.`,
+      request.prompt,
+      request.schema,
+      request.outputName,
+      request.timeoutMessage,
       {
         ...agentOptions,
-        timeoutMs,
+        timeoutMs: request.timeoutMs,
       },
     );
     agentOptions?.onProgress?.('response-received');
@@ -925,7 +949,7 @@ const readNarrativeWalkthrough = async (
         root: state.root,
         source: state.source,
       },
-      hunkIdByAlias,
+      request.hunkIdByAlias,
     );
     if (context && !walkthrough.context) {
       walkthrough.context = context;
@@ -952,9 +976,12 @@ const readNarrativeWalkthrough = async (
 };
 
 module.exports = {
+  NARRATIVE_WALKTHROUGH_AUTHORING_VERSION,
   buildNarrativeWalkthroughPrompt,
+  createNarrativeWalkthroughGenerationRequest,
   getNarrativeWalkthroughCacheKey,
   narrativeWalkthroughSchema,
+  narrativeWalkthroughResponseSchema,
   normalizeNarrativeWalkthrough,
   readNarrativeWalkthrough,
   resolveNarrativeWalkthroughModel,

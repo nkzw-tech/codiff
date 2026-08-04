@@ -19,6 +19,7 @@ import type {
   RepositoryHistory,
   RepositoryState,
   ResolvedReviewSource,
+  WalkthroughProgressEvent,
 } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
@@ -98,11 +99,13 @@ const installWindowApi = (overrides: Record<string, unknown> = {}) => {
   let copyPendingComments: (() => string | Promise<string>) | null = null;
   let refreshRequest: (() => void) | null = null;
   let repositoryChanged: (() => void) | null = null;
+  let walkthroughProgress: ((progress: WalkthroughProgressEvent) => void) | null = null;
   let windowFullScreenChanged: ((isFullScreen: boolean) => void) | null = null;
   const api = {
     applyUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     askReviewAssistant: vi.fn(async () => ({ reply: 'Checked.', status: 'ready' as const })),
     cancelDiffContentRequest: vi.fn(),
+    cancelNarrativeWalkthrough: vi.fn(async () => {}),
     createWalkthroughCommit: vi.fn(async () => ({ status: 'committed' as const })),
     dismissUpdate: vi.fn(async () => ({ currentVersion: '0.0.0', phase: 'idle' as const })),
     getDiffImageContent: vi.fn(async () => ({ reason: 'Not used.', status: 'unavailable' })),
@@ -146,7 +149,10 @@ const installWindowApi = (overrides: Record<string, unknown> = {}) => {
     }),
     onUpdateStatusChanged: vi.fn(() => unsubscribe),
     onWalkthroughCommitOutput: vi.fn(() => unsubscribe),
-    onWalkthroughProgress: vi.fn(() => unsubscribe),
+    onWalkthroughProgress: vi.fn((callback: (progress: WalkthroughProgressEvent) => void) => {
+      walkthroughProgress = callback;
+      return unsubscribe;
+    }),
     onWindowFullScreenChanged: vi.fn((callback: (isFullScreen: boolean) => void) => {
       windowFullScreenChanged = callback;
       return unsubscribe;
@@ -173,6 +179,7 @@ const installWindowApi = (overrides: Record<string, unknown> = {}) => {
     findInDiffs: () => findInDiffs,
     refreshRequest: () => refreshRequest,
     repositoryChanged: () => repositoryChanged,
+    walkthroughProgress: () => walkthroughProgress,
     windowFullScreenChanged: () => windowFullScreenChanged,
   };
 };
@@ -1001,9 +1008,9 @@ test('keeps desktop file state, fullscreen state, and active walkthrough targets
   }
 });
 
-test('ignores a walkthrough result after History switches sources', async () => {
+test('cancels active walkthrough work when History switches sources', async () => {
   surfaceProps.mockClear();
-  const { api } = installWindowApi();
+  const { api, walkthroughProgress } = installWindowApi();
   const sourceAState = stateFor({ type: 'working-tree' }, [createChangedFile('src/a.ts')]);
   const sourceB = { sha: gitSha('b'), type: 'commit' } as const;
   const sourceBRequest = { ref: gitSha('b'), type: 'commit' } as const;
@@ -1020,9 +1027,28 @@ test('ignores a walkthrough result after History switches sources', async () => 
       await Promise.resolve();
     });
     expect(api.getNarrativeWalkthrough).toHaveBeenCalledWith({ type: 'working-tree' }, undefined);
+    await act(async () =>
+      walkthroughProgress()?.({
+        generation: { phase: 'generating', summary: 'Source A progress.' },
+      }),
+    );
+    expect(getSurfaceProps().capabilities?.walkthrough?.generationProgress?.summary).toBe(
+      'Source A progress.',
+    );
 
     await act(async () => getSurfaceProps().capabilities?.history?.onSelectSource(sourceBRequest));
+    expect(api.cancelNarrativeWalkthrough).toHaveBeenCalledOnce();
     await waitFor(() => expect(getSurfaceProps().snapshot.repository.source).toEqual(sourceB));
+
+    await act(async () =>
+      walkthroughProgress()?.({
+        generation: { phase: 'generating', summary: 'Stale source A progress.' },
+        phase: 'response-received',
+      }),
+    );
+    expect(getSurfaceProps().capabilities?.walkthrough?.generationProgress?.summary).toBe(
+      'Source A progress.',
+    );
 
     await act(async () => {
       pending.resolve({
@@ -1036,6 +1062,65 @@ test('ignores a walkthrough result after History switches sources', async () => 
     expect(getSurfaceProps().capabilities?.walkthrough).toMatchObject({
       status: 'idle',
       unread: false,
+    });
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('source selection without active generation skips main-process cancellation', async () => {
+  surfaceProps.mockClear();
+  const { api } = installWindowApi();
+  const initialState = stateFor({ type: 'working-tree' }, [createChangedFile('src/initial.ts')]);
+  const nextSource = { ref: gitSha('c'), type: 'commit' } as const;
+  api.getRepositoryState.mockResolvedValueOnce(
+    stateFor({ sha: gitSha('c'), type: 'commit' }, [createChangedFile('src/next.ts')]),
+  );
+  const view = await renderHost(initialState);
+
+  try {
+    await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
+    await act(async () => getSurfaceProps().capabilities?.history?.onSelectSource(nextSource));
+    await waitFor(() =>
+      expect(getSurfaceProps().snapshot.repository.source).toEqual({
+        sha: gitSha('c'),
+        type: 'commit',
+      }),
+    );
+    expect(api.cancelNarrativeWalkthrough).not.toHaveBeenCalled();
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('same-source mode changes do not cancel active walkthrough generation', async () => {
+  surfaceProps.mockClear();
+  const pending = deferred<NarrativeWalkthroughResult>();
+  const { api } = installWindowApi({
+    getNarrativeWalkthrough: vi.fn(() => pending.promise),
+  });
+  const view = await renderHost(
+    stateFor({ type: 'working-tree' }, [createChangedFile('src/current.ts')]),
+  );
+
+  try {
+    await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
+    await act(async () => {
+      void getSurfaceProps().capabilities?.walkthrough?.onGenerate?.();
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(getSurfaceProps().capabilities?.walkthrough?.status).toBe('generating'),
+    );
+
+    await act(async () => getSurfaceProps().activeMode?.onChange('walkthrough'));
+    await act(async () => getSurfaceProps().activeMode?.onChange('tree'));
+    await act(async () => getSurfaceProps().activeMode?.onChange('comments'));
+    expect(api.cancelNarrativeWalkthrough).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pending.resolve({ reason: 'Not used.', status: 'unavailable' });
+      await pending.promise;
     });
   } finally {
     await view.cleanup();

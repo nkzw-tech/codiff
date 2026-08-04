@@ -1,8 +1,45 @@
 import type { GitSha, ResolvedReviewSource } from './review-identity.ts';
 import type { NarrativeWalkthrough } from './walkthrough.ts';
 
+export type GenerationSettings = Readonly<Record<string, boolean | number | string>>;
+
+/** Safe model policy that materially affects one generated component. */
+export type GenerationProfile = {
+  agent: NarrativeWalkthrough['agent'];
+  authoringVersion: string;
+  modelCandidates: ReadonlyArray<string>;
+  settings?: GenerationSettings;
+};
+
+/** Provenance for one successful model-produced component. */
+export type GenerationMetadata = {
+  agent: NarrativeWalkthrough['agent'];
+  generatedAt: string;
+  model: string;
+  profile: GenerationProfile;
+};
+
+export type WalkthroughGenerationUnitProgress = {
+  detail?: string;
+  id: string;
+  label: string;
+  status: 'failed' | 'generating' | 'pending' | 'preparing' | 'ready';
+};
+
+/** Format-neutral progress for one in-flight walkthrough generation. */
+export type WalkthroughGenerationProgress = {
+  completed?: number;
+  phase: 'combining' | 'generating' | 'generating-units' | 'preparing';
+  summary: string;
+  total?: number;
+  units?: ReadonlyArray<WalkthroughGenerationUnitProgress>;
+};
+
 export type WalkthroughProgressPhase = 'agent-generation' | 'response-received';
-export type WalkthroughProgressEvent = { phase: WalkthroughProgressPhase };
+export type WalkthroughProgressEvent = {
+  generation?: WalkthroughGenerationProgress;
+  phase?: WalkthroughProgressPhase;
+};
 
 export type NarrativeWalkthroughResult =
   | { status: 'ready'; walkthrough: NarrativeWalkthrough }

@@ -88,3 +88,79 @@ test('reserves timer space, reveals 3s without shifting, and resets for each sta
   expect(timer()?.textContent).toBe('3s');
   expect(timer()?.classList.contains('visible')).toBe(true);
 });
+
+test('renders format-neutral task progress and aggregate counts', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <WalkthroughProgress
+          phase={null}
+          progress={{
+            completed: 1,
+            phase: 'generating-units',
+            summary: 'Preparing the second task.',
+            total: 2,
+            units: [
+              { id: 'first', label: 'First task', status: 'ready' },
+              { id: 'second', label: 'Second task', status: 'preparing' },
+            ],
+          }}
+          responseLabelIndex={0}
+          stageRevision={0}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('1/2');
+    expect(container.textContent).toContain('Preparing the second task.');
+    expect(container.textContent).toContain('done');
+    expect(container.textContent).toContain('preparing');
+    expect(container.textContent).toContain('Second task');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('keeps failed task details visible after generation stops', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <WalkthroughProgress
+          label="Walkthrough unavailable"
+          phase={null}
+          progress={{
+            completed: 0,
+            phase: 'generating',
+            summary: 'The narrative task failed.',
+            total: 1,
+            units: [
+              {
+                detail: 'Model response was invalid.',
+                id: 'narrative',
+                label: 'Narrative',
+                status: 'failed',
+              },
+            ],
+          }}
+          responseLabelIndex={0}
+          stageRevision={0}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('failed');
+    expect(container.textContent).toContain('Model response was invalid.');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

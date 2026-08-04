@@ -19,6 +19,7 @@ const codiff = {
   dismissUpdate: () => ipcRenderer.invoke('codiff:dismissUpdate'),
   cancelDiffContentRequest: (requestId) =>
     ipcRenderer.send('codiff:cancelDiffContentRequest', requestId),
+  cancelNarrativeWalkthrough: () => ipcRenderer.invoke('codiff:cancelNarrativeWalkthrough'),
   createWalkthroughCommit: (request) =>
     ipcRenderer.invoke('codiff:createWalkthroughCommit', request),
   completePlan: (review, status) => ipcRenderer.invoke('codiff:completePlan', review, status),

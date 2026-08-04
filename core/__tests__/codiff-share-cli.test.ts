@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmod, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
@@ -165,7 +165,7 @@ test('headless share uploads the canonical snapshot and prints its URL', async (
   expect(body.snapshot).toMatchObject({
     kind: 'codiff-walkthrough-share',
     repository: {
-      root: await realpath(repositoryPath),
+      root: '[redacted]',
       source: { type: 'working-tree' },
     },
     version: 1,
@@ -450,7 +450,7 @@ exit 1
   expect(stderr).toBe('');
   expect(stdout).toBe(`${origin}/w/generated-walkthrough\n`);
   expect(body.snapshot.repository).toMatchObject({
-    root: await realpath(repositoryPath),
+    root: '[redacted]',
     source: { sha: head, type: 'commit' },
     title: 'Update example',
   });

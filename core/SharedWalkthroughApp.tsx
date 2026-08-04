@@ -25,6 +25,7 @@ import {
   SidebarGeneralCommentList,
 } from './app/components/merge-request/GeneralComments.tsx';
 import {
+  AgentUnavailablePanel,
   isTerminalPullRequestMergeState,
   CopyCommentsButton,
   DiffSearchPanel,
@@ -132,6 +133,7 @@ import type {
   SubmittedReviewComment,
   WalkthroughCommitMessageResult,
   WalkthroughCommitResult,
+  WalkthroughGenerationProgress,
 } from './types.ts';
 
 export { ReadOnlyGeneralCommentCard } from './app/components/merge-request/GeneralComments.tsx';
@@ -141,6 +143,12 @@ const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
 const emptyGeneralCommentThreads: ReadonlyArray<PullRequestGeneralCommentThread> = [];
 const emptyPaths = new Set<string>();
 const emptyWalkthroughNotes = new Map();
+const agentUnavailableCodes = new Set<NonNullable<WalkthroughError['code']>>([
+  'CODEX_NOT_FOUND',
+  'CLAUDE_NOT_FOUND',
+  'OPENCODE_NOT_FOUND',
+  'PI_NOT_FOUND',
+]);
 const readSharedSidebarWidth = () =>
   typeof localStorage === 'undefined' ? SIDEBAR_DEFAULT_WIDTH : readSidebarWidth();
 
@@ -292,6 +300,7 @@ export type ReviewWalkthroughCapabilities = {
   commit?: CommitHandler;
   commitOutput?: CommitOutputSubscriber;
   error?: Pick<WalkthroughError, 'code' | 'reason'> | null;
+  generationProgress?: WalkthroughGenerationProgress | null;
   onGenerate?: () => Promise<void> | void;
   onShare?: () => Promise<void> | void;
   progress?: ReactNode;
@@ -1441,12 +1450,23 @@ export function ReviewSurface({
   }, [walkthroughStatus]);
   const walkthroughReady = !walkthrough || walkthroughStatus === 'ready';
   const walkthroughFailed = walkthroughStatus === 'failed';
+  const walkthroughGenerationProgress = walkthrough?.generationProgress ?? null;
+  const failedGenerationUnits =
+    walkthroughGenerationProgress?.units?.filter((unit) => unit.status === 'failed') ?? [];
+  const agentUnavailable =
+    walkthroughFailed &&
+    walkthrough?.error?.code != null &&
+    agentUnavailableCodes.has(walkthrough.error.code);
   const walkthroughStatusTitle = walkthroughFailed
     ? 'Walkthrough unavailable'
     : 'Generating walkthrough…';
   const walkthroughStatusDescription = walkthroughFailed
-    ? (walkthrough?.error?.reason ?? 'Fix the generation issue, then try again.')
-    : null;
+    ? agentUnavailable
+      ? (walkthrough?.error?.reason ?? 'Install the configured agent and try again.')
+      : (walkthroughGenerationProgress?.summary ??
+        walkthrough?.error?.reason ??
+        'Fix the generation issue, then try again.')
+    : (walkthroughGenerationProgress?.summary ?? null);
   const shellTheme =
     snapshot.preferences.theme === 'system' ? undefined : snapshot.preferences.theme;
   const requestWalkthrough = () => {
@@ -1670,13 +1690,16 @@ export function ReviewSurface({
                 className={`sidebar-walkthrough-status${walkthroughFailed ? '' : ' codex'}`}
                 title={walkthroughStatusDescription ?? undefined}
               >
-                {walkthrough?.progress ? (
-                  walkthrough.progress
-                ) : walkthroughFailed ? (
+                {walkthroughFailed && failedGenerationUnits.length === 0 ? (
                   <strong>{walkthroughStatusTitle}</strong>
+                ) : !walkthroughFailed && walkthrough?.progress ? (
+                  walkthrough.progress
                 ) : (
                   <WalkthroughProgress
+                    detail={walkthroughStatusDescription}
+                    label={walkthroughStatusTitle}
                     phase={null}
+                    progress={walkthroughGenerationProgress}
                     responseLabelIndex={0}
                     stageRevision={walkthroughProgressRevision}
                   />
@@ -1804,20 +1827,42 @@ export function ReviewSurface({
           ) : walkthroughFailed ? (
             <div className="empty-state">
               <div className="empty-panel squircle">
-                <strong>{walkthroughStatusTitle}</strong>
-                <p>{walkthroughStatusDescription}</p>
-                <div className="empty-panel-actions">
-                  <button onClick={requestWalkthrough} type="button">
-                    Try again
-                  </button>
-                </div>
+                {agentUnavailable ? (
+                  <AgentUnavailablePanel
+                    agentLabel={getAgentLabel(snapshot.walkthrough.agent)}
+                    onShowFiles={() => changeSidebarMode('tree')}
+                    reason={walkthroughStatusDescription ?? undefined}
+                  />
+                ) : (
+                  <>
+                    <strong>{walkthroughStatusTitle}</strong>
+                    <p>{walkthroughStatusDescription}</p>
+                    {failedGenerationUnits.length > 0 ? (
+                      <WalkthroughProgress
+                        label="Failed walkthrough tasks"
+                        phase={null}
+                        progress={walkthroughGenerationProgress}
+                        responseLabelIndex={0}
+                        stageRevision={walkthroughProgressRevision}
+                      />
+                    ) : null}
+                    <div className="empty-panel-actions">
+                      <button onClick={requestWalkthrough} type="button">
+                        {failedGenerationUnits.length > 0 ? 'Retry failed tasks' : 'Try again'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           ) : (
             <div className="loading codex">
               {walkthrough?.progress ?? (
                 <WalkthroughProgress
+                  detail={walkthroughStatusDescription}
+                  label={walkthroughStatusTitle}
                   phase={null}
+                  progress={walkthroughGenerationProgress}
                   responseLabelIndex={0}
                   stageRevision={walkthroughProgressRevision}
                 />

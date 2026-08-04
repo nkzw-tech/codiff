@@ -113,6 +113,7 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
   }));
   await using view = await renderWalkthroughController({
     codiff: {
+      cancelNarrativeWalkthrough: vi.fn(async () => {}),
       getNarrativeWalkthrough,
       onWalkthroughProgress: vi.fn(() => () => {}),
     },
@@ -175,6 +176,7 @@ test('walkthrough controller routes progress, commit APIs, and sharing through c
   const state = createRepositoryState();
   await using view = await renderWalkthroughController({
     codiff: {
+      cancelNarrativeWalkthrough: vi.fn(async () => {}),
       createWalkthroughCommit,
       onWalkthroughProgress: vi.fn((callback) => {
         onProgress = callback;
@@ -194,6 +196,25 @@ test('walkthrough controller routes progress, commit APIs, and sharing through c
   });
   expect(getController().walkthroughProgress.phase).toBe('agent-generation');
   expect(getController().walkthroughProgress.stageRevision).toBe(1);
+  await act(async () => {
+    onProgress?.({
+      generation: {
+        completed: 1,
+        phase: 'generating-units',
+        summary: 'Completed the first task.',
+        total: 2,
+        units: [
+          { id: 'first', label: 'First task', status: 'ready' },
+          { id: 'second', label: 'Second task', status: 'pending' },
+        ],
+      },
+    });
+  });
+  expect(getController().walkthroughProgress).toMatchObject({
+    generation: { completed: 1, phase: 'generating-units', total: 2 },
+    phase: 'agent-generation',
+    stageRevision: 1,
+  });
   await act(async () => {
     await getController().commitWalkthrough({
       body: 'Body',

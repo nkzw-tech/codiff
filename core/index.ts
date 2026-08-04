@@ -33,6 +33,15 @@ export {
   type StackSnapshot,
 } from './lib/review-artifacts.ts';
 export {
+  runWalkthroughGenerationTasks,
+  walkthroughGenerationConcurrency,
+  type ReusableWalkthroughGenerationComponent,
+  type RunWalkthroughGenerationTasksInput,
+  type RunWalkthroughGenerationTasksResult,
+  type WalkthroughGenerationFailure,
+  type WalkthroughGenerationTask,
+} from './lib/walkthrough-generation-tasks.ts';
+export {
   parsePlanShareManifest,
   parsePlanShareUpload,
   type PlanShareManifestV1,
@@ -44,6 +53,9 @@ export type {
   CodiffPreferences,
   DiffRange,
   DiffSection,
+  GenerationMetadata,
+  GenerationProfile,
+  GenerationSettings,
   GitIdentity,
   GitSha,
   NarrativeWalkthrough,
@@ -75,4 +87,8 @@ export type {
   SubmittedReviewComment,
   WalkthroughShareManifestV1,
   WalkthroughHunk,
+  WalkthroughGenerationProgress,
+  WalkthroughGenerationUnitProgress,
+  WalkthroughProgressEvent,
+  WalkthroughProgressPhase,
 } from './types.ts';

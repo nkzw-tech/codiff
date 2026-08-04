@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { WalkthroughProgressPhase } from '../../../types.ts';
+import type { WalkthroughGenerationProgress, WalkthroughProgressPhase } from '../../../types.ts';
 
 export const walkthroughResponseLabels = [
   'Building walkthrough…',
@@ -15,12 +15,35 @@ export const nextWalkthroughResponseLabelIndex = (current: number) =>
 
 const TIMER_THRESHOLD_SECONDS = 3;
 
+const unitStatusLabel = (
+  status: NonNullable<WalkthroughGenerationProgress['units']>[number]['status'],
+) => {
+  switch (status) {
+    case 'ready':
+      return 'done';
+    case 'generating':
+      return 'generating';
+    case 'preparing':
+      return 'preparing';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'pending';
+  }
+};
+
 export function WalkthroughProgress({
+  detail,
+  label: labelOverride,
   phase,
+  progress,
   responseLabelIndex,
   stageRevision,
 }: {
+  detail?: string | null;
+  label?: string;
   phase: WalkthroughProgressPhase | null;
+  progress?: WalkthroughGenerationProgress | null;
   responseLabelIndex: number;
   stageRevision: number;
 }) {
@@ -40,20 +63,55 @@ export function WalkthroughProgress({
   const elapsedSeconds = timerState.stageRevision === stageRevision ? timerState.elapsedSeconds : 0;
   const showTimer = elapsedSeconds >= TIMER_THRESHOLD_SECONDS;
   const label =
-    phase === 'agent-generation'
+    labelOverride ??
+    (phase === 'agent-generation'
       ? 'Analyzing changes…'
       : phase === 'response-received'
         ? walkthroughResponseLabels[Math.abs(responseLabelIndex) % walkthroughResponseLabels.length]
-        : 'Generating walkthrough…';
+        : 'Generating walkthrough…');
+  const summary = progress?.summary ?? detail ?? null;
+  const units = progress?.units ?? [];
+  const counts =
+    progress?.total != null
+      ? `${progress.completed ?? units.filter((unit) => unit.status === 'ready').length}/${progress.total}`
+      : null;
 
   return (
     <span aria-live="polite" className="walkthrough-progress" role="status">
-      <span className="walkthrough-progress-label">{label}</span>
-      <span
-        aria-hidden={!showTimer}
-        className={`walkthrough-progress-timer${showTimer ? ' visible' : ''}`}
-      >
-        {showTimer ? `${elapsedSeconds}s` : '0s'}
+      <span className="walkthrough-progress-copy">
+        <span className="walkthrough-progress-heading">
+          <span className="walkthrough-progress-label">
+            {label}
+            {counts ? ` · ${counts}` : ''}
+            {summary ? ` · ${summary}` : ''}
+          </span>
+          <time
+            aria-hidden={!showTimer}
+            className={`walkthrough-progress-timer${showTimer ? ' visible' : ''}`}
+            dateTime={`PT${elapsedSeconds}S`}
+          >
+            {showTimer ? `${elapsedSeconds}s` : '0s'}
+          </time>
+        </span>
+        {units.length > 0 ? (
+          <ul className="walkthrough-progress-units">
+            {units.map((unit) => (
+              <li
+                className={`walkthrough-progress-unit is-${unit.status}`}
+                key={unit.id}
+                title={unit.detail ?? unit.label}
+              >
+                <span className="walkthrough-progress-unit-status">
+                  {unitStatusLabel(unit.status)}
+                </span>
+                <span className="walkthrough-progress-unit-label">{unit.label}</span>
+                {unit.status === 'failed' && unit.detail ? (
+                  <span className="walkthrough-progress-unit-detail">{unit.detail}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </span>
     </span>
   );
