@@ -239,6 +239,8 @@ export type ReviewEvolutionSummary = {
   absorbedIntoBase: number;
   added: number;
   ambiguous: number;
+  /** Every selected change can be represented by a reviewable Evolution Unit. */
+  completeCoverage: boolean;
   pairingCoverage: number;
   removed: number;
   retained: number;
