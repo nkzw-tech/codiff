@@ -4,30 +4,40 @@
 
 import { expect, test } from 'vite-plus/test';
 import { CopyCommentsButton } from '../app/components/Panels.tsx';
-import type { ReviewComment } from '../lib/app-types.ts';
+import type { LocalReviewNote, ReviewComment } from '../lib/app-types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact } from './helpers/react.tsx';
 
 const file = createChangedFile('src/app.ts');
 
-const createReviewComment = (comment: Partial<ReviewComment>) =>
-  ({
-    body: 'Rename this helper.',
-    filePath: file.path,
-    id: 'comment-1',
-    lineNumber: 1,
-    sectionId: file.sections[0].id,
-    side: 'additions',
-    ...comment,
-  }) satisfies ReviewComment;
+const createReviewComment = (comment: Partial<LocalReviewNote>): LocalReviewNote => ({
+  body: 'Rename this helper.',
+  filePath: file.path,
+  id: 'comment-1',
+  kind: 'local-note',
+  lineNumber: 1,
+  sectionId: file.sections[0].id,
+  side: 'additions',
+  ...comment,
+});
+
+const submittedComment = {
+  author: { login: 'reviewer' },
+  body: 'Existing comment.',
+  destination: 'share',
+  filePath: file.path,
+  id: 'comment-2',
+  isReadOnly: true,
+  kind: 'submitted-comment',
+  lineNumber: 1,
+  sectionId: file.sections[0].id,
+  side: 'additions',
+} satisfies ReviewComment;
 
 test('stays visible but disabled until a comment with a body exists', async () => {
   await using app = await renderReact(
     <CopyCommentsButton
-      comments={[
-        createReviewComment({ body: '   ' }),
-        createReviewComment({ id: 'comment-2', isReadOnly: true }),
-      ]}
+      comments={[createReviewComment({ body: '   ' }), submittedComment]}
       files={[file]}
       reviewCommentsPrefix=""
       showWhitespace={false}

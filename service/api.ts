@@ -1,6 +1,7 @@
 import { parsePlanShareUpload } from '@nkzw/codiff-core/share';
 import { z } from 'zod';
 import { and, db, eq, sql, withDatabase, type D1Binding } from './db.ts';
+import { reviewCommentPositionSchema } from './review-position.ts';
 import { plan, shareDailyUsage, uploadIntent, user, walkthrough, type UserRow } from './schema.ts';
 import {
   createUploadIntentSecret,
@@ -71,6 +72,7 @@ const reviewCommentSchema = z
     id: nonEmptyString(256),
     isThreadResolved: z.boolean().optional(),
     lineNumber: z.number().int().positive().optional(),
+    position: reviewCommentPositionSchema.optional(),
     sectionId: nonEmptyString(4096).optional(),
     side: z.enum(['additions', 'deletions']).optional(),
     startLineNumber: z.number().int().positive().optional(),
@@ -79,6 +81,10 @@ const reviewCommentSchema = z
     threadId: nonEmptyString(256).optional(),
   })
   .passthrough()
+  .refine(
+    (comment) => !(comment.position != null && comment.sectionId != null),
+    'A review comment cannot contain both sectionId and position.',
+  )
   .refine(
     (comment) =>
       comment.anchor === 'file' ||

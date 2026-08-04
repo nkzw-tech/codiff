@@ -2,6 +2,7 @@ import {
   type PullRequestExistingReviewComment,
   type PullRequestGeneralCommentThread,
   type PullRequestReviewComment,
+  type ReviewCommentPosition,
   type SharedWalkthroughSnapshot,
 } from '@nkzw/codiff-core';
 import {
@@ -64,6 +65,20 @@ const reviewAuthor = (message: ShareCommentMessageValue) => ({
   name: message.authorName,
 });
 
+const parseCommentPosition = (
+  value: string | null | undefined,
+): ReviewCommentPosition | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? (parsed as ReviewCommentPosition) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const reviewComments = (
   threads: ReadonlyArray<ShareCommentThreadValue>,
   signedIn: boolean,
@@ -77,12 +92,12 @@ const reviewComments = (
     if (!fileComment && (thread.lineNumber == null || thread.side == null)) {
       return [];
     }
+    const position = parseCommentPosition(thread.positionJson);
     return thread.messages.map((message) => ({
       ...(fileComment
         ? { anchor: 'file' as const }
         : {
             lineNumber: thread.lineNumber!,
-            ...(thread.sectionId ? { sectionId: thread.sectionId } : {}),
             side: thread.side!,
             ...(thread.startLineNumber ? { startLineNumber: thread.startLineNumber } : {}),
             ...(thread.startSide ? { startSide: thread.startSide } : {}),
@@ -95,6 +110,8 @@ const reviewComments = (
       filePath: thread.filePath!,
       id: message.id,
       ...(thread.status === 'resolved' ? { isThreadResolved: true } : {}),
+      ...(position ? { position } : {}),
+      ...(!position && thread.sectionId ? { sectionId: thread.sectionId } : {}),
       submittedAt: toISOString(message.createdAt),
       threadId: thread.id,
     }));
@@ -131,6 +148,7 @@ const commentTarget = (comment: PullRequestReviewComment) => {
       anchor: 'file' as const,
       filePath: comment.filePath,
       kind: 'walkthrough-diff' as const,
+      ...(comment.position ? { position: comment.position } : {}),
     };
   }
   if (comment.lineNumber == null || !comment.side) {
@@ -141,7 +159,8 @@ const commentTarget = (comment: PullRequestReviewComment) => {
     filePath: comment.filePath,
     kind: 'walkthrough-diff' as const,
     lineNumber: comment.lineNumber,
-    ...(comment.sectionId ? { sectionId: comment.sectionId } : {}),
+    ...(comment.position ? { position: comment.position } : {}),
+    ...(!comment.position && comment.sectionId ? { sectionId: comment.sectionId } : {}),
     side: comment.side,
     ...(comment.startLineNumber ? { startLineNumber: comment.startLineNumber } : {}),
     ...(comment.startSide ? { startSide: comment.startSide } : {}),
@@ -289,6 +308,7 @@ const Viewer = ({ walkthrough: walkthroughRef }: { walkthrough: ViewRef<'Walkthr
               },
             ],
             planId: null,
+            positionJson: target.position ? JSON.stringify(target.position) : null,
             resolvedAt: null,
             sectionId: fileComment ? null : (target.sectionId ?? null),
             side: fileComment ? null : target.side,

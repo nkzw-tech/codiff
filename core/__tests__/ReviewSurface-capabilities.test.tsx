@@ -7,7 +7,11 @@ import { createRoot } from 'react-dom/client';
 import { expect, expectTypeOf, test, vi } from 'vite-plus/test';
 import { createDefaultConfig } from '../config/defaults.ts';
 import { getShortcutLabel } from '../config/keymap.ts';
-import type { ReviewComment } from '../lib/app-types.ts';
+import type {
+  LocalReviewNote,
+  ProviderCommentDraft,
+  ProviderInlineComment,
+} from '../lib/app-types.ts';
 import {
   buildSharedReviewSnapshot,
   ReviewSurface,
@@ -22,6 +26,7 @@ import type {
   NarrativeWalkthrough,
   RepositoryState,
   SharedWalkthroughSnapshot,
+  SubmittedReviewComment,
 } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { waitFor } from './helpers/react.tsx';
@@ -228,6 +233,8 @@ test('rejects simultaneous controlled and uncontrolled mode inputs at the type b
     snapshot: SharedWalkthroughSnapshot;
   };
   expectTypeOf<ConflictingAnnotationProps>().not.toMatchTypeOf<ReviewSurfaceProps>();
+  expectTypeOf<LocalReviewNote>().not.toMatchTypeOf<ProviderCommentDraft>();
+  expectTypeOf<ProviderInlineComment>().not.toMatchTypeOf<ProviderCommentDraft>();
 });
 
 test('exposes Comments through persisted-comment capabilities independent of source', async () => {
@@ -331,10 +338,11 @@ test('copies local notes with the local label and Markdown heading', async () =>
     body: 'Keep this local note.',
     filePath: file.path,
     id: 'local-note',
+    kind: 'local-note',
     lineNumber: 1,
     sectionId: file.sections[0]!.id,
     side: 'additions',
-  } satisfies ReviewComment;
+  } satisfies LocalReviewNote;
   const writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
@@ -369,10 +377,11 @@ test('copies provider drafts with the provider label and Markdown heading', asyn
     body: 'Submit this provider draft.',
     filePath: file.path,
     id: 'provider-draft',
+    kind: 'provider-draft',
     lineNumber: 1,
     sectionId: file.sections[0]!.id,
     side: 'additions',
-  } satisfies ReviewComment;
+  } satisfies ProviderCommentDraft;
   const writeText = vi.fn(async () => {});
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
@@ -402,6 +411,48 @@ test('copies provider drafts with the provider label and Markdown heading', asyn
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(markdown));
 });
 
+test('excludes existing provider comments from Ask and pending-copy flows', async () => {
+  const file = providerSnapshot.files[0]!;
+  const onAsk = vi.fn();
+  const bridge = { current: null as ReviewSurfaceCommandBridge | null };
+  await using view = await renderSurface({
+    capabilities: {
+      comments: createProviderComments({
+        authoring: {
+          drafts: { onChange: vi.fn(), value: [] },
+          onAsk,
+        },
+      }),
+    },
+    initialMode: 'tree',
+    onCommandBridgeChange: (value) => {
+      bridge.current = value;
+    },
+    snapshot: {
+      ...providerSnapshot,
+      reviewComments: [
+        {
+          author: { login: 'reviewer' },
+          body: 'Existing provider feedback.',
+          filePath: file.path,
+          id: 'provider:existing',
+          lineNumber: 1,
+          side: 'additions',
+        },
+      ],
+    },
+  });
+
+  expect(view.container.textContent).toContain('Existing provider feedback.');
+  expect(findButton(view.container, 'Ask')).toBeUndefined();
+  const copyButton = view.container.querySelector<HTMLButtonElement>('.copy-comments-button');
+  expect(copyButton).not.toBeNull();
+  expect(copyButton?.disabled).toBe(true);
+  expect(copyButton?.getAttribute('title')).toBe('Copy Pending Review Comments (0)');
+  expect(bridge.current?.copyPendingComments()).toBe('');
+  expect(onAsk).not.toHaveBeenCalled();
+});
+
 test('hides the persistent copy action while a desktop source switch is pending', async () => {
   const file = snapshot.files[0]!;
   await using view = await renderSurface({
@@ -415,6 +466,7 @@ test('hides the persistent copy action while a desktop source switch is pending'
               body: 'Keep this note through the source switch.',
               filePath: file.path,
               id: 'switching-note',
+              kind: 'local-note',
               lineNumber: 1,
               sectionId: file.sections[0]!.id,
               side: 'additions',
@@ -668,32 +720,41 @@ test('composes host commands while keeping controlled preferences authoritative'
 
 test('forwards controlled draft updates atomically across an asynchronous submission', async () => {
   const file = snapshot.files[0]!;
-  const firstDraft: ReviewComment = {
+  const firstDraft: ProviderCommentDraft = {
     body: 'First draft',
     filePath: file.path,
     id: 'draft-1',
+    kind: 'provider-draft',
     lineNumber: 1,
+    position: {
+      range: {
+        base: {
+          label: { kind: 'commit', text: 'base' },
+          sha: 'a'.repeat(40) as import('../types.ts').GitSha,
+        },
+        head: {
+          label: { kind: 'commit', text: 'head' },
+          sha: 'b'.repeat(40) as import('../types.ts').GitSha,
+        },
+      },
+    },
     sectionId: file.sections[0]!.id,
     side: 'additions',
   };
-  const secondDraft: ReviewComment = {
+  const secondDraft: ProviderCommentDraft = {
     ...firstDraft,
     body: 'Second draft',
     id: 'draft-2',
   };
-  let completeSubmission!: (
-    comment: import('../types.ts').PullRequestExistingReviewComment,
-  ) => void;
-  const submission = new Promise<import('../types.ts').PullRequestExistingReviewComment>(
-    (resolve) => {
-      completeSubmission = resolve;
-    },
-  );
-  let setDrafts!: Dispatch<SetStateAction<ReadonlyArray<ReviewComment>>>;
-  let latestDrafts: ReadonlyArray<ReviewComment> = [];
+  let completeSubmission!: (comment: SubmittedReviewComment) => void;
+  const submission = new Promise<SubmittedReviewComment>((resolve) => {
+    completeSubmission = resolve;
+  });
+  let setDrafts!: Dispatch<SetStateAction<ReadonlyArray<ProviderCommentDraft>>>;
+  let latestDrafts: ReadonlyArray<ProviderCommentDraft> = [];
 
-  function ControlledSurface() {
-    const [drafts, updateDrafts] = useState<ReadonlyArray<ReviewComment>>([firstDraft]);
+  function ControlledSurface({ currentSnapshot }: { currentSnapshot: SharedWalkthroughSnapshot }) {
+    const [drafts, updateDrafts] = useState<ReadonlyArray<ProviderCommentDraft>>([firstDraft]);
     useEffect(() => {
       setDrafts = updateDrafts;
       latestDrafts = drafts;
@@ -710,7 +771,7 @@ test('forwards controlled draft updates atomically across an asynchronous submis
           }),
         }}
         initialMode="tree"
-        snapshot={providerSnapshot}
+        snapshot={currentSnapshot}
       />
     );
   }
@@ -718,8 +779,10 @@ test('forwards controlled draft updates atomically across an asynchronous submis
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(<ControlledSurface />));
-  const commentButton = findButton(container, 'Comment');
+  await act(async () => root.render(<ControlledSurface currentSnapshot={providerSnapshot} />));
+  const commentButton = Array.from(
+    container.querySelectorAll<HTMLButtonElement>('button.review-comment-action'),
+  ).find((button) => button.textContent === 'Comment');
   expect(commentButton).not.toBeUndefined();
   await act(async () => commentButton?.click());
   await act(async () => setDrafts((current) => [...current, secondDraft]));
@@ -727,14 +790,32 @@ test('forwards controlled draft updates atomically across an asynchronous submis
     completeSubmission({
       author: { login: 'ada', name: 'Ada' },
       body: firstDraft.body,
+      destination: 'provider',
       filePath: firstDraft.filePath,
       id: 'submitted-1',
+      isReadOnly: true,
       lineNumber: firstDraft.lineNumber,
-      sectionId: firstDraft.sectionId,
+      position: firstDraft.position,
       side: firstDraft.side,
     }),
   );
-  await waitFor(() => expect(latestDrafts.map(({ id }) => id)).toEqual(['submitted-1', 'draft-2']));
+  await waitFor(() => expect(latestDrafts.map(({ id }) => id)).toEqual(['draft-2']));
+  expect(container.textContent).toContain('First draft');
+
+  const nextSnapshot = {
+    ...providerSnapshot,
+    repository: {
+      root: '/another-repo',
+      source: {
+        ...providerSnapshot.repository.source,
+        number: 8,
+        url: 'https://github.com/cloudflare/codiff/pull/8',
+      },
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  await act(async () => root.render(<ControlledSurface currentSnapshot={nextSnapshot} />));
+  await waitFor(() => expect(container.textContent).not.toContain('First draft'));
+
   await act(async () => root.unmount());
   container.remove();
 });

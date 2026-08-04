@@ -35,3 +35,15 @@ export {
   type ShareReviewCommentCapabilities,
   type SubmitProviderReviewRequest,
 } from './ReviewSurface.tsx';
+export type {
+  LocalReviewNote,
+  ProviderCommentDraft,
+  ProviderInlineComment,
+  RenderedReviewCommentTarget,
+  RenderedSubmittedReviewComment,
+  ReviewComment,
+  ReviewCommentDraftTarget,
+  ReviewDraft,
+  ShareCommentDraft,
+  ShareInlineComment,
+} from './lib/app-types.ts';

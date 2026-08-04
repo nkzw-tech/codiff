@@ -85,18 +85,19 @@ const readComparisonPatches = async (repoRoot, newSha, oldSha, items) => {
 };
 
 /**
- * @param {string} ref
+ * @param {string} newRef
+ * @param {string | undefined} oldRef
  * @param {Pick<StatusItem, 'oldPath' | 'path' | 'status'>} item
  * @param {ReturnType<typeof createEmptyFileContent>} oldFile
  * @param {ReturnType<typeof createEmptyFileContent>} newFile
  * @param {string} patch
  */
-const createComparisonFile = (ref, item, oldFile, newFile, patch) => {
+const createComparisonFile = (newRef, oldRef, item, oldFile, newFile, patch) => {
   const summary = summarizeContent(oldFile, newFile);
 
   return {
     fingerprint: getFingerprint(
-      `${ref}\n${item.status}\n${item.oldPath || ''}\n${summary.loadState || 'ready'}\n${
+      `${newRef}\n${oldRef || ''}\n${item.status}\n${item.oldPath || ''}\n${summary.loadState || 'ready'}\n${
         summary.summary?.reason || ''
       }\n${summary.summary?.fingerprint || ''}\n${patch}\n${oldFile.file?.contents || ''}\n${
         newFile.file?.contents || ''
@@ -107,12 +108,22 @@ const createComparisonFile = (ref, item, oldFile, newFile, patch) => {
     sections: [
       {
         binary: summary.binary || /Binary files .* differ/.test(patch),
-        id: `${item.path}:${ref}`,
+        id: `${item.path}:${newRef}`,
         kind: 'commit',
         loadState: summary.loadState,
         newFile: newFile.file,
         oldFile: oldFile.file,
         patch,
+        range: {
+          base: {
+            label: { kind: 'commit', text: (oldRef || newRef).slice(0, 7) },
+            sha: oldRef || newRef,
+          },
+          head: {
+            label: { kind: 'commit', text: newRef.slice(0, 7) },
+            sha: newRef,
+          },
+        },
         summary: summary.summary,
       },
     ],
@@ -121,14 +132,15 @@ const createComparisonFile = (ref, item, oldFile, newFile, patch) => {
 };
 
 /**
- * @param {string} ref
+ * @param {string} newRef
+ * @param {string | undefined} oldRef
  * @param {Pick<StatusItem, 'oldPath' | 'path' | 'status'>} item
  * @param {ReturnType<typeof createEmptyFileContent>} oldFile
  * @param {ReturnType<typeof createEmptyFileContent>} newFile
  * @param {string} patch
  */
-const createComparisonSection = (ref, item, oldFile, newFile, patch) =>
-  createComparisonFile(ref, item, oldFile, newFile, patch).sections[0];
+const createComparisonSection = (newRef, oldRef, item, oldFile, newFile, patch) =>
+  createComparisonFile(newRef, oldRef, item, oldFile, newFile, patch).sections[0];
 
 /**
  * @param {Map<string, ReturnType<typeof createEmptyFileContent> | import('./common.cjs').FileContentResult>} oldFiles
@@ -192,6 +204,7 @@ const readComparisonState = async ({ launchPath, newSha, oldSha, repoRoot, sourc
     .map((item) =>
       createComparisonFile(
         newSha,
+        oldSha,
         item,
         getOldComparisonFile(oldFiles, oldSha, item),
         newFiles.get(item.path) || createEmptyFileContent(item.path),
@@ -248,7 +261,7 @@ const readComparisonSectionContent = async (
       ? await readComparisonPatch(repoRoot, newSha, oldSha, item.path)
       : '';
 
-  return createComparisonSection(newSha, item, oldFile, newFile, patch);
+  return createComparisonSection(newSha, oldSha, item, oldFile, newFile, patch);
 };
 
 /**

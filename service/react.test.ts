@@ -102,8 +102,10 @@ test('maps every shared discussion callback to share capabilities without provid
   const onSubmitComment = vi.fn(async () => ({
     author: { login: 'ada', name: 'Ada' },
     body: comment.body,
+    destination: 'share' as const,
     filePath: comment.filePath,
     id: 'submitted',
+    isReadOnly: true as const,
     lineNumber: comment.lineNumber,
     sectionId: comment.sectionId,
     side: comment.side,

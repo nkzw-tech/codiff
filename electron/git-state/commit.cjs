@@ -354,7 +354,7 @@ const readComparisonGeneratedAttributeStates = (comparison) =>
     comparison.repoRoot,
     comparison.status.map((file) => file.path),
     {
-      label: { kind: 'commit', text: comparison.newSha },
+      label: { kind: 'commit', text: comparison.newSha.slice(0, 7) },
       sha: comparison.newSha,
     },
   );

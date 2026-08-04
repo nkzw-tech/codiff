@@ -138,6 +138,7 @@ export const shareCommentThreadDataView = dataView<ShareCommentThreadRow>('Share
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   }),
   planId: true,
+  positionJson: true,
   resolvedAt: true,
   sectionId: true,
   side: true,

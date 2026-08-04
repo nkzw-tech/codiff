@@ -419,6 +419,12 @@ test('wires desktop commands, persistence, preferences, loading, and exact provi
       body: 'Submit this comment.',
       filePath: 'src/provider.ts',
       lineNumber: 1,
+      position: {
+        range: {
+          base: { label: { kind: 'commit' as const, text: 'base' }, sha: gitSha('e') },
+          head: { label: { kind: 'commit' as const, text: 'head' }, sha: gitSha('f') },
+        },
+      },
       side: 'additions' as const,
     };
     await comments.inline.onSubmit?.(comment);
@@ -483,6 +489,7 @@ test('asks the review assistant with the flushed note value supplied by the surf
         body: 'Check the just-flushed draft.',
         filePath: file.path,
         id: 'immediate-note',
+        kind: 'local-note',
         lineNumber: 1,
         sectionId: file.sections[0]!.id,
         side: 'additions',
@@ -1229,7 +1236,14 @@ test('keeps provider and local drafts in their own History source sessions', asy
     body: 'Keep this provider draft.',
     filePath: 'src/provider.ts',
     id: 'provider-draft',
+    kind: 'provider-draft' as const,
     lineNumber: 1,
+    position: {
+      range: {
+        base: { label: { kind: 'commit' as const, text: 'base' }, sha: gitSha('e') },
+        head: { label: { kind: 'commit' as const, text: 'head' }, sha: gitSha('f') },
+      },
+    },
     sectionId: 'src/provider.ts:unstaged',
     side: 'additions' as const,
   };
@@ -1237,6 +1251,7 @@ test('keeps provider and local drafts in their own History source sessions', asy
     body: 'Keep this local commit note.',
     filePath: 'src/commit.ts',
     id: 'local-note',
+    kind: 'local-note' as const,
     lineNumber: 1,
     sectionId: 'src/commit.ts:unstaged',
     side: 'additions' as const,
@@ -1262,6 +1277,8 @@ test('keeps provider and local drafts in their own History source sessions', asy
     await act(async () => getSurfaceProps().capabilities?.history?.onSelectSource(commitRequest));
     await waitFor(() => expect(getSurfaceProps().snapshot.repository.source).toEqual(commitSource));
     expect(getSurfaceProps().capabilities?.localReviewNotes).toBeDefined();
+    expect(getSurfaceProps().capabilities?.localReviewNotes?.drafts?.value).toEqual([]);
+    expect(getSurfaceProps().capabilities?.history?.pullRequestSource).toEqual(pullRequestSource);
     await act(async () =>
       getSurfaceProps().capabilities?.localReviewNotes?.drafts?.onChange([localNote]),
     );

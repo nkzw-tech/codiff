@@ -18,7 +18,13 @@ import {
 import { reconcileRepositoryRefresh } from '../lib/repository-refresh.ts';
 import type { RepositoryReviewBootstrap } from '../lib/repository-review-bootstrap.ts';
 import { resolveReviewCommandTarget } from '../lib/review-command-target.ts';
-import { getReviewCommentsFromState, mergeReviewComments } from '../lib/review-comments.ts';
+import {
+  getReviewCommentsFromState,
+  isReviewDraft,
+  mergeReviewComments,
+  toProviderSubmittedReviewComment,
+  toPullRequestExistingReviewComment,
+} from '../lib/review-comments.ts';
 import { getFileReviewIdentity } from '../lib/review-identity.ts';
 import {
   getHistorySource,
@@ -177,11 +183,7 @@ const getCollapsedViewedPaths = (
 const mergeStateReviewComments = (
   state: RepositoryState,
   currentComments: ReadonlyArray<ReviewComment>,
-) =>
-  mergeReviewComments(
-    getReviewCommentsFromState(state),
-    currentComments.filter((comment) => !comment.isReadOnly),
-  );
+) => mergeReviewComments(getReviewCommentsFromState(state), currentComments.filter(isReviewDraft));
 
 export type RepositoryReviewHostProps = {
   bootstrap: RepositoryReviewBootstrap;
@@ -332,12 +334,23 @@ export function RepositoryReviewHost({
     window.codiff.reportInitialLoadMilestone?.('first-usable-review-rendered');
   }, [state]);
 
-  const { askCodex, resetCommentFocus, reviewComments, reviewCommentsRef, setReviewComments } =
-    useAppReviewComments({
-      initialReviewComments: getReviewCommentsFromState(initialState),
-      onCommentFileChange: bumpItemVersion,
-      stateRef,
-    });
+  const {
+    askCodex,
+    localReviewNotes,
+    providerDrafts,
+    providerInlineComments,
+    resetCommentFocus,
+    reviewComments,
+    reviewCommentsRef,
+    setLocalReviewNotes,
+    setProviderDrafts,
+    setReviewComments,
+  } = useAppReviewComments({
+    draftKind: state?.source.type === 'pull-request' ? 'provider-draft' : 'local-note',
+    initialReviewComments: getReviewCommentsFromState(initialState),
+    onCommentFileChange: bumpItemVersion,
+    stateRef,
+  });
 
   const hydrateReviewComments = useCallback(
     (requestedState: RepositoryState | null = stateRef.current) => {
@@ -1178,7 +1191,7 @@ export function RepositoryReviewHost({
     const refreshHistorySource = historySourceRef.current
       ? getRefreshSource(historySourceRef.current)
       : undefined;
-    const pendingReviewComments = reviewComments.filter((comment) => !comment.isReadOnly);
+    const pendingReviewComments = reviewComments.filter(isReviewDraft);
 
     Promise.all([
       window.codiff.getRepositoryState(refreshSource),
@@ -1492,13 +1505,20 @@ export function RepositoryReviewHost({
         ? 'failed'
         : 'idle';
   const walkthroughAgent = launchOptions.agentBackend ?? config.settings.agentBackend;
-  const snapshot = buildSharedReviewSnapshot({
-    preferences,
-    state,
-    title,
-    walkthrough:
-      narrativeWalkthrough ?? createPlaceholderWalkthrough(state, title, walkthroughAgent),
-  });
+  const snapshot = {
+    ...buildSharedReviewSnapshot({
+      preferences,
+      state,
+      title,
+      walkthrough:
+        narrativeWalkthrough ?? createPlaceholderWalkthrough(state, title, walkthroughAgent),
+    }),
+    ...(source.type === 'pull-request'
+      ? {
+          reviewComments: providerInlineComments.map(toPullRequestExistingReviewComment),
+        }
+      : {}),
+  };
   const branchSource =
     historySource?.type === 'branch-diff'
       ? historySource
@@ -1525,13 +1545,19 @@ export function RepositoryReviewHost({
           },
           destination: 'provider',
           inline: {
-            onSubmit: (comment) =>
-              window.codiff.submitPullRequestComment({ comment, source: providerSource }),
+            onSubmit: async (comment) =>
+              toProviderSubmittedReviewComment(
+                await window.codiff.submitPullRequestComment({
+                  comment,
+                  source: providerSource,
+                }),
+                comment,
+              ),
           },
           reviewSession: {
             drafts: {
-              onChange: setReviewComments,
-              value: reviewComments,
+              onChange: setProviderDrafts,
+              value: providerDrafts,
             },
             submit: ({ comments, outcome, summary }) =>
               window.codiff.submitPullRequestReview({
@@ -1549,8 +1575,8 @@ export function RepositoryReviewHost({
           localReviewNotes: {
             canCreateInline: true,
             drafts: {
-              onChange: setReviewComments,
-              value: reviewComments,
+              onChange: setLocalReviewNotes,
+              value: localReviewNotes,
             },
             onAsk: askCodex,
           },

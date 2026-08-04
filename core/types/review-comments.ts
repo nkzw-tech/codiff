@@ -1,6 +1,6 @@
 import type { MarkdownAnnotationAnchor } from '@nkzw/mdx-editor';
 import type { ReviewAuthor } from './review-history.ts';
-import type { ReviewSource } from './review-identity.ts';
+import type { DiffRange, ReviewSource, Revision } from './review-identity.ts';
 
 export type PlanCommentAuthor = {
   avatarUrl?: string;
@@ -41,11 +41,17 @@ export type PlanReview = {
 
 export type PlanHandoffStatus = 'closed' | 'done';
 
+/** Durable persisted comment identity independent of a renderer section ID. */
+export type ReviewCommentPosition = {
+  range: DiffRange;
+};
+
 export type PullRequestReviewComment = {
   anchor?: 'file' | 'line';
   body: string;
   filePath: string;
   lineNumber?: number;
+  position?: ReviewCommentPosition;
   sectionId?: string;
   side?: 'additions' | 'deletions';
   startLineNumber?: number;
@@ -66,11 +72,79 @@ export type PullRequestExistingReviewComment = PullRequestReviewComment & {
   url?: string;
 };
 
-// These destination-specific names intentionally sit at the capability boundary.
-// Their coordinate shapes are refined by the review-comment coordinate layer.
-export type ProviderCommentSubmission = PullRequestReviewComment;
-export type ShareCommentSubmission = PullRequestReviewComment;
-export type SubmittedReviewComment = PullRequestExistingReviewComment;
+type ReviewCommentSubmissionBase = {
+  anchor?: 'file' | 'line';
+  body: string;
+  filePath: string;
+  lineNumber?: number;
+  side?: 'additions' | 'deletions';
+  startLineNumber?: number;
+  startSide?: 'additions' | 'deletions';
+  threadId?: string;
+};
+
+type CommitRevision = Extract<Revision, { sha: unknown }>;
+
+export type ProviderReviewCommentPosition = {
+  range: {
+    base: CommitRevision;
+    head: CommitRevision;
+  };
+};
+
+export type ProviderCommentSubmission = ReviewCommentSubmissionBase &
+  (
+    | {
+        position: ProviderReviewCommentPosition;
+        sectionId?: never;
+      }
+    | {
+        position?: never;
+        sectionId?: never;
+        threadId: string;
+      }
+  );
+
+export type ShareCommentSubmission = ReviewCommentSubmissionBase &
+  (
+    | {
+        position: ReviewCommentPosition;
+        sectionId?: never;
+      }
+    | {
+        position?: never;
+        sectionId: string;
+      }
+  );
+
+type SubmittedReviewCommentBase = ReviewCommentSubmissionBase & {
+  author: ReviewAuthor;
+  canDelete?: boolean;
+  canEdit?: boolean;
+  canReplyThread?: boolean;
+  canResolveThread?: boolean;
+  id: string;
+  isOutdated?: boolean;
+  isReadOnly: true;
+  isThreadResolved?: boolean;
+  resolvedSectionId?: string;
+  submittedAt?: string;
+  url?: string;
+};
+
+export type SubmittedReviewComment = SubmittedReviewCommentBase &
+  (
+    | {
+        destination: 'provider';
+        position?: ProviderReviewCommentPosition;
+        sectionId?: never;
+      }
+    | {
+        destination: 'share';
+        position?: ReviewCommentPosition;
+        sectionId?: string;
+      }
+  );
 
 export type PullRequestGeneralComment = {
   author: ReviewAuthor;
@@ -97,9 +171,6 @@ export type ReviewCommenting = {
   onReplyGeneralComment?: (threadId: string, body: string) => Promise<void>;
   onResolveDiscussion?: (discussionId: string, resolved: boolean) => Promise<void>;
   onSignIn?: () => Promise<void> | void;
-  onSubmitComment?: (
-    comment: PullRequestReviewComment,
-  ) => Promise<PullRequestExistingReviewComment>;
   onSubmitGeneralComment?: (body: string) => Promise<void>;
   onUpdateComment?: (commentId: string, body: string) => Promise<void>;
   onUpdateGeneralComment?: (commentId: string, body: string) => Promise<void>;

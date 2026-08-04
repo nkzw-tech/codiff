@@ -36,10 +36,10 @@ type PullRequestFileContent = {
 };
 
 type GeneratedFilesModule = {
-  readGeneratedAttributeStates: (
+  readRevisionGeneratedAttributeStates: (
     repoRoot: string,
     paths: ReadonlyArray<string>,
-    source?: string,
+    revision: import('../types.ts').Revision,
   ) => Promise<ReadonlyMap<string, boolean>>;
 };
 
@@ -149,7 +149,7 @@ type GitStateModule = {
 const execFileAsync = promisify(execFile);
 const gitSha = (value: string) => value as GitSha;
 const require = createRequire(import.meta.url);
-const { readGeneratedAttributeStates } =
+const { readRevisionGeneratedAttributeStates } =
   require('../../electron/generated-files.cjs') as GeneratedFilesModule;
 const {
   collectResolvedReviewCommentIds,
@@ -382,10 +382,13 @@ exec git "$@"
       CODIFF_TEST_ORIGINAL_PATH: process.env.PATH ?? '',
       PATH: `${wrapperDirectory.path}:${process.env.PATH ?? ''}`,
     });
-    const generatedStates = await readGeneratedAttributeStates(
+    const generatedStates = await readRevisionGeneratedAttributeStates(
       repo,
       ['client.api.ts', 'pnpm-lock.yaml'],
-      commit,
+      {
+        label: { kind: 'commit', text: commit.slice(0, 7) },
+        sha: gitSha(commit),
+      },
     );
     expect(generatedStates).toEqual(
       new Map([
@@ -393,6 +396,39 @@ exec git "$@"
         ['pnpm-lock.yaml', false],
       ]),
     );
+  });
+});
+
+test('working-tree ranges represent unborn staged additions with an absent base', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'first.txt', 'first\n');
+    await git(repo, ['add', 'first.txt']);
+
+    const state = await readWorkingTreeState(repo);
+    const file = state.files.find((candidate) => candidate.path === 'first.txt');
+    const section = file?.sections.find((candidate) => candidate.kind === 'staged');
+
+    expect(section?.range).toMatchObject({ base: null, head: { kind: 'index' } });
+  });
+});
+
+test('working-tree ranges preserve the selected conflict index stage', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'conflict.txt', 'base\n');
+    await commitAll(repo, 'base');
+    const main = (await git(repo, ['branch', '--show-current'])).trim();
+    await git(repo, ['checkout', '-b', 'other']);
+    await writeRepoFile(repo, 'conflict.txt', 'other\n');
+    await commitAll(repo, 'other');
+    await git(repo, ['checkout', main]);
+    await writeRepoFile(repo, 'conflict.txt', 'ours\n');
+    await commitAll(repo, 'ours');
+    await git(repo, ['merge', 'other']).catch(() => '');
+
+    const state = await readWorkingTreeState(repo);
+    const file = state.files.find((candidate) => candidate.path === 'conflict.txt');
+
+    expect(file?.sections[0]?.range?.base).toMatchObject({ kind: 'index', stage: 2 });
   });
 });
 
@@ -1202,6 +1238,7 @@ test('readWorkingTreeState separates staged and unstaged modifications', async (
     await writeRepoFile(repo, 'file.txt', 'two\n');
     await git(repo, ['add', 'file.txt']);
     await writeRepoFile(repo, 'file.txt', 'three\n');
+    const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
 
     const state = await readWorkingTreeState(repo);
 
@@ -1214,8 +1251,63 @@ test('readWorkingTreeState separates staged and unstaged modifications', async (
     expect(state.files[0].sections[0].newFile?.contents).toBe('two\n');
     expect(state.files[0].sections[1].oldFile?.contents).toBe('two\n');
     expect(state.files[0].sections[1].newFile?.contents).toBe('three\n');
+    expect(state.files[0].sections[0].range).toMatchObject({
+      base: { sha: head },
+      head: { kind: 'index' },
+    });
+    expect(state.files[0].sections[1].range).toMatchObject({
+      base: { kind: 'index' },
+      head: { kind: 'working-copy' },
+    });
   });
 });
+
+test.sequential('readWorkingTreeState resolves one HEAD for every staged section', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'alpha.txt', 'alpha initial\n');
+    await writeRepoFile(repo, 'beta.txt', 'beta initial\n');
+    await commitAll(repo, 'initial commit');
+    const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+
+    await writeRepoFile(repo, 'alpha.txt', 'alpha staged\n');
+    await writeRepoFile(repo, 'beta.txt', 'beta staged\n');
+    await git(repo, ['add', 'alpha.txt', 'beta.txt']);
+    await writeRepoFile(repo, 'alpha.txt', 'alpha unstaged\n');
+    await writeRepoFile(repo, 'beta.txt', 'beta unstaged\n');
+
+    const tracePath = join(repo, '.git', 'working-tree-head-trace.jsonl');
+    let state: RepositoryState;
+    {
+      using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
+      state = await readWorkingTreeState(repo);
+    }
+
+    const headResolutionCommands = readFileSync(tracePath, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: ReadonlyArray<string>; event?: string })
+      .flatMap(({ argv, event }) => {
+        if (event !== 'start' || !argv || argv.at(-1) !== 'HEAD^{commit}') {
+          return [];
+        }
+        const revParseIndex = argv.indexOf('rev-parse');
+        return revParseIndex >= 0 ? [argv.slice(revParseIndex)] : [];
+      });
+    expect(headResolutionCommands).toEqual([['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']]);
+
+    const stagedSections = state.files.flatMap((file) =>
+      file.sections.filter((section) => section.kind === 'staged'),
+    );
+    expect(stagedSections).toHaveLength(2);
+    expect(
+      stagedSections.map((section) => {
+        const base = section.range?.base;
+        return base && 'sha' in base ? base.sha : undefined;
+      }),
+    ).toEqual([head, head]);
+  });
+}, 15_000);
 
 test('readRepositoryState uses hidden-whitespace patches for patch-only working tree files', async () => {
   await withRepo(async (repo) => {
@@ -1971,6 +2063,7 @@ test('readRepositoryState reads commit diffs from short hashes', async () => {
     await writeRepoFile(repo, 'new.txt', 'created\n');
     await commitAll(repo, 'second commit');
     const commit = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    const parent = (await git(repo, ['rev-parse', 'HEAD^'])).trim();
     const shortCommit = commit.slice(0, 8);
 
     const state = await readRepositoryState(repo, {
@@ -1987,6 +2080,10 @@ test('readRepositoryState reads commit diffs from short hashes', async () => {
     expect(state.files.find((file) => file.path === 'file.txt')?.sections[0].patch).toContain(
       '+two',
     );
+    expect(state.files.find((file) => file.path === 'file.txt')?.sections[0].range).toMatchObject({
+      base: { sha: parent },
+      head: { sha: commit },
+    });
   });
 });
 

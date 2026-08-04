@@ -28,6 +28,9 @@ const auth = vi.hoisted(() => ({
 const rendered = vi.hoisted(() => ({
   props: null as null | Record<string, unknown>,
 }));
+const shareThreads = vi.hoisted(() => ({
+  threads: [] as Array<unknown>,
+}));
 
 vi.mock('@nkzw/codiff-service/react', () => ({
   resolveSubmittedShareReply: vi.fn(),
@@ -46,7 +49,8 @@ vi.mock('react-fate', () => ({
 vi.mock('void/client/react', () => ({ auth }));
 vi.mock('./ShareComments.tsx', () => ({
   ShareCommentMessageView: {},
-  ShareComments: ({ children }: { children: (threads: []) => unknown }) => children([]),
+  ShareComments: ({ children }: { children: (threads: Array<unknown>) => unknown }) =>
+    children(shareThreads.threads),
   ShareCommentThreadConnectionView: { items: { node: {} } },
   ShareCommentThreadView: {},
 }));
@@ -65,8 +69,8 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
-  window.localStorage.clear();
   rendered.props = null;
+  shareThreads.threads = [];
   fate.useFateClient.mockReset().mockReturnValue(fate.client);
   fate.useRequest.mockReset().mockReturnValue({
     walkthroughBySlug: { __typename: 'Walkthrough', id: 'walkthrough-id' },
@@ -262,4 +266,204 @@ test('preserves snapshot defaults for missing device-local preferences', async (
     theme: 'light',
     wordWrap: true,
   });
+});
+
+test('persists an unpositioned diff comment with its legacy section ID', async () => {
+  await act(async () => {
+    root.render(
+      <Suspense fallback={null}>
+        <WalkthroughPage slug="optimistic-walkthrough" />
+      </Suspense>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  const commenting = rendered.props?.commenting as {
+    onSubmitComment(comment: {
+      body: string;
+      filePath: string;
+      lineNumber: number;
+      sectionId: string;
+      side: 'additions';
+    }): Promise<unknown>;
+  };
+  await commenting.onSubmitComment({
+    body: 'Review this line.',
+    filePath: 'src/review.ts',
+    lineNumber: 12,
+    sectionId: 'src/review.ts:commit:second',
+    side: 'additions',
+  });
+
+  expect(fate.client.mutations.shareComment.createThread).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: {
+        body: 'Review this line.',
+        shareId: 'walkthrough-id',
+        shareType: 'walkthrough',
+        target: {
+          filePath: 'src/review.ts',
+          kind: 'walkthrough-diff',
+          lineNumber: 12,
+          sectionId: 'src/review.ts:commit:second',
+          side: 'additions',
+        },
+      },
+      optimistic: expect.objectContaining({
+        filePath: 'src/review.ts',
+        kind: 'walkthrough-diff',
+        lineNumber: 12,
+        positionJson: null,
+        sectionId: 'src/review.ts:commit:second',
+        side: 'additions',
+      }),
+      view: {},
+    }),
+  );
+});
+
+test('persists a positioned diff comment without its legacy section ID', async () => {
+  await act(async () => {
+    root.render(
+      <Suspense fallback={null}>
+        <WalkthroughPage slug="optimistic-walkthrough" />
+      </Suspense>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  const position = {
+    range: {
+      base: {
+        kind: 'commit' as const,
+        label: { kind: 'commit' as const, text: 'a' },
+        sha: 'a'.repeat(40),
+      },
+      head: {
+        kind: 'commit' as const,
+        label: { kind: 'commit' as const, text: 'b' },
+        sha: 'b'.repeat(40),
+      },
+    },
+  };
+  const commenting = rendered.props?.commenting as {
+    onSubmitComment(comment: {
+      body: string;
+      filePath: string;
+      lineNumber: number;
+      position: typeof position;
+      sectionId: string;
+      side: 'additions';
+    }): Promise<unknown>;
+  };
+  await commenting.onSubmitComment({
+    body: 'Review this durable position.',
+    filePath: 'src/review.ts',
+    lineNumber: 12,
+    position,
+    sectionId: 'src/review.ts:commit:second',
+    side: 'additions',
+  });
+
+  expect(fate.client.mutations.shareComment.createThread).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        target: {
+          filePath: 'src/review.ts',
+          kind: 'walkthrough-diff',
+          lineNumber: 12,
+          position,
+          side: 'additions',
+        },
+      }),
+      optimistic: expect.objectContaining({
+        positionJson: JSON.stringify(position),
+        sectionId: null,
+      }),
+    }),
+  );
+  const request = fate.client.mutations.shareComment.createThread.mock.calls[0]![0];
+  expect(request.input.target).not.toHaveProperty('sectionId');
+});
+
+test('loads durable positions before falling back to legacy section IDs', async () => {
+  shareThreads.threads = [
+    {
+      filePath: 'src/repeated.ts',
+      id: 'legacy-thread',
+      kind: 'walkthrough-diff',
+      lineNumber: 8,
+      messages: [
+        {
+          authorImage: null,
+          authorName: 'Ada Lovelace',
+          authorUsername: 'ada',
+          body: 'Keep this comment on the second repeated patch.',
+          canEdit: false,
+          createdAt: new Date('2026-07-22T00:00:00.000Z'),
+          id: 'legacy-message',
+          threadId: 'legacy-thread',
+          updatedAt: new Date('2026-07-22T00:00:00.000Z'),
+        },
+      ],
+      positionJson: null,
+      sectionId: 'src/repeated.ts:commit:second',
+      side: 'additions',
+      startLineNumber: null,
+      startSide: null,
+      status: 'open',
+    },
+    {
+      filePath: 'src/repeated.ts',
+      id: 'durable-thread',
+      kind: 'walkthrough-diff',
+      lineNumber: 8,
+      messages: [
+        {
+          authorImage: null,
+          authorName: 'Ada Lovelace',
+          authorUsername: 'ada',
+          body: 'Use the durable range instead.',
+          canEdit: false,
+          createdAt: new Date('2026-07-22T00:00:00.000Z'),
+          id: 'durable-message',
+          threadId: 'durable-thread',
+          updatedAt: new Date('2026-07-22T00:00:00.000Z'),
+        },
+      ],
+      positionJson: JSON.stringify({
+        range: {
+          base: { kind: 'commit', label: { kind: 'commit', text: 'a' }, sha: 'a'.repeat(40) },
+          head: { kind: 'commit', label: { kind: 'commit', text: 'b' }, sha: 'b'.repeat(40) },
+        },
+      }),
+      sectionId: 'src/repeated.ts:commit:first',
+      side: 'additions',
+      startLineNumber: null,
+      startSide: null,
+      status: 'open',
+    },
+  ];
+
+  await act(async () => {
+    root.render(
+      <Suspense fallback={null}>
+        <WalkthroughPage slug="legacy-section-comment" />
+      </Suspense>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  const reviewComments = (
+    rendered.props!.snapshot as { reviewComments: Array<Record<string, unknown>> }
+  ).reviewComments;
+  expect(reviewComments.find((comment) => comment.id === 'legacy-message')).toMatchObject({
+    sectionId: 'src/repeated.ts:commit:second',
+  });
+  expect(reviewComments.find((comment) => comment.id === 'durable-message')).toMatchObject({
+    position: expect.any(Object),
+  });
+  expect(reviewComments.find((comment) => comment.id === 'durable-message')).not.toHaveProperty(
+    'sectionId',
+  );
 });
