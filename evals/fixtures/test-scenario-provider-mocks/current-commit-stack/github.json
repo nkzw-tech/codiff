@@ -1,0 +1,468 @@
+{
+  "kind": "github-test-scenario-transcript-v1",
+  "routes": [
+    {
+      "path": "/repos/{{repository}}/compare/{{revision:base}}...{{revision:lifecycle-verification}}",
+      "query": {
+        "page": 1,
+        "per_page": 100
+      },
+      "response": {
+        "commits": [
+          {
+            "commit": {
+              "author": {
+                "date": "2026-07-24T00:00:00.000Z",
+                "name": "Codiff Scenario"
+              },
+              "message": "Define quiet-hour preference policy"
+            },
+            "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:policy-contract}}",
+            "parents": [
+              {
+                "sha": "{{revision:base}}"
+              }
+            ],
+            "sha": "{{revision:policy-contract}}"
+          },
+          {
+            "commit": {
+              "author": {
+                "date": "2026-07-24T00:00:00.000Z",
+                "name": "Codiff Scenario"
+              },
+              "message": "Schedule preference deliveries around quiet hours"
+            },
+            "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:delivery-orchestration}}",
+            "parents": [
+              {
+                "sha": "{{revision:policy-contract}}"
+              }
+            ],
+            "sha": "{{revision:delivery-orchestration}}"
+          },
+          {
+            "commit": {
+              "author": {
+                "date": "2026-07-24T00:00:00.000Z",
+                "name": "Codiff Scenario"
+              },
+              "message": "Record preference update audit history"
+            },
+            "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:preference-audit}}",
+            "parents": [
+              {
+                "sha": "{{revision:delivery-orchestration}}"
+              }
+            ],
+            "sha": "{{revision:preference-audit}}"
+          },
+          {
+            "commit": {
+              "author": {
+                "date": "2026-07-24T00:00:00.000Z",
+                "name": "Codiff Scenario"
+              },
+              "message": "Verify preference update lifecycle"
+            },
+            "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:lifecycle-verification}}",
+            "parents": [
+              {
+                "sha": "{{revision:preference-audit}}"
+              }
+            ],
+            "sha": "{{revision:lifecycle-verification}}"
+          }
+        ],
+        "files": [
+          {
+            "filename": "src/api/preferences-handler.ts",
+            "patch": "@@ -1,6 +1,7 @@\n import type { PreferenceChange } from '../application/update-preferences.ts';\n import type { PreferencesRepository } from '../infrastructure/preferences-repository.ts';\n import { updatePreferences } from '../application/update-preferences.ts';\n+import type { PreferenceAudit } from '../infrastructure/preference-audit.ts';\n \n export type UpdatePreferencesRequest = {\n   changes: ReadonlyArray<PreferenceChange>;\n@@ -11,13 +12,16 @@ export type UpdatePreferencesRequest = {\n export const handleUpdatePreferences = async (\n   repository: PreferencesRepository,\n   request: UpdatePreferencesRequest,\n+  audit?: PreferenceAudit,\n ) => {\n   const preferences = await updatePreferences(\n     repository,\n     request.userId,\n     request.expectedRevision,\n     request.changes,\n+    audit,\n   );\n+  // SMOKE: updated-intentional-response\n   return {\n     revision: preferences.revision,\n     values: preferences.values,\n",
+            "sha": "384c7e5381757d2468927d7681c92799d946ee08",
+            "status": "modified"
+          },
+          {
+            "filename": "src/application/schedule-delivery.ts",
+            "patch": "@@ -0,0 +1,37 @@\n+import { decideDelivery } from '../domain/delivery-rules.ts';\n+import type { Category, Channel, Preferences } from '../domain/preferences.ts';\n+import type { QuietHours } from '../domain/quiet-hours.ts';\n+\n+export type DeliverySchedule = {\n+  channel: Channel;\n+  deliverAt: Date;\n+  reason: string;\n+};\n+\n+export const scheduleDelivery = (\n+  preferences: Preferences,\n+  category: Category,\n+  channel: Channel,\n+  quietHours: QuietHours | null,\n+  now: Date,\n+): DeliverySchedule | null => {\n+  const decision = decideDelivery(preferences, category, channel);\n+  if (!decision.deliver) {\n+    return null;\n+  }\n+  if (category === 'security' || !quietHours) {\n+    return { channel, deliverAt: now, reason: decision.reason };\n+  }\n+  // SMOKE: delivery-schedule-original\n+  // SMOKE: review-group-historical\n+  const minute = now.getUTCHours() * 60 + now.getUTCMinutes();\n+  const withinQuietHours =\n+    quietHours.startMinute <= quietHours.endMinute\n+      ? minute >= quietHours.startMinute && minute < quietHours.endMinute\n+      : minute >= quietHours.startMinute || minute < quietHours.endMinute;\n+  return {\n+    channel,\n+    deliverAt: withinQuietHours ? new Date(now.getTime() + 60 * 60 * 1_000) : now,\n+    reason: withinQuietHours ? 'quiet-hours' : decision.reason,\n+  };\n+};\n",
+            "sha": "3f86fe4c1c9d18653f7230c25f7e030d50947714",
+            "status": "added"
+          },
+          {
+            "filename": "src/application/update-preferences.ts",
+            "patch": "@@ -6,6 +6,7 @@ import {\n   validatePreferences,\n } from '../domain/preferences.ts';\n import type { PreferencesRepository } from '../infrastructure/preferences-repository.ts';\n+import type { PreferenceAudit } from '../infrastructure/preference-audit.ts';\n \n export type PreferenceChange = {\n   category: Category;\n@@ -18,6 +19,7 @@ export const updatePreferences = async (\n   userId: string,\n   expectedRevision: number,\n   changes: ReadonlyArray<PreferenceChange>,\n+  audit?: PreferenceAudit,\n ): Promise<Preferences> => {\n   const current = await repository.load(userId);\n   const next = clonePreferences(current);\n@@ -25,5 +27,11 @@ export const updatePreferences = async (\n     next.values[change.category][change.channel] = change.enabled;\n   }\n   validatePreferences(next);\n-  return repository.save(next, expectedRevision);\n+  const saved = await repository.save(next, expectedRevision);\n+  await audit?.append({\n+    changes,\n+    revision: saved.revision,\n+    userId,\n+  });\n+  return saved;\n };\n",
+            "sha": "454a1dd5b9aa3ed5c7bf767c72b2d2bbe355e6d7",
+            "status": "modified"
+          },
+          {
+            "filename": "src/cli/preferences.ts",
+            "patch": "@@ -1,3 +1,4 @@\n+import type { QuietHours } from '../domain/quiet-hours.ts';\n import type { PreferenceChange } from '../application/update-preferences.ts';\n \n export const parsePreferenceChange = (value: string): PreferenceChange => {\n@@ -11,3 +12,15 @@ export const parsePreferenceChange = (value: string): PreferenceChange => {\n     enabled: enabled === 'on',\n   };\n };\n+\n+export const parseQuietHours = (value: string): QuietHours => {\n+  const [timezone, startMinute, endMinute] = value.split(':');\n+  if (!timezone || !startMinute || !endMinute) {\n+    throw new Error('Expected timezone:startMinute:endMinute.');\n+  }\n+  return {\n+    endMinute: Number(endMinute),\n+    startMinute: Number(startMinute),\n+    timezone,\n+  };\n+};\n",
+            "sha": "0ef1def911385111950037d15370b1b5f11d2160",
+            "status": "modified"
+          },
+          {
+            "filename": "src/domain/preference-policy.ts",
+            "patch": "@@ -0,0 +1,20 @@\n+import type { Category, Channel } from './preferences.ts';\n+\n+export type PreferencePolicy = {\n+  category: Category;\n+  channel: Channel;\n+  reason: string;\n+};\n+\n+export const protectedPolicies = (): ReadonlyArray<PreferencePolicy> => [\n+  {\n+    category: 'security',\n+    channel: 'sms',\n+    reason: 'Security incidents need an urgent fallback channel.',\n+  },\n+  {\n+    category: 'security',\n+    channel: 'email',\n+    reason: 'Security notices must remain externally visible.',\n+  },\n+];\n",
+            "sha": "666945ba10d7e23c9412ba2d8bff72984259d86e",
+            "status": "added"
+          },
+          {
+            "filename": "src/domain/quiet-hours.ts",
+            "patch": "@@ -0,0 +1,22 @@\n+export type QuietHours = {\n+  endMinute: number;\n+  startMinute: number;\n+  timezone: string;\n+};\n+\n+export const validateQuietHours = (quietHours: QuietHours) => {\n+  if (\n+    !Number.isInteger(quietHours.startMinute) ||\n+    !Number.isInteger(quietHours.endMinute) ||\n+    quietHours.startMinute < 0 ||\n+    quietHours.startMinute > 1_439 ||\n+    quietHours.endMinute < 0 ||\n+    quietHours.endMinute > 1_439\n+  ) {\n+    throw new Error('Quiet hours must use minutes between 0 and 1439.');\n+  }\n+  if (!quietHours.timezone) {\n+    throw new Error('Quiet hours require a timezone.');\n+  }\n+  return quietHours;\n+};\n",
+            "sha": "bcacdcc230aded609aa7f93361adeb35bb79e065",
+            "status": "added"
+          },
+          {
+            "filename": "src/infrastructure/preference-audit.ts",
+            "patch": "@@ -0,0 +1,26 @@\n+import type { PreferenceChange } from '../application/update-preferences.ts';\n+\n+export type PreferenceAuditRecord = {\n+  changes: ReadonlyArray<PreferenceChange>;\n+  revision: number;\n+  userId: string;\n+};\n+\n+export type PreferenceAudit = {\n+  append(record: PreferenceAuditRecord): Promise<void>;\n+  list(userId: string): Promise<ReadonlyArray<PreferenceAuditRecord>>;\n+};\n+\n+export const createMemoryPreferenceAudit = (): PreferenceAudit => {\n+  const records = new Map<string, Array<PreferenceAuditRecord>>();\n+  return {\n+    async append(record) {\n+      const userRecords = records.get(record.userId) ?? [];\n+      userRecords.push(record);\n+      records.set(record.userId, userRecords);\n+    },\n+    async list(userId) {\n+      return [...(records.get(userId) ?? [])];\n+    },\n+  };\n+};\n",
+            "sha": "631d455c5f67c9e8b54be4fb5f5220657c7d1940",
+            "status": "added"
+          },
+          {
+            "filename": "test/delivery-schedule.test.ts",
+            "patch": "@@ -0,0 +1,29 @@\n+import { scheduleDelivery } from '../src/application/schedule-delivery.ts';\n+import { defaultPreferences } from '../src/domain/preferences.ts';\n+\n+const preferences = defaultPreferences('ada');\n+const now = new Date('2026-07-23T22:30:00.000Z');\n+const scheduled = scheduleDelivery(\n+  preferences,\n+  'product',\n+  'push',\n+  { endMinute: 420, startMinute: 1_200, timezone: 'America/Chicago' },\n+  now,\n+);\n+\n+if (!scheduled || scheduled.reason !== 'quiet-hours') {\n+  throw new Error('Expected product push delivery to respect quiet hours.');\n+  // SMOKE: updated-intentional-schedule\n+}\n+\n+const security = scheduleDelivery(\n+  preferences,\n+  'security',\n+  'sms',\n+  { endMinute: 420, startMinute: 1_200, timezone: 'America/Chicago' },\n+  now,\n+);\n+\n+if (!security || security.deliverAt.getTime() !== now.getTime()) {\n+  throw new Error('Expected security delivery to bypass quiet hours.');\n+}\n",
+            "sha": "f53dffd303b3b48716221dd7b6261abefb5b5a28",
+            "status": "added"
+          },
+          {
+            "filename": "test/preferences-audit.test.ts",
+            "patch": "@@ -0,0 +1,32 @@\n+import { updatePreferences } from '../src/application/update-preferences.ts';\n+import { createMemoryPreferenceAudit } from '../src/infrastructure/preference-audit.ts';\n+import { createMemoryPreferencesRepository } from '../src/infrastructure/preferences-repository.ts';\n+\n+const repository = createMemoryPreferencesRepository();\n+const audit = createMemoryPreferenceAudit();\n+\n+const updated = await updatePreferences(\n+  repository,\n+  'ada',\n+  0,\n+  [{ category: 'marketing', channel: 'email', enabled: true }],\n+  audit,\n+);\n+\n+if (updated.revision !== 1) {\n+  throw new Error('Expected preference revision to advance.');\n+}\n+\n+const records = await audit.list('ada');\n+if (records.length !== 1 || records[0]?.changes[0]?.channel !== 'email') {\n+  throw new Error('Expected audit record for preference update.');\n+}\n+\n+try {\n+  await updatePreferences(repository, 'ada', 0, [], audit);\n+  throw new Error('Expected stale preference revision to fail.');\n+} catch (error) {\n+  if (!(error instanceof Error)) {\n+    throw error;\n+  }\n+}\n",
+            "sha": "b318af90a34471d7fc85c0503ece0e4b80325bce",
+            "status": "added"
+          },
+          {
+            "filename": "test/quiet-hours.test.ts",
+            "patch": "@@ -0,0 +1,20 @@\n+import { validateQuietHours } from '../src/domain/quiet-hours.ts';\n+\n+const quietHours = validateQuietHours({\n+  endMinute: 420,\n+  startMinute: 1_320,\n+  timezone: 'America/Chicago',\n+});\n+\n+if (quietHours.timezone !== 'America/Chicago') {\n+  throw new Error('Expected timezone to survive validation.');\n+}\n+\n+try {\n+  validateQuietHours({ endMinute: 1_500, startMinute: 0, timezone: 'UTC' });\n+  throw new Error('Expected invalid minutes to fail.');\n+} catch (error) {\n+  if (!(error instanceof Error)) {\n+    throw error;\n+  }\n+}\n",
+            "sha": "1d464194dc1d69b8ef2933d25b66a677ea67ab12",
+            "status": "added"
+          }
+        ],
+        "merge_base_commit": {
+          "sha": "{{revision:base}}"
+        },
+        "total_commits": 4
+      }
+    },
+    {
+      "path": "/user",
+      "response": {
+        "login": "scenario-user",
+        "username": "scenario-user"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/pulls/1",
+      "response": {
+        "base": {
+          "sha": "{{revision:base}}"
+        },
+        "head": {
+          "sha": "{{revision:lifecycle-verification}}"
+        },
+        "html_url": "{{review-url}}",
+        "number": 1,
+        "state": "open",
+        "title": "Codiff current-commit-stack smoke",
+        "url": "https://api.provider.example.test/repos/{{repository}}/pulls/1"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/commits/{{revision:policy-contract}}",
+      "response": {
+        "commit": {
+          "author": {
+            "date": "2026-07-24T00:00:00.000Z",
+            "name": "Codiff Scenario"
+          },
+          "message": "Define quiet-hour preference policy"
+        },
+        "files": [
+          {
+            "filename": "src/domain/preference-policy.ts",
+            "patch": "@@ -0,0 +1,20 @@\n+import type { Category, Channel } from './preferences.ts';\n+\n+export type PreferencePolicy = {\n+  category: Category;\n+  channel: Channel;\n+  reason: string;\n+};\n+\n+export const protectedPolicies = (): ReadonlyArray<PreferencePolicy> => [\n+  {\n+    category: 'security',\n+    channel: 'sms',\n+    reason: 'Security incidents need an urgent fallback channel.',\n+  },\n+  {\n+    category: 'security',\n+    channel: 'email',\n+    reason: 'Security notices must remain externally visible.',\n+  },\n+];\n",
+            "sha": "666945ba10d7e23c9412ba2d8bff72984259d86e",
+            "status": "added"
+          },
+          {
+            "filename": "src/domain/quiet-hours.ts",
+            "patch": "@@ -0,0 +1,22 @@\n+export type QuietHours = {\n+  endMinute: number;\n+  startMinute: number;\n+  timezone: string;\n+};\n+\n+export const validateQuietHours = (quietHours: QuietHours) => {\n+  if (\n+    !Number.isInteger(quietHours.startMinute) ||\n+    !Number.isInteger(quietHours.endMinute) ||\n+    quietHours.startMinute < 0 ||\n+    quietHours.startMinute > 1_439 ||\n+    quietHours.endMinute < 0 ||\n+    quietHours.endMinute > 1_439\n+  ) {\n+    throw new Error('Quiet hours must use minutes between 0 and 1439.');\n+  }\n+  if (!quietHours.timezone) {\n+    throw new Error('Quiet hours require a timezone.');\n+  }\n+  return quietHours;\n+};\n",
+            "sha": "bcacdcc230aded609aa7f93361adeb35bb79e065",
+            "status": "added"
+          },
+          {
+            "filename": "test/quiet-hours.test.ts",
+            "patch": "@@ -0,0 +1,20 @@\n+import { validateQuietHours } from '../src/domain/quiet-hours.ts';\n+\n+const quietHours = validateQuietHours({\n+  endMinute: 420,\n+  startMinute: 1_320,\n+  timezone: 'America/Chicago',\n+});\n+\n+if (quietHours.timezone !== 'America/Chicago') {\n+  throw new Error('Expected timezone to survive validation.');\n+}\n+\n+try {\n+  validateQuietHours({ endMinute: 1_500, startMinute: 0, timezone: 'UTC' });\n+  throw new Error('Expected invalid minutes to fail.');\n+} catch (error) {\n+  if (!(error instanceof Error)) {\n+    throw error;\n+  }\n+}\n",
+            "sha": "1d464194dc1d69b8ef2933d25b66a677ea67ab12",
+            "status": "added"
+          }
+        ],
+        "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:policy-contract}}",
+        "parents": [
+          {
+            "sha": "{{revision:base}}"
+          }
+        ],
+        "sha": "{{revision:policy-contract}}"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/commits/{{revision:delivery-orchestration}}",
+      "response": {
+        "commit": {
+          "author": {
+            "date": "2026-07-24T00:00:00.000Z",
+            "name": "Codiff Scenario"
+          },
+          "message": "Schedule preference deliveries around quiet hours"
+        },
+        "files": [
+          {
+            "filename": "src/application/schedule-delivery.ts",
+            "patch": "@@ -0,0 +1,37 @@\n+import { decideDelivery } from '../domain/delivery-rules.ts';\n+import type { Category, Channel, Preferences } from '../domain/preferences.ts';\n+import type { QuietHours } from '../domain/quiet-hours.ts';\n+\n+export type DeliverySchedule = {\n+  channel: Channel;\n+  deliverAt: Date;\n+  reason: string;\n+};\n+\n+export const scheduleDelivery = (\n+  preferences: Preferences,\n+  category: Category,\n+  channel: Channel,\n+  quietHours: QuietHours | null,\n+  now: Date,\n+): DeliverySchedule | null => {\n+  const decision = decideDelivery(preferences, category, channel);\n+  if (!decision.deliver) {\n+    return null;\n+  }\n+  if (category === 'security' || !quietHours) {\n+    return { channel, deliverAt: now, reason: decision.reason };\n+  }\n+  // SMOKE: delivery-schedule-original\n+  // SMOKE: review-group-historical\n+  const minute = now.getUTCHours() * 60 + now.getUTCMinutes();\n+  const withinQuietHours =\n+    quietHours.startMinute <= quietHours.endMinute\n+      ? minute >= quietHours.startMinute && minute < quietHours.endMinute\n+      : minute >= quietHours.startMinute || minute < quietHours.endMinute;\n+  return {\n+    channel,\n+    deliverAt: withinQuietHours ? new Date(now.getTime() + 60 * 60 * 1_000) : now,\n+    reason: withinQuietHours ? 'quiet-hours' : decision.reason,\n+  };\n+};\n",
+            "sha": "3f86fe4c1c9d18653f7230c25f7e030d50947714",
+            "status": "added"
+          },
+          {
+            "filename": "src/cli/preferences.ts",
+            "patch": "@@ -1,3 +1,4 @@\n+import type { QuietHours } from '../domain/quiet-hours.ts';\n import type { PreferenceChange } from '../application/update-preferences.ts';\n \n export const parsePreferenceChange = (value: string): PreferenceChange => {\n@@ -11,3 +12,15 @@ export const parsePreferenceChange = (value: string): PreferenceChange => {\n     enabled: enabled === 'on',\n   };\n };\n+\n+export const parseQuietHours = (value: string): QuietHours => {\n+  const [timezone, startMinute, endMinute] = value.split(':');\n+  if (!timezone || !startMinute || !endMinute) {\n+    throw new Error('Expected timezone:startMinute:endMinute.');\n+  }\n+  return {\n+    endMinute: Number(endMinute),\n+    startMinute: Number(startMinute),\n+    timezone,\n+  };\n+};\n",
+            "sha": "0ef1def911385111950037d15370b1b5f11d2160",
+            "status": "modified"
+          },
+          {
+            "filename": "test/delivery-schedule.test.ts",
+            "patch": "@@ -0,0 +1,28 @@\n+import { scheduleDelivery } from '../src/application/schedule-delivery.ts';\n+import { defaultPreferences } from '../src/domain/preferences.ts';\n+\n+const preferences = defaultPreferences('ada');\n+const now = new Date('2026-07-23T22:30:00.000Z');\n+const scheduled = scheduleDelivery(\n+  preferences,\n+  'product',\n+  'push',\n+  { endMinute: 420, startMinute: 1_200, timezone: 'America/Chicago' },\n+  now,\n+);\n+\n+if (!scheduled || scheduled.reason !== 'quiet-hours') {\n+  throw new Error('Expected product push delivery to respect quiet hours.');\n+}\n+\n+const security = scheduleDelivery(\n+  preferences,\n+  'security',\n+  'sms',\n+  { endMinute: 420, startMinute: 1_200, timezone: 'America/Chicago' },\n+  now,\n+);\n+\n+if (!security || security.deliverAt.getTime() !== now.getTime()) {\n+  throw new Error('Expected security delivery to bypass quiet hours.');\n+}\n",
+            "sha": "5947a65e6865d8c50274a5397bc0f75c255395e3",
+            "status": "added"
+          }
+        ],
+        "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:delivery-orchestration}}",
+        "parents": [
+          {
+            "sha": "{{revision:policy-contract}}"
+          }
+        ],
+        "sha": "{{revision:delivery-orchestration}}"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/commits/{{revision:preference-audit}}",
+      "response": {
+        "commit": {
+          "author": {
+            "date": "2026-07-24T00:00:00.000Z",
+            "name": "Codiff Scenario"
+          },
+          "message": "Record preference update audit history"
+        },
+        "files": [
+          {
+            "filename": "src/api/preferences-handler.ts",
+            "patch": "@@ -1,6 +1,7 @@\n import type { PreferenceChange } from '../application/update-preferences.ts';\n import type { PreferencesRepository } from '../infrastructure/preferences-repository.ts';\n import { updatePreferences } from '../application/update-preferences.ts';\n+import type { PreferenceAudit } from '../infrastructure/preference-audit.ts';\n \n export type UpdatePreferencesRequest = {\n   changes: ReadonlyArray<PreferenceChange>;\n@@ -11,12 +12,14 @@ export type UpdatePreferencesRequest = {\n export const handleUpdatePreferences = async (\n   repository: PreferencesRepository,\n   request: UpdatePreferencesRequest,\n+  audit?: PreferenceAudit,\n ) => {\n   const preferences = await updatePreferences(\n     repository,\n     request.userId,\n     request.expectedRevision,\n     request.changes,\n+    audit,\n   );\n   return {\n     revision: preferences.revision,\n",
+            "sha": "56f404563bd2f47152c28d16e00cb1936f724403",
+            "status": "modified"
+          },
+          {
+            "filename": "src/application/update-preferences.ts",
+            "patch": "@@ -6,6 +6,7 @@ import {\n   validatePreferences,\n } from '../domain/preferences.ts';\n import type { PreferencesRepository } from '../infrastructure/preferences-repository.ts';\n+import type { PreferenceAudit } from '../infrastructure/preference-audit.ts';\n \n export type PreferenceChange = {\n   category: Category;\n@@ -18,6 +19,7 @@ export const updatePreferences = async (\n   userId: string,\n   expectedRevision: number,\n   changes: ReadonlyArray<PreferenceChange>,\n+  audit?: PreferenceAudit,\n ): Promise<Preferences> => {\n   const current = await repository.load(userId);\n   const next = clonePreferences(current);\n@@ -25,5 +27,11 @@ export const updatePreferences = async (\n     next.values[change.category][change.channel] = change.enabled;\n   }\n   validatePreferences(next);\n-  return repository.save(next, expectedRevision);\n+  const saved = await repository.save(next, expectedRevision);\n+  await audit?.append({\n+    changes,\n+    revision: saved.revision,\n+    userId,\n+  });\n+  return saved;\n };\n",
+            "sha": "454a1dd5b9aa3ed5c7bf767c72b2d2bbe355e6d7",
+            "status": "modified"
+          },
+          {
+            "filename": "src/infrastructure/preference-audit.ts",
+            "patch": "@@ -0,0 +1,26 @@\n+import type { PreferenceChange } from '../application/update-preferences.ts';\n+\n+export type PreferenceAuditRecord = {\n+  changes: ReadonlyArray<PreferenceChange>;\n+  revision: number;\n+  userId: string;\n+};\n+\n+export type PreferenceAudit = {\n+  append(record: PreferenceAuditRecord): Promise<void>;\n+  list(userId: string): Promise<ReadonlyArray<PreferenceAuditRecord>>;\n+};\n+\n+export const createMemoryPreferenceAudit = (): PreferenceAudit => {\n+  const records = new Map<string, Array<PreferenceAuditRecord>>();\n+  return {\n+    async append(record) {\n+      const userRecords = records.get(record.userId) ?? [];\n+      userRecords.push(record);\n+      records.set(record.userId, userRecords);\n+    },\n+    async list(userId) {\n+      return [...(records.get(userId) ?? [])];\n+    },\n+  };\n+};\n",
+            "sha": "631d455c5f67c9e8b54be4fb5f5220657c7d1940",
+            "status": "added"
+          }
+        ],
+        "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:preference-audit}}",
+        "parents": [
+          {
+            "sha": "{{revision:delivery-orchestration}}"
+          }
+        ],
+        "sha": "{{revision:preference-audit}}"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/commits/{{revision:lifecycle-verification}}",
+      "response": {
+        "commit": {
+          "author": {
+            "date": "2026-07-24T00:00:00.000Z",
+            "name": "Codiff Scenario"
+          },
+          "message": "Verify preference update lifecycle"
+        },
+        "files": [
+          {
+            "filename": "src/api/preferences-handler.ts",
+            "patch": "@@ -21,6 +21,7 @@ export const handleUpdatePreferences = async (\n     request.changes,\n     audit,\n   );\n+  // SMOKE: updated-intentional-response\n   return {\n     revision: preferences.revision,\n     values: preferences.values,\n",
+            "sha": "384c7e5381757d2468927d7681c92799d946ee08",
+            "status": "modified"
+          },
+          {
+            "filename": "test/delivery-schedule.test.ts",
+            "patch": "@@ -13,6 +13,7 @@ const scheduled = scheduleDelivery(\n \n if (!scheduled || scheduled.reason !== 'quiet-hours') {\n   throw new Error('Expected product push delivery to respect quiet hours.');\n+  // SMOKE: updated-intentional-schedule\n }\n \n const security = scheduleDelivery(\n",
+            "sha": "f53dffd303b3b48716221dd7b6261abefb5b5a28",
+            "status": "modified"
+          },
+          {
+            "filename": "test/preferences-audit.test.ts",
+            "patch": "@@ -0,0 +1,32 @@\n+import { updatePreferences } from '../src/application/update-preferences.ts';\n+import { createMemoryPreferenceAudit } from '../src/infrastructure/preference-audit.ts';\n+import { createMemoryPreferencesRepository } from '../src/infrastructure/preferences-repository.ts';\n+\n+const repository = createMemoryPreferencesRepository();\n+const audit = createMemoryPreferenceAudit();\n+\n+const updated = await updatePreferences(\n+  repository,\n+  'ada',\n+  0,\n+  [{ category: 'marketing', channel: 'email', enabled: true }],\n+  audit,\n+);\n+\n+if (updated.revision !== 1) {\n+  throw new Error('Expected preference revision to advance.');\n+}\n+\n+const records = await audit.list('ada');\n+if (records.length !== 1 || records[0]?.changes[0]?.channel !== 'email') {\n+  throw new Error('Expected audit record for preference update.');\n+}\n+\n+try {\n+  await updatePreferences(repository, 'ada', 0, [], audit);\n+  throw new Error('Expected stale preference revision to fail.');\n+} catch (error) {\n+  if (!(error instanceof Error)) {\n+    throw error;\n+  }\n+}\n",
+            "sha": "b318af90a34471d7fc85c0503ece0e4b80325bce",
+            "status": "added"
+          }
+        ],
+        "html_url": "https://provider.example.test/{{repository}}/commit/{{revision:lifecycle-verification}}",
+        "parents": [
+          {
+            "sha": "{{revision:preference-audit}}"
+          }
+        ],
+        "sha": "{{revision:lifecycle-verification}}"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/api/preferences-handler.ts",
+      "query": {
+        "ref": "{{revision:base}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHR5cGUgeyBQcmVmZXJlbmNlQ2hhbmdlIH0gZnJvbSAnLi4vYXBwbGljYXRpb24vdXBkYXRlLXByZWZlcmVuY2VzLnRzJzsKaW1wb3J0IHR5cGUgeyBQcmVmZXJlbmNlc1JlcG9zaXRvcnkgfSBmcm9tICcuLi9pbmZyYXN0cnVjdHVyZS9wcmVmZXJlbmNlcy1yZXBvc2l0b3J5LnRzJzsKaW1wb3J0IHsgdXBkYXRlUHJlZmVyZW5jZXMgfSBmcm9tICcuLi9hcHBsaWNhdGlvbi91cGRhdGUtcHJlZmVyZW5jZXMudHMnOwoKZXhwb3J0IHR5cGUgVXBkYXRlUHJlZmVyZW5jZXNSZXF1ZXN0ID0gewogIGNoYW5nZXM6IFJlYWRvbmx5QXJyYXk8UHJlZmVyZW5jZUNoYW5nZT47CiAgZXhwZWN0ZWRSZXZpc2lvbjogbnVtYmVyOwogIHVzZXJJZDogc3RyaW5nOwp9OwoKZXhwb3J0IGNvbnN0IGhhbmRsZVVwZGF0ZVByZWZlcmVuY2VzID0gYXN5bmMgKAogIHJlcG9zaXRvcnk6IFByZWZlcmVuY2VzUmVwb3NpdG9yeSwKICByZXF1ZXN0OiBVcGRhdGVQcmVmZXJlbmNlc1JlcXVlc3QsCikgPT4gewogIGNvbnN0IHByZWZlcmVuY2VzID0gYXdhaXQgdXBkYXRlUHJlZmVyZW5jZXMoCiAgICByZXBvc2l0b3J5LAogICAgcmVxdWVzdC51c2VySWQsCiAgICByZXF1ZXN0LmV4cGVjdGVkUmV2aXNpb24sCiAgICByZXF1ZXN0LmNoYW5nZXMsCiAgKTsKICByZXR1cm4gewogICAgcmV2aXNpb246IHByZWZlcmVuY2VzLnJldmlzaW9uLAogICAgdmFsdWVzOiBwcmVmZXJlbmNlcy52YWx1ZXMsCiAgfTsKfTs=",
+        "encoding": "base64",
+        "sha": "eedd4c2db73613d39cbba5b4f82fc8e94942824c"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/api/preferences-handler.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHR5cGUgeyBQcmVmZXJlbmNlQ2hhbmdlIH0gZnJvbSAnLi4vYXBwbGljYXRpb24vdXBkYXRlLXByZWZlcmVuY2VzLnRzJzsKaW1wb3J0IHR5cGUgeyBQcmVmZXJlbmNlc1JlcG9zaXRvcnkgfSBmcm9tICcuLi9pbmZyYXN0cnVjdHVyZS9wcmVmZXJlbmNlcy1yZXBvc2l0b3J5LnRzJzsKaW1wb3J0IHsgdXBkYXRlUHJlZmVyZW5jZXMgfSBmcm9tICcuLi9hcHBsaWNhdGlvbi91cGRhdGUtcHJlZmVyZW5jZXMudHMnOwppbXBvcnQgdHlwZSB7IFByZWZlcmVuY2VBdWRpdCB9IGZyb20gJy4uL2luZnJhc3RydWN0dXJlL3ByZWZlcmVuY2UtYXVkaXQudHMnOwoKZXhwb3J0IHR5cGUgVXBkYXRlUHJlZmVyZW5jZXNSZXF1ZXN0ID0gewogIGNoYW5nZXM6IFJlYWRvbmx5QXJyYXk8UHJlZmVyZW5jZUNoYW5nZT47CiAgZXhwZWN0ZWRSZXZpc2lvbjogbnVtYmVyOwogIHVzZXJJZDogc3RyaW5nOwp9OwoKZXhwb3J0IGNvbnN0IGhhbmRsZVVwZGF0ZVByZWZlcmVuY2VzID0gYXN5bmMgKAogIHJlcG9zaXRvcnk6IFByZWZlcmVuY2VzUmVwb3NpdG9yeSwKICByZXF1ZXN0OiBVcGRhdGVQcmVmZXJlbmNlc1JlcXVlc3QsCiAgYXVkaXQ/OiBQcmVmZXJlbmNlQXVkaXQsCikgPT4gewogIGNvbnN0IHByZWZlcmVuY2VzID0gYXdhaXQgdXBkYXRlUHJlZmVyZW5jZXMoCiAgICByZXBvc2l0b3J5LAogICAgcmVxdWVzdC51c2VySWQsCiAgICByZXF1ZXN0LmV4cGVjdGVkUmV2aXNpb24sCiAgICByZXF1ZXN0LmNoYW5nZXMsCiAgICBhdWRpdCwKICApOwogIC8vIFNNT0tFOiB1cGRhdGVkLWludGVudGlvbmFsLXJlc3BvbnNlCiAgcmV0dXJuIHsKICAgIHJldmlzaW9uOiBwcmVmZXJlbmNlcy5yZXZpc2lvbiwKICAgIHZhbHVlczogcHJlZmVyZW5jZXMudmFsdWVzLAogIH07Cn07",
+        "encoding": "base64",
+        "sha": "384c7e5381757d2468927d7681c92799d946ee08"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/application/schedule-delivery.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHsgZGVjaWRlRGVsaXZlcnkgfSBmcm9tICcuLi9kb21haW4vZGVsaXZlcnktcnVsZXMudHMnOwppbXBvcnQgdHlwZSB7IENhdGVnb3J5LCBDaGFubmVsLCBQcmVmZXJlbmNlcyB9IGZyb20gJy4uL2RvbWFpbi9wcmVmZXJlbmNlcy50cyc7CmltcG9ydCB0eXBlIHsgUXVpZXRIb3VycyB9IGZyb20gJy4uL2RvbWFpbi9xdWlldC1ob3Vycy50cyc7CgpleHBvcnQgdHlwZSBEZWxpdmVyeVNjaGVkdWxlID0gewogIGNoYW5uZWw6IENoYW5uZWw7CiAgZGVsaXZlckF0OiBEYXRlOwogIHJlYXNvbjogc3RyaW5nOwp9OwoKZXhwb3J0IGNvbnN0IHNjaGVkdWxlRGVsaXZlcnkgPSAoCiAgcHJlZmVyZW5jZXM6IFByZWZlcmVuY2VzLAogIGNhdGVnb3J5OiBDYXRlZ29yeSwKICBjaGFubmVsOiBDaGFubmVsLAogIHF1aWV0SG91cnM6IFF1aWV0SG91cnMgfCBudWxsLAogIG5vdzogRGF0ZSwKKTogRGVsaXZlcnlTY2hlZHVsZSB8IG51bGwgPT4gewogIGNvbnN0IGRlY2lzaW9uID0gZGVjaWRlRGVsaXZlcnkocHJlZmVyZW5jZXMsIGNhdGVnb3J5LCBjaGFubmVsKTsKICBpZiAoIWRlY2lzaW9uLmRlbGl2ZXIpIHsKICAgIHJldHVybiBudWxsOwogIH0KICBpZiAoY2F0ZWdvcnkgPT09ICdzZWN1cml0eScgfHwgIXF1aWV0SG91cnMpIHsKICAgIHJldHVybiB7IGNoYW5uZWwsIGRlbGl2ZXJBdDogbm93LCByZWFzb246IGRlY2lzaW9uLnJlYXNvbiB9OwogIH0KICAvLyBTTU9LRTogZGVsaXZlcnktc2NoZWR1bGUtb3JpZ2luYWwKICAvLyBTTU9LRTogcmV2aWV3LWdyb3VwLWhpc3RvcmljYWwKICBjb25zdCBtaW51dGUgPSBub3cuZ2V0VVRDSG91cnMoKSAqIDYwICsgbm93LmdldFVUQ01pbnV0ZXMoKTsKICBjb25zdCB3aXRoaW5RdWlldEhvdXJzID0KICAgIHF1aWV0SG91cnMuc3RhcnRNaW51dGUgPD0gcXVpZXRIb3Vycy5lbmRNaW51dGUKICAgICAgPyBtaW51dGUgPj0gcXVpZXRIb3Vycy5zdGFydE1pbnV0ZSAmJiBtaW51dGUgPCBxdWlldEhvdXJzLmVuZE1pbnV0ZQogICAgICA6IG1pbnV0ZSA+PSBxdWlldEhvdXJzLnN0YXJ0TWludXRlIHx8IG1pbnV0ZSA8IHF1aWV0SG91cnMuZW5kTWludXRlOwogIHJldHVybiB7CiAgICBjaGFubmVsLAogICAgZGVsaXZlckF0OiB3aXRoaW5RdWlldEhvdXJzID8gbmV3IERhdGUobm93LmdldFRpbWUoKSArIDYwICogNjAgKiAxXzAwMCkgOiBub3csCiAgICByZWFzb246IHdpdGhpblF1aWV0SG91cnMgPyAncXVpZXQtaG91cnMnIDogZGVjaXNpb24ucmVhc29uLAogIH07Cn07",
+        "encoding": "base64",
+        "sha": "3f86fe4c1c9d18653f7230c25f7e030d50947714"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/application/update-preferences.ts",
+      "query": {
+        "ref": "{{revision:base}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHsKICBjbG9uZVByZWZlcmVuY2VzLAogIHR5cGUgQ2F0ZWdvcnksCiAgdHlwZSBDaGFubmVsLAogIHR5cGUgUHJlZmVyZW5jZXMsCiAgdmFsaWRhdGVQcmVmZXJlbmNlcywKfSBmcm9tICcuLi9kb21haW4vcHJlZmVyZW5jZXMudHMnOwppbXBvcnQgdHlwZSB7IFByZWZlcmVuY2VzUmVwb3NpdG9yeSB9IGZyb20gJy4uL2luZnJhc3RydWN0dXJlL3ByZWZlcmVuY2VzLXJlcG9zaXRvcnkudHMnOwoKZXhwb3J0IHR5cGUgUHJlZmVyZW5jZUNoYW5nZSA9IHsKICBjYXRlZ29yeTogQ2F0ZWdvcnk7CiAgY2hhbm5lbDogQ2hhbm5lbDsKICBlbmFibGVkOiBib29sZWFuOwp9OwoKZXhwb3J0IGNvbnN0IHVwZGF0ZVByZWZlcmVuY2VzID0gYXN5bmMgKAogIHJlcG9zaXRvcnk6IFByZWZlcmVuY2VzUmVwb3NpdG9yeSwKICB1c2VySWQ6IHN0cmluZywKICBleHBlY3RlZFJldmlzaW9uOiBudW1iZXIsCiAgY2hhbmdlczogUmVhZG9ubHlBcnJheTxQcmVmZXJlbmNlQ2hhbmdlPiwKKTogUHJvbWlzZTxQcmVmZXJlbmNlcz4gPT4gewogIGNvbnN0IGN1cnJlbnQgPSBhd2FpdCByZXBvc2l0b3J5LmxvYWQodXNlcklkKTsKICBjb25zdCBuZXh0ID0gY2xvbmVQcmVmZXJlbmNlcyhjdXJyZW50KTsKICBmb3IgKGNvbnN0IGNoYW5nZSBvZiBjaGFuZ2VzKSB7CiAgICBuZXh0LnZhbHVlc1tjaGFuZ2UuY2F0ZWdvcnldW2NoYW5nZS5jaGFubmVsXSA9IGNoYW5nZS5lbmFibGVkOwogIH0KICB2YWxpZGF0ZVByZWZlcmVuY2VzKG5leHQpOwogIHJldHVybiByZXBvc2l0b3J5LnNhdmUobmV4dCwgZXhwZWN0ZWRSZXZpc2lvbik7Cn07",
+        "encoding": "base64",
+        "sha": "a2ba6ea7febcb91248d7bb1db89eb4517a9722bd"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/application/update-preferences.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHsKICBjbG9uZVByZWZlcmVuY2VzLAogIHR5cGUgQ2F0ZWdvcnksCiAgdHlwZSBDaGFubmVsLAogIHR5cGUgUHJlZmVyZW5jZXMsCiAgdmFsaWRhdGVQcmVmZXJlbmNlcywKfSBmcm9tICcuLi9kb21haW4vcHJlZmVyZW5jZXMudHMnOwppbXBvcnQgdHlwZSB7IFByZWZlcmVuY2VzUmVwb3NpdG9yeSB9IGZyb20gJy4uL2luZnJhc3RydWN0dXJlL3ByZWZlcmVuY2VzLXJlcG9zaXRvcnkudHMnOwppbXBvcnQgdHlwZSB7IFByZWZlcmVuY2VBdWRpdCB9IGZyb20gJy4uL2luZnJhc3RydWN0dXJlL3ByZWZlcmVuY2UtYXVkaXQudHMnOwoKZXhwb3J0IHR5cGUgUHJlZmVyZW5jZUNoYW5nZSA9IHsKICBjYXRlZ29yeTogQ2F0ZWdvcnk7CiAgY2hhbm5lbDogQ2hhbm5lbDsKICBlbmFibGVkOiBib29sZWFuOwp9OwoKZXhwb3J0IGNvbnN0IHVwZGF0ZVByZWZlcmVuY2VzID0gYXN5bmMgKAogIHJlcG9zaXRvcnk6IFByZWZlcmVuY2VzUmVwb3NpdG9yeSwKICB1c2VySWQ6IHN0cmluZywKICBleHBlY3RlZFJldmlzaW9uOiBudW1iZXIsCiAgY2hhbmdlczogUmVhZG9ubHlBcnJheTxQcmVmZXJlbmNlQ2hhbmdlPiwKICBhdWRpdD86IFByZWZlcmVuY2VBdWRpdCwKKTogUHJvbWlzZTxQcmVmZXJlbmNlcz4gPT4gewogIGNvbnN0IGN1cnJlbnQgPSBhd2FpdCByZXBvc2l0b3J5LmxvYWQodXNlcklkKTsKICBjb25zdCBuZXh0ID0gY2xvbmVQcmVmZXJlbmNlcyhjdXJyZW50KTsKICBmb3IgKGNvbnN0IGNoYW5nZSBvZiBjaGFuZ2VzKSB7CiAgICBuZXh0LnZhbHVlc1tjaGFuZ2UuY2F0ZWdvcnldW2NoYW5nZS5jaGFubmVsXSA9IGNoYW5nZS5lbmFibGVkOwogIH0KICB2YWxpZGF0ZVByZWZlcmVuY2VzKG5leHQpOwogIGNvbnN0IHNhdmVkID0gYXdhaXQgcmVwb3NpdG9yeS5zYXZlKG5leHQsIGV4cGVjdGVkUmV2aXNpb24pOwogIGF3YWl0IGF1ZGl0Py5hcHBlbmQoewogICAgY2hhbmdlcywKICAgIHJldmlzaW9uOiBzYXZlZC5yZXZpc2lvbiwKICAgIHVzZXJJZCwKICB9KTsKICByZXR1cm4gc2F2ZWQ7Cn07",
+        "encoding": "base64",
+        "sha": "454a1dd5b9aa3ed5c7bf767c72b2d2bbe355e6d7"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/cli/preferences.ts",
+      "query": {
+        "ref": "{{revision:base}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHR5cGUgeyBQcmVmZXJlbmNlQ2hhbmdlIH0gZnJvbSAnLi4vYXBwbGljYXRpb24vdXBkYXRlLXByZWZlcmVuY2VzLnRzJzsKCmV4cG9ydCBjb25zdCBwYXJzZVByZWZlcmVuY2VDaGFuZ2UgPSAodmFsdWU6IHN0cmluZyk6IFByZWZlcmVuY2VDaGFuZ2UgPT4gewogIGNvbnN0IFtjYXRlZ29yeSwgY2hhbm5lbCwgZW5hYmxlZF0gPSB2YWx1ZS5zcGxpdCgnOicpOwogIGlmICghY2F0ZWdvcnkgfHwgIWNoYW5uZWwgfHwgKGVuYWJsZWQgIT09ICdvbicgJiYgZW5hYmxlZCAhPT0gJ29mZicpKSB7CiAgICB0aHJvdyBuZXcgRXJyb3IoJ0V4cGVjdGVkIGNhdGVnb3J5OmNoYW5uZWw6b258b2ZmLicpOwogIH0KICByZXR1cm4gewogICAgY2F0ZWdvcnk6IGNhdGVnb3J5IGFzIFByZWZlcmVuY2VDaGFuZ2VbJ2NhdGVnb3J5J10sCiAgICBjaGFubmVsOiBjaGFubmVsIGFzIFByZWZlcmVuY2VDaGFuZ2VbJ2NoYW5uZWwnXSwKICAgIGVuYWJsZWQ6IGVuYWJsZWQgPT09ICdvbicsCiAgfTsKfTs=",
+        "encoding": "base64",
+        "sha": "f4097c3289f12621726bc3524fbf4b6b65851843"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/cli/preferences.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHR5cGUgeyBRdWlldEhvdXJzIH0gZnJvbSAnLi4vZG9tYWluL3F1aWV0LWhvdXJzLnRzJzsKaW1wb3J0IHR5cGUgeyBQcmVmZXJlbmNlQ2hhbmdlIH0gZnJvbSAnLi4vYXBwbGljYXRpb24vdXBkYXRlLXByZWZlcmVuY2VzLnRzJzsKCmV4cG9ydCBjb25zdCBwYXJzZVByZWZlcmVuY2VDaGFuZ2UgPSAodmFsdWU6IHN0cmluZyk6IFByZWZlcmVuY2VDaGFuZ2UgPT4gewogIGNvbnN0IFtjYXRlZ29yeSwgY2hhbm5lbCwgZW5hYmxlZF0gPSB2YWx1ZS5zcGxpdCgnOicpOwogIGlmICghY2F0ZWdvcnkgfHwgIWNoYW5uZWwgfHwgKGVuYWJsZWQgIT09ICdvbicgJiYgZW5hYmxlZCAhPT0gJ29mZicpKSB7CiAgICB0aHJvdyBuZXcgRXJyb3IoJ0V4cGVjdGVkIGNhdGVnb3J5OmNoYW5uZWw6b258b2ZmLicpOwogIH0KICByZXR1cm4gewogICAgY2F0ZWdvcnk6IGNhdGVnb3J5IGFzIFByZWZlcmVuY2VDaGFuZ2VbJ2NhdGVnb3J5J10sCiAgICBjaGFubmVsOiBjaGFubmVsIGFzIFByZWZlcmVuY2VDaGFuZ2VbJ2NoYW5uZWwnXSwKICAgIGVuYWJsZWQ6IGVuYWJsZWQgPT09ICdvbicsCiAgfTsKfTsKCmV4cG9ydCBjb25zdCBwYXJzZVF1aWV0SG91cnMgPSAodmFsdWU6IHN0cmluZyk6IFF1aWV0SG91cnMgPT4gewogIGNvbnN0IFt0aW1lem9uZSwgc3RhcnRNaW51dGUsIGVuZE1pbnV0ZV0gPSB2YWx1ZS5zcGxpdCgnOicpOwogIGlmICghdGltZXpvbmUgfHwgIXN0YXJ0TWludXRlIHx8ICFlbmRNaW51dGUpIHsKICAgIHRocm93IG5ldyBFcnJvcignRXhwZWN0ZWQgdGltZXpvbmU6c3RhcnRNaW51dGU6ZW5kTWludXRlLicpOwogIH0KICByZXR1cm4gewogICAgZW5kTWludXRlOiBOdW1iZXIoZW5kTWludXRlKSwKICAgIHN0YXJ0TWludXRlOiBOdW1iZXIoc3RhcnRNaW51dGUpLAogICAgdGltZXpvbmUsCiAgfTsKfTs=",
+        "encoding": "base64",
+        "sha": "0ef1def911385111950037d15370b1b5f11d2160"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/domain/preference-policy.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHR5cGUgeyBDYXRlZ29yeSwgQ2hhbm5lbCB9IGZyb20gJy4vcHJlZmVyZW5jZXMudHMnOwoKZXhwb3J0IHR5cGUgUHJlZmVyZW5jZVBvbGljeSA9IHsKICBjYXRlZ29yeTogQ2F0ZWdvcnk7CiAgY2hhbm5lbDogQ2hhbm5lbDsKICByZWFzb246IHN0cmluZzsKfTsKCmV4cG9ydCBjb25zdCBwcm90ZWN0ZWRQb2xpY2llcyA9ICgpOiBSZWFkb25seUFycmF5PFByZWZlcmVuY2VQb2xpY3k+ID0+IFsKICB7CiAgICBjYXRlZ29yeTogJ3NlY3VyaXR5JywKICAgIGNoYW5uZWw6ICdzbXMnLAogICAgcmVhc29uOiAnU2VjdXJpdHkgaW5jaWRlbnRzIG5lZWQgYW4gdXJnZW50IGZhbGxiYWNrIGNoYW5uZWwuJywKICB9LAogIHsKICAgIGNhdGVnb3J5OiAnc2VjdXJpdHknLAogICAgY2hhbm5lbDogJ2VtYWlsJywKICAgIHJlYXNvbjogJ1NlY3VyaXR5IG5vdGljZXMgbXVzdCByZW1haW4gZXh0ZXJuYWxseSB2aXNpYmxlLicsCiAgfSwKXTs=",
+        "encoding": "base64",
+        "sha": "666945ba10d7e23c9412ba2d8bff72984259d86e"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/domain/quiet-hours.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "ZXhwb3J0IHR5cGUgUXVpZXRIb3VycyA9IHsKICBlbmRNaW51dGU6IG51bWJlcjsKICBzdGFydE1pbnV0ZTogbnVtYmVyOwogIHRpbWV6b25lOiBzdHJpbmc7Cn07CgpleHBvcnQgY29uc3QgdmFsaWRhdGVRdWlldEhvdXJzID0gKHF1aWV0SG91cnM6IFF1aWV0SG91cnMpID0+IHsKICBpZiAoCiAgICAhTnVtYmVyLmlzSW50ZWdlcihxdWlldEhvdXJzLnN0YXJ0TWludXRlKSB8fAogICAgIU51bWJlci5pc0ludGVnZXIocXVpZXRIb3Vycy5lbmRNaW51dGUpIHx8CiAgICBxdWlldEhvdXJzLnN0YXJ0TWludXRlIDwgMCB8fAogICAgcXVpZXRIb3Vycy5zdGFydE1pbnV0ZSA+IDFfNDM5IHx8CiAgICBxdWlldEhvdXJzLmVuZE1pbnV0ZSA8IDAgfHwKICAgIHF1aWV0SG91cnMuZW5kTWludXRlID4gMV80MzkKICApIHsKICAgIHRocm93IG5ldyBFcnJvcignUXVpZXQgaG91cnMgbXVzdCB1c2UgbWludXRlcyBiZXR3ZWVuIDAgYW5kIDE0MzkuJyk7CiAgfQogIGlmICghcXVpZXRIb3Vycy50aW1lem9uZSkgewogICAgdGhyb3cgbmV3IEVycm9yKCdRdWlldCBob3VycyByZXF1aXJlIGEgdGltZXpvbmUuJyk7CiAgfQogIHJldHVybiBxdWlldEhvdXJzOwp9Ow==",
+        "encoding": "base64",
+        "sha": "bcacdcc230aded609aa7f93361adeb35bb79e065"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/src/infrastructure/preference-audit.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHR5cGUgeyBQcmVmZXJlbmNlQ2hhbmdlIH0gZnJvbSAnLi4vYXBwbGljYXRpb24vdXBkYXRlLXByZWZlcmVuY2VzLnRzJzsKCmV4cG9ydCB0eXBlIFByZWZlcmVuY2VBdWRpdFJlY29yZCA9IHsKICBjaGFuZ2VzOiBSZWFkb25seUFycmF5PFByZWZlcmVuY2VDaGFuZ2U+OwogIHJldmlzaW9uOiBudW1iZXI7CiAgdXNlcklkOiBzdHJpbmc7Cn07CgpleHBvcnQgdHlwZSBQcmVmZXJlbmNlQXVkaXQgPSB7CiAgYXBwZW5kKHJlY29yZDogUHJlZmVyZW5jZUF1ZGl0UmVjb3JkKTogUHJvbWlzZTx2b2lkPjsKICBsaXN0KHVzZXJJZDogc3RyaW5nKTogUHJvbWlzZTxSZWFkb25seUFycmF5PFByZWZlcmVuY2VBdWRpdFJlY29yZD4+Owp9OwoKZXhwb3J0IGNvbnN0IGNyZWF0ZU1lbW9yeVByZWZlcmVuY2VBdWRpdCA9ICgpOiBQcmVmZXJlbmNlQXVkaXQgPT4gewogIGNvbnN0IHJlY29yZHMgPSBuZXcgTWFwPHN0cmluZywgQXJyYXk8UHJlZmVyZW5jZUF1ZGl0UmVjb3JkPj4oKTsKICByZXR1cm4gewogICAgYXN5bmMgYXBwZW5kKHJlY29yZCkgewogICAgICBjb25zdCB1c2VyUmVjb3JkcyA9IHJlY29yZHMuZ2V0KHJlY29yZC51c2VySWQpID8/IFtdOwogICAgICB1c2VyUmVjb3Jkcy5wdXNoKHJlY29yZCk7CiAgICAgIHJlY29yZHMuc2V0KHJlY29yZC51c2VySWQsIHVzZXJSZWNvcmRzKTsKICAgIH0sCiAgICBhc3luYyBsaXN0KHVzZXJJZCkgewogICAgICByZXR1cm4gWy4uLihyZWNvcmRzLmdldCh1c2VySWQpID8/IFtdKV07CiAgICB9LAogIH07Cn07",
+        "encoding": "base64",
+        "sha": "631d455c5f67c9e8b54be4fb5f5220657c7d1940"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/test/delivery-schedule.test.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHsgc2NoZWR1bGVEZWxpdmVyeSB9IGZyb20gJy4uL3NyYy9hcHBsaWNhdGlvbi9zY2hlZHVsZS1kZWxpdmVyeS50cyc7CmltcG9ydCB7IGRlZmF1bHRQcmVmZXJlbmNlcyB9IGZyb20gJy4uL3NyYy9kb21haW4vcHJlZmVyZW5jZXMudHMnOwoKY29uc3QgcHJlZmVyZW5jZXMgPSBkZWZhdWx0UHJlZmVyZW5jZXMoJ2FkYScpOwpjb25zdCBub3cgPSBuZXcgRGF0ZSgnMjAyNi0wNy0yM1QyMjozMDowMC4wMDBaJyk7CmNvbnN0IHNjaGVkdWxlZCA9IHNjaGVkdWxlRGVsaXZlcnkoCiAgcHJlZmVyZW5jZXMsCiAgJ3Byb2R1Y3QnLAogICdwdXNoJywKICB7IGVuZE1pbnV0ZTogNDIwLCBzdGFydE1pbnV0ZTogMV8yMDAsIHRpbWV6b25lOiAnQW1lcmljYS9DaGljYWdvJyB9LAogIG5vdywKKTsKCmlmICghc2NoZWR1bGVkIHx8IHNjaGVkdWxlZC5yZWFzb24gIT09ICdxdWlldC1ob3VycycpIHsKICB0aHJvdyBuZXcgRXJyb3IoJ0V4cGVjdGVkIHByb2R1Y3QgcHVzaCBkZWxpdmVyeSB0byByZXNwZWN0IHF1aWV0IGhvdXJzLicpOwogIC8vIFNNT0tFOiB1cGRhdGVkLWludGVudGlvbmFsLXNjaGVkdWxlCn0KCmNvbnN0IHNlY3VyaXR5ID0gc2NoZWR1bGVEZWxpdmVyeSgKICBwcmVmZXJlbmNlcywKICAnc2VjdXJpdHknLAogICdzbXMnLAogIHsgZW5kTWludXRlOiA0MjAsIHN0YXJ0TWludXRlOiAxXzIwMCwgdGltZXpvbmU6ICdBbWVyaWNhL0NoaWNhZ28nIH0sCiAgbm93LAopOwoKaWYgKCFzZWN1cml0eSB8fCBzZWN1cml0eS5kZWxpdmVyQXQuZ2V0VGltZSgpICE9PSBub3cuZ2V0VGltZSgpKSB7CiAgdGhyb3cgbmV3IEVycm9yKCdFeHBlY3RlZCBzZWN1cml0eSBkZWxpdmVyeSB0byBieXBhc3MgcXVpZXQgaG91cnMuJyk7Cn0=",
+        "encoding": "base64",
+        "sha": "f53dffd303b3b48716221dd7b6261abefb5b5a28"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/test/preferences-audit.test.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHsgdXBkYXRlUHJlZmVyZW5jZXMgfSBmcm9tICcuLi9zcmMvYXBwbGljYXRpb24vdXBkYXRlLXByZWZlcmVuY2VzLnRzJzsKaW1wb3J0IHsgY3JlYXRlTWVtb3J5UHJlZmVyZW5jZUF1ZGl0IH0gZnJvbSAnLi4vc3JjL2luZnJhc3RydWN0dXJlL3ByZWZlcmVuY2UtYXVkaXQudHMnOwppbXBvcnQgeyBjcmVhdGVNZW1vcnlQcmVmZXJlbmNlc1JlcG9zaXRvcnkgfSBmcm9tICcuLi9zcmMvaW5mcmFzdHJ1Y3R1cmUvcHJlZmVyZW5jZXMtcmVwb3NpdG9yeS50cyc7Cgpjb25zdCByZXBvc2l0b3J5ID0gY3JlYXRlTWVtb3J5UHJlZmVyZW5jZXNSZXBvc2l0b3J5KCk7CmNvbnN0IGF1ZGl0ID0gY3JlYXRlTWVtb3J5UHJlZmVyZW5jZUF1ZGl0KCk7Cgpjb25zdCB1cGRhdGVkID0gYXdhaXQgdXBkYXRlUHJlZmVyZW5jZXMoCiAgcmVwb3NpdG9yeSwKICAnYWRhJywKICAwLAogIFt7IGNhdGVnb3J5OiAnbWFya2V0aW5nJywgY2hhbm5lbDogJ2VtYWlsJywgZW5hYmxlZDogdHJ1ZSB9XSwKICBhdWRpdCwKKTsKCmlmICh1cGRhdGVkLnJldmlzaW9uICE9PSAxKSB7CiAgdGhyb3cgbmV3IEVycm9yKCdFeHBlY3RlZCBwcmVmZXJlbmNlIHJldmlzaW9uIHRvIGFkdmFuY2UuJyk7Cn0KCmNvbnN0IHJlY29yZHMgPSBhd2FpdCBhdWRpdC5saXN0KCdhZGEnKTsKaWYgKHJlY29yZHMubGVuZ3RoICE9PSAxIHx8IHJlY29yZHNbMF0/LmNoYW5nZXNbMF0/LmNoYW5uZWwgIT09ICdlbWFpbCcpIHsKICB0aHJvdyBuZXcgRXJyb3IoJ0V4cGVjdGVkIGF1ZGl0IHJlY29yZCBmb3IgcHJlZmVyZW5jZSB1cGRhdGUuJyk7Cn0KCnRyeSB7CiAgYXdhaXQgdXBkYXRlUHJlZmVyZW5jZXMocmVwb3NpdG9yeSwgJ2FkYScsIDAsIFtdLCBhdWRpdCk7CiAgdGhyb3cgbmV3IEVycm9yKCdFeHBlY3RlZCBzdGFsZSBwcmVmZXJlbmNlIHJldmlzaW9uIHRvIGZhaWwuJyk7Cn0gY2F0Y2ggKGVycm9yKSB7CiAgaWYgKCEoZXJyb3IgaW5zdGFuY2VvZiBFcnJvcikpIHsKICAgIHRocm93IGVycm9yOwogIH0KfQ==",
+        "encoding": "base64",
+        "sha": "b318af90a34471d7fc85c0503ece0e4b80325bce"
+      }
+    },
+    {
+      "path": "/repos/{{repository}}/contents/test/quiet-hours.test.ts",
+      "query": {
+        "ref": "{{revision:lifecycle-verification}}"
+      },
+      "response": {
+        "content": "aW1wb3J0IHsgdmFsaWRhdGVRdWlldEhvdXJzIH0gZnJvbSAnLi4vc3JjL2RvbWFpbi9xdWlldC1ob3Vycy50cyc7Cgpjb25zdCBxdWlldEhvdXJzID0gdmFsaWRhdGVRdWlldEhvdXJzKHsKICBlbmRNaW51dGU6IDQyMCwKICBzdGFydE1pbnV0ZTogMV8zMjAsCiAgdGltZXpvbmU6ICdBbWVyaWNhL0NoaWNhZ28nLAp9KTsKCmlmIChxdWlldEhvdXJzLnRpbWV6b25lICE9PSAnQW1lcmljYS9DaGljYWdvJykgewogIHRocm93IG5ldyBFcnJvcignRXhwZWN0ZWQgdGltZXpvbmUgdG8gc3Vydml2ZSB2YWxpZGF0aW9uLicpOwp9Cgp0cnkgewogIHZhbGlkYXRlUXVpZXRIb3Vycyh7IGVuZE1pbnV0ZTogMV81MDAsIHN0YXJ0TWludXRlOiAwLCB0aW1lem9uZTogJ1VUQycgfSk7CiAgdGhyb3cgbmV3IEVycm9yKCdFeHBlY3RlZCBpbnZhbGlkIG1pbnV0ZXMgdG8gZmFpbC4nKTsKfSBjYXRjaCAoZXJyb3IpIHsKICBpZiAoIShlcnJvciBpbnN0YW5jZW9mIEVycm9yKSkgewogICAgdGhyb3cgZXJyb3I7CiAgfQp9",
+        "encoding": "base64",
+        "sha": "1d464194dc1d69b8ef2933d25b66a677ea67ab12"
+      }
+    }
+  ]
+}

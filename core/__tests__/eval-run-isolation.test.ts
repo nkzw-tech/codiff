@@ -1,8 +1,21 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
+import { normalizeScenarioFixtureRevisions } from '../../evals/adapters/review-scenario.mjs';
 import { initializeEvalRun, loadCaseAdapter, readCases } from '../../evals/lib.mjs';
 import { createTemporaryDirectory } from './helpers/resources.ts';
+
+test('semantic fixture normalization removes materialized commit identities', () => {
+  const first = normalizeScenarioFixtureRevisions(
+    { path: '/commits/aaaaaaaa11111111', sha: 'aaaaaaaa11111111' },
+    { head: 'aaaaaaaa11111111' },
+  );
+  const second = normalizeScenarioFixtureRevisions(
+    { path: '/commits/bbbbbbbb22222222', sha: 'bbbbbbbb22222222' },
+    { head: 'bbbbbbbb22222222' },
+  );
+  expect(first).toEqual(second);
+});
 
 test('duplicate eval labels fail before metadata or attempt artifacts change', async () => {
   await using directory = await createTemporaryDirectory('codiff-eval-run-');
@@ -54,7 +67,13 @@ test('review-scenario prepare-only materializes model inputs without generated a
     exitStatus: 'prepared',
     modelCalls: 0,
   });
-  expect(entries).toEqual(['inputs', 'inputs/review-state.json', 'prompt.txt', 'scenario.json']);
+  expect(entries).toEqual([
+    'inputs',
+    'inputs/provider-transcripts.json',
+    'inputs/review-state.json',
+    'prompt.txt',
+    'scenario.json',
+  ]);
   expect(entries).not.toEqual(
     expect.arrayContaining([
       'contract.json',
