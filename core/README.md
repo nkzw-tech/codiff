@@ -24,3 +24,8 @@ a new head tomorrow.
 `GitSha` is only a full object id. Branch names, tags, bookmarks, and PR/MR
 numbers stay ordinary strings. A `Revision` carries a SHA only when it is a
 commit. The working copy and index have no SHA.
+
+`RepositoryHistory.entries` is a newest-first navigation feed. Review commit
+stacks are separate parent-before-child values normalized by Core, while review
+version timelines remain earlier-before-later. Consumers validate those
+contracts instead of reversing provider values locally.
