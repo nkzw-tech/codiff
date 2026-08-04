@@ -161,7 +161,6 @@ import type {
   ReviewSource,
   RepositoryState,
   ShareCommentSubmission,
-  SharedWalkthroughReviewScope,
   SharedWalkthroughSnapshot,
   SubmittedReviewComment,
   SubmitPullRequestReviewResult,
@@ -394,7 +393,7 @@ export const buildSharedReviewSnapshot = ({
   walkthrough,
 }: {
   preferences: SharedWalkthroughSnapshot['preferences'];
-  reviewStructure?: SharedWalkthroughReviewScope['structure'];
+  reviewStructure?: TargetComparisonReviewStructure;
   state: RepositoryState;
   title: string;
   walkthrough: PersistedWalkthrough;
@@ -1972,7 +1971,10 @@ export function ReviewSurface({
     sharedWalkthrough.structure === 'commit-by-commit' ||
     sharedWalkthrough.structure === 'net-change'
       ? sharedWalkthrough.structure
-      : (snapshot.reviewScope?.structure ?? 'net-change');
+      : snapshot.reviewScope?.structure === 'commit-by-commit' ||
+          snapshot.reviewScope?.structure === 'net-change'
+        ? snapshot.reviewScope.structure
+        : 'net-change';
   const alternateReviewStructure: TargetComparisonReviewStructure =
     walkthroughReviewStructure === 'commit-by-commit' ? 'net-change' : 'commit-by-commit';
   const reviewModes = [

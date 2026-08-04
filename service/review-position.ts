@@ -29,5 +29,10 @@ export const revisionSchema = z.union([
 
 export const diffRangeSchema = z.object({ base: revisionSchema, head: revisionSchema });
 
-/** Durable, range-only coordinate for a shared walkthrough review comment. */
-export const reviewCommentPositionSchema = z.object({ range: diffRangeSchema }).strict();
+/** Durable coordinate for a shared walkthrough review comment. */
+export const reviewCommentPositionSchema = z
+  .object({
+    range: diffRangeSchema,
+    versionId: nonEmptyString(256).optional(),
+  })
+  .strict();

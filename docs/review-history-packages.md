@@ -55,4 +55,3 @@ pair, not by a provider-resolved effective pair.
 Durable cache keys (`createCommitArtifactKey`, `createRangeArtifactKey`,
 `createBlobArtifactKey`), `ReviewVersionRecord`, and `ReviewProviderAdapter`
 are for later persisted history and provider-history packages.
-

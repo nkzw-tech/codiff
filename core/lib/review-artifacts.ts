@@ -118,6 +118,7 @@ export type BlobArtifactKey = {
   project: ReviewArtifactProject;
 };
 
+export interface ReviewArtifactSource {
   readBlobs(
     objectIds: ReadonlyArray<string>,
     signal: AbortSignal,
@@ -147,6 +148,7 @@ export interface ReviewProviderAdapter<ReviewReference, CurrentReview> {
   readCurrentReview(reference: ReviewReference, signal: AbortSignal): Promise<CurrentReview>;
 }
 
+export type ReviewArtifactRunDiagnostics = {
   acquired: {
     blobs: Readonly<Record<string, number>>;
     commits: Readonly<Record<string, number>>;
@@ -200,7 +202,7 @@ export const createBlobArtifactKey = ({ objectId, project }: BlobArtifactKey) =>
   `blob/${projectKey(project)}/${encodeKeyPart(objectId)}`;
 
 export const createFileBlobArtifactRequestKey = ({ path, ref }: FileBlobArtifactRequest) =>
-
+  `${ref}:${path}`;
 export const createCommitArtifactRequestKey = ({
   commitSha,
   parentSha,

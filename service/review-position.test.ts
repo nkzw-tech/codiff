@@ -31,4 +31,19 @@ test('rejects malformed or expanded review coordinates', () => {
       unexpected: true,
     }).success,
   ).toBe(false);
+  expect(
+    reviewCommentPositionSchema.safeParse({
+      range: { base: commit('a'), head: commit('b') },
+      versionId: '',
+    }).success,
+  ).toBe(false);
+});
+
+test('accepts a durable review-version coordinate', () => {
+  expect(
+    reviewCommentPositionSchema.safeParse({
+      range: { base: commit('a'.repeat(40)), head: commit('b'.repeat(40)) },
+      versionId: 'version-2',
+    }).success,
+  ).toBe(true);
 });
