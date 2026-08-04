@@ -63,6 +63,7 @@ export type PullRequestCodeQualityFinding = {
 export type HistoryEntry = {
   author: string;
   committedAt: number;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
   gravatarUrl?: string;
   parentShas: ReadonlyArray<GitSha>;
   scope?: 'base' | 'pull-request';

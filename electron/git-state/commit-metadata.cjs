@@ -6,6 +6,7 @@ const { fileSort, getGravatarHash, git, gitBufferWithInput, gitOrEmpty } = requi
  * @typedef {import('../../core/types.ts').CommitMetadata} CommitMetadata
  * @typedef {import('../../core/types.ts').CommitMetadataFile} CommitMetadataFile
  * @typedef {import('../../core/types.ts').GitSha} GitSha
+ * @typedef {import('../../core/types.ts').HistoryEntry} HistoryEntry
  * @typedef {import('./common.cjs').StatusItem} StatusItem
  * @typedef {{additions?: number; binary: boolean; deletions?: number; path: string}} NumstatItem
  */
@@ -80,6 +81,70 @@ const readCommitNumstat = async (repoRoot, commit, firstParent) =>
         : ['show', '--format=', '--numstat', '-z', '--find-renames', commit],
     ),
   );
+
+/**
+ * @param {string} raw
+ * @returns {Map<string, {additions: number, deletions: number, filesChanged: number}>}
+ */
+const parseCommitDiffStats = (raw) => {
+  const statsBySha = new Map();
+  for (const record of raw.split('\x1e')) {
+    const separator = record.indexOf('\0');
+    if (separator < 0) {
+      continue;
+    }
+    const sha = record.slice(0, separator).trim();
+    if (!/^[0-9a-f]{40}$/i.test(sha)) {
+      continue;
+    }
+    const files = parseNumstat(record.slice(separator + 1).replace(/^\0?\n/, ''));
+    let additions = 0;
+    let deletions = 0;
+    for (const file of files.values()) {
+      additions += file.additions ?? 0;
+      deletions += file.deletions ?? 0;
+    }
+    statsBySha.set(sha, { additions, deletions, filesChanged: files.size });
+  }
+  return statsBySha;
+};
+
+/**
+ * Read immutable per-commit stats in one process. Missing local objects are
+ * skipped so history remains usable while a provider ref is being fetched.
+ * @param {string} repoRoot
+ * @param {ReadonlyArray<string>} commits
+ */
+const readCommitDiffStats = async (repoRoot, commits) => {
+  const uniqueCommits = [...new Set(commits)];
+  if (uniqueCommits.length === 0) {
+    return new Map();
+  }
+  const raw = await gitOrEmpty(repoRoot, [
+    'show',
+    '--no-walk',
+    '--ignore-missing',
+    '--diff-merges=first-parent',
+    '--format=%x1e%H%x00',
+    '--numstat',
+    '-z',
+    '--find-renames',
+    ...uniqueCommits,
+  ]);
+  return parseCommitDiffStats(raw);
+};
+
+/** @param {string} repoRoot @param {ReadonlyArray<HistoryEntry>} entries */
+const addHistoryDiffStats = async (repoRoot, entries) => {
+  const statsBySha = await readCommitDiffStats(
+    repoRoot,
+    entries.map((entry) => entry.sha),
+  );
+  return entries.map((entry) => {
+    const diffStat = statsBySha.get(entry.sha);
+    return diffStat ? { ...entry, diffStat } : entry;
+  });
+};
 
 /** @param {string} raw */
 const parseTrailers = (raw) =>
@@ -251,5 +316,7 @@ const readCommitMetadataForCommit = async (repoRoot, commit, firstParent, status
 };
 
 module.exports = {
+  addHistoryDiffStats,
+  readCommitDiffStats,
   readCommitMetadataForCommit,
 };
