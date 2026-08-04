@@ -118,6 +118,7 @@ import {
   readSidebarWidth,
   writeSidebarWidth,
 } from './lib/sidebar-width.ts';
+import { buildSourceDescriptionModel } from './lib/source-description.ts';
 import {
   getEmptySourceDetail,
   getEmptySourceTitle,
@@ -1507,6 +1508,34 @@ export function ReviewSurface({
   const diffLineHeight = getCodeFontLineHeight(
     normalizeCodeFontSizePreference(snapshot.preferences.codeFontSize),
   );
+  const source = snapshot.repository.source;
+  const sourceDescriptionModel = useMemo(
+    () =>
+      buildSourceDescriptionModel({
+        commitMetadata: snapshot.commitMetadata ?? null,
+        source,
+      }),
+    [snapshot.commitMetadata, source],
+  );
+  const [sourceDescriptionCollapsedByIdentity, setSourceDescriptionCollapsedByIdentity] = useState<
+    Readonly<Record<string, boolean>>
+  >({});
+  const sourceDescriptionCollapsed = sourceDescriptionModel
+    ? (sourceDescriptionCollapsedByIdentity[sourceDescriptionModel.identity] ??
+      sourceDescriptionModel.defaultCollapsed)
+    : false;
+  const changeSourceDescriptionCollapsed = useCallback(
+    (collapsed: boolean) => {
+      if (!sourceDescriptionModel) {
+        return;
+      }
+      setSourceDescriptionCollapsedByIdentity((current) => ({
+        ...current,
+        [sourceDescriptionModel.identity]: collapsed,
+      }));
+    },
+    [sourceDescriptionModel],
+  );
   const commonReviewProps = {
     activeSearchMatch: activeDiffSearchMatch,
     agentId: snapshot.walkthrough.agent,
@@ -1543,6 +1572,7 @@ export function ReviewSurface({
     onResolveThread: resolveDiscussion ?? noop,
     onSaveCommentEdit: updateExistingReviewComment,
     onSelectPathFromScroll: noop,
+    onSourceDescriptionCollapsedChange: changeSourceDescriptionCollapsed,
     onSubmitComment: submitComment,
     onToggleCollapsed: toggleCollapsed,
     onToggleViewed: toggleViewed,
@@ -1554,12 +1584,12 @@ export function ReviewSurface({
     searchQuery: diffSearchQuery,
     showWhitespace: snapshot.preferences.showWhitespace,
     source: snapshot.repository.source,
+    sourceDescriptionCollapsed,
     supportsReviewCommentActions: submitReviewComment != null,
     theme: snapshot.preferences.theme,
     viewed,
     wordWrap,
   };
-  const source = snapshot.repository.source;
   const showDesktopCommitButton =
     sidebarMode === 'tree' &&
     source.type === 'working-tree' &&
@@ -1608,21 +1638,15 @@ export function ReviewSurface({
         onMergePullRequest={sourceNavigation?.onMergePullRequest ? mergePullRequest : undefined}
       />
     ) : undefined;
-  const sourceDescriptionFooter =
-    sourceDescriptionFooterMain && sourceDescriptionFooterAside ? (
-      <div className="codiff-source-description-footer-row">
-        <div className="codiff-source-description-footer-main">{sourceDescriptionFooterMain}</div>
-        <div className="codiff-source-description-footer-aside">{sourceDescriptionFooterAside}</div>
-      </div>
-    ) : (
-      (sourceDescriptionFooterMain ?? sourceDescriptionFooterAside)
-    );
   const sourceDescription =
     source.type === 'pull-request' ? (
       <PullRequestSourceDescription
         actions={sourceDescriptionActions}
-        footer={sourceDescriptionFooter}
+        collapsed={sourceDescriptionCollapsed}
+        footer={sourceDescriptionFooterMain}
+        footerAside={sourceDescriptionFooterAside}
         keymap={keymap}
+        onCollapsedChange={changeSourceDescriptionCollapsed}
         onUpdateDescription={sourceNavigation?.onUpdateDescription}
         onUpdateTitle={sourceNavigation?.onUpdateTitle}
         onUploadDescriptionAsset={sourceNavigation?.onUploadDescriptionAsset}
@@ -1644,7 +1668,8 @@ export function ReviewSurface({
         reviewProps={commonReviewProps}
         scrollTarget={blockScrollTarget}
         sourceDescriptionActions={sourceDescriptionActions}
-        sourceDescriptionFooter={sourceDescriptionFooter}
+        sourceDescriptionFooter={sourceDescriptionFooterMain}
+        sourceDescriptionFooterAside={sourceDescriptionFooterAside}
       />
     );
   };
@@ -2034,7 +2059,8 @@ export function ReviewSurface({
                 scrollTarget={treeScrollTarget}
                 selectedPath={visibleSelectedPath}
                 sourceDescriptionActions={sourceDescriptionActions}
-                sourceDescriptionFooter={sourceDescriptionFooter}
+                sourceDescriptionFooter={sourceDescriptionFooterMain}
+                sourceDescriptionFooterAside={sourceDescriptionFooterAside}
                 walkthroughNotes={emptyWalkthroughNotes}
               />
             )
