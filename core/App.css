@@ -1187,7 +1187,7 @@ a.review-top-bar-source:focus-visible {
   corner-shape: squircle;
   display: grid;
   gap: 4px;
-  grid-template-columns: minmax(140px, 240px) 54px repeat(3, 28px);
+  grid-template-columns: minmax(140px, 240px) 54px auto repeat(3, 28px);
   min-height: 38px;
   opacity: 0;
   padding: 4px;
@@ -1228,6 +1228,26 @@ a.review-top-bar-source:focus-visible {
 .diff-search-input::placeholder,
 .diff-search-count {
   color: var(--muted);
+}
+
+.diff-search-filters {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.diff-search-filters label {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font: 11px/1 var(--font-sans);
+  gap: 3px;
+}
+
+.diff-search-filters input {
+  accent-color: var(--tree-selection-focus);
+  margin: 0;
 }
 
 .diff-search-count {
@@ -4037,9 +4057,14 @@ diffs-container .review-comment-thread {
 
 @media (max-width: 880px) {
   .diff-search-panel {
-    grid-template-columns: minmax(120px, 1fr) 48px 28px 28px 28px;
+    grid-template-columns: minmax(120px, 1fr) 48px minmax(0, auto) repeat(3, 28px);
     left: 230px;
     right: 10px;
+  }
+
+  .diff-search-filters {
+    min-width: 0;
+    overflow-x: auto;
   }
 
   .code-view {

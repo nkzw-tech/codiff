@@ -473,7 +473,6 @@ test('dispatches neutral GitLab review sessions with pending drafts and summarie
   });
 });
 
-
 test('keeps title-only source footer actions reachable', async () => {
   const onMergePullRequest = vi.fn(async () => {});
   const source = {
@@ -641,7 +640,6 @@ test('renders the same source-description semantics once in Tree, Walkthrough, a
   await waitFor(assertSourceDescriptionOnce);
 });
 
->>>>>>> conflict 1 of 1 ends
 test('copies local notes with the local label and Markdown heading', async () => {
   const file = snapshot.files[0]!;
   const draft = {

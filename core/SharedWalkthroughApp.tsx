@@ -815,12 +815,14 @@ export function ReviewSurface({
     activeMatchIndex: activeDiffSearchMatchIndex,
     closeSearch: closeDiffSearch,
     fileFilteredFiles,
+    filters: diffSearchFilters,
     focusRequest: diffSearchFocusRequest,
     matches: diffSearchMatches,
     matchPathSet: diffSearchMatchPathSet,
     moveMatch: moveDiffSearchMatch,
     openSearch: openDiffSearch,
     query: diffSearchQuery,
+    updateFilters: updateDiffSearchFilters,
     updateQuery: updateDiffSearchQuery,
     visible: diffSearchVisible,
     visibleFiles,
@@ -1874,11 +1876,13 @@ export function ReviewSurface({
         ) : null}
         <DiffSearchPanel
           activeIndex={activeDiffSearchMatchIndex}
+          filters={diffSearchFilters}
           focusRequest={diffSearchFocusRequest}
           keymap={keymap}
           matchCount={diffSearchMatches.length}
           onChange={updateDiffSearchQuery}
           onClose={closeDiffSearch}
+          onFiltersChange={updateDiffSearchFilters}
           onNext={() => moveDiffSearchMatch(1)}
           onPrevious={() => moveDiffSearchMatch(-1)}
           query={diffSearchQuery}

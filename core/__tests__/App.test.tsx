@@ -324,6 +324,80 @@ test('diff search finds content matches across sides', () => {
   expect(result?.matchCount).toBe(1);
 });
 
+test('diff search independently filters new, old, and unchanged lines', () => {
+  const file = {
+    fingerprint: 'search-filters',
+    path: 'src/search.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/search.ts:unstaged',
+        kind: 'unstaged',
+        patch:
+          'diff --git a/src/search.ts b/src/search.ts\n@@ -1,3 +1,3 @@\n needle context\n-old needle\n+new needle\n needle context\n',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  expect(getDiffSearchResult(file, false, 'needle')?.matchCount).toBe(2);
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: false,
+      deletions: false,
+      unchanged: true,
+    })?.matchCount,
+  ).toBe(2);
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: true,
+      deletions: false,
+      unchanged: false,
+    })?.matchCount,
+  ).toBe(1);
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: false,
+      deletions: true,
+      unchanged: false,
+    })?.matchCount,
+  ).toBe(1);
+});
+
+test('diff search does not search hidden unchanged lines from complete file contents', () => {
+  const file = {
+    fingerprint: 'search-unloaded-context',
+    path: 'src/search.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/search.ts:unstaged',
+        kind: 'unstaged',
+        newFile: {
+          contents:
+            'before\nneedle outside the patch\nafter\nline four\nline five\nline six\nline seven\nline eight\nline nine\nline ten\nnew value\n',
+          name: 'src/search.ts',
+        },
+        oldFile: {
+          contents:
+            'before\nneedle outside the patch\nafter\nline four\nline five\nline six\nline seven\nline eight\nline nine\nline ten\nold value\n',
+          name: 'src/search.ts',
+        },
+        patch: 'diff --git a/src/search.ts b/src/search.ts\n@@ -4 +4 @@\n-old value\n+new value\n',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: false,
+      deletions: false,
+      unchanged: true,
+    }),
+  ).toBeNull();
+});
+
 test('diff search includes file path matches', () => {
   const file = {
     fingerprint: 'path-search',
