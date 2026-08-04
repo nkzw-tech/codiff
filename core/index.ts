@@ -1,6 +1,38 @@
 export { defaultReviewPreferences } from './defaults.ts';
 export { diffRange, isCommitRevision, shaForRevision } from './lib/review-history.ts';
 export {
+  orderReviewCommitStack,
+  validateReviewCommitStack,
+  type ReviewCommitStack,
+  type ReviewCommitStackItem,
+} from './lib/review-commit-stack.ts';
+export {
+  createCommitArtifactRequestKey,
+  createFileBlobArtifactRequestKey,
+  createReviewArtifactRun,
+  reviewArtifactSchemaVersion,
+  validateCommitArtifact,
+  validateRangeArtifact,
+  validateReviewArtifactRangeResult,
+  validateStackSnapshot,
+  type ArtifactCoverage,
+  type ArtifactFile,
+  type BlobArtifact,
+  type CommitArtifact,
+  type CommitArtifactRequest,
+  type CommitArtifactRequestKey,
+  type FileBlobArtifactRequest,
+  type RangeArtifact,
+  type ReviewArtifactProject,
+  type ReviewArtifactRangeRequest,
+  type ReviewArtifactRangeResult,
+  type ReviewArtifactProvenance,
+  type ReviewArtifactRun,
+  type ReviewArtifactRunDiagnostics,
+  type ReviewArtifactSource,
+  type StackSnapshot,
+} from './lib/review-artifacts.ts';
+export {
   parsePlanShareManifest,
   parsePlanShareUpload,
   type PlanShareManifestV1,
