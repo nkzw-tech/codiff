@@ -1,7 +1,7 @@
 {
   "name": "@nkzw/codiff-gitlab",
   "version": "0.1.0",
-  "description": "Host-injected GitLab transport for Codiff.",
+  "description": "Read-side GitLab review-history adapter for Codiff.",
   "license": "MIT",
   "author": {
     "name": "Christoph Nakazawa",
