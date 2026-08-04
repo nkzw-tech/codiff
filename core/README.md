@@ -49,3 +49,12 @@ other I/O policy.
 Target Comparison classifiers choose either `net-change` or `commit-by-commit`.
 Ordinary commit units retain their Git SHA identity, and resolved target plans
 never contain Evolution Units.
+
+## Version Comparison plans
+
+Version Comparison plans choose either `complete-comparison` or
+`commit-evolution`. Review versions use `versionId`, `fromVersionId`, and
+`toVersionId`; Evolution Units carry `unitId` and never reuse commit SHA or
+version identity. Aggregate comparison and evolution state load independently
+so hosts can present immutable comparison evidence before classification is
+ready.

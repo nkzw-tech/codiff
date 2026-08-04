@@ -1,11 +1,14 @@
 import type {
+  DiffComparisonAnalysis,
   RepositoryState,
+  ReviewCommitUnit,
   ReviewCommitSummary,
   ReviewUnit,
   TargetComparisonReviewPlan,
   TargetComparisonReviewStructure,
+  VersionComparisonReviewPlan,
 } from './review-history.ts';
-import type { DiffRange, GitSha, ResolvedReviewSource } from './review-identity.ts';
+import type { DiffComparison, DiffRange, GitSha, ResolvedReviewSource } from './review-identity.ts';
 import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
 export type GenerationSettings = Readonly<Record<string, boolean | number | string>>;
@@ -26,18 +29,31 @@ export type GenerationMetadata = {
   profile: GenerationProfile;
 };
 
-/** Top-level walkthrough authoring context for one Target Comparison. */
-export type WalkthroughGenerationInput = {
-  kind: 'range';
-  plan: TargetComparisonReviewPlan;
-  range: DiffRange;
-  /** Aggregate state for net-change review or later composition. */
-  state: RepositoryState;
-  unitStates?: ReadonlyArray<{
-    state: RepositoryState;
-    unit: ReviewUnit;
-  }>;
-};
+/** Top-level walkthrough authoring context for one resolved review relation. */
+export type WalkthroughGenerationInput =
+  | {
+      kind: 'range';
+      plan: TargetComparisonReviewPlan;
+      range: DiffRange;
+      /** Aggregate state for net-change review or later composition. */
+      state: RepositoryState;
+      unitStates?: ReadonlyArray<{
+        state: RepositoryState;
+        unit: ReviewCommitUnit;
+      }>;
+    }
+  | {
+      analysis: DiffComparisonAnalysis;
+      comparison: DiffComparison;
+      kind: 'comparison';
+      plan: VersionComparisonReviewPlan;
+      /** Aggregate state for Complete Comparison review. */
+      state?: RepositoryState;
+      unitStates?: ReadonlyArray<{
+        state: RepositoryState;
+        unit: Exclude<ReviewUnit, { kind: 'commit' }>;
+      }>;
+    };
 
 export type WalkthroughGenerationUnitProgress = {
   detail?: string;

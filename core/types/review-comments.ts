@@ -1,6 +1,12 @@
 import type { MarkdownAnnotationAnchor } from '@nkzw/mdx-editor';
 import type { ReviewAuthor } from './review-history.ts';
-import type { DiffRange, ReviewSource, Revision } from './review-identity.ts';
+import type {
+  DiffRange,
+  GitSha,
+  ReviewSource,
+  ReviewVersionId,
+  Revision,
+} from './review-identity.ts';
 
 export type PlanCommentAuthor = {
   avatarUrl?: string;
@@ -44,6 +50,8 @@ export type PlanHandoffStatus = 'closed' | 'done';
 /** Durable persisted comment identity independent of a renderer section ID. */
 export type ReviewCommentPosition = {
   range: DiffRange;
+  /** Provider version used to resolve the durable range, when applicable. */
+  versionId?: ReviewVersionId;
 };
 
 export type PullRequestReviewComment = {
@@ -70,8 +78,43 @@ export type PullRequestExistingReviewComment = PullRequestReviewComment & {
   id: string;
   isOutdated?: boolean;
   isThreadResolved?: boolean;
+  /** Exact provider coordinates when the provider reports a start revision. */
+  positionIdentity?: {
+    baseSha: GitSha;
+    headSha: GitSha;
+    startSha: GitSha;
+  };
+  resolution?: {
+    confidence: 'approximate' | 'exact';
+    nearbyHunkContext?: { after?: string; before?: string };
+    versions: ReadonlyArray<{ fromLabel: string; toLabel: string }>;
+  };
   submittedAt?: string;
   url?: string;
+  versionAssociation?: 'exact' | 'unmatched';
+  versionHeadSha?: GitSha;
+  versionId?: ReviewVersionId;
+  versionLabel?: string;
+};
+
+export type PullRequestAIReviewDecision =
+  | 'approved'
+  | 'approved-with-comments'
+  | 'changes-requested'
+  | 'unknown';
+
+export type PullRequestAIReview = {
+  body: string;
+  decision: PullRequestAIReviewDecision;
+  id: string;
+  reviewedHeadSha?: GitSha;
+  reviewer: ReviewAuthor & { id: string };
+  submittedAt?: string;
+  url?: string;
+  versionAssociation?: 'exact' | 'unmatched';
+  versionHeadSha?: GitSha;
+  versionId?: ReviewVersionId;
+  versionLabel?: string;
 };
 
 type ReviewCommentSubmissionBase = {

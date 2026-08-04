@@ -11,6 +11,7 @@ import type {
   PullRequestCodeQualityFinding,
   ReviewCommitSummary,
   TargetComparisonReviewStructure,
+  VersionComparisonReviewStructure,
 } from './review-history.ts';
 import type {
   ChangedFile,
@@ -434,10 +435,17 @@ export const hasGenerationRequestCapability = (
   readonly generationRequest: Immutable<WalkthroughArtifactV5['generationRequest']>;
 } => 'generationRequest' in walkthrough;
 
-export type SharedWalkthroughReviewScope = {
-  kind: 'merge-request';
-  structure: TargetComparisonReviewStructure;
-};
+export type SharedWalkthroughReviewScope =
+  | {
+      kind: 'merge-request';
+      structure: TargetComparisonReviewStructure;
+    }
+  | {
+      from: { label: string; sha: GitSha };
+      kind: 'version-comparison';
+      structure: VersionComparisonReviewStructure;
+      to: { label: string; sha: GitSha };
+    };
 
 export type SharedWalkthroughSnapshot = {
   branch: string | null;

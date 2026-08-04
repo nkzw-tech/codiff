@@ -123,10 +123,24 @@ const walkthroughSourceSchema = z
     url: boundedString(4096).optional(),
   })
   .passthrough();
-const sharedReviewScopeSchema = z.object({
-  kind: z.literal('merge-request'),
-  structure: z.enum(['commit-by-commit', 'net-change']),
-});
+const sharedReviewScopeSchema = z.union([
+  z.object({
+    kind: z.literal('merge-request'),
+    structure: z.enum(['commit-by-commit', 'net-change']),
+  }),
+  z.object({
+    from: z.object({
+      label: nonEmptyString(300),
+      sha: nonEmptyString(128),
+    }),
+    kind: z.literal('version-comparison'),
+    structure: z.enum(['commit-evolution', 'complete-comparison']),
+    to: z.object({
+      label: nonEmptyString(300),
+      sha: nonEmptyString(128),
+    }),
+  }),
+]);
 const walkthroughManifestSchema = z
   .object({
     branch: boundedString(1024).optional(),

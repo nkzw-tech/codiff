@@ -87,6 +87,24 @@ test('creates anonymous upload intents without touching persistent storage', asy
 for (const [name, reviewScope] of [
   ['net change', { kind: 'merge-request', structure: 'net-change' }],
   ['commit-by-commit merge request', { kind: 'merge-request', structure: 'commit-by-commit' }],
+  [
+    'complete comparison',
+    {
+      from: { label: 'Head · aaaaaaa', sha: 'a'.repeat(40) },
+      kind: 'version-comparison',
+      structure: 'complete-comparison',
+      to: { label: 'Current head', sha: 'b'.repeat(40) },
+    },
+  ],
+  [
+    'commit evolution',
+    {
+      from: { label: 'Head · aaaaaaa', sha: 'a'.repeat(40) },
+      kind: 'version-comparison',
+      structure: 'commit-evolution',
+      to: { label: 'Current head', sha: 'b'.repeat(40) },
+    },
+  ],
 ] as const) {
   test(`preserves ${name} scope metadata in version 1 walkthrough uploads`, () => {
     const parsed = parseShareUpload(
