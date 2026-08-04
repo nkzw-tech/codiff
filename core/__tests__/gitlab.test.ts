@@ -16,8 +16,10 @@ type GitLabPosition = Record<string, unknown> & {
 const {
   createGitLabPosition,
   createMergeRequestFetchRefspecs,
+  createMergeRequestSource,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
+  readMergeRequestReviewComments,
   submitMergeRequestComment,
   submitMergeRequestReview,
 } = require('../../electron/git-state/merge-request.cjs') as {
@@ -30,11 +32,20 @@ const {
     mergeRequest: Record<string, unknown>,
     metadata: Record<string, unknown>,
   ) => ReadonlyArray<string>;
+  createMergeRequestSource: (
+    mergeRequest: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+  ) => Record<string, unknown>;
   normalizeGitLabReviewComment: (
     note: Record<string, unknown>,
     url: string,
+    threadId?: string,
   ) => Record<string, unknown> | null;
   parseGitLabMergeRequestUrl: (url: string) => Record<string, unknown>;
+  readMergeRequestReviewComments: (
+    launchPath: string,
+    source: Record<string, unknown>,
+  ) => Promise<ReadonlyArray<Record<string, unknown>>>;
   submitMergeRequestComment: (
     launchPath: string,
     request: {
@@ -93,6 +104,19 @@ process.stdin.on('end', () => {
       '[{"diff":"@@ -10,2 +12,2 @@\\\\n context\\\\n-old\\\\n+new\\\\n","new_path":"src/new.ts","old_path":"src/old.ts"}]' +
         '[{"diff":"@@ -1 +1 @@\\\\n-old\\\\n+new\\\\n","new_path":"src/other.ts","old_path":"src/other.ts"}]',
     );
+    return;
+  }
+  if (endpoint.endsWith('/discussions?per_page=100')) {
+    process.stdout.write(JSON.stringify([{
+      id: 'discussion-from-provider',
+      notes: [{
+        author: { username: 'reviewer' },
+        body: 'Loaded discussion comment.',
+        created_at: '2026-07-08T00:00:00Z',
+        id: 47,
+        position: { new_line: 12, new_path: 'src/new.ts', old_path: 'src/old.ts' },
+      }],
+    }]));
     return;
   }
   if (endpoint.endsWith('/discussions/discussion%2Fwith%20spaces/notes')) {
@@ -174,6 +198,24 @@ describe('GitLab merge requests', () => {
       '+refs/merge-requests/23/head:refs/codiff/merge-requests/23/head',
       '+refs/heads/main:refs/codiff/merge-requests/23/base',
     ]);
+  });
+
+  test('preserves the GitLab target branch in the review source', () => {
+    expect(
+      createMergeRequestSource(
+        {
+          host: 'gitlab.example.com',
+          number: 23,
+          projectPath: 'group/project',
+          url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+        },
+        {
+          sha: 'head-sha',
+          target_branch: 'main',
+          title: 'Focused fix',
+        },
+      ),
+    ).toMatchObject({ provider: 'gitlab', targetBranch: 'main', type: 'pull-request' });
   });
 
   test('builds single-line and ranged GitLab diff positions', () => {
@@ -289,6 +331,7 @@ describe('GitLab merge requests', () => {
           },
         },
         'https://gitlab.example.com/group/project/-/merge_requests/23',
+        'discussion-44',
       ),
     ).toMatchObject({
       author: { login: 'reviewer' },
@@ -297,6 +340,7 @@ describe('GitLab merge requests', () => {
       id: 'gitlab:44',
       lineNumber: 12,
       side: 'additions',
+      threadId: 'discussion-44',
       url: 'https://gitlab.example.com/group/project/-/merge_requests/23#note_44',
     });
   });
@@ -389,6 +433,24 @@ describe('GitLab merge requests', () => {
     });
   });
 
+  test('loads GitLab discussion IDs as provider thread identity', async () => {
+    await withFakeGitLab(async (repo) => {
+      await expect(
+        readMergeRequestReviewComments(repo, {
+          provider: 'gitlab',
+          type: 'pull-request',
+          url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          body: 'Loaded discussion comment.',
+          id: 'gitlab:47',
+          threadId: 'discussion-from-provider',
+        }),
+      ]);
+    });
+  });
+
   test('preserves submitted metadata when GitLab discussion replies omit positions', async () => {
     await withFakeGitLab(async (repo, readCalls) => {
       await expect(
@@ -416,7 +478,7 @@ describe('GitLab merge requests', () => {
 
       const [call] = await readCalls();
       expect(call.args.at(-1)).toBe(
-        'projects/group%2Fproject/merge_requests/23/discussions/discussion%2Fwith%20spaces/notes',
+        '/projects/group%2Fproject/merge_requests/23/discussions/discussion%2Fwith%20spaces/notes',
       );
       expect(call.args).toContain('Content-Type: application/json');
       expect(JSON.parse(call.input)).toEqual({ body: 'Reply in the existing discussion.' });
@@ -456,7 +518,7 @@ if [ "$GITLAB_TOKEN" != 'from-login-shell' ]; then
   echo 'To get started with GitLab CLI, please run:  glab auth login.' >&2
   exit 4
 fi
-printf '%s' '{}'
+printf '%s' '[]'
 `,
     );
     await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);
@@ -507,7 +569,7 @@ if [ "$GITLAB_TOKEN" != 'from-process' ]; then
   echo 'Expected the process GITLAB_TOKEN to win, got:' "$GITLAB_TOKEN" >&2
   exit 4
 fi
-printf '%s' '{}'
+printf '%s' '[]'
 `,
     );
     await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);

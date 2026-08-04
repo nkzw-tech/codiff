@@ -130,6 +130,8 @@ export type RepositoryState = {
   generatedAt: number;
   launchPath: string;
   reviewComments?: ReadonlyArray<PullRequestExistingReviewComment>;
+  reviewCommentsError?: string;
+  reviewCommentsLoadState?: 'failed' | 'loaded' | 'not-loaded';
   root: string;
   source: ResolvedReviewSource;
 };

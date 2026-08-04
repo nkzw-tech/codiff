@@ -9,6 +9,7 @@ export type DiffSection = {
   binary: boolean;
   id: string;
   kind: 'commit' | 'pull-request' | 'staged' | 'unstaged';
+  lineCount?: { additions: number; deletions: number };
   loadState?: 'binary' | 'deferred' | 'directory' | 'error' | 'ready' | 'too-large';
   newFile?: { cacheKey?: string; contents: string; name: string };
   oldFile?: { cacheKey?: string; contents: string; name: string };
@@ -118,6 +119,14 @@ export type DiffSectionContentRequest = {
   path: string;
   showWhitespace?: boolean;
   source?: ResolvedReviewSource;
+};
+export type DiffSectionsContentRequest = {
+  source: Extract<ResolvedReviewSource, { type: 'pull-request' }>;
+};
+
+export type DiffSectionsContentResult = {
+  headSha?: GitSha;
+  sections: ReadonlyArray<{ path: string; section: DiffSection }>;
 };
 
 export type DefinitionSearchRequest = {

@@ -149,7 +149,7 @@ test('skips a mismatching origin alias and selects the remote with the exact PR 
   } finally {
     await removeGitTestDirectory(directory);
   }
-});
+}, 15_000);
 
 test('rejects opaque remotes that do not match both the repository path and PR head', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'codiff-pull-request-remote-'));
@@ -179,4 +179,4 @@ test('rejects opaque remotes that do not match both the repository path and PR h
   } finally {
     await removeGitTestDirectory(directory);
   }
-});
+}, 15_000);

@@ -1,74 +1,35 @@
 // @ts-check
 
 const { createHash } = require('node:crypto');
-const { spawn } = require('node:child_process');
-const { homedir } = require('node:os');
-const { join } = require('node:path');
-const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
-const { getCommandEnvironment } = require('../login-shell-environment.cjs');
-const {
-  getFingerprint,
-  git,
-  gitOrEmpty,
-  readGitImageFile,
-  validateRepositoryPath,
-} = require('./common.cjs');
+const { git, gitOrEmpty, readGitImageFile, validateRepositoryPath } = require('./common.cjs');
 const { readGitFiles } = require('./git-files.cjs');
+const { createGlabGitLabTransport } = require('./glab-gitlab-transport.cjs');
+const { loadGitLabHistory } = require('../gitlab-history-bridge.cjs');
+const { normalizeGitHubCommit } = require('./pull-request.cjs');
 const {
-  createPatchFromPullRequestFile,
+  canHydrateArtifactFile,
   createPullRequestSection,
-  normalizeGitHubCommit,
-} = require('./pull-request.cjs');
+  isBinaryDiffPatch,
+  rangeArtifactToPullRequestFiles,
+} = require('./review-range-sections.cjs');
 const { parseReviewUrl, readReviewRemotes } = require('../review-source.cjs');
 
 /**
- * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
  * @typedef {import('../../core/types.ts').PullRequestReviewComment} PullRequestReviewComment
  * @typedef {import('../../core/types.ts').ReviewSource} ReviewSource
+ * @typedef {import('../../core/lib/review-artifacts.ts').ArtifactFile} ArtifactFile
  */
 
-const GLAB_NOT_FOUND_CODE = 'GLAB_NOT_FOUND';
-const GLAB_NOT_FOUND_MESSAGE =
-  'GitLab support requires glab. Install glab, authenticate it, and verify `glab --version` works in Terminal. Codiff searches PATH, ~/.local/bin/glab, /opt/homebrew/bin/glab, and /usr/local/bin/glab. If glab is installed somewhere else, launch Codiff with `CODIFF_GLAB_PATH=/absolute/path/to/glab codiff -w`.';
+/**
+ * Latest initial provider snapshots, keyed by local root and MR URL.
+ * @type {Map<string, {headSha?: string, metadata: any, range: import('../../core/lib/review-artifacts.ts').RangeArtifact}>}
+ */
+const mergeRequestHydrationSnapshots = new Map();
+const MAX_MERGE_REQUEST_HYDRATION_SNAPSHOTS = 8;
 
-/** @param {string} [detail] */
-const createGlabNotFoundError = (detail) =>
-  Object.assign(
-    new Error(detail ? `${GLAB_NOT_FOUND_MESSAGE} ${detail}` : GLAB_NOT_FOUND_MESSAGE),
-    {
-      code: GLAB_NOT_FOUND_CODE,
-    },
-  );
-
-const getGlabCommand = () => {
-  const glabPath = process.env.CODIFF_GLAB_PATH?.trim();
-  if (glabPath) {
-    if (isExecutableFile(glabPath)) {
-      return glabPath;
-    }
-
-    throw createGlabNotFoundError(
-      `CODIFF_GLAB_PATH is set to ${JSON.stringify(glabPath)}, but that file is not executable.`,
-    );
-  }
-
-  const pathCommand = findExecutableOnPath('glab');
-  if (pathCommand) {
-    return pathCommand;
-  }
-
-  for (const path of [
-    join(homedir(), '.local/bin/glab'),
-    '/opt/homebrew/bin/glab',
-    '/usr/local/bin/glab',
-  ]) {
-    if (isExecutableFile(path)) {
-      return path;
-    }
-  }
-
-  throw createGlabNotFoundError();
-};
+/** @type {Map<string, Promise<import('../../core/types.ts').DiffSectionsContentResult>>} */
+const mergeRequestBulkHydrations = new Map();
+const MAX_MERGE_REQUEST_BULK_HYDRATIONS = 8;
 
 /** @param {string} value */
 const parseGitLabMergeRequestUrl = (value) => {
@@ -81,116 +42,6 @@ const parseGitLabMergeRequestUrl = (value) => {
 
 /** @param {string} projectPath */
 const encodeProjectPath = (projectPath) => encodeURIComponent(projectPath);
-
-/**
- * @param {{host: string}} mergeRequest
- * @param {ReadonlyArray<string>} args
- * @param {unknown} [input]
- */
-const createGlabApiArgs = (mergeRequest, args, input) => [
-  'api',
-  '--hostname',
-  mergeRequest.host,
-  ...(input == null ? [] : ['--header', 'Content-Type: application/json']),
-  ...args,
-];
-
-/**
- * @param {string} repoRoot
- * @param {{host: string}} mergeRequest
- * @param {ReadonlyArray<string>} args
- * @param {unknown} [input]
- */
-const glabApi = async (repoRoot, mergeRequest, args, input) => {
-  const environment = await getCommandEnvironment();
-  return new Promise((resolve, reject) => {
-    let command;
-    try {
-      command = getGlabCommand();
-    } catch (error) {
-      reject(error);
-      return;
-    }
-
-    const child = spawn(command, createGlabApiArgs(mergeRequest, args, input), {
-      cwd: repoRoot,
-      env: environment,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const stdout = [];
-    const stderr = [];
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', (error) => {
-      reject(error.code === 'ENOENT' ? createGlabNotFoundError() : error);
-    });
-    child.on('close', (code) => {
-      if (code === 0) {
-        resolve(Buffer.concat(stdout).toString('utf8'));
-      } else {
-        reject(
-          new Error(
-            Buffer.concat(stderr).toString('utf8').trim() || `glab api exited with code ${code}.`,
-          ),
-        );
-      }
-    });
-    child.stdin.end(input == null ? undefined : JSON.stringify(input));
-  });
-};
-
-/** @param {string} value */
-const parseGlabJsonPages = (value) => {
-  const documents = [];
-  let depth = 0;
-  let escape = false;
-  let inString = false;
-  let start = -1;
-
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index];
-    if (start === -1) {
-      if (/\s/.test(character)) {
-        continue;
-      }
-      if (character !== '[' && character !== '{') {
-        throw new SyntaxError(`Unexpected character in glab JSON output at position ${index}.`);
-      }
-      start = index;
-      depth = 1;
-      continue;
-    }
-
-    if (inString) {
-      if (escape) {
-        escape = false;
-      } else if (character === '\\') {
-        escape = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-    } else if (character === '[' || character === '{') {
-      depth += 1;
-    } else if (character === ']' || character === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        documents.push(JSON.parse(value.slice(start, index + 1)));
-        start = -1;
-      }
-    }
-  }
-
-  if (start !== -1 || inString) {
-    throw new SyntaxError('Incomplete JSON document in glab output.');
-  }
-
-  return documents.flatMap((document) => (Array.isArray(document) ? document : [document]));
-};
 
 /** @param {{number: number; projectPath: string}} mergeRequest */
 const mergeRequestEndpoint = (mergeRequest, suffix = '') =>
@@ -227,35 +78,98 @@ const selectMergeRequestRemote = (repoRoot, mergeRequest) => {
   return remote;
 };
 
-/** @param {string} repoRoot @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest */
-const readMergeRequestMetadata = async (repoRoot, mergeRequest) =>
-  JSON.parse(await glabApi(repoRoot, mergeRequest, [mergeRequestEndpoint(mergeRequest)]));
+/** Provider transport backed by the authenticated `glab` process owned by Electron. */
+const createMergeRequestTransport = (repoRoot, mergeRequest) =>
+  createGlabGitLabTransport({ hostname: mergeRequest.host, repoRoot });
+
+/**
+ * @param {string} repoRoot
+ * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
+ * @param {{request: (request: any) => Promise<any>}} [transport]
+ */
+const readMergeRequestMetadata = (repoRoot, mergeRequest, transport) =>
+  (transport || createMergeRequestTransport(repoRoot, mergeRequest)).request({
+    path: mergeRequestEndpoint(mergeRequest),
+  });
+
+/**
+ * @param {string} repoRoot
+ * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
+ * @param {ReturnType<typeof createGlabGitLabTransport>} [transport]
+ */
+const readMergeRequestDiffs = (repoRoot, mergeRequest, transport) =>
+  (transport || createMergeRequestTransport(repoRoot, mergeRequest)).requestPages({
+    path: mergeRequestEndpoint(mergeRequest, '/diffs'),
+    query: { per_page: 100 },
+  });
 
 /** @param {string} repoRoot @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest */
-const readMergeRequestDiffs = async (repoRoot, mergeRequest) =>
-  parseGlabJsonPages(
-    await glabApi(repoRoot, mergeRequest, [
-      '--paginate',
-      `${mergeRequestEndpoint(mergeRequest, '/diffs')}?per_page=100`,
-    ]),
+const mergeRequestHydrationSnapshotKey = (repoRoot, mergeRequest) =>
+  `${repoRoot}:${mergeRequest.url}`;
+
+/**
+ * @param {string} repoRoot
+ * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
+ * @param {{headSha?: string, metadata: any, range: import('../../core/lib/review-artifacts.ts').RangeArtifact}} snapshot
+ */
+const rememberMergeRequestHydrationSnapshot = (repoRoot, mergeRequest, snapshot) => {
+  const key = mergeRequestHydrationSnapshotKey(repoRoot, mergeRequest);
+  mergeRequestHydrationSnapshots.delete(key);
+  mergeRequestHydrationSnapshots.set(key, snapshot);
+  while (mergeRequestHydrationSnapshots.size > MAX_MERGE_REQUEST_HYDRATION_SNAPSHOTS) {
+    mergeRequestHydrationSnapshots.delete(mergeRequestHydrationSnapshots.keys().next().value);
+  }
+};
+
+/**
+ * @param {string} repoRoot
+ * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
+ * @param {{expectedHeadSha?: string, forceRefresh?: boolean}} [options]
+ */
+const readMergeRequestHydrationSnapshot = async (repoRoot, mergeRequest, options = {}) => {
+  const key = mergeRequestHydrationSnapshotKey(repoRoot, mergeRequest);
+  const cached = mergeRequestHydrationSnapshots.get(key);
+  if (
+    !options.forceRefresh &&
+    options.expectedHeadSha &&
+    cached?.headSha === options.expectedHeadSha
+  ) {
+    return cached;
+  }
+  const transport = createMergeRequestTransport(repoRoot, mergeRequest);
+  const [gitlab, metadata] = await Promise.all([
+    loadGitLabHistory(),
+    readMergeRequestMetadata(repoRoot, mergeRequest, transport),
+  ]);
+  const baseSha = metadata.diff_refs?.base_sha;
+  const headSha = metadata.diff_refs?.head_sha || metadata.sha;
+  if (!baseSha || !headSha) {
+    throw new Error('GitLab did not return complete merge request range coordinates.');
+  }
+  if (options.expectedHeadSha && headSha !== options.expectedHeadSha) {
+    throw new Error('The merge request head changed. Refresh before loading exact file contents.');
+  }
+  const project = {
+    host: mergeRequest.host,
+    project: mergeRequest.projectPath,
+    provider: /** @type {'gitlab'} */ ('gitlab'),
+  };
+  const artifactSource = gitlab.createGitLabArtifactSource({
+    project,
+    projectPath: mergeRequest.projectPath,
+    transport,
+  });
+  const { range } = await artifactSource.readStackAndRange(
+    { requestedBaseSha: baseSha, headSha },
+    new AbortController().signal,
   );
+  const snapshot = { headSha, metadata, range };
+  rememberMergeRequestHydrationSnapshot(repoRoot, mergeRequest, snapshot);
+  return snapshot;
+};
 
-/** @param {any} diff */
-const normalizeGitLabDiffFile = (diff) => ({
-  filename: diff.new_path,
-  patch: diff.diff,
-  ...(diff.old_path !== diff.new_path ? { previous_filename: diff.old_path } : {}),
-  status: diff.new_file
-    ? 'added'
-    : diff.deleted_file
-      ? 'removed'
-      : diff.renamed_file
-        ? 'renamed'
-        : 'modified',
-});
-
-/** @param {any} note @param {string} url */
-const normalizeGitLabReviewComment = (note, url) => {
+/** @param {any} note @param {string} url @param {string} [threadId] */
+const normalizeGitLabReviewComment = (note, url, threadId) => {
   const position = note.position || note.original_position;
   const isFilePosition = position?.position_type === 'file';
   const lineNumber = position?.new_line ?? position?.old_line;
@@ -289,14 +203,15 @@ const normalizeGitLabReviewComment = (note, url) => {
           startSide: start.type === 'old' ? 'deletions' : 'additions',
         }
       : {}),
+    ...(threadId ? { threadId } : {}),
     submittedAt: note.created_at,
     url: `${url}#note_${note.id}`,
   };
 };
 
-/** @param {any} note @param {PullRequestReviewComment} submittedComment @param {string} url */
-const normalizeSubmittedGitLabReviewComment = (note, submittedComment, url) => {
-  const normalized = normalizeGitLabReviewComment(note, url);
+/** @param {any} note @param {PullRequestReviewComment} submittedComment @param {string} url @param {string} [threadId] */
+const normalizeSubmittedGitLabReviewComment = (note, submittedComment, url, threadId) => {
+  const normalized = normalizeGitLabReviewComment(note, url, threadId || submittedComment.threadId);
   if (normalized) {
     return normalized;
   }
@@ -317,18 +232,24 @@ const normalizeSubmittedGitLabReviewComment = (note, submittedComment, url) => {
   };
 };
 
-/** @param {string} repoRoot @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest */
-const readMergeRequestComments = async (repoRoot, mergeRequest) => {
-  const discussions = parseGlabJsonPages(
-    await glabApi(repoRoot, mergeRequest, [
-      '--paginate',
-      `${mergeRequestEndpoint(mergeRequest, '/discussions')}?per_page=100`,
-    ]),
-  );
+/**
+ * @param {string} repoRoot
+ * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
+ * @param {ReturnType<typeof createGlabGitLabTransport>} [transport]
+ */
+const readMergeRequestComments = async (repoRoot, mergeRequest, transport) => {
+  const discussions = await (
+    transport || createMergeRequestTransport(repoRoot, mergeRequest)
+  ).requestPages({
+    path: mergeRequestEndpoint(mergeRequest, '/discussions'),
+    query: { per_page: 100 },
+  });
   return discussions
-    .flatMap((discussion) => discussion.notes || [])
-    .filter((note) => !note.system && !note.resolved)
-    .map((note) => normalizeGitLabReviewComment(note, mergeRequest.url))
+    .flatMap((discussion) =>
+      (discussion.notes || []).map((note) => ({ note, threadId: discussion.id })),
+    )
+    .filter(({ note }) => !note.system && !note.resolved)
+    .map(({ note, threadId }) => normalizeGitLabReviewComment(note, mergeRequest.url, threadId))
     .filter(Boolean);
 };
 
@@ -351,6 +272,7 @@ const createMergeRequestSource = (mergeRequest, metadata) => ({
   number: mergeRequest.number,
   projectPath: mergeRequest.projectPath,
   provider: 'gitlab',
+  ...(metadata.target_branch ? { targetBranch: metadata.target_branch } : {}),
   title: metadata.title,
   type: 'pull-request',
   url: metadata.web_url || mergeRequest.url,
@@ -389,15 +311,156 @@ const resolveMergeRequestContentRefs = async (repoRoot, mergeRequest, metadata) 
       metadata,
     );
   }
+  const expectedHead = metadata.diff_refs?.head_sha || metadata.sha;
+  const resolvedHead = (
+    await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', head])
+  ).trim();
+  const resolvedBase = (
+    await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', base])
+  ).trim();
+  if (!resolvedHead || !resolvedBase || (expectedHead && resolvedHead !== expectedHead)) {
+    return null;
+  }
   const metadataBase = metadata.diff_refs?.base_sha;
   if (
     metadataBase &&
     (await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', `${metadataBase}^{commit}`]))
   ) {
-    return { base: metadataBase, head };
+    return { base: metadataBase, head: resolvedHead };
   }
   const mergeBase = (await gitOrEmpty(repoRoot, ['merge-base', base, head])).trim();
-  return mergeBase ? { base: mergeBase, head } : null;
+  return mergeBase ? { base: mergeBase, head: resolvedHead } : null;
+};
+
+/**
+ * Hydrate eligible files from one immutable MR range with one pair of batched
+ * Git object reads.
+ *
+ * @param {string} repoRoot
+ * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
+ * @param {any} metadata
+ * @param {import('../../core/lib/review-artifacts.ts').RangeArtifact} range
+ * @param {ReadonlyArray<ArtifactFile>} files
+ * @param {{force?: boolean}} [options]
+ */
+const hydrateMergeRequestSections = async (
+  repoRoot,
+  mergeRequest,
+  metadata,
+  range,
+  files,
+  options = {},
+) => {
+  const candidates = files.filter(
+    (file) => canHydrateArtifactFile(file) && !isBinaryDiffPatch(file.patch || ''),
+  );
+  const refs = await resolveMergeRequestContentRefs(repoRoot, mergeRequest, metadata).catch(
+    () => null,
+  );
+  if (!refs) {
+    return candidates.map((file) => ({
+      path: file.path,
+      section: createPullRequestSection(mergeRequest, file, undefined, undefined, {
+        base: range.baseSha,
+        contentAttempted: true,
+        contentError:
+          'Codiff could not resolve the immutable merge request range. Retry exact content loading.',
+        head: range.headSha,
+      }),
+    }));
+  }
+
+  const oldPaths = candidates.map((file) => file.oldPath || file.path);
+  const newPaths = candidates.map((file) => file.path);
+  const [oldFiles, newFiles] = await Promise.all([
+    readGitFiles(repoRoot, refs.base, oldPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+    readGitFiles(repoRoot, refs.head, newPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+  ]);
+  return candidates.map((file) => {
+    const oldPath = file.oldPath || file.path;
+    return {
+      path: file.path,
+      section: createPullRequestSection(
+        mergeRequest,
+        file,
+        oldFiles.get(oldPath),
+        newFiles.get(file.path),
+        { base: range.baseSha, contentAttempted: true, head: range.headSha },
+      ),
+    };
+  });
+};
+
+/**
+ * @param {string} repoRoot
+ * @param {ReturnType<typeof parseGitLabMergeRequestUrl>} mergeRequest
+ * @param {any} metadata
+ * @param {import('../../core/lib/review-artifacts.ts').RangeArtifact} range
+const hydrateMergeRequestSection = async (
+  repoRoot,
+  mergeRequest,
+  metadata,
+  range,
+  file,
+  options = {},
+) => {
+  const [result] = await hydrateMergeRequestSections(
+    repoRoot,
+    mergeRequest,
+    metadata,
+    range,
+    [file],
+    options,
+  );
+  return (
+    result?.section ??
+    createPullRequestSection(mergeRequest, file, undefined, undefined, {
+      base: range.baseSha,
+      head: range.headSha,
+    })
+  );
+};
+  options = {},
+) => (await hydrateMergeRequestSections(repoRoot, mergeRequest, metadata, range, [file], options))[0]
+  ?.section;
+
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
+const readMergeRequestSectionsContent = async (launchPath, source) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const mergeRequest = parseGitLabMergeRequestUrl(source.url);
+  selectMergeRequestRemote(repoRoot, mergeRequest);
+  const { metadata, range } = await readMergeRequestHydrationSnapshot(repoRoot, mergeRequest, {
+    expectedHeadSha: source.headSha,
+  });
+  const key = `${repoRoot}:${mergeRequest.url}:${range.headSha}`;
+  const existing = mergeRequestBulkHydrations.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const hydration = hydrateMergeRequestSections(
+    repoRoot,
+    mergeRequest,
+    metadata,
+    range,
+    range.files,
+  )
+    .then((sections) => ({ headSha: range.headSha, sections }))
+    .catch((error) => {
+      mergeRequestBulkHydrations.delete(key);
+      throw error;
+    });
+  mergeRequestBulkHydrations.set(key, hydration);
+  while (mergeRequestBulkHydrations.size > MAX_MERGE_REQUEST_BULK_HYDRATIONS) {
+    mergeRequestBulkHydrations.delete(mergeRequestBulkHydrations.keys().next().value);
+  }
+  return hydration;
 };
 
 /** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
@@ -405,70 +468,49 @@ const readMergeRequestState = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const mergeRequest = parseGitLabMergeRequestUrl(source.url);
   selectMergeRequestRemote(repoRoot, mergeRequest);
-  const [metadata, diffs, reviewComments] = await Promise.all([
-    readMergeRequestMetadata(repoRoot, mergeRequest),
-    readMergeRequestDiffs(repoRoot, mergeRequest),
-    readMergeRequestComments(repoRoot, mergeRequest),
-  ]);
-  const refs = await resolveMergeRequestContentRefs(repoRoot, mergeRequest, metadata).catch(
-    () => null,
-  );
-  const reviewFiles = diffs.map((rawDiff) => {
-    const file = normalizeGitLabDiffFile(rawDiff);
-    return {
-      file,
-      oldPath: file.previous_filename || file.filename,
-      patch: createPatchFromPullRequestFile(file),
-    };
+  const { metadata, range } = await readMergeRequestHydrationSnapshot(repoRoot, mergeRequest, {
+    forceRefresh: true,
   });
-  const [oldFiles, newFiles] = refs
-    ? await Promise.all([
-        readGitFiles(
-          repoRoot,
-          refs.base,
-          reviewFiles.map(({ oldPath }) => oldPath),
-          { refScopedEmptyCacheKey: true },
-        ),
-        readGitFiles(
-          repoRoot,
-          refs.head,
-          reviewFiles.map(({ file }) => file.filename),
-          { refScopedEmptyCacheKey: true },
-        ),
-      ])
-    : [new Map(), new Map()];
-  /** @type {Array<ChangedFile>} */
-  const files = reviewFiles.map(({ file, oldPath, patch }) => {
-    const oldFile = refs ? oldFiles.get(oldPath) : null;
-    const newFile = refs ? newFiles.get(file.filename) : null;
-    const section = createPullRequestSection(mergeRequest, file, patch, oldFile, newFile);
-    return {
-      fingerprint: getFingerprint(
-        [metadata.sha || '', file.status, file.previous_filename || '', file.filename, patch].join(
-          '\n',
-        ),
-      ),
-      oldPath: file.previous_filename,
-      path: file.filename,
-      sections: [section],
-      status:
-        file.status === 'added'
-          ? 'added'
-          : file.status === 'removed'
-            ? 'deleted'
-            : file.status === 'renamed'
-              ? 'renamed'
-              : 'modified',
-    };
+  const files = rangeArtifactToPullRequestFiles(range, mergeRequest.number, {
+    deferContents: true,
   });
   return {
     files: files.sort((left, right) => left.path.localeCompare(right.path)),
     generatedAt: Date.now(),
     launchPath,
-    reviewComments,
+    reviewCommentsLoadState: 'not-loaded',
     root: repoRoot,
     source: createMergeRequestSource(mergeRequest, metadata),
   };
+};
+
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
+const readMergeRequestReviewComments = async (launchPath, source) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const mergeRequest = parseGitLabMergeRequestUrl(source.url);
+  selectMergeRequestRemote(repoRoot, mergeRequest);
+  return readMergeRequestComments(repoRoot, mergeRequest);
+};
+
+/**
+ * Load exact local contents for one merge-request file when explicitly retried.
+ * @param {string} launchPath
+ * @param {Extract<ReviewSource, {type: 'pull-request'}>} source
+ * @param {string} requestedPath
+ */
+const readMergeRequestSectionContent = async (launchPath, source, requestedPath, options = {}) => {
+  const path = validateRepositoryPath(requestedPath);
+  const mergeRequest = parseGitLabMergeRequestUrl(source.url);
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  selectMergeRequestRemote(repoRoot, mergeRequest);
+  const { metadata, range } = await readMergeRequestHydrationSnapshot(repoRoot, mergeRequest, {
+    expectedHeadSha: source.headSha,
+  });
+  const file = range.files.find((candidate) => candidate.path === path);
+  if (!file) {
+    throw new Error('File is not part of this merge request.');
+  }
+  return hydrateMergeRequestSection(repoRoot, mergeRequest, metadata, range, file, options);
 };
 
 /** @param {any} commit @param {'base' | 'pull-request'} scope */
@@ -488,18 +530,22 @@ const normalizeGitLabCommit = (commit, scope) =>
     scope,
   );
 
-/** @param {string} repoRoot @param {any} mergeRequest @param {string} ref @param {number} limit */
-const readRepositoryCommits = async (repoRoot, mergeRequest, ref, limit) => {
+/**
+ * @param {string} repoRoot
+ * @param {any} mergeRequest
+ * @param {string} ref
+ * @param {number} limit
+ * @param {ReturnType<typeof createGlabGitLabTransport>} [transport]
+ */
+const readRepositoryCommits = async (repoRoot, mergeRequest, ref, limit, transport) => {
+  const client = transport || createMergeRequestTransport(repoRoot, mergeRequest);
   const commits = [];
   for (let page = 1; commits.length < limit; page += 1) {
     const perPage = Math.min(limit - commits.length, 100);
-    const pageCommits = JSON.parse(
-      await glabApi(repoRoot, mergeRequest, [
-        `projects/${encodeProjectPath(mergeRequest.projectPath)}/repository/commits?ref_name=${encodeURIComponent(
-          ref,
-        )}&per_page=${perPage}&page=${page}`,
-      ]),
-    );
+    const pageCommits = await client.request({
+      path: `projects/${encodeProjectPath(mergeRequest.projectPath)}/repository/commits`,
+      query: { page, per_page: perPage, ref_name: ref },
+    });
     if (!Array.isArray(pageCommits) || pageCommits.length === 0) {
       break;
     }
@@ -515,15 +561,14 @@ const readRepositoryCommits = async (repoRoot, mergeRequest, ref, limit) => {
 const listMergeRequestHistory = async (launchPath, source, limit = 200) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const mergeRequest = parseGitLabMergeRequestUrl(source.url);
-  const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest);
-  const commits = parseGlabJsonPages(
-    await glabApi(repoRoot, mergeRequest, [
-      '--paginate',
-      `${mergeRequestEndpoint(mergeRequest, '/commits')}?per_page=100`,
-    ]),
-  );
+  const transport = createMergeRequestTransport(repoRoot, mergeRequest);
+  const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest, transport);
+  const commits = await transport.requestPages({
+    path: mergeRequestEndpoint(mergeRequest, '/commits'),
+    query: { per_page: 100 },
+  });
   const baseCommits = metadata.target_branch
-    ? await readRepositoryCommits(repoRoot, mergeRequest, metadata.target_branch, limit)
+    ? await readRepositoryCommits(repoRoot, mergeRequest, metadata.target_branch, limit, transport)
     : [];
   return {
     entries: [
@@ -640,45 +685,40 @@ const submitMergeRequestComment = async (launchPath, request) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const mergeRequest = parseGitLabMergeRequestUrl(request.source.url);
   selectMergeRequestRemote(repoRoot, mergeRequest);
+  const transport = createMergeRequestTransport(repoRoot, mergeRequest);
   if (request.comment.threadId) {
-    const note = JSON.parse(
-      await glabApi(
-        repoRoot,
-        mergeRequest,
-        [
-          '--method',
-          'POST',
-          '--input',
-          '-',
-          getGitLabDiscussionReplyEndpoint(mergeRequest, request.comment.threadId),
-        ],
-        { body: request.comment.body },
-      ),
+    const note = await transport.request({
+      body: { body: request.comment.body },
+      method: 'POST',
+      path: getGitLabDiscussionReplyEndpoint(mergeRequest, request.comment.threadId),
+    });
+    const comment = normalizeSubmittedGitLabReviewComment(
+      note,
+      request.comment,
+      mergeRequest.url,
+      request.comment.threadId,
     );
-    const comment = normalizeSubmittedGitLabReviewComment(note, request.comment, mergeRequest.url);
     if (!comment) {
       throw new Error('GitLab accepted the reply but did not return comment metadata.');
     }
     return comment;
   }
-  const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest);
-  const diffs = await readMergeRequestDiffs(repoRoot, mergeRequest);
+  const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest, transport);
+  const diffs = await readMergeRequestDiffs(repoRoot, mergeRequest, transport);
   const diff = diffs.find((candidate) => candidate.new_path === request.comment.filePath);
-  const discussion = JSON.parse(
-    await glabApi(
-      repoRoot,
-      mergeRequest,
-      ['--method', 'POST', '--input', '-', mergeRequestEndpoint(mergeRequest, '/discussions')],
-      {
-        body: request.comment.body,
-        position: createGitLabPosition(request.comment, metadata, diff),
-      },
-    ),
-  );
+  const discussion = await transport.request({
+    body: {
+      body: request.comment.body,
+      position: createGitLabPosition(request.comment, metadata, diff),
+    },
+    method: 'POST',
+    path: mergeRequestEndpoint(mergeRequest, '/discussions'),
+  });
   const comment = normalizeSubmittedGitLabReviewComment(
     discussion.notes?.[0],
     request.comment,
     mergeRequest.url,
+    discussion.id,
   );
   if (!comment) {
     throw new Error('GitLab accepted the comment but did not return comment metadata.');
@@ -692,28 +732,27 @@ const submitMergeRequestReview = async (launchPath, request) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const mergeRequest = parseGitLabMergeRequestUrl(request.source.url);
   selectMergeRequestRemote(repoRoot, mergeRequest);
-  const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest);
-  const diffs = await readMergeRequestDiffs(repoRoot, mergeRequest);
+  const transport = createMergeRequestTransport(repoRoot, mergeRequest);
+  const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest, transport);
+  const diffs = await readMergeRequestDiffs(repoRoot, mergeRequest, transport);
   for (const comment of request.comments) {
     const diff = diffs.find((candidate) => candidate.new_path === comment.filePath);
-    await glabApi(
-      repoRoot,
-      mergeRequest,
-      ['--method', 'POST', '--input', '-', mergeRequestEndpoint(mergeRequest, '/draft_notes')],
-      {
+    await transport.request({
+      body: {
         note: comment.body,
         position: createGitLabPosition(comment, metadata, diff),
       },
-    );
+      method: 'POST',
+      path: mergeRequestEndpoint(mergeRequest, '/draft_notes'),
+    });
   }
-  await glabApi(
-    repoRoot,
-    mergeRequest,
-    ['--method', 'POST', '--input', '-', mergeRequestEndpoint(mergeRequest, '/notes')],
-    {
+  await transport.request({
+    body: {
       body: `${request.body ? `${request.body}\n\n` : ''}${quickAction}`,
     },
-  );
+    method: 'POST',
+    path: mergeRequestEndpoint(mergeRequest, '/notes'),
+  });
 };
 
 /** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source @param {string} requestedPath */
@@ -722,16 +761,17 @@ const readMergeRequestImageContent = async (launchPath, source, requestedPath) =
     const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
     const path = validateRepositoryPath(requestedPath);
     const mergeRequest = parseGitLabMergeRequestUrl(source.url);
-    const metadata = await readMergeRequestMetadata(repoRoot, mergeRequest);
-    const diffs = await readMergeRequestDiffs(repoRoot, mergeRequest);
-    const rawDiff = diffs.find((candidate) => candidate.new_path === path);
-    if (!rawDiff) {
+    const { metadata, range } = await readMergeRequestHydrationSnapshot(repoRoot, mergeRequest, {
+      expectedHeadSha: source.headSha,
+    });
+    const file = range.files.find((candidate) => candidate.path === path);
+    if (!file) {
       throw new Error('File is not part of this merge request.');
     }
     const refs = await resolveMergeRequestContentRefs(repoRoot, mergeRequest, metadata);
     const [oldImage, newImage] = await Promise.all([
-      refs ? readGitImageFile(repoRoot, refs.base, rawDiff.old_path) : undefined,
-      refs ? readGitImageFile(repoRoot, refs.head, rawDiff.new_path) : undefined,
+      refs ? readGitImageFile(repoRoot, refs.base, file.oldPath || file.path) : undefined,
+      refs ? readGitImageFile(repoRoot, refs.head, file.path) : undefined,
     ]);
     return oldImage || newImage
       ? { ...(newImage ? { newImage } : {}), ...(oldImage ? { oldImage } : {}), status: 'ready' }
@@ -747,10 +787,14 @@ const readMergeRequestImageContent = async (launchPath, source, requestedPath) =
 module.exports = {
   createGitLabPosition,
   createMergeRequestFetchRefspecs,
+  createMergeRequestSource,
   listMergeRequestHistory,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
   readMergeRequestImageContent,
+  readMergeRequestReviewComments,
+  readMergeRequestSectionContent,
+  readMergeRequestSectionsContent,
   readMergeRequestState,
   submitMergeRequestComment,
   submitMergeRequestReview,

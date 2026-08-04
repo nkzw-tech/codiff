@@ -26,6 +26,7 @@ export type StackSnapshot = {
 
 export type ArtifactFile = {
   coverage: ArtifactCoverage;
+  lineCount?: { additions: number; deletions: number };
   newMode?: string;
   newObjectId?: string;
   oldMode?: string;
@@ -176,6 +177,15 @@ const validateCoverage = (
   for (const file of artifact.files) {
     if (!file.path) {
       throw new Error(`${label} contains a file without a path.`);
+    }
+    if (
+      file.lineCount != null &&
+      (!Number.isInteger(file.lineCount.additions) ||
+        file.lineCount.additions < 0 ||
+        !Number.isInteger(file.lineCount.deletions) ||
+        file.lineCount.deletions < 0)
+    ) {
+      throw new Error(`${label} contains invalid line counts for ${file.path}.`);
     }
     if (file.coverage === 'complete' && file.patch == null) {
       const hasExactMetadata =

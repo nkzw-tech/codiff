@@ -10,24 +10,26 @@ import {
 } from '../../core/__tests__/helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
-const { GH_NOT_FOUND_CODE, getGhCommand, submitPullRequestReview } =
-  require('../git-state/pull-request.cjs') as {
+const { GH_NOT_FOUND_CODE, getGhCommand } =
+  require('../git-state/github-history/gh-github-transport.cjs') as {
     GH_NOT_FOUND_CODE: string;
     getGhCommand: () => string;
-    submitPullRequestReview: (
-      launchPath: string,
-      request: {
-        body?: string;
-        comments: ReadonlyArray<Record<string, unknown>>;
-        event: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
-        source: {
-          provider: 'github';
-          type: 'pull-request';
-          url: string;
-        };
-      },
-    ) => Promise<void>;
   };
+const { submitPullRequestReview } = require('../git-state/pull-request.cjs') as {
+  submitPullRequestReview: (
+    launchPath: string,
+    request: {
+      body?: string;
+      comments: ReadonlyArray<Record<string, unknown>>;
+      event: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
+      source: {
+        provider: 'github';
+        type: 'pull-request';
+        url: string;
+      };
+    },
+  ) => Promise<void>;
+};
 
 const execFileAsync = promisify(execFile);
 
@@ -147,7 +149,7 @@ test('reaches the GitHub CLI when it is not on PATH', async () => {
     `#!/bin/sh
 printf '%s | %s\\n' "$*" "$(cat)" >> "$CODIFF_GITHUB_COMMAND_TEST_CALLS"
 for arg in "$@"; do
-  if [ "$arg" = 'repos/nkzw-tech/codiff/pulls/12' ]; then
+  if [ "$arg" = '/repos/nkzw-tech/codiff/pulls/12' ]; then
     printf '%s' '{"head":{"sha":"0123456789abcdef0123456789abcdef01234567"}}'
     exit 0
   fi
@@ -177,7 +179,7 @@ printf '%s' '{}'
 
   const calls = (await readFile(callsPath, 'utf8')).trim().split('\n');
   expect(calls).toEqual([
-    'api repos/nkzw-tech/codiff/pulls/12 | ',
+    'api /repos/nkzw-tech/codiff/pulls/12 | ',
     'api -X POST repos/nkzw-tech/codiff/pulls/12/reviews --input - | ' +
       '{"body":"General feedback.","comments":[],"event":"COMMENT"}',
   ]);

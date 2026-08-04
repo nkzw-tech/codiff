@@ -1,27 +1,30 @@
 // @ts-check
 
-const { spawn } = require('node:child_process');
-const { homedir } = require('node:os');
-const { join } = require('node:path');
-const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
-const { getCommandEnvironment } = require('../login-shell-environment.cjs');
 const {
   IMAGE_FILE_LIMIT,
   bufferToImageRevision,
-  createSummary,
   formatBytes,
-  getFingerprint,
   getImageMimeType,
   git,
   gitOrEmpty,
-  summarizeContent,
   validateRepositoryPath,
 } = require('./common.cjs');
 const { readGitFiles } = require('./git-files.cjs');
+const {
+  canHydrateArtifactFile,
+  createPullRequestSection,
+  isBinaryDiffPatch,
+  rangeArtifactToPullRequestFiles,
+} = require('./review-range-sections.cjs');
+const {
+  createGhGitHubTransport,
+  runGhApi,
+  runGhApiBuffer,
+} = require('./github-history/gh-github-transport.cjs');
+const { loadGitHubHistory } = require('../github-history-bridge.cjs');
 const { parseReviewUrl } = require('../review-source.cjs');
 
 /**
- * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
  * @typedef {import('../../core/types.ts').DiffImageContentResult} DiffImageContentResult
  * @typedef {import('../../core/types.ts').GitSha} GitSha
  * @typedef {import('../../core/types.ts').HistoryEntry} HistoryEntry
@@ -30,63 +33,31 @@ const { parseReviewUrl } = require('../review-source.cjs');
  * @typedef {import('../../core/types.ts').ReviewSource} ReviewSource
  * @typedef {import('../../core/types.ts').SubmitPullRequestCommentRequest} SubmitPullRequestCommentRequest
  * @typedef {import('../../core/types.ts').SubmitPullRequestReviewRequest} SubmitPullRequestReviewRequest
+ * @typedef {import('../../core/lib/review-artifacts.ts').ArtifactFile} ArtifactFile
  * @typedef {{owner: string; repo: string}} GitHubRepositoryReference
  * @typedef {{name: string; url: string}} LocalGitRemote
  * @typedef {{full_name?: string; name?: string; owner?: {login?: string}}} GitHubRepositoryMetadata
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{direction: 'fetch' | 'push'; name: string; owner: string; repo: string}} GitHubRemote
- * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
  * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
  * @typedef {{author?: {avatar_url?: string}; commit?: {author?: {date?: string; email?: string; name?: string}; message?: string}; parents?: ReadonlyArray<{sha?: string}>; sha?: string}} GitHubCommit
  * @typedef {{[key: string]: any}} GitHubReviewComment
  * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
  */
 
-const GH_NOT_FOUND_CODE = 'GH_NOT_FOUND';
-const GH_NOT_FOUND_MESSAGE =
-  'GitHub support requires gh. Install gh, authenticate it, and verify `gh --version` works in Terminal. Codiff searches PATH, ~/.local/bin/gh, /opt/homebrew/bin/gh, and /usr/local/bin/gh. If gh is installed somewhere else, quit Codiff, then launch it with `CODIFF_GH_PATH=/absolute/path/to/gh codiff`.';
-
-/** @param {string} [detail] */
-const createGhNotFoundError = (detail) =>
-  Object.assign(new Error(detail ? `${GH_NOT_FOUND_MESSAGE} ${detail}` : GH_NOT_FOUND_MESSAGE), {
-    code: GH_NOT_FOUND_CODE,
-  });
-
 /**
- * A Dock or Spotlight launch gives the app a minimal PATH that omits the
- * directories Homebrew and manual installs use, and later `codiff` invocations
- * hand their arguments to that first process rather than replacing it, so `gh`
- * has to be located the same way the other CLIs Codiff shells out to are.
+ * The first usable state already has the exact provider metadata and patches
+ * needed to hydrate a section. Keep only the latest immutable-head snapshot
+ * for a small number of open review roots so the first deferred file does not
+ * repeat those provider reads.
+ * @type {Map<string, {headSha?: string, metadata: GitHubPullRequestMetadata, range: import('../../core/lib/review-artifacts.ts').RangeArtifact}>}
  */
-const getGhCommand = () => {
-  const ghPath = process.env.CODIFF_GH_PATH?.trim();
-  if (ghPath) {
-    if (isExecutableFile(ghPath)) {
-      return ghPath;
-    }
+const pullRequestHydrationSnapshots = new Map();
+const MAX_PULL_REQUEST_HYDRATION_SNAPSHOTS = 8;
 
-    throw createGhNotFoundError(
-      `CODIFF_GH_PATH is set to ${JSON.stringify(ghPath)}, but that file is not executable.`,
-    );
-  }
-
-  const pathCommand = findExecutableOnPath('gh');
-  if (pathCommand) {
-    return pathCommand;
-  }
-
-  for (const path of [
-    join(homedir(), '.local/bin/gh'),
-    '/opt/homebrew/bin/gh',
-    '/usr/local/bin/gh',
-  ]) {
-    if (isExecutableFile(path)) {
-      return path;
-    }
-  }
-
-  throw createGhNotFoundError();
-};
+/** @type {Map<string, Promise<import('../../core/types.ts').DiffSectionsContentResult>>} */
+const pullRequestBulkHydrations = new Map();
+const MAX_PULL_REQUEST_BULK_HYDRATIONS = 8;
 
 /** @param {string} value @returns {PullRequestReference} */
 const parseGitHubPullRequestUrl = (value) => {
@@ -184,6 +155,22 @@ const readLocalGitRemotes = async (repoRoot) => {
   return remotes.filter((remote) => remote != null);
 };
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
+const assertPullRequestMatchesRepository = async (repoRoot, pullRequest) => {
+  const matchesRepository = (await readLocalGitRemotes(repoRoot)).some(({ url }) => {
+    const repository = parseGitHubRemoteUrl(url) ?? parseRemoteRepositoryPath(url);
+    return (
+      repository?.owner.toLowerCase() === pullRequest.owner.toLowerCase() &&
+      repository.repo.toLowerCase() === pullRequest.repo.toLowerCase()
+    );
+  });
+  if (!matchesRepository) {
+    throw new Error(
+      `Pull request ${pullRequest.owner}/${pullRequest.repo} does not match a GitHub remote in this repository.`,
+    );
+  }
+};
+
 /** @param {LocalGitRemote} remote */
 const getRemotePriority = (remote) => (remote.name === 'origin' ? 0 : 1);
 
@@ -271,56 +258,12 @@ const fetchPullRequestHistoryRefs = (repoRoot, remote, pullRequest, metadata) =>
   ]);
 
 /**
- * Runs `gh api` and reports how it exited. Callers decide which exit codes are
- * failures because a missing file is a valid answer for content lookups.
- *
- * @param {string} repoRoot
- * @param {ReadonlyArray<string>} args
- * @param {unknown} [input]
- * @returns {Promise<{code: number | null; stderr: string; stdout: Buffer}>}
- */
-const runGhApi = async (repoRoot, args, input) => {
-  const environment = await getCommandEnvironment();
-  return new Promise((resolve, reject) => {
-    const child = spawn(getGhCommand(), ['api', ...args], {
-      cwd: repoRoot,
-      env: environment,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    /** @type {Array<Buffer>} */
-    const stdout = [];
-    /** @type {Array<Buffer>} */
-    const stderr = [];
-
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', (error) => reject(error.code === 'ENOENT' ? createGhNotFoundError() : error));
-    child.on('close', (code) =>
-      resolve({
-        code,
-        stderr: Buffer.concat(stderr).toString('utf8'),
-        stdout: Buffer.concat(stdout),
-      }),
-    );
-
-    child.stdin.end(input == null ? undefined : JSON.stringify(input));
-  });
-};
-
-/**
  * @param {string} repoRoot
  * @param {ReadonlyArray<string>} args
  * @param {unknown} [input]
  * @returns {Promise<string>}
  */
-const ghApi = async (repoRoot, args, input) => {
-  const { code, stderr, stdout } = await runGhApi(repoRoot, args, input);
-  if (code === 0) {
-    return stdout.toString('utf8');
-  }
-
-  throw new Error(stderr.trim() || `gh api exited with code ${code}.`);
-};
+const ghApi = (repoRoot, args, input) => runGhApi(repoRoot, args, input);
 
 /**
  * @param {string} repoRoot
@@ -328,36 +271,99 @@ const ghApi = async (repoRoot, args, input) => {
  * @returns {Promise<Buffer | undefined>}
  */
 const ghApiBuffer = async (repoRoot, args) => {
-  const { code, stderr, stdout } = await runGhApi(repoRoot, args);
-  if (code === 0) {
-    return stdout;
+  try {
+    return await runGhApiBuffer(repoRoot, args, undefined, { maxBytes: IMAGE_FILE_LIMIT });
+  } catch (error) {
+    if (error instanceof Error && /not found|404/i.test(error.message)) {
+      return undefined;
+    }
+    throw error;
   }
-
-  if (code === 1 && /not found|404/i.test(stderr)) {
-    return undefined;
-  }
-
-  throw new Error(stderr.trim() || `gh api exited with code ${code}.`);
 };
 
-/** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<GitHubPullRequestMetadata>} */
-const readPullRequestMetadata = async (repoRoot, pullRequest) =>
-  JSON.parse(
-    await ghApi(repoRoot, [
-      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
-    ]),
-  );
+/** Provider transport backed by the authenticated `gh` process owned by Electron. */
+const createPullRequestTransport = (repoRoot) => createGhGitHubTransport({ repoRoot });
 
-/** @param {string} repoRoot @param {PullRequestReference} pullRequest @returns {Promise<Array<GitHubPullRequestFile>>} */
-const readPullRequestFiles = async (repoRoot, pullRequest) => {
-  const pages = JSON.parse(
-    await ghApi(repoRoot, [
-      '--paginate',
-      '--slurp',
-      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/files?per_page=100`,
-    ]),
+/**
+ * @param {string} repoRoot
+ * @param {PullRequestReference} pullRequest
+ * @param {{request: (request: any) => Promise<any>}} [transport]
+ * @returns {Promise<GitHubPullRequestMetadata>}
+ */
+const readPullRequestMetadata = (repoRoot, pullRequest, transport) =>
+  (transport || createPullRequestTransport(repoRoot)).request({
+    path: `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
+  });
+
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
+const pullRequestHydrationSnapshotKey = (repoRoot, pullRequest) => `${repoRoot}:${pullRequest.url}`;
+
+/**
+ * @param {string} repoRoot
+ * @param {PullRequestReference} pullRequest
+ * @param {{headSha?: string, metadata: GitHubPullRequestMetadata, range: import('../../core/lib/review-artifacts.ts').RangeArtifact}} snapshot
+ */
+const rememberPullRequestHydrationSnapshot = (repoRoot, pullRequest, snapshot) => {
+  const key = pullRequestHydrationSnapshotKey(repoRoot, pullRequest);
+  pullRequestHydrationSnapshots.delete(key);
+  pullRequestHydrationSnapshots.set(key, snapshot);
+  while (pullRequestHydrationSnapshots.size > MAX_PULL_REQUEST_HYDRATION_SNAPSHOTS) {
+    pullRequestHydrationSnapshots.delete(pullRequestHydrationSnapshots.keys().next().value);
+  }
+};
+
+/**
+ * Read the provider data required to create or hydrate the current PR range.
+ * A deferred section accepts an in-process snapshot only when its immutable
+ * head is exactly the source's head; a fresh state read always refreshes it.
+ *
+ * @param {string} repoRoot
+ * @param {PullRequestReference} pullRequest
+ * @param {{expectedHeadSha?: string, forceRefresh?: boolean}} [options]
+ */
+const readPullRequestHydrationSnapshot = async (repoRoot, pullRequest, options = {}) => {
+  const key = pullRequestHydrationSnapshotKey(repoRoot, pullRequest);
+  const cached = pullRequestHydrationSnapshots.get(key);
+  if (
+    !options.forceRefresh &&
+    options.expectedHeadSha &&
+    cached?.headSha === options.expectedHeadSha
+  ) {
+    return cached;
+  }
+  const transport = createPullRequestTransport(repoRoot);
+  const [github, metadata] = await Promise.all([
+    loadGitHubHistory(),
+    readPullRequestMetadata(repoRoot, pullRequest, transport),
+  ]);
+  const baseSha = metadata.base?.sha;
+  const headSha = metadata.head?.sha;
+  if (!baseSha || !headSha) {
+    throw new Error('GitHub did not return complete pull request range coordinates.');
+  }
+  if (options.expectedHeadSha && headSha !== options.expectedHeadSha) {
+    throw new Error('The pull request head changed. Refresh before loading exact file contents.');
+  }
+  const project = {
+    host: 'github.com',
+    project: `${pullRequest.owner}/${pullRequest.repo}`,
+    provider: /** @type {'github'} */ ('github'),
+  };
+  const artifactSource = github.createGitHubArtifactSource({
+    project,
+    pull: pullRequest,
+    transport,
+  });
+  const { range } = await artifactSource.readStackAndRange(
+    {
+      requestedBaseSha: /** @type {GitSha} */ (baseSha),
+      headSha: /** @type {GitSha} */ (headSha),
+    },
+    new AbortController().signal,
   );
-  return pages.flat();
+  const snapshot = { headSha, metadata, range };
+  rememberPullRequestHydrationSnapshot(repoRoot, pullRequest, snapshot);
+  return snapshot;
 };
 
 /** @param {string} path */
@@ -422,14 +428,6 @@ const readGitHubImageFile = async (repoRoot, repository, ref, path) => {
   return bufferToImageRevision(path, buffer);
 };
 
-/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
-const readPullRequestDiff = async (repoRoot, pullRequest) =>
-  ghApi(repoRoot, [
-    '-H',
-    'Accept: application/vnd.github.v3.diff',
-    `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
-  ]);
-
 /** @param {unknown} side */
 const fromGitHubReviewSide = (side) => (side === 'LEFT' ? 'deletions' : 'additions');
 /** @param {unknown} side */
@@ -467,6 +465,7 @@ const normalizeGitHubReviewComment = (comment) => {
     side,
     ...(hasRange ? { startLineNumber } : {}),
     ...(hasRange && startSide != null && startSide !== side ? { startSide } : {}),
+    threadId: String(comment.in_reply_to_id || comment.id),
     submittedAt: comment.created_at,
     url: comment.html_url,
   };
@@ -654,56 +653,6 @@ const listPullRequestHistory = async (launchPath, source, limit = 200) => {
   };
 };
 
-/** @param {string} diff @returns {Map<string, string>} */
-const splitPullRequestDiff = (diff) => {
-  const chunks = diff
-    .split(/(?=^diff --git )/m)
-    .map((chunk) => chunk.trimEnd())
-    .filter((chunk) => chunk.startsWith('diff --git '));
-  const map = new Map();
-
-  for (const chunk of chunks) {
-    const newPath = chunk.match(/^\+\+\+\s+b\/(.+)$/m)?.[1];
-    const oldPath = chunk.match(/^---\s+a\/(.+)$/m)?.[1];
-    const renamePath = chunk.match(/^rename to (.+)$/m)?.[1];
-    const path = newPath && newPath !== '/dev/null' ? newPath : renamePath || oldPath;
-    if (path) {
-      map.set(path, `${chunk}\n`);
-    }
-  }
-
-  return map;
-};
-
-/** @param {string} path */
-const quotePatchPath = (path) => path.replace(/\\/g, '\\\\').replace(/\n/g, '\\n');
-
-/** @param {GitHubPullRequestFile} file */
-const createPatchFromPullRequestFile = (file) => {
-  if (!file.patch) {
-    return '';
-  }
-
-  const oldPath = file.previous_filename || file.filename;
-  const header = [
-    `diff --git a/${quotePatchPath(oldPath)} b/${quotePatchPath(file.filename)}`,
-    file.status === 'added' ? '--- /dev/null' : `--- a/${quotePatchPath(oldPath)}`,
-    file.status === 'removed' ? '+++ /dev/null' : `+++ b/${quotePatchPath(file.filename)}`,
-  ];
-
-  return `${header.join('\n')}\n${file.patch}\n`;
-};
-
-/** @param {string} status @returns {GitFileStatus} */
-const normalizePullRequestFileStatus = (status) =>
-  status === 'added'
-    ? 'added'
-    : status === 'removed'
-      ? 'deleted'
-      : status === 'renamed'
-        ? 'renamed'
-        : 'modified';
-
 /** @param {PullRequestReference} pullRequest @param {GitHubPullRequestMetadata} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
 const createPullRequestSource = (pullRequest, metadata) => ({
   ...(metadata.user?.login
@@ -723,6 +672,7 @@ const createPullRequestSource = (pullRequest, metadata) => ({
   projectPath: `${pullRequest.owner}/${pullRequest.repo}`,
   provider: 'github',
   repo: pullRequest.repo,
+  ...(metadata.base?.ref ? { targetBranch: metadata.base.ref } : {}),
   title: metadata.title,
   type: 'pull-request',
   url: pullRequest.url,
@@ -741,10 +691,17 @@ const createPullRequestSource = (pullRequest, metadata) => ({
  * @param {string} repoRoot
  * @param {PullRequestReference} pullRequest
  * @param {GitHubPullRequestMetadata} metadata
+ * @param {string} expectedBaseSha
  * @param {GitHubRemote} [selectedRemote]
  * @returns {Promise<{base: string; head: string} | null>}
  */
-const resolvePullRequestContentRefs = async (repoRoot, pullRequest, metadata, selectedRemote) => {
+const resolvePullRequestContentRefs = async (
+  repoRoot,
+  pullRequest,
+  metadata,
+  expectedBaseSha,
+  selectedRemote,
+) => {
   if (!metadata.base?.ref) {
     return null;
   }
@@ -780,161 +737,209 @@ const resolvePullRequestContentRefs = async (repoRoot, pullRequest, metadata, se
     }
   }
 
-  const mergeBase = (await gitOrEmpty(repoRoot, ['merge-base', baseRef, headRef])).trim();
-  return mergeBase ? { base: mergeBase, head: headRef } : null;
+  const resolvedHead = (
+    await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', headRef])
+  ).trim();
+  const resolvedBase = (
+    await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', baseRef])
+  ).trim();
+  if (
+    !resolvedHead ||
+    !resolvedBase ||
+    (headSha != null && resolvedHead !== headSha) ||
+    (baseSha != null && resolvedBase !== baseSha)
+  ) {
+    return null;
+  }
+
+  const resolvedEffectiveBase = (
+    await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', `${expectedBaseSha}^{commit}`])
+  ).trim();
+  return resolvedEffectiveBase === expectedBaseSha
+    ? { base: expectedBaseSha, head: headRef }
+    : null;
 };
 
 /**
- * git/GitHub emit `Binary files a/x and b/x differ` as a diff metadata line.
- * Anchor to the start of a line so the same text appearing inside a patch's
- * added/removed/context lines (which are prefixed with `+`/`-`/space) does not
- * misclassify a text file as binary.
- */
-const BINARY_DIFF_MARKER = /^Binary files .* differ/m;
-
-/**
- * Build a diff section for a pull request file. When the full base and head
- * contents are available the section carries `oldFile`/`newFile` so Codiff
- * renders a recomputed diff with expandable unmodified context (matching commits
- * and the working tree). Otherwise it falls back to the GitHub patch.
+ * Hydrate eligible files from one immutable PR range. Ref resolution and Git
+ * object reads are shared across the complete file set.
  *
+ * @param {string} repoRoot
  * @param {PullRequestReference} pullRequest
- * @param {GitHubPullRequestFile} file
- * @param {string} patch
- * @param {import('./common.cjs').FileContentResult} [oldFile]
- * @param {import('./common.cjs').FileContentResult} [newFile]
- * @returns {import('../../core/types.ts').DiffSection}
+ * @param {GitHubPullRequestMetadata} metadata
+ * @param {import('../../core/lib/review-artifacts.ts').RangeArtifact} range
+ * @param {ReadonlyArray<ArtifactFile>} files
+ * @param {{force?: boolean}} [options]
  */
-const createPullRequestSection = (pullRequest, file, patch, oldFile, newFile) => {
-  const id = `${file.filename}:pull-request:${pullRequest.number}`;
-  const patchBinary = !patch || BINARY_DIFF_MARKER.test(patch);
-  // Expandable context can only be rendered when both sides' contents are present.
-  const attemptedContent = oldFile != null && newFile != null;
-
-  if (attemptedContent && !patchBinary) {
-    const summary = summarizeContent(oldFile, newFile);
-    const status = normalizePullRequestFileStatus(file.status);
-    const oldContents = oldFile.file?.contents ?? '';
-    const newContents = newFile.file?.contents ?? '';
-    // A modification that reads empty on both sides means the content failed to
-    // load; keep the patch instead of rendering it as an empty (no-op) diff.
-    const contentMissing =
-      (status === 'modified' || status === 'renamed') && oldContents === '' && newContents === '';
-
-    if (!summary.binary && summary.loadState === 'ready' && !contentMissing) {
-      return {
-        binary: false,
-        id,
-        kind: 'pull-request',
-        loadState: 'ready',
-        newFile: newFile.file,
-        oldFile: oldFile.file,
-        patch,
-      };
-    }
+const hydratePullRequestSections = async (
+  repoRoot,
+  pullRequest,
+  metadata,
+  range,
+  files,
+  options = {},
+) => {
+  const candidates = files.filter(
+    (file) => canHydrateArtifactFile(file) && !isBinaryDiffPatch(file.patch || ''),
+  );
+  const refs = await resolvePullRequestContentRefs(
+    repoRoot,
+    pullRequest,
+    metadata,
+    range.baseSha,
+  ).catch(() => null);
+  if (!refs) {
+    return candidates.map((file) => ({
+      path: file.path,
+      section: createPullRequestSection(pullRequest, file, undefined, undefined, {
+        base: range.baseSha,
+        contentAttempted: true,
+        contentError:
+          'Codiff could not resolve the immutable pull request range. Retry exact content loading.',
+        head: range.headSha,
+      }),
+    }));
   }
 
-  // Pull request contents are loaded up front, so a file that falls back to its
-  // patch (binary, oversized, or refs unavailable) cannot be loaded on demand.
-  return {
-    binary: patchBinary,
-    id,
-    kind: 'pull-request',
-    loadState: patchBinary ? 'binary' : 'ready',
-    patch,
-    summary: createSummary(
-      patchBinary ? 'Binary file changed.' : 'Showing the pull request patch for this file.',
-      { canLoad: false },
-    ),
-  };
+  const oldPaths = candidates.map((file) => file.oldPath || file.path);
+  const newPaths = candidates.map((file) => file.path);
+  const [oldFiles, newFiles] = await Promise.all([
+    readGitFiles(repoRoot, refs.base, oldPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+    readGitFiles(repoRoot, refs.head, newPaths, {
+      force: options.force,
+      refScopedEmptyCacheKey: true,
+    }),
+  ]);
+  return candidates.map((file) => {
+    const oldPath = file.oldPath || file.path;
+    return {
+      path: file.path,
+      section: createPullRequestSection(
+        pullRequest,
+        file,
+        oldFiles.get(oldPath),
+        newFiles.get(file.path),
+        { base: range.baseSha, contentAttempted: true, head: range.headSha },
+      ),
+    };
+  });
+};
+
+/**
+ * Hydrate one explicitly requested file. This force path remains available for
+ * large-file retries after normal bulk hydration has completed.
+ *
+ * @param {string} repoRoot
+ * @param {PullRequestReference} pullRequest
+ * @param {GitHubPullRequestMetadata} metadata
+ * @param {import('../../core/lib/review-artifacts.ts').RangeArtifact} range
+ * @param {ArtifactFile} file
+ * @param {{force?: boolean}} [options]
+ */
+const hydratePullRequestSection = async (
+  repoRoot,
+  pullRequest,
+  metadata,
+  range,
+  file,
+  options = {},
+) => {
+  const [result] = await hydratePullRequestSections(
+    repoRoot,
+    pullRequest,
+    metadata,
+    range,
+    [file],
+    options,
+  );
+  return (
+    result?.section ??
+    createPullRequestSection(pullRequest, file, undefined, undefined, {
+      base: range.baseSha,
+      head: range.headSha,
+    })
+  );
+};
+
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
+const readPullRequestSectionsContent = async (launchPath, source) => {
+  const pullRequest = parseGitHubPullRequestUrl(source.url);
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  await assertPullRequestMatchesRepository(repoRoot, pullRequest);
+  const { metadata, range } = await readPullRequestHydrationSnapshot(repoRoot, pullRequest, {
+    expectedHeadSha: source.headSha,
+  });
+  const key = `${repoRoot}:${pullRequest.url}:${range.headSha}`;
+  const existing = pullRequestBulkHydrations.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const hydration = hydratePullRequestSections(repoRoot, pullRequest, metadata, range, range.files)
+    .then((sections) => ({ headSha: range.headSha, sections }))
+    .catch((error) => {
+      pullRequestBulkHydrations.delete(key);
+      throw error;
+    });
+  pullRequestBulkHydrations.set(key, hydration);
+  while (pullRequestBulkHydrations.size > MAX_PULL_REQUEST_BULK_HYDRATIONS) {
+    pullRequestBulkHydrations.delete(pullRequestBulkHydrations.keys().next().value);
+  }
+  return hydration;
 };
 
 /** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source @returns {Promise<RepositoryState>} */
 const readPullRequestState = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const pullRequest = parseGitHubPullRequestUrl(source.url);
-
-  const [metadata, apiFiles, diff, reviewComments] = await Promise.all([
-    readPullRequestMetadata(repoRoot, pullRequest),
-    readPullRequestFiles(repoRoot, pullRequest),
-    readPullRequestDiff(repoRoot, pullRequest),
-    readPullRequestComments(repoRoot, pullRequest),
-  ]);
-  const remote = await selectPullRequestRemote(repoRoot, pullRequest, metadata.head?.sha);
-  const diffByPath = splitPullRequestDiff(diff);
-  // Load every file's base and head contents up front from the local refs, so
-  // each diff renders in its final collapsed layout immediately and never shifts
-  // as expandable context becomes available. Files larger than the eager limit
-  // stay patch-only.
-  const contentRefs = await resolvePullRequestContentRefs(
-    repoRoot,
-    pullRequest,
-    metadata,
-    remote,
-  ).catch(() => null);
-  const reviewFiles = [...apiFiles].map((file) => {
-    const patch = diffByPath.get(file.filename) || createPatchFromPullRequestFile(file);
-    return {
-      file,
-      oldPath: file.previous_filename || file.filename,
-      patch,
-    };
+  await assertPullRequestMatchesRepository(repoRoot, pullRequest);
+  const { metadata, range } = await readPullRequestHydrationSnapshot(repoRoot, pullRequest, {
+    forceRefresh: true,
   });
-  const contentFiles = reviewFiles.filter(({ patch }) => !BINARY_DIFF_MARKER.test(patch));
-  const [oldFiles, newFiles] = contentRefs
-    ? await Promise.all([
-        readGitFiles(
-          repoRoot,
-          contentRefs.base,
-          contentFiles.map(({ oldPath }) => oldPath),
-          { refScopedEmptyCacheKey: true },
-        ),
-        readGitFiles(
-          repoRoot,
-          contentRefs.head,
-          contentFiles.map(({ file }) => file.filename),
-          { refScopedEmptyCacheKey: true },
-        ),
-      ])
-    : [new Map(), new Map()];
-
-  /** @type {Array<ChangedFile>} */
-  const files = reviewFiles
-    .map(({ file, oldPath, patch }) => {
-      const oldFile = contentRefs && !BINARY_DIFF_MARKER.test(patch) ? oldFiles.get(oldPath) : null;
-      const newFile =
-        contentRefs && !BINARY_DIFF_MARKER.test(patch) ? newFiles.get(file.filename) : null;
-      const section = createPullRequestSection(pullRequest, file, patch, oldFile, newFile);
-
-      return {
-        fingerprint: getFingerprint(
-          [
-            metadata.head?.sha || '',
-            file.status,
-            file.previous_filename || '',
-            file.filename,
-            section.loadState || 'ready',
-            section.oldFile?.cacheKey || '',
-            section.newFile?.cacheKey || '',
-            patch,
-          ].join('\n'),
-        ),
-        oldPath: file.previous_filename,
-        path: file.filename,
-        sections: [section],
-        status: normalizePullRequestFileStatus(file.status),
-      };
-    })
-    .sort((left, right) => left.path.localeCompare(right.path));
-
+  const files = rangeArtifactToPullRequestFiles(range, pullRequest.number, {
+    deferContents: true,
+  }).toSorted((left, right) => left.path.localeCompare(right.path));
   return {
     files,
     generatedAt: Date.now(),
     launchPath,
-    reviewComments,
+    reviewCommentsLoadState: 'not-loaded',
     root: repoRoot,
     source: createPullRequestSource(pullRequest, metadata),
   };
+};
+
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
+const readPullRequestReviewComments = async (launchPath, source) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const pullRequest = parseGitHubPullRequestUrl(source.url);
+  await assertPullRequestMatchesRepository(repoRoot, pullRequest);
+  return readPullRequestComments(repoRoot, pullRequest);
+};
+
+/**
+ * Load exact local contents for one pull-request file when explicitly retried.
+ * @param {string} launchPath
+ * @param {Extract<ReviewSource, {type: 'pull-request'}>} source
+ * @param {string} requestedPath
+ * @param {{force?: boolean}} [options]
+ */
+const readPullRequestSectionContent = async (launchPath, source, requestedPath, options = {}) => {
+  const path = validateRepositoryPath(requestedPath);
+  const pullRequest = parseGitHubPullRequestUrl(source.url);
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  await assertPullRequestMatchesRepository(repoRoot, pullRequest);
+  const { metadata, range } = await readPullRequestHydrationSnapshot(repoRoot, pullRequest, {
+    expectedHeadSha: source.headSha,
+  });
+  const file = range.files.find((candidate) => candidate.path === path);
+  if (!file) {
+    throw new Error('File is not part of this pull request.');
+  }
+  return hydratePullRequestSection(repoRoot, pullRequest, metadata, range, file, options);
 };
 
 /**
@@ -948,28 +953,19 @@ const readPullRequestImageContent = async (launchPath, source, requestedPath) =>
     const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
     const path = validateRepositoryPath(requestedPath);
     const pullRequest = parseGitHubPullRequestUrl(source.url);
-
-    const [metadata, files] = await Promise.all([
-      readPullRequestMetadata(repoRoot, pullRequest),
-      readPullRequestFiles(repoRoot, pullRequest),
-    ]);
-    await selectPullRequestRemote(repoRoot, pullRequest, metadata.head?.sha);
-    const file = files.find((candidate) => candidate.filename === path);
+    await assertPullRequestMatchesRepository(repoRoot, pullRequest);
+    const { metadata, range } = await readPullRequestHydrationSnapshot(repoRoot, pullRequest, {
+      expectedHeadSha: source.headSha,
+    });
+    const file = range.files.find((candidate) => candidate.path === path);
     if (!file) {
       throw new Error('File is not part of this pull request.');
     }
 
     const headImageSource = getPullRequestHeadImageSource(pullRequest, metadata);
     const [oldImage, newImage] = await Promise.all([
-      metadata.base?.sha
-        ? readGitHubImageFile(
-            repoRoot,
-            pullRequest,
-            metadata.base.sha,
-            file.previous_filename || file.filename,
-          )
-        : undefined,
-      readGitHubImageFile(repoRoot, headImageSource, headImageSource.ref, file.filename),
+      readGitHubImageFile(repoRoot, pullRequest, range.baseSha, file.oldPath || file.path),
+      readGitHubImageFile(repoRoot, headImageSource, headImageSource.ref, file.path),
     ]);
 
     if (!oldImage && !newImage) {
@@ -1040,10 +1036,16 @@ const submitPullRequestComment = async (launchPath, request) => {
   const pullRequest = parseGitHubPullRequestUrl(request.source.url);
   const metadata = await readPullRequestMetadata(repoRoot, pullRequest);
   await selectPullRequestRemote(repoRoot, pullRequest, metadata.head?.sha);
-  const payload = {
-    ...normalizePullRequestComment(request.comment),
-    commit_id: metadata.head?.sha,
-  };
+  const replyTo = request.comment.threadId ? Number(request.comment.threadId) : null;
+  if (request.comment.threadId && (!Number.isInteger(replyTo) || replyTo <= 0)) {
+    throw new Error('GitHub review replies require a numeric provider thread ID.');
+  }
+  const payload = replyTo
+    ? { body: request.comment.body, in_reply_to: replyTo }
+    : {
+        ...normalizePullRequestComment(request.comment),
+        commit_id: metadata.head?.sha,
+      };
 
   const rawComment = await ghApi(
     repoRoot,
@@ -1112,14 +1114,10 @@ const createPullRequestReviewPayload = (request) => {
 };
 
 module.exports = {
-  GH_NOT_FOUND_CODE,
   PENDING_REVIEW_COMMENT_ERROR,
   collectResolvedReviewCommentIds,
-  createPatchFromPullRequestFile,
   createPullRequestHistoryFetchRefspecs,
-  createPullRequestSection,
   createPullRequestSource,
-  getGhCommand,
   getPullRequestHeadImageSource,
   listPullRequestHistory,
   normalizeGitHubCommit,
@@ -1128,6 +1126,9 @@ module.exports = {
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,
   readPullRequestImageContent,
+  readPullRequestReviewComments,
+  readPullRequestSectionContent,
+  readPullRequestSectionsContent,
   readPullRequestState,
   resolvePullRequestContentRefs,
   selectPullRequestRemote,

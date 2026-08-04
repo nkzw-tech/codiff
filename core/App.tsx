@@ -87,6 +87,7 @@ import {
   buildReviewCommentsMarkdown,
   getReviewCommentsFromState,
   getVisibleReviewComments,
+  mergeReviewComments,
 } from './lib/review-comments.ts';
 import { getSelectedPathFromScroll } from './lib/review-scroll.ts';
 import {
@@ -127,6 +128,10 @@ import type {
 
 const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
 const emptyWalkthroughNotes = new Map<string, WalkthroughNote>();
+const getReviewCommentsSourceKey = (state: RepositoryState) => {
+  const headSha = state.source.type === 'pull-request' ? (state.source.headSha ?? '') : '';
+  return `${state.root}:${getSourceKey(state.source)}:${headSha}`;
+};
 const disableCodeViewWorkerPool = process.env.NODE_ENV === 'test';
 
 const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
@@ -216,6 +221,8 @@ export default function App() {
   const historyRequestRef = useRef(0);
   const historySourceRef = useRef<ReviewSource | null>(null);
   const loadingSectionKeysRef = useRef<Set<string>>(new Set());
+  const reviewCommentsInFlightRef = useRef<string | null>(null);
+  const reviewCommentsRequestRef = useRef(0);
   const programmaticScrollPathRef = useRef<string | null>(null);
   const programmaticScrollTimerRef = useRef<number | null>(null);
   const sourceSessionsRef = useRef<Map<string, SourceSession>>(new Map());
@@ -283,6 +290,83 @@ export default function App() {
     onCommentFileChange: bumpItemVersion,
     stateRef,
   });
+  const hydrateReviewComments = useCallback(
+    (requestedState: RepositoryState) => {
+      if (
+        requestedState.source.type !== 'pull-request' ||
+        requestedState.reviewCommentsLoadState !== 'not-loaded'
+      ) {
+        return;
+      }
+      const sourceKey = getReviewCommentsSourceKey(requestedState);
+      const generation = stateGenerationRef.current;
+      const inFlightKey = `${generation}:${sourceKey}`;
+      if (reviewCommentsInFlightRef.current === inFlightKey) {
+        return;
+      }
+      reviewCommentsInFlightRef.current = inFlightKey;
+      const request = reviewCommentsRequestRef.current + 1;
+      reviewCommentsRequestRef.current = request;
+      const isCurrent = () => {
+        const current = stateRef.current;
+        return (
+          reviewCommentsRequestRef.current === request &&
+          stateGenerationRef.current === generation &&
+          current?.source.type === 'pull-request' &&
+          getReviewCommentsSourceKey(current) === sourceKey
+        );
+      };
+
+      void window.codiff
+        .getReviewComments(requestedState.source)
+        .then((loadedComments) => {
+          if (!isCurrent()) {
+            return;
+          }
+          const current = stateRef.current!;
+          const hydratedState = {
+            ...current,
+            reviewComments: loadedComments,
+            reviewCommentsError: undefined,
+            reviewCommentsLoadState: 'loaded' as const,
+          };
+          stateRef.current = hydratedState;
+          setState(hydratedState);
+          setReviewComments((comments) =>
+            mergeReviewComments(
+              getReviewCommentsFromState(hydratedState),
+              comments.filter((comment) => !comment.isReadOnly),
+            ),
+          );
+        })
+        .catch((error: unknown) => {
+          if (!isCurrent()) {
+            return;
+          }
+          const current = stateRef.current!;
+          const failedState = {
+            ...current,
+            reviewCommentsError: error instanceof Error ? error.message : String(error),
+            reviewCommentsLoadState: 'failed' as const,
+          };
+          stateRef.current = failedState;
+          setState(failedState);
+        })
+        .finally(() => {
+          if (reviewCommentsInFlightRef.current === inFlightKey) {
+            reviewCommentsInFlightRef.current = null;
+          }
+        });
+    },
+    [setReviewComments],
+  );
+
+  useEffect(() => {
+    if (state?.source.type === 'pull-request' && state.reviewCommentsLoadState === 'not-loaded') {
+      hydrateReviewComments(state);
+    }
+  }, [hydrateReviewComments, state]);
+
   const collapseSidebar = useCallback(() => {
     setSidebarCollapsed(true);
   }, []);

@@ -150,6 +150,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   getDiffSectionContent: vi.fn(async () => {
     throw new Error('Unexpected diff section load.');
   }),
+  getDiffSectionsContent: vi.fn(async () => ({ sections: [] })),
   getFeatureFlags: vi.fn(async () => ({
     planSharing: false,
     walkthroughSharing: false,
@@ -200,6 +201,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     root: '/repo',
   })),
   getRepositoryState: vi.fn(async () => repositoryState),
+  getReviewComments: vi.fn(async () => []),
   getTerminalHelperStatus: vi.fn(async () => ({
     command: 'codiff',
     installed: true,
@@ -3761,4 +3763,59 @@ test('Pi not-found walkthrough errors show the agent recovery panel', async () =
   });
   expect(container.textContent).toContain('Pi CLI was not found.');
   expect(container.textContent).toContain('Review Files');
+});
+
+test('pull request comments hydrate through the public preload capability', async () => {
+  const file = {
+    fingerprint: 'src/app.ts:pull-request',
+    path: 'src/app.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/app.ts:pull-request:1',
+        kind: 'pull-request',
+        loadState: 'ready',
+        patch: 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+  const source = {
+    headSha: gitSha('b'.repeat(40)),
+    number: 1,
+    owner: 'octo',
+    provider: 'github',
+    repo: 'example',
+    type: 'pull-request',
+    url: 'https://github.com/octo/example/pull/1',
+  } satisfies ResolvedReviewSource;
+  const getReviewComments = vi.fn(async () => [
+    {
+      author: { login: 'reviewer' },
+      body: 'Loaded after the initial review state.',
+      filePath: file.path,
+      id: 'github:1',
+      lineNumber: 1,
+      side: 'additions' as const,
+      threadId: '1',
+    },
+  ]);
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => ({
+      branch: 'feature',
+      files: [file],
+      generatedAt: 1,
+      launchPath: '/repo',
+      reviewCommentsLoadState: 'not-loaded' as const,
+      root: '/repo',
+      source,
+    })),
+    getReviewComments,
+  });
+
+  await using view = await renderReact(<App />);
+  await waitFor(() => {
+    expect(getReviewComments).toHaveBeenCalledWith(source);
+    expect(view.container.textContent).toContain('Loaded after the initial review state.');
+  });
 });
