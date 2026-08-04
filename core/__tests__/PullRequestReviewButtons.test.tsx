@@ -43,14 +43,13 @@ vi.mock('@nkzw/mdx-editor', async () => {
   };
 });
 
-test('GitHub comment reviews require inline comments or a review body', async () => {
+test('provider comment reviews require inline comments or a review body', async () => {
   const onSubmitReview = vi.fn(async () => {});
   await using view = await renderReact(
     <PullRequestReviewButtons
       disabled={false}
       hasPendingComments={false}
       onSubmitReview={onSubmitReview}
-      showCommentReview
     />,
   );
 
@@ -62,6 +61,8 @@ test('GitHub comment reviews require inline comments or a review body', async ()
   );
   expect(submitComments?.disabled).toBe(true);
   expect(addReviewComment?.disabled).toBe(false);
+  expect(view.container.querySelector('[aria-label="Approve review"]')).not.toBeNull();
+  expect(view.container.querySelector('[aria-label="Request changes"]')).not.toBeNull();
   await act(async () => addReviewComment?.click());
   const textarea = view.container.querySelector<HTMLTextAreaElement>(
     'textarea[aria-label="Add review comment"]',
@@ -79,14 +80,13 @@ test('GitHub comment reviews require inline comments or a review body', async ()
   });
 });
 
-test('GitHub comment reviews submit pending inline comments without a body', async () => {
+test('provider comment reviews submit pending inline comments without a body', async () => {
   const onSubmitReview = vi.fn(async () => {});
   await using view = await renderReact(
     <PullRequestReviewButtons
       disabled={false}
       hasPendingComments
       onSubmitReview={onSubmitReview}
-      showCommentReview
     />,
   );
 
@@ -98,16 +98,15 @@ test('GitHub comment reviews submit pending inline comments without a body', asy
   expect(onSubmitReview).toHaveBeenCalledWith('COMMENT');
 });
 
-test('GitHub comment reviews preserve the review body after submission fails', async () => {
+test('provider comment reviews preserve the review body after submission fails', async () => {
   const onSubmitReview = vi.fn(async () => {
-    throw new Error('GitHub rejected the review.');
+    throw new Error('The provider rejected the review.');
   });
   await using view = await renderReact(
     <PullRequestReviewButtons
       disabled={false}
       hasPendingComments={false}
       onSubmitReview={onSubmitReview}
-      showCommentReview
     />,
   );
 
@@ -144,7 +143,6 @@ test('comment review remains available when decision reviews are provider-blocke
           reason: 'You cannot review your own pull request.',
         },
       }}
-      showCommentReview
     />,
   );
 
@@ -153,12 +151,23 @@ test('comment review remains available when decision reviews are provider-blocke
   expect(view.container.querySelector('[aria-label="Request changes"]')).toBeNull();
 });
 
-test('non-GitHub reviews keep the existing review actions', async () => {
+test('an explicitly disabled comment outcome is not actionable', async () => {
   await using view = await renderReact(
-    <PullRequestReviewButtons disabled={false} hasPendingComments onSubmitReview={vi.fn()} />,
+    <PullRequestReviewButtons
+      disabled={false}
+      hasPendingComments
+      onSubmitReview={vi.fn()}
+      reviewStatus={{
+        comment: {
+          disabled: true,
+          reason: 'Neutral reviews are unavailable.',
+        },
+      }}
+    />,
   );
 
   expect(view.container.querySelector('[aria-label="Submit review comments"]')).toBeNull();
+  expect(view.container.querySelector('[aria-label="Add review comment"]')).toBeNull();
   expect(view.container.querySelector('[aria-label="Approve review"]')).not.toBeNull();
   expect(view.container.querySelector('[aria-label="Request changes"]')).not.toBeNull();
 });

@@ -159,7 +159,8 @@ export function useAppReviewComments({
         currentState?.source.type !== 'pull-request' ||
         !comment ||
         comment.body.trim().length === 0 ||
-        comment.remoteSubmit?.status === 'submitting'
+        comment.remoteSubmit?.status === 'submitting' ||
+        comment.remoteSubmit?.status === 'outcome-unknown'
       ) {
         return;
       }
@@ -214,11 +215,11 @@ export function useAppReviewComments({
 
   const submitPullRequestReview = useCallback(
     (event: PullRequestReviewEvent, body?: string) => {
-      const currentState = stateRef.current;
+      const source = stateRef.current?.source;
       if (
-        currentState?.source.type !== 'pull-request' ||
+        source?.type !== 'pull-request' ||
         pullRequestReviewSubmitting ||
-        isReviewActionDisabled(currentState.source.reviewStatus, event)
+        isReviewActionDisabled(source.reviewStatus, event)
       ) {
         return;
       }
@@ -230,20 +231,51 @@ export function useAppReviewComments({
       if (event === 'COMMENT' && pendingComments.length === 0 && !body?.trim()) {
         return;
       }
-      const pendingCommentIds = new Set(pendingComments.map((comment) => comment.id));
+      let formattedComments;
+      try {
+        formattedComments = pendingComments.map((comment) => toProviderCommentSubmission(comment));
+      } catch (error) {
+        return Promise.reject(error);
+      }
       setPullRequestReviewSubmitting(event);
-      return window.codiff
-        .submitPullRequestReview({
-          ...(body ? { body } : {}),
-          comments: pendingComments.map((comment) => toProviderCommentSubmission(comment)),
-          event,
-          source: currentState.source,
-        })
-        .then(() => {
-          updateActiveReviewCommentDraft(null);
-          setReviewComments((current) =>
-            current.filter((comment) => !pendingCommentIds.has(comment.id)),
+      return Promise.resolve()
+        .then(() =>
+          window.codiff.submitPullRequestReview({
+            ...(body ? { body } : {}),
+            comments: formattedComments,
+            event,
+            source,
+          }),
+        )
+        .then((result) => {
+          const submittedDraftIds = new Set(result.submittedDraftIds);
+          const outcomeUnknownDraftIds = new Set(
+            result.status === 'failed' ? (result.outcomeUnknownDraftIds ?? []) : [],
           );
+          if (
+            activeReviewCommentDraftRef.current &&
+            submittedDraftIds.has(activeReviewCommentDraftRef.current.id)
+          ) {
+            updateActiveReviewCommentDraft(null);
+          }
+          setReviewComments((current) =>
+            current
+              .filter((comment) => !submittedDraftIds.has(comment.id))
+              .map((comment) =>
+                outcomeUnknownDraftIds.has(comment.id) && isProviderCommentDraft(comment)
+                  ? {
+                      ...comment,
+                      remoteSubmit: {
+                        error: 'Provider outcome is unknown. Refresh and inspect before retrying.',
+                        status: 'outcome-unknown' as const,
+                      },
+                    }
+                  : comment,
+              ),
+          );
+          if (result.status === 'failed') {
+            throw new Error(result.reason);
+          }
         })
         .catch((error: unknown) => {
           window.alert(error instanceof Error ? error.message : String(error));

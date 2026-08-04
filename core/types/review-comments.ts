@@ -51,6 +51,8 @@ export type PullRequestReviewComment = {
   body: string;
   filePath: string;
   lineNumber?: number;
+  /** Local-only draft identity; provider payload builders deliberately omit it. */
+  localDraftId?: string;
   position?: ReviewCommentPosition;
   sectionId?: string;
   side?: 'additions' | 'deletions';
@@ -92,18 +94,11 @@ export type ProviderReviewCommentPosition = {
   };
 };
 
-export type ProviderCommentSubmission = ReviewCommentSubmissionBase &
-  (
-    | {
-        position: ProviderReviewCommentPosition;
-        sectionId?: never;
-      }
-    | {
-        position?: never;
-        sectionId?: never;
-        threadId: string;
-      }
-  );
+export type ProviderCommentSubmission = ReviewCommentSubmissionBase & {
+  /** Host-only identity used to account for partial review submission. */
+  localDraftId: string;
+  sectionId?: never;
+} & ({ position: ProviderReviewCommentPosition } | { position?: never; threadId: string });
 
 export type ShareCommentSubmission = ReviewCommentSubmissionBase &
   (
@@ -178,12 +173,24 @@ export type ReviewCommenting = {
 
 export type PullRequestReviewEvent = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
 export type SubmitPullRequestCommentRequest = {
-  comment: PullRequestReviewComment;
+  comment: ProviderCommentSubmission;
   source: Extract<ReviewSource, { type: 'pull-request' }>;
 };
 export type SubmitPullRequestReviewRequest = {
   body?: string;
-  comments: ReadonlyArray<PullRequestReviewComment>;
+  comments: ReadonlyArray<ProviderCommentSubmission>;
   event: PullRequestReviewEvent;
   source: Extract<ReviewSource, { type: 'pull-request' }>;
 };
+
+export type SubmitPullRequestReviewResult =
+  | {
+      status: 'submitted';
+      submittedDraftIds: ReadonlyArray<string>;
+    }
+  | {
+      outcomeUnknownDraftIds?: ReadonlyArray<string>;
+      reason: string;
+      status: 'failed';
+      submittedDraftIds: ReadonlyArray<string>;
+    };

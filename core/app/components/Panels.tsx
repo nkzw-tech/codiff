@@ -501,7 +501,7 @@ function PullRequestReviewAction({
   hasPendingComments?: boolean;
   icon: ReactNode;
   label: string;
-  onSubmitReview?: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
+  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   title: string;
 }) {
   const [body, setBody] = useState('');
@@ -690,7 +690,6 @@ export function PullRequestReviewButtons({
   onClosePullRequest,
   onSubmitReview,
   reviewStatus,
-  showCommentReview = false,
 }: {
   children?: ReactNode;
   disabled: boolean;
@@ -698,7 +697,6 @@ export function PullRequestReviewButtons({
   onClosePullRequest?: () => void;
   onSubmitReview?: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   reviewStatus?: PullRequestReviewStatus;
-  showCommentReview?: boolean;
 }) {
   const approveBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'APPROVE');
   const commentBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'COMMENT');
@@ -706,7 +704,7 @@ export function PullRequestReviewButtons({
   const canSubmitReview = onSubmitReview != null;
   const closeStatus = reviewStatus?.close;
   const closeVisible = onClosePullRequest && closeStatus && closeStatus.disabled !== true;
-  const commentVisible = canSubmitReview && showCommentReview && !commentBlocked;
+  const commentVisible = canSubmitReview && !commentBlocked;
   const hasReviewActions =
     commentVisible ||
     (canSubmitReview && (!approveBlocked || !requestChangesBlocked)) ||

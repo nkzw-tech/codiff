@@ -77,6 +77,7 @@ import type {
   ProviderCommentDraft,
   RenderedSubmittedReviewComment,
   ReviewComment,
+  ReviewCommentCreation,
   ReviewDraft,
   ReviewScrollTarget,
   ShareCommentDraft,
@@ -92,6 +93,10 @@ import {
 import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
+import {
+  resolveProviderCommentTarget,
+  resolveShareCommentTarget,
+} from './lib/review-comment-target.ts';
 import {
   buildReviewCommentsMarkdown,
   getPendingPullRequestReviewComments,
@@ -142,6 +147,7 @@ import type {
   ShareCommentSubmission,
   SharedWalkthroughSnapshot,
   SubmittedReviewComment,
+  SubmitPullRequestReviewResult,
   WalkthroughCommitMessageResult,
   WalkthroughCommitResult,
   WalkthroughGenerationProgress,
@@ -200,6 +206,7 @@ export type LocalReviewNoteCapabilities = ReviewDraftCapabilities<LocalReviewNot
 export type CommentDestination = 'provider' | 'share';
 export type CommentAnchorPolicy = 'provider-target' | 'share-snapshot';
 export type ProviderReviewOutcome = 'approve' | 'comment' | 'request-changes';
+export type SubmitProviderReviewResult = SubmitPullRequestReviewResult;
 
 export type SubmitProviderReviewRequest = {
   comments: ReadonlyArray<ProviderCommentSubmission>;
@@ -209,7 +216,7 @@ export type SubmitProviderReviewRequest = {
 
 export type ProviderReviewSessionCapabilities = {
   drafts: ControlledReviewDrafts<ProviderCommentDraft>;
-  submit: (request: SubmitProviderReviewRequest) => Promise<void>;
+  submit: (request: SubmitProviderReviewRequest) => Promise<SubmitProviderReviewResult>;
 };
 
 type ReviewCommentDraftForDestination<Destination extends CommentDestination> =
@@ -717,7 +724,7 @@ export function ReviewSurface({
     activeReviewCommentDraftRef,
     activeReviewCommentDraftState,
     clearCommentFocus,
-    createComment,
+    createComment: createDraftComment,
     deleteComment: deleteLocalComment,
     focusCommentId,
     focusCommentRequest,
@@ -731,6 +738,50 @@ export function ReviewSurface({
     onCommentFileChange: bumpItemVersion,
     setComments: setLocalReviewComments,
   });
+  const createComment = useCallback(
+    (comment: ReviewCommentCreation) => {
+      if (localReviewNotes) {
+        createDraftComment(comment);
+        return;
+      }
+      if (!comments) {
+        return;
+      }
+      const file = snapshot.files.find((candidate) => candidate.path === comment.filePath);
+      const section = file?.sections.find((candidate) => candidate.id === comment.sectionId);
+      if (!file || !section) {
+        return;
+      }
+      const targetInput = {
+        anchor: comment.anchor,
+        file,
+        lineNumber: comment.lineNumber,
+        section,
+        showWhitespace: snapshot.preferences.showWhitespace,
+        side: comment.side,
+        startLineNumber: comment.startLineNumber,
+        startSide: comment.startSide,
+      };
+      const target =
+        comments.destination === 'share'
+          ? resolveShareCommentTarget({ ...targetInput, displayedFiles: snapshot.files })
+          : resolveProviderCommentTarget({ ...targetInput, canonicalFiles: snapshot.files });
+      if (target.status !== 'enabled') {
+        return;
+      }
+      createDraftComment({
+        ...comment,
+        ...(target.position ? { position: target.position } : {}),
+      });
+    },
+    [
+      comments,
+      createDraftComment,
+      localReviewNotes,
+      snapshot.files,
+      snapshot.preferences.showWhitespace,
+    ],
+  );
   const generalCommentThreads = snapshot.repository.generalComments ?? emptyGeneralCommentThreads;
   const generalComments = useMemo(
     () =>
@@ -960,7 +1011,8 @@ export function ReviewSurface({
         !comment ||
         !isPersistedDraft ||
         !comment.body.trim() ||
-        comment.remoteSubmit?.status === 'submitting'
+        comment.remoteSubmit?.status === 'submitting' ||
+        comment.remoteSubmit?.status === 'outcome-unknown'
       ) {
         return;
       }
@@ -1062,22 +1114,50 @@ export function ReviewSurface({
       if (event === 'COMMENT' && pendingComments.length === 0 && !body?.trim()) {
         return;
       }
-      const pendingIds = new Set(pendingComments.map((comment) => comment.id));
+      let formattedComments;
+      try {
+        formattedComments = pendingComments.map((comment) => toProviderCommentSubmission(comment));
+      } catch (error) {
+        return Promise.reject(error);
+      }
       setPullRequestReviewSubmitting(event);
-      const formattedComments = pendingComments.map((comment) =>
-        toProviderCommentSubmission(comment),
-      );
-      const submission = reviewSession.submit({
-        comments: formattedComments,
-        outcome: toProviderReviewOutcome(event),
-        ...(body?.trim() ? { summary: body } : {}),
-      });
-      return submission
-        .then(() => {
-          updateActiveReviewCommentDraft(null);
-          setLocalReviewComments((current) =>
-            current.filter((comment) => !pendingIds.has(comment.id)),
+      return Promise.resolve()
+        .then(() =>
+          reviewSession.submit({
+            comments: formattedComments,
+            outcome: toProviderReviewOutcome(event),
+            ...(body?.trim() ? { summary: body } : {}),
+          }),
+        )
+        .then((result) => {
+          const submittedDraftIds = new Set(result.submittedDraftIds);
+          const outcomeUnknownDraftIds = new Set(
+            result.status === 'failed' ? (result.outcomeUnknownDraftIds ?? []) : [],
           );
+          if (
+            activeReviewCommentDraftRef.current &&
+            submittedDraftIds.has(activeReviewCommentDraftRef.current.id)
+          ) {
+            updateActiveReviewCommentDraft(null);
+          }
+          setLocalReviewComments((current) =>
+            current
+              .filter((comment) => !submittedDraftIds.has(comment.id))
+              .map((comment) =>
+                outcomeUnknownDraftIds.has(comment.id) && isProviderCommentDraft(comment)
+                  ? {
+                      ...comment,
+                      remoteSubmit: {
+                        error: 'Provider outcome is unknown. Refresh and inspect before retrying.',
+                        status: 'outcome-unknown' as const,
+                      },
+                    }
+                  : comment,
+              ),
+          );
+          if (result.status === 'failed') {
+            throw new Error(result.reason);
+          }
         })
         .catch((error: unknown) => {
           window.alert(error instanceof Error ? error.message : String(error));
@@ -1513,7 +1593,6 @@ export function ReviewSurface({
         onClosePullRequest={sourceNavigation?.onClosePullRequest ? closePullRequest : undefined}
         onSubmitReview={reviewSession ? submitReview : undefined}
         reviewStatus={source.reviewStatus}
-        showCommentReview={source.provider === 'github' || source.host === 'github.com'}
       >
         {sourceMergeStatusBadge}
       </PullRequestReviewButtons>

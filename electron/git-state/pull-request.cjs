@@ -22,6 +22,11 @@ const {
   runGhApi,
   runGhApiBuffer,
 } = require('./github-history/gh-github-transport.cjs');
+const {
+  PENDING_REVIEW_COMMENT_ERROR,
+  createGitHubReviewMutations,
+  normalizePullRequestComment,
+} = require('./github-review-mutations.cjs');
 const { loadGitHubHistory } = require('../github-history-bridge.cjs');
 const { parseReviewUrl } = require('../review-source.cjs');
 
@@ -29,11 +34,8 @@ const { parseReviewUrl } = require('../review-source.cjs');
  * @typedef {import('../../core/types.ts').DiffImageContentResult} DiffImageContentResult
  * @typedef {import('../../core/types.ts').GitSha} GitSha
  * @typedef {import('../../core/types.ts').HistoryEntry} HistoryEntry
- * @typedef {import('../../core/types.ts').PullRequestReviewComment} PullRequestReviewComment
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../../core/types.ts').ReviewSource} ReviewSource
- * @typedef {import('../../core/types.ts').SubmitPullRequestCommentRequest} SubmitPullRequestCommentRequest
- * @typedef {import('../../core/types.ts').SubmitPullRequestReviewRequest} SubmitPullRequestReviewRequest
  * @typedef {import('../../core/lib/review-artifacts.ts').ArtifactFile} ArtifactFile
  * @typedef {{owner: string; repo: string}} GitHubRepositoryReference
  * @typedef {{name: string; url: string}} LocalGitRemote
@@ -42,6 +44,7 @@ const { parseReviewUrl } = require('../review-source.cjs');
  * @typedef {{direction: 'fetch' | 'push'; name: string; owner: string; repo: string}} GitHubRemote
  * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
  * @typedef {{author?: {avatar_url?: string}; commit?: {author?: {date?: string; email?: string; name?: string}; message?: string}; parents?: ReadonlyArray<{sha?: string}>; sha?: string}} GitHubCommit
+ * @typedef {{merge_base_commit?: {sha?: string}} | null} GitHubComparison
  * @typedef {{[key: string]: any}} GitHubReviewComment
  * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
  */
@@ -156,22 +159,6 @@ const readLocalGitRemotes = async (repoRoot) => {
   return remotes.filter((remote) => remote != null);
 };
 
-/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
-const assertPullRequestMatchesRepository = async (repoRoot, pullRequest) => {
-  const matchesRepository = (await readLocalGitRemotes(repoRoot)).some(({ url }) => {
-    const repository = parseGitHubRemoteUrl(url) ?? parseRemoteRepositoryPath(url);
-    return (
-      repository?.owner.toLowerCase() === pullRequest.owner.toLowerCase() &&
-      repository.repo.toLowerCase() === pullRequest.repo.toLowerCase()
-    );
-  });
-  if (!matchesRepository) {
-    throw new Error(
-      `Pull request ${pullRequest.owner}/${pullRequest.repo} does not match a GitHub remote in this repository.`,
-    );
-  }
-};
-
 /** @param {LocalGitRemote} remote */
 const getRemotePriority = (remote) => (remote.name === 'origin' ? 0 : 1);
 
@@ -241,6 +228,11 @@ const selectPullRequestRemote = async (repoRoot, pullRequest, expectedHeadSha) =
   );
 };
 
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
+const assertPullRequestMatchesRepository = async (repoRoot, pullRequest) => {
+  await selectPullRequestRemote(repoRoot, pullRequest);
+};
+
 /** @param {PullRequestReference} pullRequest @param {GitHubPullRequestMetadata} metadata */
 const createPullRequestHistoryFetchRefspecs = (pullRequest, metadata) => [
   `+refs/pull/${pullRequest.number}/head:refs/codiff/pull-requests/${pullRequest.number}/head`,
@@ -295,6 +287,45 @@ const readPullRequestMetadata = (repoRoot, pullRequest, transport) =>
   (transport || createPullRequestTransport(repoRoot)).request({
     path: `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
   });
+
+/**
+ * @param {string} repoRoot
+ * @param {PullRequestReference} pullRequest
+ * @param {ReturnType<typeof createPullRequestTransport>} transport
+ */
+const readCurrentPullRequestTarget = async (repoRoot, pullRequest, transport) => {
+  const metadata = await readPullRequestMetadata(repoRoot, pullRequest, transport);
+  const baseSha = metadata.base?.sha;
+  const headSha = metadata.head?.sha;
+  if (!baseSha || !headSha) {
+    throw new Error('GitHub did not return complete pull request range coordinates.');
+  }
+  const [comparison, files] = await Promise.all([
+    /** @type {Promise<GitHubComparison>} */ (
+      transport.request({
+        path: `repos/${pullRequest.owner}/${pullRequest.repo}/compare/${encodeURIComponent(baseSha)}...${encodeURIComponent(headSha)}`,
+      })
+    ),
+    transport.request({
+      paginate: true,
+      path: `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/files`,
+      query: { per_page: 100 },
+    }),
+  ]);
+  const mergeBaseSha = comparison?.merge_base_commit?.sha;
+  if (!mergeBaseSha) {
+    throw new Error('GitHub did not return the current pull request merge base.');
+  }
+  return {
+    baseSha: mergeBaseSha,
+    files: files.map((file) => ({
+      newPath: file.filename,
+      ...(file.previous_filename ? { oldPath: file.previous_filename } : {}),
+      ...(file.patch ? { patch: file.patch } : {}),
+    })),
+    headSha,
+  };
+};
 
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest */
 const pullRequestHydrationSnapshotKey = (repoRoot, pullRequest) => `${repoRoot}:${pullRequest.url}`;
@@ -440,7 +471,26 @@ const firstNumber = (...values) => values.find((value) => typeof value === 'numb
 /** @param {GitHubReviewComment} comment */
 const normalizeGitHubReviewComment = (comment) => {
   const lineNumber = firstNumber(comment.line, comment.original_line);
-  if (lineNumber == null || !comment.path || !comment.body) {
+  if (!comment.path || !comment.body) {
+    return null;
+  }
+  if (lineNumber == null && comment.subject_type === 'file') {
+    return {
+      anchor: 'file',
+      author: {
+        avatarUrl: comment.user?.avatar_url,
+        login: comment.user?.login || 'GitHub user',
+        url: comment.user?.html_url,
+      },
+      body: comment.body,
+      filePath: comment.path,
+      id: `github:${comment.id}`,
+      threadId: String(comment.in_reply_to_id || comment.id),
+      submittedAt: comment.created_at,
+      url: comment.html_url,
+    };
+  }
+  if (lineNumber == null) {
     return null;
   }
 
@@ -823,7 +873,7 @@ const hydratePullRequestSections = async (
         file,
         oldFiles.get(oldPath),
         newFiles.get(file.path),
-        { base: range.baseSha, contentAttempted: true, head: range.headSha },
+        { base: range.baseSha, head: range.headSha },
       ),
     };
   });
@@ -994,130 +1044,13 @@ const readPullRequestImageContent = async (launchPath, source, requestedPath) =>
   }
 };
 
-/** @param {PullRequestReviewComment['side']} side */
-const toGitHubReviewSide = (side) => (side === 'deletions' ? 'LEFT' : 'RIGHT');
-
-/** @param {PullRequestReviewComment} comment */
-const normalizePullRequestComment = (comment) => {
-  /** @type {{body: string; line: number; path: string; side: string; start_line?: number; start_side?: string}} */
-  const payload = {
-    body: comment.body,
-    line: comment.lineNumber,
-    path: comment.filePath,
-    side: toGitHubReviewSide(comment.side),
-  };
-  const startSide = comment.startSide ?? comment.side;
-  if (
-    typeof comment.startLineNumber === 'number' &&
-    comment.startLineNumber !== comment.lineNumber
-  ) {
-    payload.start_line = comment.startLineNumber;
-    payload.start_side = toGitHubReviewSide(startSide);
-  }
-  return payload;
-};
-
-const PENDING_REVIEW_COMMENT_ERROR =
-  'You already have a pending GitHub review on this pull request. Submit or discard it on GitHub, then retry. Your comment draft is still here.';
-
-/** @param {unknown} error */
-const isGitHubValidationError = (error) =>
-  error instanceof Error && /(?:validation failed|http 422)/i.test(error.message);
-
-/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
-const hasPendingPullRequestReview = async (repoRoot, pullRequest) => {
-  const pages = JSON.parse(
-    await ghApi(repoRoot, [
-      '--paginate',
-      '--slurp',
-      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/reviews?per_page=100`,
-    ]),
-  );
-  return Array.isArray(pages) && pages.flat().some((review) => review?.state === 'PENDING');
-};
-
-/** @param {string} launchPath @param {SubmitPullRequestCommentRequest} request */
-const submitPullRequestComment = async (launchPath, request) => {
-  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-  const pullRequest = parseGitHubPullRequestUrl(request.source.url);
-  const metadata = await readPullRequestMetadata(repoRoot, pullRequest);
-  await selectPullRequestRemote(repoRoot, pullRequest, metadata.head?.sha);
-  const replyTo = request.comment.threadId ? Number(request.comment.threadId) : null;
-  if (request.comment.threadId && (!Number.isInteger(replyTo) || replyTo <= 0)) {
-    throw new Error('GitHub review replies require a numeric provider thread ID.');
-  }
-  const payload = replyTo
-    ? { body: request.comment.body, in_reply_to: replyTo }
-    : {
-        ...normalizePullRequestComment(request.comment),
-        commit_id: metadata.head?.sha,
-      };
-
-  const rawComment = await ghApi(
-    repoRoot,
-    [
-      '-X',
-      'POST',
-      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/comments`,
-      '--input',
-      '-',
-    ],
-    payload,
-  ).catch(async (error) => {
-    if (isGitHubValidationError(error)) {
-      const hasPendingReview = await hasPendingPullRequestReview(repoRoot, pullRequest).catch(
-        () => false,
-      );
-      if (hasPendingReview) {
-        throw new Error(PENDING_REVIEW_COMMENT_ERROR);
-      }
-    }
-    throw error;
-  });
-  const comment = normalizeGitHubReviewComment(JSON.parse(rawComment));
-  if (!comment) {
-    throw new Error('GitHub accepted the comment but did not return line metadata.');
-  }
-  return comment;
-};
-
-/** @param {string} launchPath @param {SubmitPullRequestReviewRequest} request */
-const submitPullRequestReview = async (launchPath, request) => {
-  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-  const pullRequest = parseGitHubPullRequestUrl(request.source.url);
-  const metadata = await readPullRequestMetadata(repoRoot, pullRequest);
-  await selectPullRequestRemote(repoRoot, pullRequest, metadata.head?.sha);
-
-  await ghApi(
-    repoRoot,
-    [
-      '-X',
-      'POST',
-      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}/reviews`,
-      '--input',
-      '-',
-    ],
-    createPullRequestReviewPayload(request),
-  );
-};
-
-/** @param {SubmitPullRequestReviewRequest} request */
-const createPullRequestReviewPayload = (request) => {
-  const body = request.body?.trim() || '';
-  if (request.event === 'COMMENT' && request.comments.length === 0 && !body) {
-    throw new Error('A comment review requires an inline comment or a review comment.');
-  }
-
-  return {
-    body:
-      body ||
-      (request.event === 'REQUEST_CHANGES' && request.comments.length === 0
-        ? 'Requesting changes.'
-        : ''),
-    comments: request.comments.map(normalizePullRequestComment),
-    event: request.event,
-  };
-};
+const { submitPullRequestComment, submitPullRequestReview } = createGitHubReviewMutations({
+  assertPullRequestMatchesRepository,
+  createTransport: createPullRequestTransport,
+  normalizeGitHubReviewComment,
+  parseGitHubPullRequestUrl,
+  readCurrentTarget: readCurrentPullRequestTarget,
+});
 
 module.exports = {
   PENDING_REVIEW_COMMENT_ERROR,

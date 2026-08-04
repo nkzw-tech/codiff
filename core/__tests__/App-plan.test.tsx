@@ -177,7 +177,10 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   submitPullRequestComment: vi.fn(async () => {
     throw new Error('Unexpected provider comment submission.');
   }),
-  submitPullRequestReview: vi.fn(async () => {}),
+  submitPullRequestReview: vi.fn(async () => ({
+    status: 'submitted' as const,
+    submittedDraftIds: [],
+  })),
   updateWalkthroughCommitMessage: vi.fn(async () => ({
     reason: 'Not used.',
     status: 'unavailable' as const,

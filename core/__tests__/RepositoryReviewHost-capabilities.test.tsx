@@ -423,6 +423,7 @@ test('wires desktop commands, persistence, preferences, loading, and exact provi
       body: 'Submit this comment.',
       filePath: 'src/provider.ts',
       lineNumber: 1,
+      localDraftId: 'provider-draft',
       position: {
         range: {
           base: { label: { kind: 'commit' as const, text: 'base' }, sha: gitSha('e') },
