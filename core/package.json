@@ -13,7 +13,15 @@
     "directory": "core"
   },
   "files": [
-    "dist"
+    "dist",
+    "*.css",
+    "*.ts",
+    "*.tsx",
+    "app",
+    "config",
+    "fonts",
+    "lib",
+    "types"
   ],
   "type": "module",
   "sideEffects": [
@@ -43,6 +51,11 @@
       "types": "./dist/styles.css.d.ts",
       "@nkzw/codiff-source": "./App.css",
       "default": "./dist/style.css"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "@nkzw/codiff-source": "./types.ts",
+      "default": "./dist/types.d.ts"
     },
     "./walkthrough": {
       "types": "./dist/lib/narrative-walkthrough-diff.d.ts",
