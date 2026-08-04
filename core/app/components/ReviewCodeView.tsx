@@ -53,6 +53,7 @@ import type {
   ReviewAnnotationMetadata,
   ReviewComment,
   ReviewCommentAnnotationMetadata,
+  ReviewCommentCreation,
   ReviewIdentity,
   ReviewScrollBehavior,
   ReviewScrollTarget,
@@ -89,11 +90,16 @@ import { isGeneratedWalkthroughFile } from '../../lib/narrative-walkthrough-diff
 import {
   getCommentKey,
   getReviewCommentLineLabel,
+  getReviewCommentRendererSectionId,
   getReviewCommentsDigest,
   hasActiveTextSelection,
   isFileReviewComment,
   isInteractiveReviewEvent,
   isLineReviewComment,
+  isProviderCommentDraft,
+  isReviewDraft,
+  isShareCommentDraft,
+  isSubmittedReviewComment,
   shouldDiscardReviewCommentOnEscape,
   updateStickyHeaderState,
 } from '../../lib/review-comments.ts';
@@ -389,10 +395,12 @@ const agentIconUrl = (agentId: 'codex' | 'claude' | 'opencode' | 'pi') => {
 };
 
 const canAskCodexForComment = (comment: ReviewComment) =>
-  !comment.isReadOnly && comment.body.trim().length > 0 && comment.codexReply?.status !== 'loading';
+  isReviewDraft(comment) &&
+  comment.body.trim().length > 0 &&
+  comment.codexReply?.status !== 'loading';
 
 const canSubmitComment = (comment: ReviewComment) =>
-  !comment.isReadOnly &&
+  (isProviderCommentDraft(comment) || isShareCommentDraft(comment)) &&
   comment.body.trim().length > 0 &&
   comment.remoteSubmit?.status !== 'submitting';
 
@@ -1408,7 +1416,7 @@ function ReviewCommentEditor({
             draft,
           },
     );
-    if (!comment.isReadOnly && draft !== comment.body) {
+    if (isReviewDraft(comment) && draft !== comment.body) {
       onUpdateComment(comment.id, draft);
     }
     return withCommentBody(comment, draft);
@@ -1615,7 +1623,8 @@ function ReviewCommentEditor({
         <div className="review-comment-body">
           <div
             className={`review-comment-header${
-              (supportsReviewCommentActions && !comment.isReadOnly) ||
+              (supportsReviewCommentActions &&
+                (isProviderCommentDraft(comment) || isShareCommentDraft(comment))) ||
               canEditExistingComment ||
               comment.canDelete ||
               editingExistingComment
@@ -1665,7 +1674,7 @@ function ReviewCommentEditor({
                 <X aria-hidden className="review-comment-delete-icon" size={14} weight="bold" />
               </button>
             ) : null}
-            {!comment.isReadOnly && onAskCodex ? (
+            {isReviewDraft(comment) && onAskCodex ? (
               <button
                 className="review-comment-action"
                 disabled={!canAskCodex}
@@ -1687,7 +1696,8 @@ function ReviewCommentEditor({
                 Ask
               </button>
             ) : null}
-            {supportsReviewCommentActions && !comment.isReadOnly ? (
+            {supportsReviewCommentActions &&
+            (isProviderCommentDraft(comment) || isShareCommentDraft(comment)) ? (
               <button
                 className="review-comment-action"
                 disabled={!commentCanSubmit}
@@ -1706,7 +1716,7 @@ function ReviewCommentEditor({
                 {comment.remoteSubmit?.status === 'submitting' ? 'Sending' : 'Comment'}
               </button>
             ) : null}
-            {!comment.isReadOnly ? (
+            {isReviewDraft(comment) ? (
               <button
                 aria-label="Delete comment"
                 className="review-comment-delete"
@@ -1918,8 +1928,8 @@ function ReviewCommentThreadGroup({
   const canReplyToThread =
     supportsReviewCommentActions &&
     threadId != null &&
-    comments.some((comment) => comment.isReadOnly) &&
-    !comments.some((comment) => !comment.isReadOnly) &&
+    comments.some(isSubmittedReviewComment) &&
+    !comments.some(isProviderCommentDraft) &&
     !comments.some((comment) => comment.canReplyThread === false) &&
     !threadResolved;
   const hasThreadActions = canReplyToThread || canResolveThread;
@@ -2282,11 +2292,15 @@ const dedupeReviewComments = (
 const groupReviewCommentsBySection = (comments: ReadonlyArray<ReviewComment>) => {
   const map = new Map<string, Array<ReviewComment>>();
   for (const comment of comments) {
-    const list = map.get(comment.sectionId);
+    const sectionId = getReviewCommentRendererSectionId(comment);
+    if (!sectionId) {
+      continue;
+    }
+    const list = map.get(sectionId);
     if (list) {
       list.push(comment);
     } else {
-      map.set(comment.sectionId, [comment]);
+      map.set(sectionId, [comment]);
     }
   }
   return map;
@@ -2542,7 +2556,7 @@ export function ReviewCodeView({
   onActiveBlockChange?: (blockId: string) => void;
   onAskCodex?: (comment: ReviewComment) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
-  onCreateComment: (comment: Omit<ReviewComment, 'body' | 'id'>) => void;
+  onCreateComment: (comment: ReviewCommentCreation) => void;
   onDeleteComment: (commentId: string) => void;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
   onLoadSection?: (file: ChangedFile, section: DiffSection) => void;
@@ -3098,6 +3112,7 @@ export function ReviewCodeView({
       onCreateComment({
         anchor: 'file',
         filePath: meta.file.path,
+        ...(meta.section.range ? { position: { range: meta.section.range } } : {}),
         sectionId: meta.section.id,
       });
       clearCommentLineHighlight();
@@ -3142,6 +3157,7 @@ export function ReviewCodeView({
       onCreateComment({
         filePath: meta.file.path,
         lineNumber: end,
+        ...(meta.section.range ? { position: { range: meta.section.range } } : {}),
         sectionId: meta.section.id,
         side: endSide,
         ...(end !== start ? { startLineNumber: start } : {}),
@@ -3233,6 +3249,7 @@ export function ReviewCodeView({
           onCreateComment({
             filePath: meta.file.path,
             lineNumber: line.lineNumber,
+            ...(meta.section.range ? { position: { range: meta.section.range } } : {}),
             sectionId: meta.section.id,
             side,
           });
@@ -3320,7 +3337,7 @@ export function ReviewCodeView({
     (comment: ReviewComment, body: string) => {
       onCommentDraftChange?.(null);
       clearCommentLineHighlight();
-      if (!comment.isReadOnly && body.trim().length === 0) {
+      if (isReviewDraft(comment) && body.trim().length === 0) {
         const existingTimer = emptyCommentDeleteTimersRef.current.get(comment.id);
         if (existingTimer != null) {
           window.clearTimeout(existingTimer);
@@ -3343,11 +3360,16 @@ export function ReviewCodeView({
     (threadId: string, comment: ReviewComment) => {
       clearCommentLineHighlight();
       cancelPendingEmptyCommentDeletes();
+      const sectionId = getReviewCommentRendererSectionId(comment);
+      if (!sectionId) {
+        return;
+      }
       onCreateComment({
         ...(isFileReviewComment(comment) ? { anchor: 'file' as const } : {}),
         filePath: comment.filePath,
         ...(comment.lineNumber != null ? { lineNumber: comment.lineNumber } : {}),
-        sectionId: comment.sectionId,
+        ...(comment.position ? { position: comment.position } : {}),
+        sectionId,
         ...(comment.side ? { side: comment.side } : {}),
         ...(comment.startLineNumber != null ? { startLineNumber: comment.startLineNumber } : {}),
         ...(comment.startSide ? { startSide: comment.startSide } : {}),

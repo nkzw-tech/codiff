@@ -5,7 +5,7 @@
 import { act, useRef } from 'react';
 import { afterEach, expect, test, vi } from 'vite-plus/test';
 import { useAppReviewComments } from '../app/hooks/useAppReviewComments.ts';
-import type { ReviewComment } from '../lib/app-types.ts';
+import type { LocalReviewNote, ProviderCommentDraft } from '../lib/app-types.ts';
 import type { RepositoryState } from '../types.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
 
@@ -31,13 +31,35 @@ const pullRequestState = {
     url: 'https://github.com/nkzw-tech/codiff/pull/42',
   },
 } satisfies RepositoryState;
-const comment: ReviewComment = {
+const localNote: LocalReviewNote = {
   body: 'Review this',
   filePath: 'src/app.ts',
   id: 'comment-1',
+  kind: 'local-note',
   lineNumber: 4,
   sectionId: 'src/app.ts:pull-request',
   side: 'additions',
+};
+const providerDraft: ProviderCommentDraft = {
+  body: localNote.body,
+  filePath: localNote.filePath,
+  id: localNote.id,
+  kind: 'provider-draft',
+  lineNumber: localNote.lineNumber,
+  position: {
+    range: {
+      base: {
+        label: { kind: 'commit', text: 'base' },
+        sha: 'a'.repeat(40) as import('../types.ts').GitSha,
+      },
+      head: {
+        label: { kind: 'commit', text: 'head' },
+        sha: 'b'.repeat(40) as import('../types.ts').GitSha,
+      },
+    },
+  },
+  sectionId: localNote.sectionId,
+  side: localNote.side,
 };
 
 function AppReviewCommentsHarness({
@@ -51,6 +73,7 @@ function AppReviewCommentsHarness({
 }) {
   const stateRef = useRef<RepositoryState | null>(state);
   const comments = useAppReviewComments({
+    draftKind: state.source.type === 'pull-request' ? 'provider-draft' : 'local-note',
     isReviewActionDisabled: () => false,
     onCommentFileChange,
     stateRef,
@@ -95,18 +118,18 @@ test('app review comments request and store assistant replies', async () => {
   const { getState, onCommentFileChange } = view;
 
   await act(async () => {
-    getState().setReviewComments([comment]);
+    getState().setReviewComments([localNote]);
   });
   await act(async () => {
-    getState().askCodex(comment);
+    getState().askCodex(localNote);
   });
   expect(askReviewAssistant).toHaveBeenCalledWith({
     comment: {
-      body: comment.body,
-      filePath: comment.filePath,
-      lineNumber: comment.lineNumber,
-      sectionId: comment.sectionId,
-      side: comment.side,
+      body: localNote.body,
+      filePath: localNote.filePath,
+      lineNumber: localNote.lineNumber,
+      sectionId: localNote.sectionId,
+      side: localNote.side,
     },
     source: workingTreeState.source,
   });
@@ -125,11 +148,11 @@ test('app review comments submit a draft and replace it with the remote comment'
       login: 'reviewer',
       name: 'Reviewer',
     },
-    body: comment.body,
-    filePath: comment.filePath,
+    body: providerDraft.body,
+    filePath: providerDraft.filePath,
     id: 'remote-comment',
-    lineNumber: comment.lineNumber,
-    side: comment.side,
+    lineNumber: providerDraft.lineNumber,
+    side: providerDraft.side,
     submittedAt: '2026-07-15T00:00:00.000Z',
     url: 'https://github.com/nkzw-tech/codiff/pull/42#discussion_r1',
   }));
@@ -138,17 +161,18 @@ test('app review comments submit a draft and replace it with the remote comment'
   const { getState, onCommentFileChange } = view;
 
   await act(async () => {
-    getState().setReviewComments([comment]);
+    getState().setReviewComments([providerDraft]);
   });
   await act(async () => {
-    getState().submitPullRequestComment(comment.id);
+    getState().submitPullRequestComment(providerDraft.id);
   });
   expect(submitPullRequestComment).toHaveBeenCalledWith({
     comment: {
-      body: comment.body,
-      filePath: comment.filePath,
-      lineNumber: comment.lineNumber,
-      side: comment.side,
+      body: providerDraft.body,
+      filePath: providerDraft.filePath,
+      lineNumber: providerDraft.lineNumber,
+      position: providerDraft.position,
+      side: providerDraft.side,
     },
     source: pullRequestState.source,
   });
@@ -159,13 +183,16 @@ test('app review comments submit a draft and replace it with the remote comment'
           login: 'reviewer',
           name: 'Reviewer',
         },
-        body: comment.body,
-        filePath: comment.filePath,
+        body: providerDraft.body,
+        destination: 'provider',
+        filePath: providerDraft.filePath,
         id: 'remote-comment',
         isReadOnly: true,
-        lineNumber: comment.lineNumber,
-        sectionId: comment.sectionId,
-        side: comment.side,
+        kind: 'submitted-comment',
+        lineNumber: providerDraft.lineNumber,
+        position: providerDraft.position,
+        resolvedSectionId: providerDraft.sectionId,
+        side: providerDraft.side,
         submittedAt: '2026-07-15T00:00:00.000Z',
         url: 'https://github.com/nkzw-tech/codiff/pull/42#discussion_r1',
       },
@@ -181,7 +208,7 @@ test('app review comments submit and clear pending review drafts', async () => {
   const { getState } = view;
 
   await act(async () => {
-    getState().setReviewComments([comment]);
+    getState().setReviewComments([providerDraft]);
   });
   await act(async () => {
     await getState().submitPullRequestReview('COMMENT');
@@ -189,10 +216,11 @@ test('app review comments submit and clear pending review drafts', async () => {
   expect(submitPullRequestReview).toHaveBeenCalledWith({
     comments: [
       {
-        body: comment.body,
-        filePath: comment.filePath,
-        lineNumber: comment.lineNumber,
-        side: comment.side,
+        body: providerDraft.body,
+        filePath: providerDraft.filePath,
+        lineNumber: providerDraft.lineNumber,
+        position: providerDraft.position,
+        side: providerDraft.side,
       },
     ],
     event: 'COMMENT',

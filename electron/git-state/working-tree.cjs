@@ -227,14 +227,21 @@ const splitPatchByPath = (rawPatch) => {
 /**
  * @param {string} repoRoot
  * @param {WorkingTreeSectionKind} kind
- * @param {{showWhitespace?: boolean}} [options]
+ * @param {{head?: string; showWhitespace?: boolean}} [options]
  * @returns {Promise<Map<string, {binary: boolean; patch: string}>>}
  */
 const readPatchMap = async (repoRoot, kind, options = {}) => {
   const whitespaceArgs = getWhitespaceDiffArgs(options);
   const args =
     kind === 'staged'
-      ? ['diff', '--cached', '--patch', '--no-ext-diff', ...whitespaceArgs]
+      ? [
+          'diff',
+          '--cached',
+          '--patch',
+          '--no-ext-diff',
+          ...whitespaceArgs,
+          ...(options.head ? [options.head] : []),
+        ]
       : ['diff', '--patch', '--no-ext-diff', ...whitespaceArgs];
   return splitPatchByPath(await git(repoRoot, args));
 };
@@ -314,10 +321,12 @@ const listUntrackedItems = async (repoRoot) => {
 const readWorkingTreeState = async (launchPath, options = {}) => {
   const repoRoot =
     options.repositoryRoot || (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-  const [watcherStatus, untrackedItems] = await Promise.all([
+  const [watcherStatus, untrackedItems, rawHead] = await Promise.all([
     git(repoRoot, ['status', '--porcelain=v2', '--branch', '-z', '-uall']),
     listUntrackedItems(repoRoot),
+    gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']),
   ]);
+  const head = rawHead.trim();
   const initialWatcherSnapshot = createRepositoryWatcherSnapshot(
     repoRoot,
     parseRepositoryWatcherStatus(watcherStatus),
@@ -329,7 +338,7 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
   const shouldUsePatchOnly = options.eagerContents === false;
   const [stagedPatches, unstagedPatches] = shouldUsePatchOnly
     ? await Promise.all([
-        readPatchMap(repoRoot, 'staged', options),
+        readPatchMap(repoRoot, 'staged', { ...options, head }),
         readPatchMap(repoRoot, 'unstaged', options),
       ])
     : [new Map(), new Map()];
@@ -344,6 +353,7 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
     if (item.staged) {
       sections.push(
         await createSection(repoRoot, item, 'staged', {
+          head,
           patch: stagedPatches.get(item.path),
           patchOnly,
           showWhitespace: options.showWhitespace,
@@ -354,6 +364,7 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
     if (item.unstaged) {
       sections.push(
         await createSection(repoRoot, item, 'unstaged', {
+          head,
           patch: item.status === 'conflicted' ? undefined : unstagedPatches.get(item.path),
           patchOnly,
           showWhitespace: options.showWhitespace,

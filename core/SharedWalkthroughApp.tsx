@@ -73,8 +73,13 @@ import type { CodiffDiffStyle, CodiffKeymap } from './config/types.ts';
 import { getAgentLabel } from './lib/app-constants.ts';
 import type {
   CodeViewInstance,
+  LocalReviewNote,
+  ProviderCommentDraft,
+  RenderedSubmittedReviewComment,
   ReviewComment,
+  ReviewDraft,
   ReviewScrollTarget,
+  ShareCommentDraft,
   WalkthroughError,
 } from './lib/app-types.ts';
 import type { Command } from './lib/command-registry.ts';
@@ -91,9 +96,15 @@ import {
   buildReviewCommentsMarkdown,
   getPendingPullRequestReviewComments,
   getReviewCommentsFromState,
+  isLocalReviewNote,
+  isProviderCommentDraft,
+  isReviewDraft,
+  isShareCommentDraft,
+  isSubmittedReviewComment,
   mergeReviewComments,
-  toSubmittedReviewComment,
-  toPullRequestReviewComment,
+  toProviderCommentSubmission,
+  toRenderedSubmittedReviewComment,
+  toShareCommentSubmission,
 } from './lib/review-comments.ts';
 import { getSelectedPathFromScroll } from './lib/review-scroll.ts';
 import {
@@ -139,7 +150,8 @@ import type {
 export { ReadOnlyGeneralCommentCard } from './app/components/merge-request/GeneralComments.tsx';
 export type { ReviewCommenting } from './types.ts';
 
-const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
+const emptyReviewComments: ReadonlyArray<RenderedSubmittedReviewComment> = [];
+const emptyReviewDrafts: ReadonlyArray<ReviewDraft> = [];
 const emptyGeneralCommentThreads: ReadonlyArray<PullRequestGeneralCommentThread> = [];
 const emptyPaths = new Set<string>();
 const emptyWalkthroughNotes = new Map();
@@ -172,18 +184,18 @@ export type ControlledReviewValue<Value> = Readonly<{
   value: Value;
 }>;
 
-export type ControlledReviewDrafts<Draft extends ReviewComment = ReviewComment> = Readonly<{
+export type ControlledReviewDrafts<Draft extends ReviewDraft = ReviewDraft> = Readonly<{
   onChange: Dispatch<SetStateAction<ReadonlyArray<Draft>>>;
   value: ReadonlyArray<Draft>;
 }>;
 
-type ReviewDraftCapabilities = {
+type ReviewDraftCapabilities<Draft extends ReviewDraft> = {
   canCreateInline?: boolean;
-  drafts?: ControlledReviewDrafts;
-  onAsk?: (comment: ReviewComment) => void;
+  drafts?: ControlledReviewDrafts<Draft>;
+  onAsk?: (comment: Draft) => void;
 };
 
-export type LocalReviewNoteCapabilities = ReviewDraftCapabilities;
+export type LocalReviewNoteCapabilities = ReviewDraftCapabilities<LocalReviewNote>;
 
 export type CommentDestination = 'provider' | 'share';
 export type CommentAnchorPolicy = 'provider-target' | 'share-snapshot';
@@ -196,9 +208,12 @@ export type SubmitProviderReviewRequest = {
 };
 
 export type ProviderReviewSessionCapabilities = {
-  drafts: ControlledReviewDrafts;
+  drafts: ControlledReviewDrafts<ProviderCommentDraft>;
   submit: (request: SubmitProviderReviewRequest) => Promise<void>;
 };
+
+type ReviewCommentDraftForDestination<Destination extends CommentDestination> =
+  Destination extends 'share' ? ShareCommentDraft : ProviderCommentDraft;
 
 type ReviewCommentSubmission<Destination extends CommentDestination> = Destination extends 'share'
   ? ShareCommentSubmission
@@ -206,7 +221,7 @@ type ReviewCommentSubmission<Destination extends CommentDestination> = Destinati
 
 type CommonReviewCommentCapabilities<Destination extends CommentDestination> = {
   anchorPolicy: Destination extends 'share' ? 'share-snapshot' : 'provider-target';
-  authoring: ReviewDraftCapabilities;
+  authoring: ReviewDraftCapabilities<ReviewCommentDraftForDestination<Destination>>;
   destination: Destination;
   general?: {
     onCreate?: (body: string) => Promise<void>;
@@ -367,20 +382,24 @@ export const buildSharedReviewSnapshot = ({
 
 const getSnapshotReviewComments = (
   snapshot: SharedWalkthroughSnapshot,
-): ReadonlyArray<ReviewComment> => {
+  destination: CommentDestination,
+): ReadonlyArray<RenderedSubmittedReviewComment> => {
   if (!snapshot.reviewComments?.length) {
     return emptyReviewComments;
   }
 
-  return getReviewCommentsFromState({
-    branch: snapshot.branch,
-    files: snapshot.files,
-    generatedAt: Date.parse(snapshot.exportedAt) || Date.now(),
-    launchPath: snapshot.repository.root,
-    reviewComments: snapshot.reviewComments as ReadonlyArray<PullRequestExistingReviewComment>,
-    root: snapshot.repository.root,
-    source: snapshot.repository.source,
-  } satisfies RepositoryState);
+  return getReviewCommentsFromState(
+    {
+      branch: snapshot.branch,
+      files: snapshot.files,
+      generatedAt: Date.parse(snapshot.exportedAt) || Date.now(),
+      launchPath: snapshot.repository.root,
+      reviewComments: snapshot.reviewComments as ReadonlyArray<PullRequestExistingReviewComment>,
+      root: snapshot.repository.root,
+      source: snapshot.repository.source,
+    } satisfies RepositoryState,
+    destination,
+  );
 };
 
 const noop = () => {};
@@ -456,20 +475,17 @@ export function ReviewSurface({
   const history = capabilities?.history;
   const localReviewNotes = capabilities?.localReviewNotes;
   const comments = capabilities?.comments;
+  const providerComments = comments?.destination === 'provider' ? comments : undefined;
+  const shareComments = comments?.destination === 'share' ? comments : undefined;
   const controlledPreferences = capabilities?.preferences;
   const sourceNavigation = capabilities?.sourceNavigation;
   const walkthrough = capabilities?.walkthrough;
-  const reviewSession = comments?.destination === 'provider' ? comments.reviewSession : undefined;
+  const reviewSession = providerComments?.reviewSession;
   const canComment =
     localReviewNotes?.canCreateInline ??
     comments?.authoring.canCreateInline ??
     comments?.inline.onSubmit != null;
-  const reviewDrafts =
-    localReviewNotes ??
-    (comments && (canComment || comments.authoring.drafts || reviewSession?.drafts)
-      ? comments.authoring
-      : undefined);
-  const controlledReviewDrafts = reviewSession?.drafts ?? reviewDrafts?.drafts;
+  const reviewDrafts = localReviewNotes ?? comments?.authoring;
   const copyPendingCommentsLabel = localReviewNotes
     ? 'Copy Review Notes'
     : 'Copy Pending Review Comments';
@@ -490,7 +506,6 @@ export function ReviewSurface({
             onReplyGeneralComment: comments.general?.onReply,
             onResolveDiscussion: comments.general?.onResolve ?? comments.inline.onResolve,
             onSignIn: comments.onSignIn,
-            onSubmitComment: comments.inline.onSubmit,
             onSubmitGeneralComment: comments.general?.onCreate,
             onUpdateComment: comments.inline.onUpdate,
             onUpdateGeneralComment: comments.general?.onUpdate,
@@ -571,46 +586,128 @@ export function ReviewSurface({
     onWidthCommit: writeSharedSidebarWidth,
     readWidth: readSharedSidebarWidth,
   });
-  const snapshotReviewComments = useMemo(() => getSnapshotReviewComments(snapshot), [snapshot]);
-  const showOutdated = controlledPreferences?.outdatedVisibility?.value ?? true;
-  const [editedReviewCommentBodies, setEditedReviewCommentBodies] = useState<
-    Readonly<Record<string, string>>
-  >({});
-  const visibleSnapshotReviewComments = useMemo(
-    () =>
-      snapshotReviewComments
-        .filter((comment) => showOutdated || !comment.isOutdated)
-        .map((comment) => ({
-          ...comment,
-          ...(editedReviewCommentBodies[comment.id] != null &&
-          editedReviewCommentBodies[comment.id] !== comment.body
-            ? { body: editedReviewCommentBodies[comment.id] }
-            : {}),
-          canDelete: comment.canDelete === true && comments?.inline.onDelete != null,
-          canEdit: comment.canEdit === true && comments?.inline.onUpdate != null,
-          canReplyThread: comment.canReplyThread !== false && comments?.inline.onSubmit != null,
-          canResolveThread: comment.canResolveThread === true && comments?.inline.onResolve != null,
-        })),
-    [comments, editedReviewCommentBodies, showOutdated, snapshotReviewComments],
+  const snapshotReviewComments = useMemo(
+    () => getSnapshotReviewComments(snapshot, comments?.destination ?? 'provider'),
+    [comments?.destination, snapshot],
   );
+  const reviewCommentScopeKey = `${snapshot.repository.root}:${getSourceKey(snapshot.repository.source)}`;
+  const showOutdated = controlledPreferences?.outdatedVisibility?.value ?? true;
+  const [submittedReviewCommentState, setSubmittedReviewCommentState] = useState<{
+    comments: ReadonlyArray<RenderedSubmittedReviewComment>;
+    scopeKey: string;
+  }>(() => ({ comments: [], scopeKey: reviewCommentScopeKey }));
+  const submittedReviewComments = useMemo(
+    () =>
+      submittedReviewCommentState.scopeKey === reviewCommentScopeKey
+        ? submittedReviewCommentState.comments
+        : [],
+    [reviewCommentScopeKey, submittedReviewCommentState],
+  );
+  const setSubmittedReviewComments = useCallback<
+    Dispatch<SetStateAction<ReadonlyArray<RenderedSubmittedReviewComment>>>
+  >(
+    (update) => {
+      setSubmittedReviewCommentState((current) => {
+        const scopedCurrent = current.scopeKey === reviewCommentScopeKey ? current.comments : [];
+        return {
+          comments: typeof update === 'function' ? update(scopedCurrent) : update,
+          scopeKey: reviewCommentScopeKey,
+        };
+      });
+    },
+    [reviewCommentScopeKey],
+  );
+  const [editedReviewCommentBodyState, setEditedReviewCommentBodyState] = useState<{
+    bodies: Readonly<Record<string, string>>;
+    scopeKey: string;
+  }>(() => ({ bodies: {}, scopeKey: reviewCommentScopeKey }));
+  const editedReviewCommentBodies = useMemo(
+    () =>
+      editedReviewCommentBodyState.scopeKey === reviewCommentScopeKey
+        ? editedReviewCommentBodyState.bodies
+        : {},
+    [editedReviewCommentBodyState, reviewCommentScopeKey],
+  );
+  const setEditedReviewCommentBodies = useCallback<
+    Dispatch<SetStateAction<Readonly<Record<string, string>>>>
+  >(
+    (update) => {
+      setEditedReviewCommentBodyState((current) => {
+        const scopedCurrent = current.scopeKey === reviewCommentScopeKey ? current.bodies : {};
+        return {
+          bodies: typeof update === 'function' ? update(scopedCurrent) : update,
+          scopeKey: reviewCommentScopeKey,
+        };
+      });
+    },
+    [reviewCommentScopeKey],
+  );
+  const visibleSnapshotReviewComments = useMemo(() => {
+    const snapshotIds = new Set(snapshotReviewComments.map((comment) => comment.id));
+    return [
+      ...snapshotReviewComments,
+      ...submittedReviewComments.filter((comment) => !snapshotIds.has(comment.id)),
+    ]
+      .filter((comment) => showOutdated || !comment.isOutdated)
+      .map((comment) => ({
+        ...comment,
+        ...(editedReviewCommentBodies[comment.id] != null &&
+        editedReviewCommentBodies[comment.id] !== comment.body
+          ? { body: editedReviewCommentBodies[comment.id] }
+          : {}),
+        canDelete: comment.canDelete === true && comments?.inline.onDelete != null,
+        canEdit: comment.canEdit === true && comments?.inline.onUpdate != null,
+        canReplyThread: comment.canReplyThread !== false && comments?.inline.onSubmit != null,
+        canResolveThread: comment.canResolveThread === true && comments?.inline.onResolve != null,
+      }));
+  }, [
+    comments,
+    editedReviewCommentBodies,
+    showOutdated,
+    snapshotReviewComments,
+    submittedReviewComments,
+  ]);
   const [uncontrolledLocalReviewComments, setUncontrolledLocalReviewComments] =
-    useState<ReadonlyArray<ReviewComment>>(emptyReviewComments);
+    useState<ReadonlyArray<ReviewDraft>>(emptyReviewDrafts);
   const uncontrolledLocalReviewCommentsRef = useRef(uncontrolledLocalReviewComments);
-  const localReviewComments = controlledReviewDrafts?.value ?? uncontrolledLocalReviewComments;
+  const providerControlledDrafts = reviewSession?.drafts ?? providerComments?.authoring.drafts;
+  const localReviewComments: ReadonlyArray<ReviewDraft> =
+    localReviewNotes?.drafts?.value ??
+    shareComments?.authoring.drafts?.value ??
+    providerControlledDrafts?.value ??
+    uncontrolledLocalReviewComments;
   const setLocalReviewComments = useCallback<
     Dispatch<SetStateAction<ReadonlyArray<ReviewComment>>>
   >(
     (update) => {
-      if (controlledReviewDrafts) {
-        controlledReviewDrafts.onChange(update);
+      if (localReviewNotes?.drafts) {
+        localReviewNotes.drafts.onChange((current) => {
+          const next = typeof update === 'function' ? update(current) : update;
+          return next.filter(isLocalReviewNote);
+        });
+        return;
+      }
+      if (shareComments?.authoring.drafts) {
+        shareComments.authoring.drafts.onChange((current) => {
+          const next = typeof update === 'function' ? update(current) : update;
+          return next.filter(isShareCommentDraft);
+        });
+        return;
+      }
+      if (providerControlledDrafts) {
+        providerControlledDrafts.onChange((current) => {
+          const next = typeof update === 'function' ? update(current) : update;
+          return next.filter(isProviderCommentDraft);
+        });
         return;
       }
       const nextComments =
         typeof update === 'function' ? update(uncontrolledLocalReviewCommentsRef.current) : update;
-      uncontrolledLocalReviewCommentsRef.current = nextComments;
-      setUncontrolledLocalReviewComments(nextComments);
+      const nextDrafts = nextComments.filter(isReviewDraft);
+      uncontrolledLocalReviewCommentsRef.current = nextDrafts;
+      setUncontrolledLocalReviewComments(nextDrafts);
     },
-    [controlledReviewDrafts],
+    [localReviewNotes, providerControlledDrafts, shareComments],
   );
   const reviewComments = useMemo(
     () => mergeReviewComments(visibleSnapshotReviewComments, localReviewComments),
@@ -630,6 +727,7 @@ export function ReviewSurface({
   } = useReviewCommentDrafts({
     canCreateComment: canComment,
     comments: reviewComments,
+    draftKind: localReviewNotes ? 'local-note' : shareComments ? 'share-draft' : 'provider-draft',
     onCommentFileChange: bumpItemVersion,
     setComments: setLocalReviewComments,
   });
@@ -766,6 +864,18 @@ export function ReviewSurface({
     },
     [activeMode],
   );
+  const askReviewAssistant = useCallback(
+    (comment: ReviewComment) => {
+      if (isLocalReviewNote(comment)) {
+        localReviewNotes?.onAsk?.(comment);
+      } else if (isProviderCommentDraft(comment)) {
+        providerComments?.authoring.onAsk?.(comment);
+      } else if (isShareCommentDraft(comment)) {
+        shareComments?.authoring.onAsk?.(comment);
+      }
+    },
+    [localReviewNotes, providerComments, shareComments],
+  );
 
   const activateGeneralComment = useCallback(
     (commentId: string) => {
@@ -810,14 +920,19 @@ export function ReviewSurface({
         bumpItemVersion(comment.filePath);
       }
     },
-    [bumpItemVersion, reviewCommentsRef, updateReviewComment],
+    [bumpItemVersion, reviewCommentsRef, setEditedReviewCommentBodies, updateReviewComment],
   );
   const deleteComment = useCallback(
     (commentId: string) => {
       const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
-      if (comment?.isReadOnly && comment.canDelete && comments?.inline.onDelete) {
+      if (
+        comment &&
+        isSubmittedReviewComment(comment) &&
+        comment.canDelete &&
+        comments?.inline.onDelete
+      ) {
         updateActiveReviewCommentDraft(null);
-        setLocalReviewComments((current) =>
+        setSubmittedReviewComments((current) =>
           current.filter((candidate) => candidate.id !== commentId),
         );
         void comments.inline.onDelete(commentId).catch((error: unknown) => {
@@ -831,17 +946,19 @@ export function ReviewSurface({
       comments,
       deleteLocalComment,
       reviewCommentsRef,
-      setLocalReviewComments,
+      setSubmittedReviewComments,
       updateActiveReviewCommentDraft,
     ],
   );
   const submitComment = useCallback(
     (commentId: string) => {
       const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
+      const isPersistedDraft =
+        comment != null && (isProviderCommentDraft(comment) || isShareCommentDraft(comment));
       if (
-        !submitReviewComment ||
+        !comments?.inline.onSubmit ||
         !comment ||
-        comment.isReadOnly ||
+        !isPersistedDraft ||
         !comment.body.trim() ||
         comment.remoteSubmit?.status === 'submitting'
       ) {
@@ -851,36 +968,63 @@ export function ReviewSurface({
       updateActiveReviewCommentDraft(null);
       setLocalReviewComments((current) =>
         current.map((candidate) =>
-          candidate.id === commentId
-            ? { ...candidate, remoteSubmit: { status: 'submitting' } }
+          candidate.id === commentId &&
+          (isProviderCommentDraft(candidate) || isShareCommentDraft(candidate))
+            ? { ...candidate, remoteSubmit: { status: 'submitting' as const } }
             : candidate,
         ),
       );
-      const submission = toPullRequestReviewComment(comment, {
-        includeSectionId: comments?.destination === 'share',
-      });
-      void submitReviewComment(submission)
+
+      let submission: Promise<SubmittedReviewComment>;
+      try {
+        if (comments.destination === 'share' && isShareCommentDraft(comment)) {
+          submission = comments.inline.onSubmit(toShareCommentSubmission(comment));
+        } else if (comments.destination === 'provider' && isProviderCommentDraft(comment)) {
+          submission = comments.inline.onSubmit(toProviderCommentSubmission(comment));
+        } else {
+          return;
+        }
+      } catch (error: unknown) {
+        setLocalReviewComments((current) =>
+          current.map((candidate) =>
+            candidate.id === commentId &&
+            (isProviderCommentDraft(candidate) || isShareCommentDraft(candidate))
+              ? {
+                  ...candidate,
+                  remoteSubmit: {
+                    error: error instanceof Error ? error.message : String(error),
+                    status: 'error' as const,
+                  },
+                }
+              : candidate,
+          ),
+        );
+        return;
+      }
+
+      void submission
         .then((submittedComment) => {
           clearCommentFocus(commentId);
+          const submitted = toRenderedSubmittedReviewComment(submittedComment, comment);
           setLocalReviewComments((current) =>
-            current.flatMap((candidate) => {
-              if (candidate.id !== commentId) {
-                return [candidate];
-              }
-              return [toSubmittedReviewComment(submittedComment, candidate)];
-            }),
+            current.filter((candidate) => candidate.id !== commentId),
           );
+          setSubmittedReviewComments((current) => [
+            ...current.filter((candidate) => candidate.id !== submitted.id),
+            submitted,
+          ]);
           bumpItemVersion(comment.filePath);
         })
         .catch((error: unknown) => {
           setLocalReviewComments((current) =>
             current.map((candidate) =>
-              candidate.id === commentId
+              candidate.id === commentId &&
+              (isProviderCommentDraft(candidate) || isShareCommentDraft(candidate))
                 ? {
                     ...candidate,
                     remoteSubmit: {
                       error: error instanceof Error ? error.message : String(error),
-                      status: 'error',
+                      status: 'error' as const,
                     },
                   }
                 : candidate,
@@ -892,10 +1036,10 @@ export function ReviewSurface({
     [
       bumpItemVersion,
       clearCommentFocus,
-      comments?.destination,
+      comments,
       reviewCommentsRef,
       setLocalReviewComments,
-      submitReviewComment,
+      setSubmittedReviewComments,
       updateActiveReviewCommentDraft,
     ],
   );
@@ -912,7 +1056,7 @@ export function ReviewSurface({
       }
 
       const pendingComments = getPendingPullRequestReviewComments(
-        reviewCommentsRef.current,
+        reviewCommentsRef.current.filter(isProviderCommentDraft),
         activeReviewCommentDraftRef.current,
       );
       if (event === 'COMMENT' && pendingComments.length === 0 && !body?.trim()) {
@@ -921,7 +1065,7 @@ export function ReviewSurface({
       const pendingIds = new Set(pendingComments.map((comment) => comment.id));
       setPullRequestReviewSubmitting(event);
       const formattedComments = pendingComments.map((comment) =>
-        toPullRequestReviewComment(comment),
+        toProviderCommentSubmission(comment),
       );
       const submission = reviewSession.submit({
         comments: formattedComments,
@@ -1309,7 +1453,10 @@ export function ReviewSurface({
     itemVersionByKey,
     keymap,
     loadingSectionIds: content?.loadingSectionIds ?? new Set<string>(),
-    onAskCodex: reviewDrafts?.onAsk,
+    onAskCodex:
+      localReviewNotes?.onAsk || providerComments?.authoring.onAsk || shareComments?.authoring.onAsk
+        ? askReviewAssistant
+        : undefined,
     onCommentDraftChange: updateActiveReviewCommentDraft,
     onCreateComment: createComment,
     onDeleteComment: deleteComment,
@@ -1358,8 +1505,10 @@ export function ReviewSurface({
       <PullRequestReviewButtons
         disabled={pullRequestReviewSubmitting != null || pullRequestCloseSubmitting}
         hasPendingComments={
-          getPendingPullRequestReviewComments(localReviewComments, activeReviewCommentDraftState)
-            .length > 0
+          getPendingPullRequestReviewComments(
+            localReviewComments.filter(isProviderCommentDraft),
+            activeReviewCommentDraftState,
+          ).length > 0
         }
         onClosePullRequest={sourceNavigation?.onClosePullRequest ? closePullRequest : undefined}
         onSubmitReview={reviewSession ? submitReview : undefined}

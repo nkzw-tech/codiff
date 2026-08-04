@@ -41,7 +41,7 @@ const runWithCommandSignal = (signal, callback) => commandSignalStorage.run(sign
  *   unstaged: boolean;
  *   untracked: boolean;
  * }} StatusItem
- * @typedef {{force?: boolean; patch?: {binary: boolean; patch: string}; patchOnly?: boolean; showWhitespace?: boolean}} ReadFileOptions
+ * @typedef {{force?: boolean; head?: string; patch?: {binary: boolean; patch: string}; patchOnly?: boolean; showWhitespace?: boolean}} ReadFileOptions
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
@@ -633,7 +633,7 @@ const createPatchForNewFile = (path, contents) => {
 const getWhitespaceDiffArgs = (options = {}) =>
   options.showWhitespace === false ? ['--ignore-all-space'] : [];
 
-/** @param {string} repoRoot @param {StatusItem} item @param {WorkingTreeSectionKind} kind @param {{showWhitespace?: boolean}} [options] */
+/** @param {string} repoRoot @param {StatusItem} item @param {WorkingTreeSectionKind} kind @param {{head?: string; showWhitespace?: boolean}} [options] */
 const getPatch = async (repoRoot, item, kind, options = {}) => {
   const whitespaceArgs = getWhitespaceDiffArgs(options);
   if (item.status === 'conflicted' && !item.conflictStage) {
@@ -661,6 +661,7 @@ const getPatch = async (repoRoot, item, kind, options = {}) => {
             '--patch',
             '--no-ext-diff',
             ...whitespaceArgs,
+            ...(options.head ? [options.head] : []),
             '--',
             ...(item.oldPath ? [item.oldPath] : []),
             item.path,
@@ -720,7 +721,12 @@ const summarizeContent = (...results) => {
  */
 const getWorkingTreeContents = async (repoRoot, item, kind, options = {}) => {
   if (kind === 'staged') {
-    const oldFile = await readGitFile(repoRoot, 'HEAD', item.oldPath || item.path, options);
+    const oldFile = await readGitFile(
+      repoRoot,
+      options.head || 'HEAD',
+      item.oldPath || item.path,
+      options,
+    );
     const newFile = await readIndexFile(repoRoot, item.path, options);
     const summary = summarizeContent(oldFile, newFile);
 
@@ -782,6 +788,28 @@ const getWorkingTreeContents = async (repoRoot, item, kind, options = {}) => {
 const createSection = async (repoRoot, item, kind, options = {}) => {
   const id = `${item.path}:${kind}`;
   const needsWorkingTreeBaseline = item.status === 'conflicted' && !item.conflictStage;
+  const head =
+    options.head ??
+    (kind === 'staged'
+      ? (await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'])).trim()
+      : '');
+  const index = { kind: 'index', label: { kind: 'review-marker', text: 'Index' } };
+  const workingCopy = {
+    kind: 'working-copy',
+    label: { kind: 'review-marker', text: 'Working copy' },
+  };
+  const range =
+    kind === 'staged'
+      ? head
+        ? {
+            base: {
+              label: { kind: 'commit', text: head.slice(0, 7) },
+              sha: head,
+            },
+            head: index,
+          }
+        : undefined
+      : { base: index, head: workingCopy };
 
   if (options.patchOnly && !item.untracked && !needsWorkingTreeBaseline) {
     const patch = options.patch ?? (await getPatch(repoRoot, item, kind, options));
@@ -793,6 +821,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
         kind,
         loadState: 'binary',
         patch: '',
+        ...(range ? { range } : {}),
         summary: createSummary('Binary file changed.', {
           canLoad: false,
         }),
@@ -805,6 +834,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
       kind,
       loadState: 'ready',
       patch: patch.patch,
+      ...(range ? { range } : {}),
     };
   }
 
@@ -817,6 +847,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
       kind,
       loadState: contents.loadState,
       patch: '',
+      ...(range ? { range } : {}),
       summary: contents.summary,
     };
   }
@@ -830,6 +861,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
       newFile: contents.newFile,
       oldFile: contents.oldFile,
       patch: createPatchForNewFile(item.path, contents.newFile?.contents || ''),
+      ...(range ? { range } : {}),
     };
   }
 
@@ -843,6 +875,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
     newFile: contents.newFile,
     oldFile: contents.oldFile,
     patch: patch.patch,
+    ...(range ? { range } : {}),
   };
 };
 

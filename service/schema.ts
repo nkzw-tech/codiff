@@ -164,6 +164,7 @@ export const shareCommentThread = sqliteTable(
     kind: text({ enum: shareCommentThreadKind }).notNull(),
     lineNumber: integer(),
     planId: text().references(() => plan.id, { onDelete: 'cascade' }),
+    positionJson: text(),
     resolvedAt: nullableTimestampColumn(),
     sectionId: text(),
     side: text({ enum: ['additions', 'deletions'] }),

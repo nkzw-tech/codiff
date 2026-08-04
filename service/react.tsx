@@ -80,7 +80,9 @@ const toSubmittedReviewComment = (
   body: message.body,
   ...(message.canEdit ? { canDelete: true, canEdit: true } : {}),
   ...(canResolveThread ? { canResolveThread: true } : {}),
+  destination: 'share',
   id: message.id,
+  isReadOnly: true,
   submittedAt: message.createdAt,
   threadId,
 });

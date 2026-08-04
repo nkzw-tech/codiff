@@ -6,7 +6,9 @@ import type {
   NarrativeWalkthrough,
   NarrativeWalkthroughResult,
   PullRequestCodeQualityFinding,
-  PullRequestExistingReviewComment,
+  ProviderReviewCommentPosition,
+  ReviewCommentPosition,
+  SubmittedReviewComment as PersistedSubmittedReviewComment,
   ReviewSource,
 } from '../types.ts';
 
@@ -87,37 +89,81 @@ export type DiffLineCount = {
   deletions: number;
 };
 
-export type ReviewComment = {
+export type RenderedReviewCommentTarget = {
   anchor?: 'file' | 'line';
-  author?: PullRequestExistingReviewComment['author'];
-  body: string;
-  canDelete?: boolean;
-  canEdit?: boolean;
-  canReplyThread?: boolean;
-  canResolveThread?: boolean;
-  codexReply?: {
-    body?: string;
-    error?: string;
-    status: 'error' | 'loading' | 'ready';
-  };
   filePath: string;
-  id: string;
-  isOutdated?: boolean;
-  isReadOnly?: boolean;
-  isThreadResolved?: boolean;
   lineNumber?: number;
-  remoteSubmit?: {
-    error?: string;
-    status: 'error' | 'submitting';
-  };
   sectionId: string;
   side?: 'additions' | 'deletions';
   startLineNumber?: number;
   startSide?: 'additions' | 'deletions';
-  submittedAt?: string;
-  threadId?: string;
-  url?: string;
 };
+
+export type ReviewCommentDraftTarget = RenderedReviewCommentTarget & {
+  position?: ReviewCommentPosition;
+};
+
+type ReviewAssistantReply = {
+  body?: string;
+  error?: string;
+  status: 'error' | 'loading' | 'ready';
+};
+
+type EditableReviewCommentDraft = ReviewCommentDraftTarget & {
+  author?: never;
+  body: string;
+  canDelete?: never;
+  canEdit?: never;
+  canReplyThread?: never;
+  canResolveThread?: never;
+  codexReply?: ReviewAssistantReply;
+  id: string;
+  isOutdated?: never;
+  isReadOnly?: false;
+  isThreadResolved?: never;
+  submittedAt?: never;
+  url?: never;
+};
+
+export type LocalReviewNote = EditableReviewCommentDraft & {
+  kind: 'local-note';
+  remoteSubmit?: never;
+  threadId?: never;
+};
+
+export type ShareCommentDraft = EditableReviewCommentDraft & {
+  kind: 'share-draft';
+  remoteSubmit?: {
+    error?: string;
+    status: 'error' | 'submitting';
+  };
+  threadId?: string;
+};
+
+export type ProviderCommentDraft = EditableReviewCommentDraft & {
+  kind: 'provider-draft';
+  position?: ProviderReviewCommentPosition;
+  remoteSubmit?: {
+    error?: string;
+    status: 'error' | 'submitting';
+  };
+  threadId?: string;
+};
+
+export type RenderedSubmittedReviewComment = PersistedSubmittedReviewComment & {
+  codexReply?: never;
+  kind: 'submitted-comment';
+  remoteSubmit?: never;
+};
+
+export type ProviderInlineComment = Extract<
+  RenderedSubmittedReviewComment,
+  { destination: 'provider' }
+>;
+export type ShareInlineComment = Extract<RenderedSubmittedReviewComment, { destination: 'share' }>;
+export type ReviewDraft = LocalReviewNote | ProviderCommentDraft | ShareCommentDraft;
+export type ReviewComment = RenderedSubmittedReviewComment | ReviewDraft;
+export type ReviewCommentCreation = ReviewCommentDraftTarget & { threadId?: string };
 
 export type SidebarMode = 'tree' | 'walkthrough' | 'history';
 
