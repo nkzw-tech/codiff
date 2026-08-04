@@ -106,6 +106,7 @@ test('one Artifact Run deduplicates overlapping and warm immutable reads', async
   const commitCalls: Array<ReadonlyArray<CommitArtifactRequest>> = [];
   const blobCalls: Array<ReadonlyArray<string>> = [];
   let rangeCalls = 0;
+  let now = 0;
   const artifact = (commitSha: GitSha) => ({
     commitSha,
     coverage: 'complete' as const,
@@ -116,6 +117,7 @@ test('one Artifact Run deduplicates overlapping and warm immutable reads', async
   const source: ReviewArtifactSource = {
     readBlobs: async (objectIds) => {
       blobCalls.push(objectIds);
+      now += 2;
       return new Map(
         objectIds.map((objectId) => [
           objectId,
@@ -125,6 +127,7 @@ test('one Artifact Run deduplicates overlapping and warm immutable reads', async
     },
     readCommitArtifacts: async (commits) => {
       commitCalls.push(commits);
+      now += 4;
       await Promise.resolve();
       return new Map(
         commits.map(({ commitSha, parentSha }) => {
@@ -135,6 +138,7 @@ test('one Artifact Run deduplicates overlapping and warm immutable reads', async
     },
     readStackAndRange: async () => {
       rangeCalls += 1;
+      now += 3;
       return {
         range: { baseSha: base, coverage: 'complete', files: [], headSha: head, provenance },
         stack: {
@@ -147,7 +151,7 @@ test('one Artifact Run deduplicates overlapping and warm immutable reads', async
       };
     },
   };
-  const run = createReviewArtifactRun(source);
+  const run = createReviewArtifactRun(source, { now: () => now });
 
   const [left, right, firstRange, secondRange] = await Promise.all([
     run.readCommitArtifacts(
@@ -193,6 +197,13 @@ test('one Artifact Run deduplicates overlapping and warm immutable reads', async
       blobs: { 'blob-a': 1, 'blob-b': 1 },
       commits: { [`${first}:${base}`]: 1, [`${head}:${first}`]: 1 },
       stackAndRanges: { [`${base}:${head}`]: 1 },
+    },
+    execution: {
+      blobBytesRead: 6,
+      elapsedMs: 9,
+      peakSourceReads: 2,
+      sourceElapsedMs: { blobs: 2, commits: 7, stackAndRanges: 3 },
+      wasCanceled: false,
     },
     sourceCalls: { blobs: 1, commits: 1, stackAndRanges: 1 },
   });
@@ -449,6 +460,7 @@ test('Artifact Runs propagate cancellation to cooperative in-flight commit reads
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   expect(run.signal.aborted).toBe(true);
   expect(commitCalls).toBe(1);
+  expect(run.diagnostics().execution.wasCanceled).toBe(true);
 });
 
 test('Artifact Runs reject signal-ignoring stack and range results resolved after cancellation', async () => {

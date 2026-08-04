@@ -16,10 +16,12 @@ if (document.documentElement) {
 const codiff = {
   applyUpdate: () => ipcRenderer.invoke('codiff:applyUpdate'),
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
-  dismissUpdate: () => ipcRenderer.invoke('codiff:dismissUpdate'),
   cancelDiffContentRequest: (requestId) =>
     ipcRenderer.send('codiff:cancelDiffContentRequest', requestId),
   cancelNarrativeWalkthrough: () => ipcRenderer.invoke('codiff:cancelNarrativeWalkthrough'),
+  cancelReviewVersionEvolution: (requestId) =>
+    ipcRenderer.invoke('codiff:cancelReviewVersionEvolution', requestId),
+  dismissUpdate: () => ipcRenderer.invoke('codiff:dismissUpdate'),
   createWalkthroughCommit: (request) =>
     ipcRenderer.invoke('codiff:createWalkthroughCommit', request),
   completePlan: (review, status) => ipcRenderer.invoke('codiff:completePlan', review, status),
@@ -43,6 +45,15 @@ const codiff = {
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
   getReviewComments: (source, requestId) =>
     ipcRenderer.invoke('codiff:getReviewComments', source, requestId),
+  getReviewVersionAggregate: (request) =>
+    ipcRenderer.invoke('codiff:getReviewVersionAggregate', request),
+  getReviewVersionCompare: (request) =>
+    ipcRenderer.invoke('codiff:getReviewVersionCompare', request),
+  getReviewVersionEvolution: (request) =>
+    ipcRenderer.invoke('codiff:getReviewVersionEvolution', request),
+  getReviewVersions: (request) => ipcRenderer.invoke('codiff:getReviewVersions', request),
+  getReviewVersionUnitDiff: (request) =>
+    ipcRenderer.invoke('codiff:getReviewVersionUnitDiff', request),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getUpdateStatus: () => ipcRenderer.invoke('codiff:getUpdateStatus'),
   getNarrativeWalkthrough: (request) =>
@@ -121,6 +132,12 @@ const codiff = {
     const listener = (_event, change) => callback(change);
     ipcRenderer.on('codiff:repositoryChanged', listener);
     return () => ipcRenderer.removeListener('codiff:repositoryChanged', listener);
+  },
+  onReviewVersionEvolutionProgress: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {import('../core/types.ts').ReviewVersionEvolutionProgressEvent} progressEvent */
+    const listener = (_event, progressEvent) => callback(progressEvent);
+    ipcRenderer.on('codiff:reviewVersionEvolutionProgress', listener);
+    return () => ipcRenderer.removeListener('codiff:reviewVersionEvolutionProgress', listener);
   },
   onWalkthroughProgress: (callback) => {
     /** @param {Electron.IpcRendererEvent} _event @param {import('../core/types.ts').WalkthroughProgressEvent} progress */

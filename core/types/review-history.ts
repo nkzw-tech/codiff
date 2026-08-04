@@ -350,6 +350,27 @@ export type ReviewComparisonState = {
   toVersionId: ReviewVersionId;
 };
 
+export type ReviewVersionEvolutionProgressPhase =
+  | 'reading-stacks'
+  | 'reading-mr-evidence'
+  | 'reading-base-stack'
+  | 'reading-base-evidence'
+  | 'composing-units';
+
+export type ReviewVersionEvolutionProgress = {
+  commits?: ReadonlyArray<ReviewCommitSummary>;
+  completed?: number;
+  exactMatchShas?: ReadonlyArray<GitSha>;
+  message: string;
+  phase: ReviewVersionEvolutionProgressPhase;
+  total?: number;
+};
+
+export type ReviewVersionEvolutionProgressEvent = {
+  progress: ReviewVersionEvolutionProgress;
+  requestId: string;
+};
+
 export type ReviewVersionCompareEndpoint =
   | { kind: 'base' }
   | { kind: 'version'; versionId: ReviewVersionId }
@@ -370,16 +391,45 @@ type ReviewVersionRangeRequest = {
   toVersionId?: ReviewVersionId;
 };
 
-export type ReviewVersionAggregateRequest = ReviewVersionRangeRequest;
+export type ReviewVersionAggregateRequest = ReviewVersionRangeRequest & {
+  requestId?: string;
+};
 export type ReviewVersionAggregateResult = {
   versionCompare: DiffComparisonView;
   warning?: string | null;
 };
 
-export type ReviewVersionEvolutionRequest = ReviewVersionRangeRequest;
+export type ReviewVersionEvolutionRequest = ReviewVersionRangeRequest & {
+  requestId?: string;
+};
 export type ReviewVersionEvolutionResult = {
   versionCommitEvolution: ReviewCommitEvolution;
   warning?: string | null;
+};
+
+export type ReviewVersionsRequest = {
+  /** Load reviewer activity after the version selector has become usable. */
+  includeActivity?: boolean;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+};
+
+export type ReviewVersionsResult = {
+  versions: ReadonlyArray<ReviewVersionOption>;
+  warning?: string | null;
+};
+
+export type ReviewVersionCompareRequest = ReviewVersionAggregateRequest;
+
+export type ReviewVersionCompareResult = {
+  versionCommitEvolution: ReviewCommitEvolution | null;
+  versionCommitEvolutionError: string | null;
+  versionCompare: DiffComparisonView;
+  warning?: string | null;
+};
+
+export type ReviewVersionUnitDiffRequest = {
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  unit: ReviewEvolutionUnit;
 };
 
 export type ReviewStrategySummary = {

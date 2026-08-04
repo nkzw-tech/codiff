@@ -10,11 +10,18 @@ import type { GitSha } from '../../core/types.ts';
 
 const require = createRequire(import.meta.url);
 const {
+  artifactToChangedFiles,
   createNativeCommitArtifactSource,
   parseCommitArtifactOutput,
+  rangeArtifactToChangedFiles,
   readBlobArtifacts,
+  readBlobObjectIds,
   readCommitArtifacts,
 } = require('../git-state/commit-artifacts.cjs') as {
+  artifactToChangedFiles: (
+    artifact: CommitArtifact,
+    options?: { reverse?: boolean },
+  ) => ReadonlyArray<import('../../core/types.ts').ChangedFile>;
   createNativeCommitArtifactSource: (
     repoRoot: string,
     project: ReviewArtifactProvenance['project'],
@@ -28,6 +35,9 @@ const {
     output: string,
     provenance: ReviewArtifactProvenance,
   ) => ReadonlyMap<GitSha, CommitArtifact>;
+  rangeArtifactToChangedFiles: (
+    artifact: import('../../core/lib/review-artifacts.ts').RangeArtifact,
+  ) => ReadonlyArray<import('../../core/types.ts').ChangedFile>;
   readCommitArtifacts: (
     repoRoot: string,
     commits: ReadonlyArray<GitSha>,
@@ -64,6 +74,26 @@ const {
       signal?: AbortSignal;
     },
   ) => Promise<ReadonlyMap<string, { bytes: Uint8Array; objectId: string }>>;
+  readBlobObjectIds: (
+    repoRoot: string,
+    requests: ReadonlyArray<{ path: string; ref: string }>,
+    options?: {
+      maxBytes?: number;
+      runGit?: (
+        repoRoot: string,
+        args: ReadonlyArray<string>,
+        input: string,
+        options?: { signal?: AbortSignal },
+      ) => Promise<Buffer>;
+      runGitStream?: (
+        repoRoot: string,
+        args: ReadonlyArray<string>,
+        input: string,
+        options?: { onStdout?: (chunk: Buffer) => void; signal?: AbortSignal },
+      ) => Promise<void>;
+      signal?: AbortSignal;
+    },
+  ) => Promise<ReadonlyMap<string, string>>;
 };
 const { git: runGit, gitBufferWithInput } = require('../git-state/common.cjs') as {
   git: (
@@ -97,6 +127,63 @@ test('parses root and merge parents while preserving forge provenance', () => {
 
   expect(artifacts.get(root)).toMatchObject({ parentSha: null, provenance });
   expect(artifacts.get(merge)).toMatchObject({ parentSha: firstParent, provenance });
+});
+
+test('projects cached artifacts forward and in reverse without another Git read', () => {
+  const parentSha = '1'.repeat(40) as GitSha;
+  const commitSha = '2'.repeat(40) as GitSha;
+  const artifact: CommitArtifact = {
+    commitSha,
+    coverage: 'complete',
+    files: [
+      {
+        coverage: 'complete',
+        patch: '@@ -1 +1 @@\n-old\n+new',
+        path: 'src/app.ts',
+        status: 'modified',
+      },
+    ],
+    parentSha,
+    provenance,
+  };
+
+  const forward = artifactToChangedFiles(artifact);
+  const reverse = artifactToChangedFiles(artifact, { reverse: true });
+
+  expect(forward[0]?.sections[0]?.range).toMatchObject({
+    base: { sha: parentSha },
+    head: { sha: commitSha },
+  });
+  expect(reverse[0]?.sections[0]?.patch).toContain('@@ -1 +1 @@\n+old\n-new');
+  expect(reverse[0]?.sections[0]?.range).toMatchObject({
+    base: { sha: commitSha },
+    head: { sha: parentSha },
+  });
+});
+
+test('renders complete file patches from an incomplete cached range', () => {
+  const baseSha = '1'.repeat(40) as GitSha;
+  const headSha = '2'.repeat(40) as GitSha;
+  const files = rangeArtifactToChangedFiles({
+    baseSha,
+    coverage: 'truncated',
+    files: [
+      {
+        coverage: 'complete',
+        patch: '@@ -1 +1 @@\n-old\n+new',
+        path: 'src/app.ts',
+        status: 'modified',
+      },
+    ],
+    headSha,
+    provenance,
+  });
+
+  expect(files[0]?.sections[0]).toMatchObject({
+    loadState: 'ready',
+    patch: expect.stringContaining('+new'),
+  });
+  expect(files[0]?.sections[0]?.summary?.reason ?? '').not.toContain('Artifact coverage');
 });
 
 test('reads deduplicated binary Blob Artifacts through one batch process', async () => {
@@ -178,6 +265,82 @@ test('parses Blob Artifact records across streaming chunk boundaries', async () 
   expect([...blobs.get(objectId)!.bytes]).toEqual([...contents]);
 });
 
+test('resolves missing replay endpoint object IDs in one batch check', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-blob-endpoints-'));
+  const runner = vi.fn(gitBufferWithInput);
+  try {
+    execFileSync('git', ['init', '--quiet', directory]);
+    await writeFile(join(directory, 'tracked.txt'), 'tracked\n', 'utf8');
+    git(directory, ['add', 'tracked.txt']);
+    git(directory, [
+      '-c',
+      'user.email=codiff@example.com',
+      '-c',
+      'user.name=Codiff',
+      'commit',
+      '--quiet',
+      '-m',
+      'Track file',
+    ]);
+    const head = git(directory, ['rev-parse', 'HEAD']);
+    const expected = git(directory, ['rev-parse', 'HEAD:tracked.txt']);
+
+    const objectIds = await readBlobObjectIds(
+      directory,
+      [
+        { path: 'tracked.txt', ref: head },
+        { path: 'missing.txt', ref: head },
+      ],
+      { runGit: runner },
+    );
+
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(objectIds).toEqual(new Map([[`${head}:tracked.txt`, expected]]));
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test('drains an oversized native Blob Artifact endpoint lookup while preserving early mappings', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-bounded-blob-endpoints-'));
+  try {
+    execFileSync('git', ['init', '--quiet', directory]);
+    await Promise.all([
+      writeFile(join(directory, 'first.txt'), 'first\n', 'utf8'),
+      writeFile(join(directory, 'second.txt'), 'second\n', 'utf8'),
+    ]);
+    git(directory, ['add', '.']);
+    git(directory, [
+      '-c',
+      'user.email=codiff@example.com',
+      '-c',
+      'user.name=Codiff',
+      'commit',
+      '--quiet',
+      '-m',
+      'Track blob endpoints',
+    ]);
+    const head = git(directory, ['rev-parse', 'HEAD']);
+    const firstObjectId = git(directory, ['rev-parse', 'HEAD:first.txt']);
+    const secondObjectId = git(directory, ['rev-parse', 'HEAD:second.txt']);
+
+    const objectIds = await readBlobObjectIds(
+      directory,
+      [
+        { path: 'first.txt', ref: head },
+        { path: 'second.txt', ref: head },
+      ],
+      { maxBytes: Buffer.byteLength(`${firstObjectId} blob\n`) },
+    );
+
+    expect(objectIds).toEqual(new Map([[`${head}:first.txt`, firstObjectId]]));
+    expect(objectIds.has(`${head}:second.txt`)).toBe(false);
+    expect(secondObjectId).toMatch(/^[0-9a-f]{40}$/);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+}, 30_000);
+
 test('reads text, large, binary, rename, and mode Commit Artifacts in one Git process', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'codiff-commit-artifacts-'));
   execFileSync('git', ['init', '--quiet', directory]);
@@ -238,8 +401,7 @@ test('reads text, large, binary, rename, and mode Commit Artifacts in one Git pr
     runGitWithInput: rangeRunner,
   });
   const { range, stack } = await source.readStackAndRange(
-    parent,
-    head,
+    { headSha: head, requestedBaseSha: parent },
     new AbortController().signal,
   );
   expect(stack.commits.map((commit) => commit.sha)).toEqual([head]);
@@ -319,8 +481,7 @@ test('drains an oversized native range diff while preserving completed early fil
       maxRangeArtifactBytes: 32 * 1024,
     });
     const { range, stack } = await source.readStackAndRange(
-      baseSha,
-      headSha,
+      { headSha: headSha, requestedBaseSha: baseSha },
       new AbortController().signal,
     );
 

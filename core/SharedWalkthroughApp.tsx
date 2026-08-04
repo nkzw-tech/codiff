@@ -2234,7 +2234,7 @@ export function ReviewSurface({
                 />
               </SidebarCommentSection>
             </>
-          ) : walkthroughReady ? (
+          ) : sidebarMode === 'history' ? null : walkthroughReady ? (
             <>
               {walkthrough?.onGenerate ? (
                 <div className="history-section walkthrough-structure-controls">

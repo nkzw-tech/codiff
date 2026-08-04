@@ -91,7 +91,6 @@ type GitStateModule = {
     limit?: number,
     source?: ReviewSource,
   ) => Promise<{ entries: ReadonlyArray<unknown>; root: string }>;
-  normalizeGitHubPullRequestCommit: (commit: Record<string, unknown>) => unknown;
   normalizeGitHubReviewComment: (comment: Record<string, unknown>) => unknown;
   normalizePullRequestComment: (comment: Record<string, unknown>) => Record<string, unknown>;
   parseGitHubPullRequestUrl: (value: string) => {
@@ -163,7 +162,6 @@ const {
   createPullRequestSource,
   getPullRequestHeadImageSource,
   listRepositoryHistory,
-  normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,
@@ -1084,34 +1082,6 @@ test('selectUnresolvedReviewComments keeps every comment when nothing is resolve
     'github:10',
     'github:11',
   ]);
-});
-
-test('normalizeGitHubPullRequestCommit reads GitHub PR commit metadata', () => {
-  expect(
-    normalizeGitHubPullRequestCommit({
-      author: {
-        avatar_url: 'https://avatars.githubusercontent.com/u/1?v=4',
-      },
-      commit: {
-        author: {
-          date: '2026-05-22T12:34:56Z',
-          email: 'author@example.com',
-          name: 'PR Author',
-        },
-        message: 'Feature commit\n\nBody',
-      },
-      parents: [{ sha: 'parent-sha' }],
-      sha: 'commit-sha',
-    }),
-  ).toEqual({
-    author: 'PR Author',
-    committedAt: Date.parse('2026-05-22T12:34:56Z'),
-    gravatarUrl: 'https://avatars.githubusercontent.com/u/1?v=4',
-    parentShas: ['parent-sha'],
-    scope: 'pull-request',
-    sha: 'commit-sha',
-    subject: 'Feature commit',
-  });
 });
 
 test('normalizePullRequestComment uses the start side for ranged comments', () => {

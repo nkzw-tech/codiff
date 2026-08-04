@@ -77,6 +77,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   })),
   cancelDiffContentRequest: vi.fn(),
   cancelNarrativeWalkthrough: vi.fn(async () => {}),
+  cancelReviewVersionEvolution: vi.fn(async () => {}),
   completePlan: vi.fn(async () => {}),
   createWalkthroughCommit: vi.fn(async () => ({
     sha: '0'.repeat(40) as GitSha,
@@ -116,6 +117,21 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   getRepositoryHistory: vi.fn(async () => ({ entries: [], root: '/repo' })),
   getRepositoryState: vi.fn(async () => repositoryState),
   getReviewComments: vi.fn(async () => []),
+  getReviewVersionAggregate: vi.fn(async () => {
+    throw new Error('Not used.');
+  }),
+  getReviewVersionCompare: vi.fn(async () => {
+    throw new Error('Not used.');
+  }),
+  getReviewVersionEvolution: vi.fn(async () => {
+    throw new Error('Not used.');
+  }),
+  getReviewVersions: vi.fn(async () => {
+    throw new Error('Not used.');
+  }),
+  getReviewVersionUnitDiff: vi.fn(async () => {
+    throw new Error('Not used.');
+  }),
   getTerminalHelperStatus: vi.fn(async () => ({
     command: 'codiff',
     installed: true,
@@ -141,6 +157,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   onPlanCloseRequested: vi.fn(() => () => {}),
   onRefreshRequest: vi.fn(() => () => {}),
   onRepositoryChanged: vi.fn(() => () => {}),
+  onReviewVersionEvolutionProgress: vi.fn(() => () => {}),
   onUpdateStatusChanged: vi.fn(() => () => {}),
   onWalkthroughCommitOutput: vi.fn(() => () => {}),
   onWalkthroughProgress: vi.fn(() => () => {}),

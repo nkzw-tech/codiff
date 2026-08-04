@@ -42,6 +42,13 @@ const {
   validateRepositoryPath,
 } = require('./git-state.cjs');
 const { attachExternalLinkHandling } = require('./external-links.cjs');
+const {
+  classifyReviewVersionEvolution,
+  compareReviewVersionAggregate,
+  compareReviewVersions,
+  listReviewVersions,
+  loadReviewVersionUnitDiff,
+} = require('./git-state/review-history.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
@@ -85,6 +92,7 @@ const {
   getWindowIdentity,
   storeResolvedWindowState,
 } = require('./window-identity.cjs');
+const { mapWithConcurrency } = require('./bounded-map.cjs');
 const { createPendingCommentsClipboardController } = require('./pending-comments.cjs');
 const {
   getCommandLineLaunchOptions,
@@ -152,6 +160,7 @@ const {
 const { getPlanReviewPath, readPlanReview, writePlanReview } = require('./plan-review.cjs');
 const { createSharedPlanSnapshot } = require('./shared-plan.cjs');
 const { createWalkthroughProgressReporter } = require('./walkthrough-progress.cjs');
+const { loadReviewVersionEvolution } = require('./review-version-evolution-ipc.cjs');
 const { getLocalReviewWalkthroughCacheKey } = require('./local-review-walkthrough-cache-key.cjs');
 
 /**
@@ -177,6 +186,72 @@ const diffContentRequests = new Map();
 const windowLaunchOptions = new Map();
 /** @type {Map<number, Promise<RepositoryState>>} */
 const windowInitialRepositoryStates = new Map();
+/** @type {Map<string, {artifactRuns: Map<string, Promise<any>>, comparisonMetrics: Array<Record<string, unknown>>, controller: AbortController, pending: number}>} */
+const reviewVersionEvolutionControllers = new Map();
+const MAX_COMPARISON_RUN_DIAGNOSTIC_CONCURRENCY = 8;
+
+/** @param {string | null} key */
+const acquireComparisonRun = (key) => {
+  if (!key) {
+    return {
+      artifactRuns: new Map(),
+      comparisonMetrics: [],
+      controller: new AbortController(),
+      pending: 1,
+    };
+  }
+  const existing = reviewVersionEvolutionControllers.get(key);
+  if (existing) {
+    existing.pending += 1;
+    return existing;
+  }
+  const run = {
+    artifactRuns: new Map(),
+    comparisonMetrics: [],
+    controller: new AbortController(),
+    pending: 1,
+  };
+  reviewVersionEvolutionControllers.set(key, run);
+  return run;
+};
+
+/** @param {string | null} key @param {{artifactRuns: Map<string, Promise<any>>, comparisonMetrics: Array<Record<string, unknown>>, controller: AbortController, pending: number}} run */
+const releaseComparisonRun = (key, run) => {
+  if (!key) {
+    return;
+  }
+  run.pending -= 1;
+  if (run.pending === 0 && reviewVersionEvolutionControllers.get(key) === run) {
+    reviewVersionEvolutionControllers.delete(key);
+  }
+};
+
+/**
+ * Record immutable-key acquisition and cache reuse while the enclosing
+ * comparison action context is still active.
+ * @param {string | null} requestId
+ * @param {{artifactRuns: Map<string, Promise<any>>, comparisonMetrics: Array<Record<string, unknown>>}} run
+ */
+const recordComparisonRunDiagnostics = async (requestId, run) => {
+  const entries = await mapWithConcurrency(
+    [...run.artifactRuns],
+    MAX_COMPARISON_RUN_DIAGNOSTIC_CONCURRENCY,
+    async ([key, pending]) => {
+      try {
+        return [key, (await pending).diagnostics()];
+      } catch {
+        return [key, { unavailable: true }];
+      }
+    },
+  );
+  recordCommandMilestone('comparison-run-artifacts', {
+    details: {
+      requestId,
+      metrics: run.comparisonMetrics,
+      sources: Object.fromEntries(entries),
+    },
+  });
+};
 /** @type {Map<number, number>} */
 const walkthroughProgressGenerations = new Map();
 const walkthroughGenerationCoordinator = createWalkthroughGenerationCoordinator();
@@ -1144,6 +1219,12 @@ const createWindow = (
     windowIdentities.delete(webContentsId);
     windowInitialRepositoryStates.delete(webContentsId);
     walkthroughProgressGenerations.delete(webContentsId);
+    for (const [key, run] of reviewVersionEvolutionControllers) {
+      if (key.startsWith(`${webContentsId}:`)) {
+        run.controller.abort();
+        reviewVersionEvolutionControllers.delete(key);
+      }
+    }
     windowRepositories.delete(webContentsId);
     windowLaunchOptions.delete(webContentsId);
   });
@@ -2534,6 +2615,15 @@ ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   );
 });
 
+ipcMain.handle('codiff:getReviewVersions', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return runInInitialLoadAction(event.sender.id, () =>
+    listReviewVersions(repositoryPath, request.source, {
+      includeActivity: request.includeActivity,
+    }),
+  );
+});
+
 ipcMain.on('codiff:initialLoadMilestone', (event, name) => {
   if (name !== 'first-usable-review-rendered' && name !== 'deferred-review-data-complete') {
     return;
@@ -2557,6 +2647,121 @@ ipcMain.handle('codiff:getReviewComments', async (event, source, requestId) => {
   return runDiffContentRequest(event, { requestId }, () =>
     runInInitialLoadAction(event.sender.id, () => readReviewComments(repositoryPath, source)),
   );
+});
+
+ipcMain.handle('codiff:getReviewVersionCompare', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return compareReviewVersions(repositoryPath, request.source, {
+    ...(request.from ? { from: request.from } : {}),
+    ...(request.fromVersionId ? { fromVersionId: request.fromVersionId } : {}),
+    ...(request.to ? { to: request.to } : {}),
+    ...(request.toVersionId ? { toVersionId: request.toVersionId } : {}),
+  });
+});
+
+ipcMain.handle('codiff:getReviewVersionAggregate', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  const requestId = typeof request.requestId === 'string' ? request.requestId : null;
+  const controllerKey = requestId ? `${event.sender.id}:${requestId}` : null;
+  const run = acquireComparisonRun(controllerKey);
+  try {
+    const versionCompare = await runWithCommandAction(
+      {
+        command: 'review-version-aggregate',
+        cwd: repositoryPath,
+        details: { requestId, source: request.source?.url },
+      },
+      async () => {
+        const result = await compareReviewVersionAggregate(
+          repositoryPath,
+          request.source,
+          {
+            ...(request.from ? { from: request.from } : {}),
+            ...(request.fromVersionId ? { fromVersionId: request.fromVersionId } : {}),
+            ...(request.to ? { to: request.to } : {}),
+            ...(request.toVersionId ? { toVersionId: request.toVersionId } : {}),
+          },
+          undefined,
+          { comparisonRun: run, signal: run.controller.signal },
+        );
+        await recordComparisonRunDiagnostics(requestId, run);
+        return result;
+      },
+    );
+    return { versionCompare, warning: null };
+  } finally {
+    releaseComparisonRun(controllerKey, run);
+  }
+});
+
+ipcMain.handle('codiff:getReviewVersionEvolution', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  const requestId = typeof request.requestId === 'string' ? request.requestId : null;
+  const controllerKey = requestId ? `${event.sender.id}:${requestId}` : null;
+  const run = acquireComparisonRun(controllerKey);
+  const { controller } = run;
+  try {
+    const versionCommitEvolution = await runWithCommandAction(
+      {
+        command: 'review-version-evolution',
+        cwd: repositoryPath,
+        details: {
+          from: request.from,
+          fromVersionId: request.fromVersionId,
+          requestId,
+          source: request.source?.url,
+          to: request.to,
+          toVersionId: request.toVersionId,
+        },
+      },
+      async () => {
+        const result = await loadReviewVersionEvolution(
+          classifyReviewVersionEvolution,
+          repositoryPath,
+          request.source,
+          {
+            ...(request.from ? { from: request.from } : {}),
+            ...(request.fromVersionId ? { fromVersionId: request.fromVersionId } : {}),
+            ...(request.to ? { to: request.to } : {}),
+            ...(request.toVersionId ? { toVersionId: request.toVersionId } : {}),
+          },
+          {
+            comparisonRun: run,
+            onProgress: requestId
+              ? (progress) => {
+                  if (!controller.signal.aborted && !event.sender.isDestroyed()) {
+                    event.sender.send('codiff:reviewVersionEvolutionProgress', {
+                      progress,
+                      requestId,
+                    });
+                  }
+                }
+              : undefined,
+            signal: controller.signal,
+          },
+        );
+        await recordComparisonRunDiagnostics(requestId, run);
+        return result;
+      },
+    );
+    return { versionCommitEvolution, warning: null };
+  } finally {
+    releaseComparisonRun(controllerKey, run);
+  }
+});
+
+ipcMain.handle('codiff:cancelReviewVersionEvolution', (event, requestId) => {
+  if (typeof requestId !== 'string') {
+    return;
+  }
+  const key = `${event.sender.id}:${requestId}`;
+  reviewVersionEvolutionControllers.get(key)?.controller.abort();
+  reviewVersionEvolutionControllers.delete(key);
+});
+
+ipcMain.handle('codiff:getReviewVersionUnitDiff', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return loadReviewVersionUnitDiff(repositoryPath, request.source, request.unit);
 });
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {
