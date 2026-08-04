@@ -514,6 +514,121 @@ test('keeps title-only source footer actions reachable', async () => {
   });
 });
 
+test('keeps empty provider Comments visible and guides inline feedback through Tree', async () => {
+  await using empty = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: providerSnapshot,
+  });
+  expect(findButton(empty.container, 'Comments')).not.toBeUndefined();
+  expect(empty.container.textContent).toContain('No review comments yet');
+  expect(empty.container.textContent).toContain('Add inline feedback from Tree');
+  expect(empty.container.textContent).toContain('PR #7');
+
+  const file = providerSnapshot.files[0]!;
+  await using inlineOnly = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: {
+      ...providerSnapshot,
+      reviewComments: [
+        {
+          author: { login: 'reviewer' },
+          body: 'Inline feedback exists.',
+          filePath: file.path,
+          id: 'inline-only',
+          lineNumber: 1,
+          side: 'additions',
+        },
+      ],
+    },
+  });
+  expect(inlineOnly.container.textContent).toContain('No overview comments yet');
+  expect(inlineOnly.container.textContent).toContain(
+    'Inline review comments are available in Tree.',
+  );
+  expect(
+    Array.from(inlineOnly.container.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+      .find((button) => button.textContent?.includes('Comments'))
+      ?.getAttribute('aria-label'),
+  ).toBe('Comments (1)');
+});
+
+test('keeps unresolved outdated provider comments in Comments without guessing a diff target', async () => {
+  const unresolvedSnapshot = {
+    ...providerSnapshot,
+    reviewComments: [
+      {
+        author: { login: 'reviewer' },
+        body: 'The original provider line is unavailable.',
+        filePath: 'src/missing.ts',
+        id: 'provider:unresolved',
+        isOutdated: true,
+        lineNumber: 999,
+        side: 'additions' as const,
+        url: 'https://github.com/cloudflare/codiff/pull/7#discussion_r1',
+      },
+    ],
+  } satisfies SharedWalkthroughSnapshot;
+  await using view = await renderSurface({
+    capabilities: { comments: createProviderComments() },
+    initialMode: 'comments',
+    snapshot: unresolvedSnapshot,
+  });
+
+  const commentsTab = () =>
+    Array.from(view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((button) =>
+      button.textContent?.includes('Comments'),
+    );
+  expect(commentsTab()?.getAttribute('aria-label')).toBe('Comments (1)');
+  expect(view.container.textContent).toContain('Original location unavailable');
+  expect(view.container.textContent).toContain('Outdated');
+  expect(view.container.textContent).toContain('View on provider');
+  const entry = view.container.querySelector<HTMLButtonElement>('.sidebar-comment-entry');
+  await act(async () => entry?.click());
+  expect(commentsTab()?.getAttribute('aria-selected')).toBe('true');
+  expect(entry?.getAttribute('aria-current')).toBe('true');
+  expect(view.container.querySelector('.file-tree-shell')).toBeNull();
+
+  await view.render({
+    capabilities: {
+      comments: createProviderComments(),
+      preferences: { outdatedVisibility: { onChange: vi.fn(), value: false } },
+    },
+    initialMode: 'comments',
+    snapshot: unresolvedSnapshot,
+  });
+  expect(commentsTab()?.getAttribute('aria-label')).toBe('Comments');
+  expect(view.container.textContent).not.toContain('The original provider line is unavailable.');
+});
+
+test('labels shared review provenance as Codiff rather than a provider', async () => {
+  const file = snapshot.files[0]!;
+  await using view = await renderSurface({
+    capabilities: { comments: createShareComments() },
+    initialMode: 'comments',
+    snapshot: {
+      ...snapshot,
+      reviewComments: [
+        {
+          author: { login: 'ada' },
+          body: 'Shared Codiff feedback.',
+          filePath: file.path,
+          id: 'share:comment',
+          lineNumber: 1,
+          sectionId: file.sections[0]!.id,
+          side: 'additions',
+          url: 'https://codiff.example/share/comment/1',
+        },
+      ],
+    },
+  });
+
+  expect(view.container.textContent).toContain('Codiff 1');
+  expect(view.container.textContent).toContain('View on Codiff');
+  expect(view.container.textContent).not.toContain('View on provider');
+});
+
 test('keeps provider source-description collapse state across Tree and Comments', async () => {
   const richSnapshot = {
     ...providerSnapshot,

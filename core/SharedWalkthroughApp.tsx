@@ -22,7 +22,9 @@ import { ReviewFileTree } from './app/components/FileTree.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import {
   MergeRequestCommentsView,
+  SidebarCommentSection,
   SidebarGeneralCommentList,
+  SidebarInlineReviewCommentList,
 } from './app/components/merge-request/GeneralComments.tsx';
 import {
   AgentUnavailablePanel,
@@ -718,12 +720,20 @@ export function ReviewSurface({
     () => mergeReviewComments(visibleSnapshotReviewComments, localReviewComments),
     [localReviewComments, visibleSnapshotReviewComments],
   );
+  const renderableReviewComments = useMemo(
+    () =>
+      reviewComments.filter(
+        (comment) => isReviewDraft(comment) || comment.resolvedSectionId != null,
+      ),
+    [reviewComments],
+  );
   const {
     activeReviewCommentDraftRef,
     activeReviewCommentDraftState,
     clearCommentFocus,
     createComment: createDraftComment,
     deleteComment: deleteLocalComment,
+    focusComment,
     focusCommentId,
     focusCommentRequest,
     reviewCommentsRef,
@@ -789,8 +799,9 @@ export function ReviewSurface({
     [snapshot.repository.generalComments],
   );
   const generalCommentCount = generalComments.length;
-  const showCommentsTab =
-    comments != null || generalCommentCount > 0 || visibleSnapshotReviewComments.length > 0;
+  const inlineReviewCommentCount = visibleSnapshotReviewComments.length;
+  const reviewCommentCount = generalCommentCount + inlineReviewCommentCount;
+  const showCommentsTab = comments != null || reviewCommentCount > 0;
   const [generalCommentDraft, setGeneralCommentDraft] = useState('');
   const [generalCommentEditDraft, setGeneralCommentEditDraft] = useState('');
   const [editingGeneralCommentId, setEditingGeneralCommentId] = useState<string | null>(null);
@@ -798,6 +809,10 @@ export function ReviewSurface({
   const [generalCommentEditSubmitting, setGeneralCommentEditSubmitting] = useState(false);
   const [generalCommentError, setGeneralCommentError] = useState<string | null>(null);
   const [focusedGeneralCommentId, setFocusedGeneralCommentId] = useState<string | null>(null);
+  const [focusedInlineSidebarCommentId, setFocusedInlineSidebarCommentId] = useState<string | null>(
+    null,
+  );
+  const [focusedReviewCommentPath, setFocusedReviewCommentPath] = useState<string | null>(null);
   const [generalCommentScrollRequest, setGeneralCommentScrollRequest] = useState(0);
   const [generalCommentSubmitting, setGeneralCommentSubmitting] = useState(false);
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
@@ -867,8 +882,13 @@ export function ReviewSurface({
     };
   }, [content, diffSearchQuery, fileFilteredFiles, snapshot.repository.source]);
   const forceExpandedPaths = useMemo(
-    () => new Set([...diffSearchMatchPathSet, ...(content?.forceExpandedPaths ?? emptyPaths)]),
-    [content?.forceExpandedPaths, diffSearchMatchPathSet],
+    () =>
+      new Set([
+        ...diffSearchMatchPathSet,
+        ...(content?.forceExpandedPaths ?? emptyPaths),
+        ...(focusedReviewCommentPath ? [focusedReviewCommentPath] : []),
+      ]),
+    [content?.forceExpandedPaths, diffSearchMatchPathSet, focusedReviewCommentPath],
   );
   const totalLineCount = useMemo(
     () =>
@@ -931,10 +951,40 @@ export function ReviewSurface({
   const activateGeneralComment = useCallback(
     (commentId: string) => {
       changeSidebarMode('comments');
+      setFocusedReviewCommentPath(null);
       setFocusedGeneralCommentId(commentId);
       setGeneralCommentScrollRequest((current) => current + 1);
     },
     [changeSidebarMode],
+  );
+  const activateReviewComment = useCallback(
+    (commentId: string) => {
+      const comment = visibleSnapshotReviewComments.find((candidate) => candidate.id === commentId);
+      if (!comment?.resolvedSectionId) {
+        changeSidebarMode('comments');
+        setFocusedReviewCommentPath(null);
+        setFocusedInlineSidebarCommentId(commentId);
+        return;
+      }
+      setFocusedInlineSidebarCommentId(null);
+      setFocusedReviewCommentPath(comment.filePath);
+      setUncontrolledSelectedPath(comment.filePath);
+      controlledPreferences?.selectedPath?.onChange(comment.filePath);
+      setTreeScrollTarget((current) => ({
+        behavior: 'smooth',
+        path: comment.filePath,
+        request: (current?.request ?? 0) + 1,
+      }));
+      changeSidebarMode('tree');
+      focusComment(commentId);
+    },
+    [
+      changeSidebarMode,
+      controlledPreferences?.selectedPath,
+      focusComment,
+      setUncontrolledSelectedPath,
+      visibleSnapshotReviewComments,
+    ],
   );
   const navigateGeneralComment = useCallback(
     (direction: 1 | -1) => {
@@ -1358,6 +1408,7 @@ export function ReviewSurface({
   );
   const activateTreePath = useCallback(
     (path: string) => {
+      setFocusedReviewCommentPath(null);
       selectPath(path);
       setTreeScrollTarget((current) => ({
         behavior: 'smooth',
@@ -1544,7 +1595,7 @@ export function ReviewSurface({
     agentLabel: getAgentLabel(snapshot.walkthrough.agent),
     codeQualityFindings: snapshot.codeQualityFindings,
     collapsed,
-    comments: reviewComments,
+    comments: renderableReviewComments,
     commitMetadata: snapshot.commitMetadata ?? null,
     diffLineHeight,
     diffStyle: controlledPreferences?.diffLayout?.value ?? snapshot.preferences.diffStyle,
@@ -1750,18 +1801,18 @@ export function ReviewSurface({
     ...(showCommentsTab
       ? [
           {
-            ariaLabel: generalCommentCount > 0 ? `Comments (${generalCommentCount})` : 'Comments',
+            ariaLabel: reviewCommentCount > 0 ? `Comments (${reviewCommentCount})` : 'Comments',
             icon: <ChatCircle aria-hidden size={14} weight="bold" />,
             indicator:
-              generalCommentCount > 0 ? (
+              reviewCommentCount > 0 ? (
                 <span aria-hidden className="review-mode-count">
-                  {generalCommentCount}
+                  {reviewCommentCount}
                 </span>
               ) : undefined,
             label: 'Comments',
             title:
-              generalCommentCount > 0
-                ? `${generalCommentCount} ${generalCommentCount === 1 ? 'comment' : 'comments'}`
+              reviewCommentCount > 0
+                ? `${reviewCommentCount} ${reviewCommentCount === 1 ? 'comment' : 'comments'}`
                 : 'Comments',
             value: 'comments' as const,
           },
@@ -1926,11 +1977,30 @@ export function ReviewSurface({
               viewed={viewed}
             />
           ) : sidebarMode === 'comments' ? (
-            <SidebarGeneralCommentList
-              comments={generalComments}
-              focusedCommentId={focusedGeneralCommentId}
-              onActivateComment={activateGeneralComment}
-            />
+            <>
+              <SidebarCommentSection count={generalComments.length} title="Overview comments">
+                <SidebarGeneralCommentList
+                  comments={generalComments}
+                  focusedCommentId={focusedGeneralCommentId}
+                  onActivateComment={activateGeneralComment}
+                />
+              </SidebarCommentSection>
+              <SidebarCommentSection
+                count={inlineReviewCommentCount}
+                title="Inline review comments"
+              >
+                <SidebarInlineReviewCommentList
+                  comments={visibleSnapshotReviewComments}
+                  focusedCommentId={focusedInlineSidebarCommentId ?? focusCommentId}
+                  onActivateComment={activateReviewComment}
+                  permalinkLabel={
+                    comments?.destination === 'share'
+                      ? 'View on Codiff'
+                      : `View on ${providerLabel}`
+                  }
+                />
+              </SidebarCommentSection>
+            </>
           ) : walkthroughReady ? (
             <NarrativeSidebar
               allowCommit={walkthrough?.commit != null}
@@ -2002,6 +2072,9 @@ export function ReviewSurface({
             <MergeRequestCommentsView
               canComment={comments?.general?.onCreate != null}
               commenting={commenting}
+              commentPermalinkLabel={
+                comments?.destination === 'share' ? 'View on Codiff' : `View on ${providerLabel}`
+              }
               draft={generalCommentDraft}
               editDraft={generalCommentEditDraft}
               editError={generalCommentEditError}
@@ -2011,6 +2084,7 @@ export function ReviewSurface({
               focusedCommentId={focusedGeneralCommentId}
               focusedCommentRequest={generalCommentScrollRequest}
               gitIdentity={gitIdentity}
+              inlineCommentCount={inlineReviewCommentCount}
               keymap={keymap}
               onCancelEdit={cancelEditGeneralComment}
               onChangeDraft={setGeneralCommentDraft}

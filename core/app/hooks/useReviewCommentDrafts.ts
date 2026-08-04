@@ -186,6 +186,7 @@ export function useReviewCommentDrafts({
     clearCommentFocus,
     createComment,
     deleteComment,
+    focusComment,
     focusCommentId,
     focusCommentRequest,
     resetCommentFocus,

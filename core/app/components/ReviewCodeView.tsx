@@ -2111,8 +2111,14 @@ function ReviewAnnotation({
     focusCommentId != null && annotationComments.some((comment) => comment.id === focusCommentId);
 
   useEffect(() => {
-    if (hasFocusedComment) {
-      focusEditorRef.current?.focus();
+    if (!hasFocusedComment) {
+      return;
+    }
+    threadRef.current?.scrollIntoView?.({ block: 'center' });
+    if (focusEditorRef.current) {
+      focusEditorRef.current.focus();
+    } else {
+      threadRef.current?.focus({ preventScroll: true });
     }
   }, [focusCommentId, focusCommentRequest, hasFocusedComment]);
 
@@ -2141,7 +2147,7 @@ function ReviewAnnotation({
   const commentGroups = groupReviewCommentsByThread(annotationComments);
 
   return (
-    <div className="review-comment-thread" ref={threadRef}>
+    <div className="review-comment-thread" ref={threadRef} tabIndex={-1}>
       {commentGroups.map((group) => (
         <ReviewCommentThreadGroup
           agentId={agentId}
