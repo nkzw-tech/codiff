@@ -517,6 +517,99 @@ test('preserves structured walkthrough failure metadata', async () => {
   expect(view.container.textContent).toContain('Pi CLI was not found.');
 });
 
+test('renders tailored recovery for every unavailable agent executable', async () => {
+  for (const { agent, code, displayLabel, reasonLabel } of [
+    { agent: 'codex', code: 'CODEX_NOT_FOUND', displayLabel: 'Codex', reasonLabel: 'Codex' },
+    {
+      agent: 'claude',
+      code: 'CLAUDE_NOT_FOUND',
+      displayLabel: 'Claude Code',
+      reasonLabel: 'Claude',
+    },
+    {
+      agent: 'opencode',
+      code: 'OPENCODE_NOT_FOUND',
+      displayLabel: 'OpenCode',
+      reasonLabel: 'OpenCode',
+    },
+    { agent: 'pi', code: 'PI_NOT_FOUND', displayLabel: 'Pi', reasonLabel: 'Pi' },
+  ] as const) {
+    await using view = await renderSurface({
+      capabilities: {
+        walkthrough: {
+          error: { code, reason: `${reasonLabel} CLI was not found.` },
+          status: 'failed',
+        },
+      },
+      initialMode: 'walkthrough',
+      snapshot: {
+        ...snapshot,
+        walkthrough: { ...snapshot.walkthrough, agent },
+      },
+    });
+
+    expect(view.container.textContent).toContain(`${displayLabel} CLI not found`);
+    expect(view.container.textContent).toContain(`${reasonLabel} CLI was not found.`);
+    expect(findButton(view.container, 'Review Files')).not.toBeUndefined();
+    expect(findButton(view.container, 'Try again')).toBeUndefined();
+    await act(async () => findButton(view.container, 'Review Files')?.click());
+    expect(findButton(view.container, 'Tree')?.getAttribute('aria-selected')).toBe('true');
+  }
+});
+
+test('keeps generic and task-level generation failures retryable', async () => {
+  const onGenerate = vi.fn(async () => {});
+  await using generic = await renderSurface({
+    capabilities: {
+      walkthrough: {
+        error: { reason: 'Generation stopped.' },
+        onGenerate,
+        status: 'failed',
+      },
+    },
+    initialMode: 'walkthrough',
+  });
+  expect(findButton(generic.container, 'Try again')).not.toBeUndefined();
+  await act(async () => findButton(generic.container, 'Try again')?.click());
+  expect(onGenerate).toHaveBeenCalledTimes(1);
+
+  const retryFailedTasks = vi.fn(async () => {});
+  await using partial = await renderSurface({
+    capabilities: {
+      walkthrough: {
+        error: { reason: 'One task failed.' },
+        generationProgress: {
+          completed: 1,
+          phase: 'generating-units',
+          summary: 'One walkthrough task failed.',
+          total: 2,
+          units: [
+            { id: 'ready', label: 'Ready task', status: 'ready' },
+            {
+              detail: 'Model request failed.',
+              id: 'failed',
+              label: 'Failed task',
+              status: 'failed',
+            },
+          ],
+        },
+        onGenerate: retryFailedTasks,
+        status: 'failed',
+      },
+    },
+    initialMode: 'walkthrough',
+  });
+  expect(partial.container.textContent).toContain('Model request failed.');
+  expect(findButton(partial.container, 'Retry failed tasks')).not.toBeUndefined();
+  await act(async () => findButton(partial.container, 'Retry failed tasks')?.click());
+  expect(retryFailedTasks).toHaveBeenCalledTimes(1);
+  await partial.render({
+    capabilities: { walkthrough: { status: 'ready' } },
+    initialMode: 'walkthrough',
+  });
+  expect(findButton(partial.container, 'Retry failed tasks')).toBeUndefined();
+});
+
 test('renders the walkthrough unread indicator from host capability state', async () => {
   await using view = await renderSurface({
     capabilities: { walkthrough: { unread: true } },

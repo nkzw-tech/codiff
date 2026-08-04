@@ -29,6 +29,7 @@ const PI_NOT_FOUND_MESSAGE =
  *   model?: string;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onPartialText?: (delta: string) => void;
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} PiOptions
  */
@@ -150,6 +151,7 @@ const runPi = async (
       const child = commandTransport.spawn(commandTransport.command, piArgs, {
         cwd: repoRoot,
         env: environment,
+        signal: options.signal,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 

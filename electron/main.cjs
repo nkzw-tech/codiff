@@ -90,11 +90,22 @@ const {
   writeWindowState,
 } = require('./window-state.cjs');
 const {
-  getNarrativeWalkthroughCacheKey,
+  NARRATIVE_WALKTHROUGH_AUTHORING_VERSION,
+  buildNarrativeWalkthroughPrompt,
+  createNarrativeWalkthroughGenerationRequest,
+  narrativeWalkthroughResponseSchema,
   normalizeNarrativeWalkthrough,
-  readNarrativeWalkthrough,
   resolveNarrativeWalkthroughModel,
 } = require('./narrative-walkthrough.cjs');
+const { runWalkthroughGenerationTasks } = require('./walkthrough-generation-bridge.cjs');
+const {
+  createWalkthroughGenerationCoordinator,
+} = require('./walkthrough-generation-coordinator.cjs');
+const { getWalkthroughGenerationCacheKey } = require('./walkthrough-generation-cache-key.cjs');
+const {
+  invokeWalkthroughModel,
+  parseStructuredModelResponse,
+} = require('./walkthrough-model-invocation.cjs');
 const { readStoredWalkthrough, writeStoredWalkthrough } = require('./walkthrough-store.cjs');
 const { uploadSharedSnapshot } = require('./shared-walkthrough-upload.cjs');
 const {
@@ -144,6 +155,7 @@ const windowLaunchOptions = new Map();
 const windowInitialRepositoryStates = new Map();
 /** @type {Map<number, number>} */
 const walkthroughProgressGenerations = new Map();
+const walkthroughGenerationCoordinator = createWalkthroughGenerationCoordinator();
 /** @type {Map<number, string>} */
 const planInitialVersions = new Map();
 /** @type {Set<number>} */
@@ -1060,6 +1072,10 @@ const createWindow = (
     completedPlanWindows.delete(webContentsId);
     planInitialVersions.delete(webContentsId);
     readyPlanWindows.delete(webContentsId);
+    walkthroughGenerationCoordinator.clear(
+      webContentsId,
+      new Error('The walkthrough window was closed.'),
+    );
     abortDiffContentRequests(webContentsId);
     windowIdentities.delete(webContentsId);
     windowInitialRepositoryStates.delete(webContentsId);
@@ -1067,7 +1083,20 @@ const createWindow = (
     windowRepositories.delete(webContentsId);
     windowLaunchOptions.delete(webContentsId);
   });
+  window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) {
+      abortDiffContentRequests(webContentsId);
+      walkthroughGenerationCoordinator.clear(
+        webContentsId,
+        new Error('The walkthrough renderer was reloaded.'),
+      );
+    }
+  });
   window.webContents.on('render-process-gone', () => {
+    walkthroughGenerationCoordinator.clear(
+      webContentsId,
+      new Error('The walkthrough renderer process exited.'),
+    );
     abortDiffContentRequests(webContentsId);
     writePlanResult(webContentsId, 'canceled');
   });
@@ -1238,6 +1267,11 @@ const focusOrCreateWindow = (
       if (identity) {
         windowIdentities.set(matchingWebContentsId, identity);
       }
+      walkthroughGenerationCoordinator.clear(
+        matchingWebContentsId,
+        new Error('The walkthrough window was retargeted.'),
+      );
+      abortDiffContentRequests(matchingWebContentsId);
       matchingWindow.reload();
     }
     focusWindow(matchingWindow);
@@ -1606,8 +1640,15 @@ ipcMain.handle('codiff:installTerminalHelper', async (event) => {
   return getTerminalHelperStatus();
 });
 
+ipcMain.handle('codiff:cancelNarrativeWalkthrough', (event) => {
+  const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
+  walkthroughProgressGenerations.set(event.sender.id, progressGeneration);
+  walkthroughGenerationCoordinator.cancel(event.sender.id, new Error('The review source changed.'));
+});
+
 ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) => {
   const launchOptions = windowLaunchOptions.get(event.sender.id);
+  const abortController = walkthroughGenerationCoordinator.begin(event.sender.id);
   const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
   walkthroughProgressGenerations.set(event.sender.id, progressGeneration);
   const reportProgress = createWalkthroughProgressReporter(
@@ -1616,11 +1657,12 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
   );
 
   try {
+    reportProgress({ phase: 'preparing', summary: 'Loading review state.' });
     const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-    const state = await readRepositoryStateWithConfig(
-      repositoryPath,
-      source || launchOptions?.source,
+    const state = await runWithCommandSignal(abortController.signal, () =>
+      readRepositoryStateWithConfig(repositoryPath, source || launchOptions?.source),
     );
+    abortController.signal.throwIfAborted();
     const agent = resolveWindowAgent(event.sender.id);
     const walkthroughFile = launchOptions?.walkthroughFile;
     if (walkthroughFile) {
@@ -1629,6 +1671,9 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       try {
         contents = readFileSync(walkthroughFile, 'utf8');
       } catch (error) {
+        if (abortController.signal.aborted) {
+          throw abortController.signal.reason;
+        }
         const detail = error instanceof Error ? error.message : String(error);
         return {
           reason: `Could not read walkthrough file: ${detail}`,
@@ -1639,9 +1684,13 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       const sessionContext = await Promise.resolve(
         agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
       ).catch(() => null);
+      abortController.signal.throwIfAborted();
       try {
         input = JSON.parse(contents);
       } catch (error) {
+        if (abortController.signal.aborted) {
+          throw abortController.signal.reason;
+        }
         const detail = error instanceof Error ? error.message : String(error);
         return {
           reason: `Could not read walkthrough file: ${detail}`,
@@ -1650,6 +1699,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       }
 
       try {
+        abortController.signal.throwIfAborted();
         return {
           status: 'ready',
           walkthrough: normalizeNarrativeWalkthrough(input, state.files, {
@@ -1662,6 +1712,9 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
           }),
         };
       } catch (error) {
+        if (abortController.signal.aborted) {
+          throw abortController.signal.reason;
+        }
         const detail = error instanceof Error ? error.message : String(error);
         // The usual cause of an unanchored working-tree walkthrough is that the
         // changes were committed (or reverted) after it was authored. Surface a
@@ -1682,19 +1735,40 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       launchOptions?.walkthroughContext,
       await agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
     );
+    abortController.signal.throwIfAborted();
     const agentOptions = getAgentOptions(agent);
     const walkthroughModel = resolveNarrativeWalkthroughModel(state, agent, agentOptions.model);
     const walkthroughPrompt = config.settings.walkthroughPrompt;
-    const cacheKey = getNarrativeWalkthroughCacheKey(
+    const modelCandidates = agent.getModelCandidates(walkthroughModel);
+    const profile = {
+      agent: agent.id,
+      authoringVersion: NARRATIVE_WALKTHROUGH_AUTHORING_VERSION,
+      modelCandidates,
+    };
+    const cacheRequest = {
+      prompt: buildNarrativeWalkthroughPrompt(
+        state,
+        walkthroughContext,
+        agent.label,
+        walkthroughPrompt,
+      ),
+      responseSchema: narrativeWalkthroughResponseSchema,
+    };
+    const cacheKey = getWalkthroughGenerationCacheKey({
+      profile,
+      request: cacheRequest,
       state,
-      agent,
-      walkthroughModel,
-      walkthroughContext,
-      walkthroughPrompt,
-    );
+    });
     if (!options?.force) {
       const cachedWalkthrough = readStoredWalkthrough(cacheKey);
       if (cachedWalkthrough) {
+        reportProgress({
+          completed: 1,
+          phase: 'combining',
+          summary: 'Loaded the cached walkthrough.',
+          total: 1,
+          units: [{ id: 'narrative', label: 'Walkthrough narrative', status: 'ready' }],
+        });
         return {
           status: 'ready',
           walkthrough: {
@@ -1711,46 +1785,116 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       }
     }
 
-    let generatedModel = walkthroughModel;
-    const onModelFallback = agentOptions.onModelFallback;
-    const result = await readNarrativeWalkthrough(
+    const generationRequest = createNarrativeWalkthroughGenerationRequest(
       state,
       agent,
-      {
-        ...agentOptions,
-        model: walkthroughModel,
-        onModelFallback: async (fallbackModel, originalModel) => {
-          generatedModel = fallbackModel;
-          await onModelFallback(fallbackModel, originalModel);
-        },
-        onProgress: reportProgress,
-      },
       walkthroughContext,
       walkthroughPrompt,
       options?.previousWalkthrough,
     );
+    let notFoundCode;
+    const result = await runWalkthroughGenerationTasks({
+      onProgress: reportProgress,
+      reusableComponents: walkthroughGenerationCoordinator.getReusable(
+        event.sender.id,
+        cacheKey,
+        options?.force,
+      ),
+      signal: abortController.signal,
+      tasks: [
+        {
+          id: 'narrative',
+          identity: cacheKey,
+          label: 'Walkthrough narrative',
+          profile,
+          run: async ({ profile: taskProfile, semanticInput, signal }) => {
+            try {
+              reportProgress('agent-generation');
+              const invocation = await invokeWalkthroughModel({
+                agent,
+                agentOptions: { ...agentOptions, onProgress: reportProgress },
+                outputName: generationRequest.outputName,
+                profile: taskProfile,
+                prompt: semanticInput.prompt,
+                repoRoot: state.root,
+                schema: generationRequest.schema,
+                signal,
+                timeoutMessage: generationRequest.timeoutMessage,
+                timeoutMs: generationRequest.timeoutMs,
+              });
+              reportProgress('response-received');
+              const walkthrough = normalizeNarrativeWalkthrough(
+                parseStructuredModelResponse(invocation.response),
+                state.files,
+                {
+                  agent: agent.id,
+                  branch: state.branch,
+                  generatedAt: invocation.generationMetadata.generatedAt,
+                  root: state.root,
+                  source: state.source,
+                },
+                generationRequest.hunkIdByAlias,
+              );
+              if (walkthroughContext && !walkthrough.context) {
+                walkthrough.context = walkthroughContext;
+              }
+              return { generationMetadata: invocation.generationMetadata, output: walkthrough };
+            } catch (error) {
+              if (agent.isNotFoundError(error)) {
+                notFoundCode = agent.notFoundCode;
+              }
+              throw error;
+            }
+          },
+          semanticInput: { prompt: generationRequest.prompt },
+        },
+      ],
+    });
+    walkthroughGenerationCoordinator.retain(
+      event.sender.id,
+      abortController,
+      cacheKey,
+      result.components,
+    );
     if (result.status === 'ready') {
-      const generatedCacheKey = getNarrativeWalkthroughCacheKey(
-        state,
-        agent,
-        generatedModel,
-        walkthroughContext,
-        walkthroughPrompt,
-      );
+      const walkthrough = result.components.find(
+        (component) => component.identity === cacheKey,
+      )?.output;
+      if (!walkthrough) {
+        throw new Error('Walkthrough generation completed without a validated narrative.');
+      }
+      abortController.signal.throwIfAborted();
       try {
-        const cacheableWalkthrough = { ...result.walkthrough };
+        const cacheableWalkthrough = { ...walkthrough };
         delete cacheableWalkthrough.context;
-        writeStoredWalkthrough(generatedCacheKey, cacheableWalkthrough);
+        writeStoredWalkthrough(cacheKey, cacheableWalkthrough);
       } catch {
         // Caching is optional; a filesystem failure must not hide a generated result.
       }
+      return { status: 'ready', walkthrough };
     }
-    return result;
-  } catch (error) {
     return {
-      reason: error instanceof Error ? error.message : String(error),
+      ...(notFoundCode ? { code: notFoundCode } : {}),
+      reason: result.reason,
       status: 'unavailable',
     };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    reportProgress({
+      completed: 0,
+      phase: 'generating',
+      summary: 'Walkthrough generation failed.',
+      total: 1,
+      units: [
+        { detail: reason, id: 'narrative', label: 'Walkthrough narrative', status: 'failed' },
+      ],
+    });
+    return {
+      reason,
+      status: 'unavailable',
+    };
+  } finally {
+    walkthroughGenerationCoordinator.finish(event.sender.id, abortController);
   }
 });
 
@@ -1866,8 +2010,7 @@ ipcMain.on('codiff:cancelDiffContentRequest', (event, requestId) => {
     return;
   }
   const requests = diffContentRequests.get(event.sender.id);
-  const controller = requests?.get(requestId);
-  controller?.abort(new DOMException('Diff content request canceled.', 'AbortError'));
+  requests?.get(requestId)?.abort(new DOMException('Diff content request canceled.', 'AbortError'));
 });
 
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {

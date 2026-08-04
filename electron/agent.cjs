@@ -28,6 +28,7 @@ const { readPiSessionContext } = require('./pi-session-context.cjs');
  *   onPartialText?: (delta: string) => void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
  *   reasoningEffort?: 'low' | 'medium' | 'high';
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} AgentOptions
  * @typedef {{
@@ -39,6 +40,7 @@ const { readPiSessionContext } = require('./pi-session-context.cjs');
  *   models: ReadonlyArray<{id: string; label: string}>;
  *   defaultModel: string;
  *   fallbackModel: string;
+ *   getModelCandidates: (model: unknown) => ReadonlyArray<string>;
  *   modelSettingKey: 'openAIModel' | 'claudeModel' | 'opencodeModel' | 'piModel';
  *   normalizeModel: (value: unknown) => string;
  *   notFoundCode: string;
@@ -88,6 +90,10 @@ const createCodexAgent = () => ({
   models: codex.OPENAI_MODELS,
   defaultModel: codex.DEFAULT_OPENAI_MODEL,
   fallbackModel: codex.FALLBACK_OPENAI_MODEL,
+  getModelCandidates: (model) => {
+    const normalized = codex.normalizeOpenAIModel(model);
+    return [normalized, ...codex.getOpenAIModelFallbacks(normalized)];
+  },
   modelSettingKey: 'openAIModel',
   normalizeModel: codex.normalizeOpenAIModel,
   notFoundCode: codex.CODEX_NOT_FOUND_CODE,
@@ -108,6 +114,12 @@ const createClaudeAgent = () => ({
   models: claude.CLAUDE_MODELS,
   defaultModel: claude.DEFAULT_CLAUDE_MODEL,
   fallbackModel: claude.FALLBACK_CLAUDE_MODEL,
+  getModelCandidates: (model) => [
+    ...new Set([
+      claude.normalizeClaudeModel(model),
+      claude.normalizeClaudeModel(claude.FALLBACK_CLAUDE_MODEL),
+    ]),
+  ],
   modelSettingKey: 'claudeModel',
   normalizeModel: claude.normalizeClaudeModel,
   notFoundCode: claude.CLAUDE_NOT_FOUND_CODE,
@@ -128,6 +140,12 @@ const createOpenCodeAgent = () => ({
   models: opencode.OPENCODE_MODELS,
   defaultModel: opencode.DEFAULT_OPENCODE_MODEL,
   fallbackModel: opencode.FALLBACK_OPENCODE_MODEL,
+  getModelCandidates: (model) => [
+    ...new Set([
+      opencode.normalizeOpenCodeModel(model),
+      opencode.normalizeOpenCodeModel(opencode.FALLBACK_OPENCODE_MODEL),
+    ]),
+  ],
   modelSettingKey: 'opencodeModel',
   normalizeModel: opencode.normalizeOpenCodeModel,
   notFoundCode: opencode.OPENCODE_NOT_FOUND_CODE,
@@ -149,6 +167,7 @@ const createPiAgent = () => ({
   models: pi.PI_MODELS,
   defaultModel: pi.DEFAULT_PI_MODEL,
   fallbackModel: pi.FALLBACK_PI_MODEL,
+  getModelCandidates: (model) => [pi.normalizePiModel(model)],
   modelSettingKey: 'piModel',
   normalizeModel: pi.normalizePiModel,
   notFoundCode: pi.PI_NOT_FOUND_CODE,

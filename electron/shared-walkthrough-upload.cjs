@@ -4,6 +4,30 @@ const { trustSystemCertificates } = require('./system-certificates.cjs');
 
 const poll = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const REDACTED_REPOSITORY_ROOT = '[redacted]';
+
+const sanitizeSharedWalkthroughSnapshot = (snapshot) => {
+  if (!snapshot || typeof snapshot !== 'object' || snapshot.kind !== 'codiff-walkthrough-share') {
+    return snapshot;
+  }
+  const repository =
+    snapshot.repository && typeof snapshot.repository === 'object'
+      ? { ...snapshot.repository, root: REDACTED_REPOSITORY_ROOT }
+      : snapshot.repository;
+  let walkthrough = snapshot.walkthrough;
+  if (walkthrough && typeof walkthrough === 'object') {
+    const { context: _context, ...walkthroughWithoutContext } = walkthrough;
+    walkthrough = {
+      ...walkthroughWithoutContext,
+      repo:
+        walkthrough.repo && typeof walkthrough.repo === 'object'
+          ? { ...walkthrough.repo, root: REDACTED_REPOSITORY_ROOT }
+          : walkthrough.repo,
+    };
+  }
+  return { ...snapshot, repository, walkthrough };
+};
+
 const CERTIFICATE_ERROR_CODES = new Set([
   'DEPTH_ZERO_SELF_SIGNED_CERT',
   'SELF_SIGNED_CERT_IN_CHAIN',
@@ -93,6 +117,7 @@ const uploadSharedSnapshot = async ({
   uploader,
 }) => {
   const certificateTrust = trustCertificates();
+  const safeSnapshot = sanitizeSharedWalkthroughSnapshot(snapshot);
 
   const baseUrl = serviceUrl.replace(/\/+$/, '');
   await authenticate();
@@ -153,7 +178,7 @@ const uploadSharedSnapshot = async ({
   }
 
   const uploadResponse = await fetchShareService('upload request', `${baseUrl}/api/uploads`, {
-    body: JSON.stringify(uploader ? { snapshot, uploader } : snapshot),
+    body: JSON.stringify(uploader ? { snapshot: safeSnapshot, uploader } : safeSnapshot),
     credentials: 'include',
     headers: {
       authorization: `Bearer ${uploadToken}`,
@@ -171,6 +196,7 @@ const uploadSharedSnapshot = async ({
 };
 
 module.exports = {
+  sanitizeSharedWalkthroughSnapshot,
   uploadSharedSnapshot,
   uploadSharedWalkthrough: uploadSharedSnapshot,
 };

@@ -13,6 +13,9 @@ const {
     isAvailable?: (agent: { id: 'codex' | 'claude' | 'opencode' | 'pi' }) => boolean,
   ) => string;
   getAgent: (backendId: unknown) => {
+    defaultModel: string;
+    fallbackModel: string;
+    getModelCandidates: (model: unknown) => ReadonlyArray<string>;
     id: string;
     isAvailable: () => boolean;
     label: string;
@@ -113,4 +116,21 @@ test('shows a custom configured model in the agent model menu', () => {
 
 test('falls back to the default backend for unknown ids', () => {
   expect(getAgent('unknown').id).toBe('codex');
+});
+
+test('constructs normalized fallback chains for every agent backend', () => {
+  const codex = getAgent('codex');
+  expect(codex.getModelCandidates('gpt-5.6-sol')).toEqual([
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.5',
+  ]);
+
+  for (const backend of ['claude', 'opencode', 'pi']) {
+    const agent = getAgent(backend);
+    const candidates = agent.getModelCandidates(agent.defaultModel);
+    expect(candidates[0]).toBe(agent.defaultModel);
+    expect(candidates).toContain(agent.fallbackModel);
+    expect(new Set(candidates).size).toBe(candidates.length);
+  }
 });

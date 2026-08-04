@@ -76,6 +76,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     status: 'unavailable' as const,
   })),
   cancelDiffContentRequest: vi.fn(),
+  cancelNarrativeWalkthrough: vi.fn(async () => {}),
   completePlan: vi.fn(async () => {}),
   createWalkthroughCommit: vi.fn(async () => ({
     sha: '0'.repeat(40) as GitSha,

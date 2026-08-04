@@ -54,3 +54,21 @@ setInterval(() => {}, 1000);
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test('renderer reload and retarget cancel main-process diff-content ownership', async () => {
+  const source = await readFile(join(process.cwd(), 'electron/main.cjs'), 'utf8');
+  const navigation = source.slice(
+    source.indexOf("window.webContents.on('did-start-navigation'"),
+    source.indexOf("window.webContents.on('render-process-gone'"),
+  );
+  expect(navigation).toContain('abortDiffContentRequests(webContentsId)');
+
+  const retarget = source.slice(
+    source.indexOf("new Error('The walkthrough window was retargeted.')"),
+    source.indexOf('matchingWindow.reload()') + 'matchingWindow.reload()'.length,
+  );
+  expect(retarget).toContain('abortDiffContentRequests(matchingWebContentsId)');
+  expect(retarget.indexOf('abortDiffContentRequests')).toBeLessThan(
+    retarget.indexOf('matchingWindow.reload()'),
+  );
+});

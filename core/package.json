@@ -61,10 +61,20 @@
       "types": "./dist/lib/narrative-walkthrough-diff.d.ts",
       "@nkzw/codiff-source": "./lib/narrative-walkthrough-diff.js",
       "default": "./dist/lib/narrative-walkthrough-diff.mjs"
+    },
+    "./walkthrough-generation": {
+      "types": "./dist/walkthrough-generation.d.ts",
+      "@nkzw/codiff-source": "./walkthrough-generation.ts",
+      "default": "./dist/walkthrough-generation.mjs"
+    },
+    "./walkthrough-progress": {
+      "types": "./dist/walkthrough-progress.d.ts",
+      "@nkzw/codiff-source": "./walkthrough-progress.ts",
+      "default": "./dist/walkthrough-progress.mjs"
     }
   },
   "scripts": {
-    "build": "rm -rf dist && vp pack -d dist --target=node24 index.ts react.ts share.ts lib/narrative-walkthrough-diff.js App.css && vp exec tsc -p tsconfig.build.json"
+    "build": "rm -rf dist && vp pack -d dist --target=node24 index.ts react.ts share.ts walkthrough-generation.ts walkthrough-progress.ts lib/narrative-walkthrough-diff.js App.css && vp exec tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "@nkzw/mdx-editor": "^0.2.2",

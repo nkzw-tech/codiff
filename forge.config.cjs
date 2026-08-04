@@ -17,6 +17,7 @@ const macAssetCatalogPath = existsSync(join(__dirname, 'electron/icons/Assets.ca
 const linuxIconPath = './electron/icons/icon.png';
 const windowsIconPath = './electron/icons/icon.ico';
 const runtimeCopies = [
+  ['core/dist', 'core/dist'],
   ['core/lib/narrative-walkthrough-diff.cjs', 'core/lib/narrative-walkthrough-diff.cjs'],
   ['github/dist', 'github/dist'],
   ['gitlab/dist', 'gitlab/dist'],

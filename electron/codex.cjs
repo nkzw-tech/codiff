@@ -44,6 +44,7 @@ const CODEX_NOT_FOUND_MESSAGE =
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
  *   reasoningEffort?: 'low' | 'medium' | 'high';
+ *   signal?: AbortSignal;
  *   timeoutMs?: number;
  * }} CodexOptions
  */
@@ -424,6 +425,7 @@ const runCodex = async (
         ];
         const child = commandTransport.spawn(commandTransport.command, codexArgs, {
           env: environment,
+          signal: options.signal,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
         const eventParser = createCodexEventParser(options.onProgress);
@@ -514,6 +516,7 @@ const runCodex = async (
         {
           cwd: repoRoot,
           env: environment,
+          signal: options.signal,
           stdio: ['pipe', 'pipe', 'pipe'],
         },
       );
@@ -821,6 +824,7 @@ module.exports = {
   DEFAULT_OPENAI_MODEL,
   FALLBACK_OPENAI_MODEL,
   getCodexCommand,
+  getOpenAIModelFallbacks,
   isCodexNotFoundError,
   normalizeOpenAIModel,
   OPENAI_MODELS,
