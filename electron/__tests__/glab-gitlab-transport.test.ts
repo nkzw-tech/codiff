@@ -5,6 +5,17 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
+const { configureCommandLog, disableCommandLog, flushCommandLog, startCommandAction } =
+  require('../command-log.cjs') as {
+    configureCommandLog: (logsDirectory: string) => string;
+    disableCommandLog: () => void;
+    flushCommandLog: () => Promise<void>;
+    startCommandAction: (input: { command: string }) => {
+      cancel: () => void;
+      run: <Value>(callback: () => Value) => Value;
+      signal: AbortSignal;
+    };
+  };
 const { createGlabGitLabTransport } = require('../git-state/glab-gitlab-transport.cjs') as {
   createGlabGitLabTransport: (options: { hostname: string; repoRoot: string }) => {
     request: <T>(request: {
@@ -23,6 +34,7 @@ const { createGlabGitLabTransport } = require('../git-state/glab-gitlab-transpor
       maxBytes?: number;
       path: string;
       query?: Record<string, boolean | number | string>;
+      signal?: AbortSignal;
     }) => Promise<Uint8Array>;
     requestText: (request: {
       maxBytes?: number;
@@ -35,7 +47,9 @@ const { createGlabGitLabTransport } = require('../git-state/glab-gitlab-transpor
 const previousGlabPath = process.env.CODIFF_GLAB_PATH;
 const previousCallsPath = process.env.CODIFF_GLAB_TEST_CALLS;
 
-afterEach(() => {
+afterEach(async () => {
+  await flushCommandLog();
+  disableCommandLog();
   if (previousGlabPath == null) {
     delete process.env.CODIFF_GLAB_PATH;
   } else {
@@ -84,6 +98,7 @@ process.stdin.on('end', () => {
   await chmod(fakeGlabPath, 0o755);
   process.env.CODIFF_GLAB_PATH = fakeGlabPath;
   process.env.CODIFF_GLAB_TEST_CALLS = callsPath;
+  const commandLogPath = configureCommandLog(directory);
 
   const transport = createGlabGitLabTransport({
     hostname: 'gitlab.example.com',
@@ -96,6 +111,30 @@ process.stdin.on('end', () => {
   const calls = JSON.parse((await readFile(callsPath, 'utf8')).trim()) as { args: Array<string> };
   expect(calls.args).toContain('/projects/group%2Fproject/merge_requests/7/versions');
   expect(calls.args).not.toContain('/api/v4/projects/group%2Fproject/merge_requests/7/versions');
+  await flushCommandLog();
+  const commandLog = (await readFile(commandLogPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const start = commandLog.find(
+    (record) => record.event === 'start' && record.command === fakeGlabPath,
+  );
+  expect(start).toEqual(
+    expect.objectContaining({
+      args: calls.args,
+      kind: 'command',
+    }),
+  );
+  expect(commandLog).toContainEqual(
+    expect.objectContaining({
+      command: fakeGlabPath,
+      durationMs: expect.any(Number),
+      event: 'finish',
+      exitCode: 0,
+      id: start?.id,
+      status: 'ok',
+    }),
+  );
 });
 
 test('createGlabGitLabTransport drains oversized JSON, text, binary, and paginated responses', async () => {
@@ -314,6 +353,95 @@ process.stdout.write(Buffer.from([0, 255, 10, 128]));
     args: Array<string>;
   };
   expect(calls.args).toContain('/projects/group%2Fproject/repository/blobs/deadbeef/raw');
+});
+
+test('createGlabGitLabTransport inherits cancellation from its enclosing action', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-glab-transport-'));
+  const fakeGlabPath = join(directory, 'glab');
+  await writeFile(
+    fakeGlabPath,
+    `#!/usr/bin/env node
+setInterval(() => {}, 1_000);
+`,
+    'utf8',
+  );
+  await chmod(fakeGlabPath, 0o755);
+  process.env.CODIFF_GLAB_PATH = fakeGlabPath;
+  const commandLogPath = configureCommandLog(directory);
+
+  const transport = createGlabGitLabTransport({
+    hostname: 'gitlab.example.com',
+    repoRoot: directory,
+  });
+  const action = startCommandAction({ command: 'initial-load' });
+  const pending = action.run(() =>
+    transport.requestBuffer({
+      path: '/api/v4/projects/group%2Fproject/repository/blobs/deadbeef/raw',
+    }),
+  );
+  setTimeout(() => action.cancel(), 25);
+
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(action.signal.aborted).toBe(true);
+  await flushCommandLog();
+  const commandLog = (await readFile(commandLogPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const actionStart = commandLog.find(
+    (record) => record.event === 'start' && record.command === 'initial-load',
+  );
+  const finishes = commandLog.filter(
+    (record) => record.event === 'finish' && record.command === fakeGlabPath,
+  );
+  expect(finishes).toEqual([
+    expect.objectContaining({
+      actionId: actionStart?.id,
+      canceled: true,
+      errorName: 'AbortError',
+      status: 'canceled',
+    }),
+  ]);
+});
+
+test('createGlabGitLabTransport records cancellation before spawning a provider process', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-glab-transport-'));
+  const fakeGlabPath = join(directory, 'glab');
+  await writeFile(fakeGlabPath, '#!/usr/bin/env node\n', 'utf8');
+  await chmod(fakeGlabPath, 0o755);
+  process.env.CODIFF_GLAB_PATH = fakeGlabPath;
+  const commandLogPath = configureCommandLog(directory);
+  const controller = new AbortController();
+  controller.abort();
+
+  const transport = createGlabGitLabTransport({
+    hostname: 'gitlab.example.com',
+    repoRoot: directory,
+  });
+  await expect(
+    transport.requestBuffer({
+      path: '/api/v4/projects/group%2Fproject/repository/blobs/deadbeef/raw',
+      signal: controller.signal,
+    }),
+  ).rejects.toMatchObject({ name: 'AbortError' });
+  await flushCommandLog();
+
+  const commandLog = (await readFile(commandLogPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(
+    commandLog.filter((record) => record.event === 'start' && record.command === fakeGlabPath),
+  ).toHaveLength(1);
+  expect(commandLog).toContainEqual(
+    expect.objectContaining({
+      canceled: true,
+      command: fakeGlabPath,
+      errorName: 'AbortError',
+      event: 'finish',
+      status: 'canceled',
+    }),
+  );
 });
 
 test('createGlabGitLabTransport flattens all glab paginated response pages', async () => {

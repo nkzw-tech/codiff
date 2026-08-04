@@ -24,6 +24,7 @@ const {
   readWorkingTreeImageFile,
   validateRepositoryPath,
 } = require('./common.cjs');
+const { getCommandActionSignal } = require('../command-log.cjs');
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
@@ -493,41 +494,67 @@ const readDiffImageContent = async (launchPath, request) => {
 
 /** @param {string} repoRoot @param {ReadonlyArray<string>} args */
 const gitOrEmpty = async (repoRoot, args) => {
+  const signal = getCommandActionSignal();
   try {
-    return await git(repoRoot, args);
+    return await git(repoRoot, args, { signal });
   } catch {
+    signal?.throwIfAborted();
     return '';
   }
 };
 
+/** @type {Map<string, Map<AbortSignal | null, Promise<{email: string, gravatarUrl?: string, name: string}>>>} */
 const gitIdentityReads = new Map();
 
 /** @param {string} launchPath */
 const readGitIdentity = (launchPath) => {
-  const existing = gitIdentityReads.get(launchPath);
+  const signal = getCommandActionSignal();
+  let readsBySignal = gitIdentityReads.get(launchPath);
+  if (!readsBySignal) {
+    readsBySignal = new Map();
+    gitIdentityReads.set(launchPath, readsBySignal);
+  }
+  const signalKey = signal || null;
+  const existing = readsBySignal.get(signalKey);
   if (existing) {
     return existing;
   }
   const read = Promise.all([
     gitOrEmpty(launchPath, ['config', '--get', 'user.name']),
     gitOrEmpty(launchPath, ['config', '--get', 'user.email']),
-  ])
-    .then(([configuredName, configuredEmail]) => {
-      const email = configuredEmail.trim();
-      const name = configuredName.trim();
-      return {
-        email,
-        gravatarUrl: email
-          ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
-          : undefined,
-        name,
-      };
-    })
-    .finally(() => {
+  ]).then(([configuredName, configuredEmail]) => {
+    const email = configuredEmail.trim();
+    const name = configuredName.trim();
+    return {
+      email,
+      gravatarUrl: email
+        ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
+        : undefined,
+      name,
+    };
+  });
+  let pending;
+  const clear = () => {
+    if (readsBySignal.get(signalKey) !== pending) {
+      return;
+    }
+    readsBySignal.delete(signalKey);
+    if (readsBySignal.size === 0 && gitIdentityReads.get(launchPath) === readsBySignal) {
       gitIdentityReads.delete(launchPath);
-    });
-  gitIdentityReads.set(launchPath, read);
-  return read;
+    }
+  };
+  pending = read.then(
+    (identity) => {
+      clear();
+      return identity;
+    },
+    (error) => {
+      clear();
+      throw error;
+    },
+  );
+  readsBySignal.set(signalKey, pending);
+  return pending;
 };
 
 module.exports = {

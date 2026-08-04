@@ -6,6 +6,7 @@
  */
 
 const { spawn } = require('node:child_process');
+const { getCommandActionSignal, startCommandTiming } = require('../../command-log.cjs');
 const { realpathSync } = require('node:fs');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
@@ -55,18 +56,26 @@ const enforceOutputLimit = (bytes, maxBytes) => {
 };
 
 /**
- * Share only uncancelable GETs, briefly retaining completed bytes so each
- * consumer can enforce its own response bound. Concurrent consumers may raise
- * the acquisition bound until output crosses it; a later larger consumer
- * starts a new read only after an earlier bounded read discarded bytes.
+ * Share GETs within one cancellation boundary, briefly retaining completed
+ * bytes so each consumer can enforce its own response bound. Concurrent
+ * consumers may raise the acquisition bound until output crosses it; a later
+ * larger consumer starts a new read only after an earlier bounded read
+ * discarded bytes.
  * @param {string} key
  * @param {number | undefined} maxBytes
  * @param {(options: {getMaxBytes: () => number | undefined, onOutputLimit: () => void}) => Promise<Buffer>} read
+ * @param {AbortSignal | undefined} signal
  * @returns {Promise<Buffer>}
  */
-const readSharedGet = (key, maxBytes, read) => {
+const readSharedGet = (key, maxBytes, read, signal) => {
+  let requestsBySignal = sharedGetRequests.get(key);
+  if (!requestsBySignal) {
+    requestsBySignal = new Map();
+    sharedGetRequests.set(key, requestsBySignal);
+  }
+  const signalKey = signal || null;
   /** @type {SharedGetRequest | undefined} */
-  const existing = sharedGetRequests.get(key);
+  const existing = requestsBySignal.get(signalKey);
   if (existing) {
     if (existing.status === 'fulfilled') {
       return existing.promise;
@@ -103,11 +112,14 @@ const readSharedGet = (key, maxBytes, read) => {
     }),
   );
   entry.promise = request;
-  sharedGetRequests.set(key, entry);
+  requestsBySignal.set(signalKey, entry);
   const expire = () => {
     const timeout = setTimeout(() => {
-      if (sharedGetRequests.get(key) === entry) {
-        sharedGetRequests.delete(key);
+      if (requestsBySignal.get(signalKey) === entry) {
+        requestsBySignal.delete(signalKey);
+        if (requestsBySignal.size === 0 && sharedGetRequests.get(key) === requestsBySignal) {
+          sharedGetRequests.delete(key);
+        }
       }
     }, SHARED_GET_RETENTION_MS);
     timeout.unref?.();
@@ -175,6 +187,7 @@ const runGhApiBuffer = async (repoRoot, args, input, options = {}) => {
   const environment = await getCommandEnvironment();
   return new Promise((resolve, reject) => {
     const fixedMaxBytes = normalizeMaxBytes(options.maxBytes);
+    const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
     let command;
     try {
       command = getGhCommand();
@@ -183,12 +196,21 @@ const runGhApiBuffer = async (repoRoot, args, input, options = {}) => {
       return;
     }
 
-    const child = spawn(command, ['api', ...args], {
-      cwd: repoRoot,
-      env: environment,
-      signal: options.signal ?? getCurrentCommandSignal(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const timing = startCommandTiming({ args: ['api', ...args], command, cwd: repoRoot });
+    let child;
+    try {
+      signal?.throwIfAborted();
+      child = spawn(command, ['api', ...args], {
+        cwd: repoRoot,
+        env: environment,
+        signal,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      timing.finish({ canceled: signal?.aborted, error });
+      reject(error);
+      return;
+    }
     /** @type {Array<Buffer>} */
     const stdout = [];
     /** @type {Array<Buffer>} */
@@ -198,12 +220,42 @@ const runGhApiBuffer = async (repoRoot, args, input, options = {}) => {
     let forceKillTimeout;
     let outputBytes = 0;
     let outputLimit;
+    let settled = false;
+
     const terminate = () => {
       child.kill('SIGTERM');
       forceKillTimeout ??= setTimeout(() => child.kill('SIGKILL'), 1_000);
       forceKillTimeout.unref?.();
     };
-    child.stdout.on('data', (chunk) => {
+
+    /**
+     * @param {unknown} reason
+     * @param {{canceled?: boolean, exitCode?: number | null, signal?: string | null}} [result]
+     */
+    const fail = (reason, result = {}) => {
+      if (settled) return;
+      settled = true;
+      const error = reason instanceof Error ? reason : new Error(String(reason));
+      timing.finish({
+        canceled: result.canceled,
+        error,
+        exitCode: result.exitCode,
+        signal: result.signal,
+      });
+      reject(error);
+    };
+
+    const abortError = () => {
+      const reason = signal?.reason;
+      if (reason instanceof Error) return reason;
+      const error = new Error('gh api request was aborted.');
+      error.name = 'AbortError';
+      return error;
+    };
+
+    child.stdout.on('data', (value) => {
+      if (settled) return;
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       outputBytes += chunk.length;
       if (outputLimit != null) {
         return;
@@ -218,44 +270,75 @@ const runGhApiBuffer = async (repoRoot, args, input, options = {}) => {
       }
       stdout.push(chunk);
     });
-    child.stderr.on('data', (chunk) => {
-      if (stderrBytes >= MAX_STDERR_BYTES) return;
+    child.stderr.on('data', (value) => {
+      if (settled || stderrBytes >= MAX_STDERR_BYTES) return;
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       const retained = chunk.subarray(0, MAX_STDERR_BYTES - stderrBytes);
       stderr.push(Buffer.from(retained));
       stderrBytes += retained.length;
     });
-    child.on('error', (error) => {
-      if (outputLimit != null) {
-        reject(new ProviderOutputLimitError(outputLimit));
-        return;
+    child.stdin.on('error', (error) => {
+      if (
+        !settled &&
+        outputLimit == null &&
+        /** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE'
+      ) {
+        fail(error, { canceled: signal?.aborted });
+        child.kill();
       }
-      reject(
-        /** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT'
-          ? createGhNotFoundError()
-          : error,
-      );
     });
-    child.on('close', (code) => {
+    child.on('error', (error) => {
       if (forceKillTimeout) {
         clearTimeout(forceKillTimeout);
       }
+      if (settled) return;
       if (outputLimit != null) {
-        reject(new ProviderOutputLimitError(outputLimit));
+        fail(new ProviderOutputLimitError(outputLimit), { canceled: signal?.aborted });
+        return;
+      }
+      fail(
+        /** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT'
+          ? createGhNotFoundError()
+          : error,
+        { canceled: error.name === 'AbortError' || signal?.aborted },
+      );
+    });
+    child.on('close', (code, childSignal) => {
+      if (forceKillTimeout) {
+        clearTimeout(forceKillTimeout);
+      }
+      if (settled) return;
+      if (outputLimit != null) {
+        fail(new ProviderOutputLimitError(outputLimit), {
+          exitCode: code,
+          signal: childSignal,
+        });
+        return;
+      }
+      if (signal?.aborted) {
+        fail(abortError(), { canceled: true, exitCode: code, signal: childSignal });
         return;
       }
       if (code === 0) {
+        settled = true;
+        timing.finish({ exitCode: code });
         resolve(Buffer.concat(stdout, outputBytes));
       } else {
         const error = new Error(
           Buffer.concat(stderr).toString('utf8').trim() || `gh api exited with code ${code}.`,
         );
-        reject(error);
+        fail(error, { exitCode: code, signal: childSignal });
       }
     });
-    if (input == null) {
-      child.stdin.end();
-    } else {
-      child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input));
+    try {
+      if (input == null) {
+        child.stdin.end();
+      } else {
+        child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input));
+      }
+    } catch (error) {
+      fail(error, { canceled: signal?.aborted });
+      child.kill();
     }
   });
 };
@@ -342,9 +425,9 @@ const withoutPageSize = (query) =>
   query && Object.fromEntries(Object.entries(query).filter(([key]) => key !== 'per_page'));
 
 /**
- * @param {{ repoRoot: string }} options
+ * @param {{ repoRoot: string, signal?: AbortSignal }} options
  */
-const createGhGitHubTransport = ({ repoRoot }) => {
+const createGhGitHubTransport = ({ repoRoot, signal: defaultSignal }) => {
   const repositoryIdentity = realpathSync.native(repoRoot);
 
   /**
@@ -354,18 +437,21 @@ const createGhGitHubTransport = ({ repoRoot }) => {
    */
   const readApiBuffer = async (args, input, options) => {
     const maxBytes = normalizeMaxBytes(options.maxBytes);
-    const signal = options.signal ?? getCurrentCommandSignal();
     const bytes = options.sharedKey
-      ? await readSharedGet(options.sharedKey, maxBytes, ({ getMaxBytes, onOutputLimit }) =>
-          runGhApiBuffer(repoRoot, args, input, {
-            getMaxBytes,
-            onOutputLimit,
-            signal,
-          }),
+      ? await readSharedGet(
+          options.sharedKey,
+          maxBytes,
+          ({ getMaxBytes, onOutputLimit }) =>
+            runGhApiBuffer(repoRoot, args, input, {
+              getMaxBytes,
+              onOutputLimit,
+              signal: options.signal,
+            }),
+          options.signal,
         )
       : await runGhApiBuffer(repoRoot, args, input, {
           maxBytes,
-          signal,
+          signal: options.signal,
         });
     return enforceOutputLimit(bytes, maxBytes);
   };
@@ -374,6 +460,8 @@ const createGhGitHubTransport = ({ repoRoot }) => {
    * @param {{maxBytes?: number, query: string, signal?: AbortSignal, variables: Readonly<Record<string, boolean | number | string | null>>}} request
    */
   const graphql = async (request) => {
+    const signal =
+      request.signal || defaultSignal || getCurrentCommandSignal() || getCommandActionSignal();
     /** @type {Array<string>} */
     const args = ['graphql', '-f', `query=${request.query}`];
     for (const [key, value] of Object.entries(request.variables)) {
@@ -385,7 +473,7 @@ const createGhGitHubTransport = ({ repoRoot }) => {
       (
         await readApiBuffer(args, undefined, {
           maxBytes: request.maxBytes,
-          signal: request.signal,
+          signal,
         })
       ).toString('utf8'),
     );
@@ -404,7 +492,8 @@ const createGhGitHubTransport = ({ repoRoot }) => {
    * }} request
    */
   const requestText = async (request) => {
-    const signal = request.signal ?? getCurrentCommandSignal();
+    const signal =
+      request.signal || defaultSignal || getCurrentCommandSignal() || getCommandActionSignal();
     /** @type {Array<string>} */
     const args = [];
     if (request.paginate) {
@@ -421,7 +510,7 @@ const createGhGitHubTransport = ({ repoRoot }) => {
       args.push('--input', '-');
     }
     const sharedKey =
-      request.body == null && (!request.method || request.method === 'GET') && !signal
+      request.body == null && (!request.method || request.method === 'GET')
         ? `${repositoryIdentity}\0text\0${request.paginate ? 'paginate' : 'single'}\0${request.accept || ''}\0${appendQuery(request.path, request.paginate ? withoutPageSize(request.query) : request.query)}`
         : undefined;
     return (
@@ -462,7 +551,8 @@ const createGhGitHubTransport = ({ repoRoot }) => {
       return /** @type {T} */ (JSON.parse(text));
     },
     async requestBuffer(request) {
-      const signal = request.signal ?? getCurrentCommandSignal();
+      const signal =
+        request.signal || defaultSignal || getCurrentCommandSignal() || getCommandActionSignal();
       /** @type {Array<string>} */
       const args = [];
       if (request.accept) {
@@ -471,9 +561,7 @@ const createGhGitHubTransport = ({ repoRoot }) => {
       args.push(appendQuery(request.path, request.query));
       return readApiBuffer(args, undefined, {
         maxBytes: request.maxBytes,
-        sharedKey: !signal
-          ? `${repositoryIdentity}\0buffer\0single\0${request.accept || ''}\0${appendQuery(request.path, request.query)}`
-          : undefined,
+        sharedKey: `${repositoryIdentity}\0buffer\0single\0${request.accept || ''}\0${appendQuery(request.path, request.query)}`,
         signal,
       });
     },

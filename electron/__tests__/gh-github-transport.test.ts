@@ -25,6 +25,7 @@ const { createGhGitHubTransport } =
         maxBytes?: number;
         path: string;
         query?: Record<string, boolean | number | string>;
+        signal?: AbortSignal;
       }) => Promise<Uint8Array>;
       requestText: (request: {
         accept?: string;
@@ -35,11 +36,24 @@ const { createGhGitHubTransport } =
       }) => Promise<string>;
     };
   };
+const { configureCommandLog, disableCommandLog, flushCommandLog, startCommandAction } =
+  require('../command-log.cjs') as {
+    configureCommandLog: (logsDirectory: string) => string;
+    disableCommandLog: () => void;
+    flushCommandLog: () => Promise<void>;
+    startCommandAction: (input: { command: string }) => {
+      cancel: () => void;
+      run: <Value>(callback: () => Value) => Value;
+      signal: AbortSignal;
+    };
+  };
 
 const previousGhPath = process.env.CODIFF_GH_PATH;
 const previousCallsPath = process.env.CODIFF_GH_TEST_CALLS;
 
-afterEach(() => {
+afterEach(async () => {
+  await flushCommandLog();
+  disableCommandLog();
   if (previousGhPath == null) delete process.env.CODIFF_GH_PATH;
   else process.env.CODIFF_GH_PATH = previousGhPath;
   if (previousCallsPath == null) delete process.env.CODIFF_GH_TEST_CALLS;
@@ -228,4 +242,87 @@ process.stdout.write('[\\n  {"id": 1, "label": "nested } and \\\\"quoted\\\\" te
     [{ id: 1, label: 'nested } and "quoted" text' }, { id: 2 }],
   ]);
   expect((await readFile(callsPath, 'utf8')).trim()).toBe('call');
+});
+
+test('createGhGitHubTransport inherits cancellation from its enclosing action', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-gh-transport-'));
+  const fakeGhPath = join(directory, 'gh');
+  await writeFile(
+    fakeGhPath,
+    `#!/usr/bin/env node
+setInterval(() => {}, 1_000);
+`,
+    'utf8',
+  );
+  await chmod(fakeGhPath, 0o755);
+  process.env.CODIFF_GH_PATH = fakeGhPath;
+  const commandLogPath = configureCommandLog(directory);
+
+  const transport = createGhGitHubTransport({ repoRoot: directory });
+  const action = startCommandAction({ command: 'initial-load' });
+  const pending = action.run(() =>
+    transport.requestBuffer({
+      path: '/repos/nkzw-tech/codiff/git/blobs/deadbeef',
+    }),
+  );
+  setTimeout(() => action.cancel(), 25);
+
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(action.signal.aborted).toBe(true);
+  await flushCommandLog();
+  const commandLog = (await readFile(commandLogPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const actionStart = commandLog.find(
+    (record) => record.event === 'start' && record.command === 'initial-load',
+  );
+  const finishes = commandLog.filter(
+    (record) => record.event === 'finish' && record.command === fakeGhPath,
+  );
+  expect(finishes).toEqual([
+    expect.objectContaining({
+      actionId: actionStart?.id,
+      canceled: true,
+      errorName: 'AbortError',
+      status: 'canceled',
+    }),
+  ]);
+});
+
+test('createGhGitHubTransport records cancellation before spawning a provider process', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-gh-transport-'));
+  const fakeGhPath = join(directory, 'gh');
+  await writeFile(fakeGhPath, '#!/usr/bin/env node\n', 'utf8');
+  await chmod(fakeGhPath, 0o755);
+  process.env.CODIFF_GH_PATH = fakeGhPath;
+  const commandLogPath = configureCommandLog(directory);
+  const controller = new AbortController();
+  controller.abort();
+
+  const transport = createGhGitHubTransport({ repoRoot: directory });
+  await expect(
+    transport.requestBuffer({
+      path: '/repos/nkzw-tech/codiff/git/blobs/deadbeef',
+      signal: controller.signal,
+    }),
+  ).rejects.toMatchObject({ name: 'AbortError' });
+  await flushCommandLog();
+
+  const commandLog = (await readFile(commandLogPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(
+    commandLog.filter((record) => record.event === 'start' && record.command === fakeGhPath),
+  ).toHaveLength(1);
+  expect(commandLog).toContainEqual(
+    expect.objectContaining({
+      canceled: true,
+      command: fakeGhPath,
+      errorName: 'AbortError',
+      event: 'finish',
+      status: 'canceled',
+    }),
+  );
 });
