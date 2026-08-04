@@ -153,6 +153,18 @@ importers:
         specifier: ^1.4.2
         version: 1.4.2(typescript@7.0.2)
 
+  github:
+    dependencies:
+      '@nkzw/codiff-core':
+        specifier: workspace:*
+        version: link:../core
+
+  gitlab:
+    dependencies:
+      '@nkzw/codiff-core':
+        specifier: workspace:*
+        version: link:../core
+
   service:
     dependencies:
       '@nkzw/codiff-core':

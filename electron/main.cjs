@@ -20,8 +20,10 @@ const {
   listRepositoryHistory,
   readDiffImageContent,
   readDiffSectionContent,
+  readDiffSectionsContent,
   readGitIdentity,
   readRepositoryState,
+  readReviewComments,
   readWalkthroughRepositoryState,
   submitPullRequestComment,
   submitPullRequestReview,
@@ -1799,6 +1801,11 @@ ipcMain.handle('codiff:getDiffSectionContent', async (event, request) => {
   });
 });
 
+ipcMain.handle('codiff:getDiffSectionsContent', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return readDiffSectionsContent(repositoryPath, request);
+});
+
 ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   return readDiffImageContent(repositoryPath, request);
@@ -1807,6 +1814,14 @@ ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   return listRepositoryHistory(repositoryPath, limit, source);
+});
+
+ipcMain.handle('codiff:getReviewComments', async (event, source) => {
+  if (source?.type !== 'pull-request') {
+    throw new Error('Review comments require a pull-request source.');
+  }
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return readReviewComments(repositoryPath, source);
 });
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {

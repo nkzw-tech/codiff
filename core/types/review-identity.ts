@@ -112,6 +112,14 @@ export type DiffSectionContentRequest = {
   showWhitespace?: boolean;
   source?: ResolvedReviewSource;
 };
+export type DiffSectionsContentRequest = {
+  source: Extract<ResolvedReviewSource, { type: 'pull-request' }>;
+};
+
+export type DiffSectionsContentResult = {
+  headSha?: GitSha;
+  sections: ReadonlyArray<{ path: string; section: DiffSection }>;
+};
 
 export type DiffImageContentRequest = {
   kind: DiffSection['kind'];

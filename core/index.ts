@@ -58,6 +58,7 @@ export type {
   PullRequestReviewEvent,
   PullRequestReviewStatus,
   PullRequestReviewer,
+  ReviewCommitSummary,
   ReviewPreferences,
   RepositoryState,
   Revision,
