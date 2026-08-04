@@ -1,7 +1,7 @@
 {
   "name": "@nkzw/codiff-github",
   "version": "0.1.0",
-  "description": "Host-injected GitHub transport for Codiff.",
+  "description": "Read-side GitHub review-history adapter for Codiff (force-push heads).",
   "license": "MIT",
   "author": {
     "name": "Christoph Nakazawa",
