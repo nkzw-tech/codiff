@@ -289,6 +289,7 @@ export default function App() {
     collapseThreshold: SIDEBAR_COLLAPSE_THRESHOLD,
     onCollapse: collapseSidebar,
     onWidthCommit: writeSidebarWidth,
+    position: preferences.sidebarPosition,
     readWidth: readSidebarWidth,
   });
   const {
@@ -1799,8 +1800,16 @@ export default function App() {
       className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}${
         isWindowFullScreen ? ' window-fullscreen' : ''
       }`}
+      data-sidebar-position={preferences.sidebarPosition}
       style={
-        sidebarCollapsed ? undefined : { gridTemplateColumns: `${sidebarWidth}px 0 minmax(0, 1fr)` }
+        sidebarCollapsed
+          ? undefined
+          : {
+              gridTemplateColumns:
+                preferences.sidebarPosition === 'right'
+                  ? `minmax(0, 1fr) 0 ${sidebarWidth}px`
+                  : `${sidebarWidth}px 0 minmax(0, 1fr)`,
+            }
       }
     >
       <div aria-hidden className="window-drag-region" />
@@ -1846,6 +1855,7 @@ export default function App() {
         }
         repositoryTooltip={state.root}
         sidebarCollapsed={sidebarCollapsed}
+        sidebarPosition={preferences.sidebarPosition}
         sourceMenu={
           <OpenReviewSourceMenu
             onOpen={showOpenReviewSourceDialog}

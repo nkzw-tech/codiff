@@ -206,6 +206,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     reviewCommentsPrefix: defaultSettings.reviewCommentsPrefix,
     showOutdated: false,
     showWhitespace: false,
+    sidebarPosition: defaultSettings.sidebarPosition,
     theme: 'system' as const,
     walkthroughPrompt: defaultSettings.walkthroughPrompt,
     wordWrap: false,
@@ -403,6 +404,22 @@ test('code font preferences update root CSS variables', async () => {
 
   await act(async () => root.unmount());
   container.remove();
+});
+
+test('desktop app places the sidebar on the configured side', async () => {
+  const nextConfig = createDefaultConfig();
+  nextConfig.settings.sidebarPosition = 'right';
+  window.codiff = createCodiffMock({
+    getConfig: vi.fn(async () => nextConfig),
+  });
+
+  await using app = await renderReact(<App />);
+
+  await waitFor(() => {
+    const shell = app.container.querySelector<HTMLElement>('.app-shell');
+    expect(shell?.dataset.sidebarPosition).toBe('right');
+    expect(shell?.style.gridTemplateColumns).toBe('minmax(0, 1fr) 0 292px');
+  });
 });
 
 test('empty code font family removes the root CSS variable', async () => {

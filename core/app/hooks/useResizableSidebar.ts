@@ -1,10 +1,12 @@
 import { useCallback, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import type { SidebarPosition } from '../../lib/app-types.ts';
 import { clampSidebarWidth } from '../../lib/sidebar-width.ts';
 
 type UseResizableSidebarOptions = {
   collapseThreshold?: number;
   onCollapse?: () => void;
   onWidthCommit: (width: number) => void;
+  position: SidebarPosition;
   readWidth: () => number;
 };
 
@@ -12,6 +14,7 @@ export function useResizableSidebar({
   collapseThreshold,
   onCollapse,
   onWidthCommit,
+  position,
   readWidth,
 }: UseResizableSidebarOptions) {
   const [sidebarWidth, setSidebarWidth] = useState(readWidth);
@@ -30,7 +33,7 @@ export function useResizableSidebar({
         return;
       }
 
-      const shellLeft = shell.getBoundingClientRect().left;
+      const shellRect = shell.getBoundingClientRect();
       handle.setPointerCapture(event.pointerId);
       handle.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
@@ -46,7 +49,10 @@ export function useResizableSidebar({
       };
 
       const handleMove = (moveEvent: PointerEvent) => {
-        const rawWidth = moveEvent.clientX - shellLeft;
+        const rawWidth =
+          position === 'right'
+            ? shellRect.right - moveEvent.clientX
+            : moveEvent.clientX - shellRect.left;
         if (collapseThreshold != null && rawWidth < collapseThreshold) {
           collapsed = true;
           onCollapse?.();
@@ -70,7 +76,7 @@ export function useResizableSidebar({
       handle.addEventListener('pointerup', handleEnd);
       handle.addEventListener('pointercancel', handleEnd);
     },
-    [collapseThreshold, onCollapse, onWidthCommit],
+    [collapseThreshold, onCollapse, onWidthCommit, position],
   );
 
   return { resizeSidebar, sidebarWidth };

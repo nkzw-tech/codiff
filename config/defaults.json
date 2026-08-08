@@ -13,6 +13,7 @@
     "opencodeModel": "opencode-default",
     "piModel": "pi-default",
     "reviewCommentsPrefix": "# Address these Review Comments",
+    "sidebarPosition": "left",
     "showOutdated": false,
     "showWhitespace": false,
     "theme": "system",

@@ -120,6 +120,7 @@ export type ReviewComment = {
 };
 
 export type SidebarMode = 'tree' | 'walkthrough' | 'history';
+export type SidebarPosition = 'left' | 'right';
 
 export type PullRequestSource = Extract<ReviewSource, { type: 'pull-request' }>;
 

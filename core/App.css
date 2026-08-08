@@ -713,6 +713,10 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
   display: none;
 }
 
+.app-shell.sidebar-collapsed > .review {
+  grid-column: 1;
+}
+
 .review-top-bar {
   display: grid;
   gap: 12px;
@@ -1025,10 +1029,27 @@ a.review-top-bar-source:focus-visible {
   z-index: 21;
 }
 
-.app-shell > .sidebar,
-.app-shell > .sidebar-resizer,
-.app-shell > .review {
+.app-shell > .sidebar {
+  grid-column: 1;
   grid-row: 2;
+}
+
+.app-shell > .sidebar-resizer {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.app-shell > .review {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.app-shell[data-sidebar-position='right'] > .review {
+  grid-column: 1;
+}
+
+.app-shell[data-sidebar-position='right'] > .sidebar {
+  grid-column: 3;
 }
 
 .sidebar-resizer::before {

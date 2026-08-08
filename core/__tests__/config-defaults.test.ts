@@ -78,6 +78,16 @@ test('electron config normalizes code font settings', () => {
   expect(readElectronConfig({ settings: { codeFontSize: 99 } }).settings.codeFontSize).toBe(32);
 });
 
+test('electron config normalizes sidebar position', () => {
+  expect(readElectronConfig({}).settings.sidebarPosition).toBe('left');
+  expect(
+    readElectronConfig({ settings: { sidebarPosition: 'right' } }).settings.sidebarPosition,
+  ).toBe('right');
+  expect(
+    readElectronConfig({ settings: { sidebarPosition: 'bottom' } }).settings.sidebarPosition,
+  ).toBe('left');
+});
+
 test('electron config keeps custom walkthrough prompt text only when it is a string', () => {
   expect(
     readElectronConfig({

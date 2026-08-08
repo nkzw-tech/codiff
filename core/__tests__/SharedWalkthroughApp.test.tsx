@@ -6,10 +6,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
-import { ReviewSurface, type ReviewCommenting } from '../SharedWalkthroughApp.tsx';
+import { ReviewSurface, type ReviewCommenting } from '../react.ts';
 import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
-import { waitFor } from './helpers/react.tsx';
+import { renderReact, waitFor } from './helpers/react.tsx';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   ResizeObserver?: typeof ResizeObserver;
@@ -65,7 +65,38 @@ const commenting = {
   onUpdateGeneralComment: async () => {},
 } satisfies ReviewCommenting;
 
-test('review top bar renders its leading control at the far left', async () => {
+const sharedWalkthroughSource = { type: 'working-tree' } as const;
+const sharedWalkthroughSnapshot = {
+  branch: 'main',
+  codiffVersion: '1.4.1',
+  exportedAt: '2026-06-19T00:00:00.000Z',
+  files: [createChangedFile('src/app.ts')],
+  kind: 'codiff-walkthrough-share',
+  preferences: {
+    codeFontFamily: 'Fira Code',
+    codeFontSize: 13,
+    diffStyle: 'split',
+    showWhitespace: false,
+    theme: 'system',
+    wordWrap: false,
+  },
+  repository: { root: '/Users/ada/dev/codiff-web', source: sharedWalkthroughSource },
+  version: 1,
+  walkthrough: {
+    agent: 'codex',
+    chapters: [],
+    focus: 'Focus on the implementation.',
+    generatedAt: '2026-06-19T00:00:00.000Z',
+    kind: 'narrative',
+    repo: { branch: 'main', root: '/Users/ada/dev/codiff-web' },
+    source: sharedWalkthroughSource,
+    support: [],
+    title: 'Shared walkthrough',
+    version: 4,
+  },
+} satisfies SharedWalkthroughSnapshot;
+
+test('review top bar renders its leading and sidebar controls at opposite edges', async () => {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
@@ -80,6 +111,7 @@ test('review top bar renders its leading control at the far left', async () => {
         onToggleSidebar={() => {}}
         repository="cloudflare/voidzero/codiff-web"
         sidebarCollapsed={false}
+        sidebarPosition="right"
         toggleTitle="Collapse sidebar"
       />,
     );
@@ -91,44 +123,30 @@ test('review top bar renders its leading control at the far left', async () => {
   expect(leftRegion?.nextElementSibling?.nextElementSibling?.className).toBe(
     'review-top-bar-right',
   );
+  const rightRegion = leftRegion?.nextElementSibling?.nextElementSibling;
+  const toggle = rightRegion?.lastElementChild;
+  expect(toggle?.classList.contains('sidebar-toggle-button')).toBe(true);
+  expect(toggle?.querySelector('svg')?.getAttribute('transform')).toBe('scale(-1, 1)');
 
   await act(async () => root.unmount());
   container.remove();
 });
 
-test('share viewer shows the complete repository path when there is no repository link', async () => {
-  const file = createChangedFile('src/app.ts');
-  const source = { type: 'working-tree' } as const;
-  const snapshot = {
-    branch: 'main',
-    codiffVersion: '1.4.1',
-    exportedAt: '2026-06-19T00:00:00.000Z',
-    files: [file],
-    kind: 'codiff-walkthrough-share',
-    preferences: {
-      codeFontFamily: 'Fira Code',
-      codeFontSize: 13,
-      diffStyle: 'split',
-      showWhitespace: false,
-      theme: 'system',
-      wordWrap: false,
-    },
-    repository: { root: '/Users/ada/dev/codiff-web', source },
-    version: 1,
-    walkthrough: {
-      agent: 'codex',
-      chapters: [],
-      focus: 'Focus on the implementation.',
-      generatedAt: '2026-06-19T00:00:00.000Z',
-      kind: 'narrative',
-      repo: { branch: 'main', root: '/Users/ada/dev/codiff-web' },
-      source,
-      support: [],
-      title: 'Shared walkthrough',
-      version: 4,
-    },
-  } satisfies SharedWalkthroughSnapshot;
+test.each([
+  { columns: '292px 0 minmax(0, 1fr)', position: 'left' },
+  { columns: 'minmax(0, 1fr) 0 292px', position: 'right' },
+] as const)('$position review surface layout', async (testCase) => {
+  window.localStorage.clear();
+  await using view = await renderReact(
+    <ReviewSurface sidebarPosition={testCase.position} snapshot={sharedWalkthroughSnapshot} />,
+  );
 
+  const shell = view.container.querySelector<HTMLElement>('.app-shell');
+  expect(shell?.dataset.sidebarPosition).toBe(testCase.position);
+  expect(shell?.style.gridTemplateColumns).toBe(testCase.columns);
+});
+
+test('share viewer shows the complete repository path when there is no repository link', async () => {
   const container = document.createElement('div');
   document.body.append(container);
   let root: Root | null = null;
@@ -142,7 +160,9 @@ test('share viewer shows the complete repository path when there is no repositor
   };
   await act(async () => {
     root = createRoot(container);
-    root.render(<ReviewSurface snapshot={snapshot} title="Review shared walkthrough" />);
+    root.render(
+      <ReviewSurface snapshot={sharedWalkthroughSnapshot} title="Review shared walkthrough" />,
+    );
   });
 
   await waitFor(() => {

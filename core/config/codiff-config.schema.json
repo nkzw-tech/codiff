@@ -83,6 +83,12 @@
           "default": "# Address these Review Comments",
           "description": "Markdown prefix prepended to copied review comments. Set to an empty string to omit the heading entirely."
         },
+        "sidebarPosition": {
+          "type": "string",
+          "enum": ["left", "right"],
+          "default": "left",
+          "description": "Side of the desktop window where the file sidebar appears."
+        },
         "showOutdated": {
           "type": "boolean",
           "default": false,

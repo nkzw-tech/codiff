@@ -153,6 +153,9 @@ const normalizeTheme = (theme) =>
 const normalizeDiffStyle = (diffStyle) =>
   diffStyle === 'split' || diffStyle === 'unified' ? diffStyle : 'split';
 
+/** @param {unknown} position @returns {'left' | 'right'} */
+const normalizeSidebarPosition = (position) => (position === 'right' ? 'right' : 'left');
+
 /** @param {unknown} backend @returns {'codex' | 'claude' | 'opencode' | 'pi'} */
 const normalizeAgentBackend = (backend) =>
   backend === 'codex' || backend === 'claude' || backend === 'opencode' || backend === 'pi'
@@ -306,6 +309,7 @@ const mergeConfig = (raw) => {
         typeof rawSettings.reviewCommentsPrefix === 'string'
           ? rawSettings.reviewCommentsPrefix
           : defaults.settings.reviewCommentsPrefix,
+      sidebarPosition: normalizeSidebarPosition(rawSettings.sidebarPosition),
       showOutdated:
         typeof rawSettings.showOutdated === 'boolean'
           ? rawSettings.showOutdated

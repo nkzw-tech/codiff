@@ -759,6 +759,7 @@ export type CodiffPreferences = {
   reviewCommentsPrefix: string;
   showOutdated: boolean;
   showWhitespace: boolean;
+  sidebarPosition: 'left' | 'right';
   theme: CodiffTheme;
   walkthroughPrompt: string;
   wordWrap: boolean;
