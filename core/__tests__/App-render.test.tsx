@@ -552,6 +552,19 @@ test('repository label is plain text and clicking it does nothing', async () => 
   expect(openRepositoryFolder).not.toHaveBeenCalled();
 });
 
+test('the branch name renders in the center of the top bar', async () => {
+  window.codiff = createCodiffMock();
+
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.app-shell')).not.toBeNull());
+
+  const branch = app.container.querySelector<HTMLElement>('.review-top-bar-branch');
+  expect(branch?.textContent).toBe('main');
+  expect(branch?.getAttribute('title')).toBe('main');
+  expect(branch?.parentElement?.className).toBe('review-top-bar-center');
+  expect(app.container.querySelector('.review-top-bar-context .review-top-bar-branch')).toBeNull();
+});
+
 test('empty repository state fills the review pane for centered layout', async () => {
   window.codiff = createCodiffMock();
 

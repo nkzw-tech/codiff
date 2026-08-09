@@ -1803,29 +1803,29 @@ export default function App() {
     >
       <div aria-hidden className="window-drag-region" />
       <ReviewTopBar
+        center={
+          state.branch ? (
+            <span className="review-top-bar-branch" title={state.branch}>
+              {state.branch}
+            </span>
+          ) : null
+        }
         context={
-          <>
-            {state.branch ? (
-              <span className="review-top-bar-branch" title={state.branch}>
-                {state.branch}
-              </span>
-            ) : null}
-            {sidebarSourceLabel ? (
-              pullRequestUrl ? (
-                <a
-                  className="review-top-bar-source"
-                  href={pullRequestUrl}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <span>{sidebarSourceLabel}</span>
-                  <ArrowSquareOut aria-hidden size={14} weight="bold" />
-                </a>
-              ) : (
-                <span className="review-top-bar-source">{sidebarSourceLabel}</span>
-              )
-            ) : null}
-          </>
+          sidebarSourceLabel ? (
+            pullRequestUrl ? (
+              <a
+                className="review-top-bar-source"
+                href={pullRequestUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <span>{sidebarSourceLabel}</span>
+                <ArrowSquareOut aria-hidden size={14} weight="bold" />
+              </a>
+            ) : (
+              <span className="review-top-bar-source">{sidebarSourceLabel}</span>
+            )
+          ) : null
         }
         onToggleSidebar={toggleSidebar}
         repository={

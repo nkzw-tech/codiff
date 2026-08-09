@@ -763,6 +763,11 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
   transform: translate(-50%, -50%);
 }
 
+.review-top-bar-center .review-top-bar-branch {
+  max-width: 100%;
+  pointer-events: auto;
+}
+
 .review-top-bar-repository-slot {
   align-items: center;
   color: var(--sidebar-text);
@@ -4300,6 +4305,7 @@ diffs-container .review-comment-thread {
 
 @media (max-width: 720px) {
   .review-top-bar-repository-slot,
+  .review-top-bar-center,
   .review-top-bar-context {
     display: none;
   }
