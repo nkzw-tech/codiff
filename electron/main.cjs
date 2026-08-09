@@ -80,6 +80,7 @@ const {
 } = require('./main/command-line.cjs');
 const { createSkillInstaller } = require('./main/agent-skill.cjs');
 const { createEditorOpener } = require('./main/editor.cjs');
+const { findDefinitions } = require('./definition-search.cjs');
 const { createTerminalHelper } = require('./main/terminal-helper.cjs');
 const {
   readWindowState,
@@ -1860,13 +1861,20 @@ ipcMain.handle('codiff:openRepositoryFolder', (event) =>
   openRepositoryFolder(BrowserWindow.fromWebContents(event.sender) ?? undefined),
 );
 
-ipcMain.handle('codiff:openFile', async (event, filePath) => {
+ipcMain.handle('codiff:findDefinitions', (event, request) =>
+  findDefinitions(getWindowRepositoryRoot(event.sender.id), request),
+);
+
+ipcMain.handle('codiff:openFile', async (event, filePath, lineNumber) => {
   const repositoryRoot = getWindowRepositoryRoot(event.sender.id);
   const repositoryFilePath = validateRepositoryPath(filePath);
   const absolutePath = resolve(repositoryRoot, repositoryFilePath);
 
   if (existsSync(absolutePath)) {
-    await openFileInEditor(absolutePath, { repoPath: repositoryRoot });
+    await openFileInEditor(absolutePath, {
+      lineNumber: Number.isSafeInteger(lineNumber) && lineNumber > 0 ? lineNumber : undefined,
+      repoPath: repositoryRoot,
+    });
   } else {
     await shell.openPath(repositoryRoot);
   }

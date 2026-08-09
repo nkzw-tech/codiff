@@ -35,6 +35,7 @@
     "dev:app": "ELECTRON_RENDERER_URL=http://127.0.0.1:5173 node ./bin/codiff.js",
     "electron": "electron .",
     "eval:walkthrough": "node ./evals/run.mjs",
+    "example:definition-navigation": "node ./examples/definition-navigation/run.mjs",
     "forge:make": "electron-forge make",
     "forge:package": "electron-forge package",
     "link:global": "vp build && pnpm link --global",

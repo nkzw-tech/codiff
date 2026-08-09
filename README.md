@@ -10,6 +10,7 @@ Codiff is a beautiful, minimal, local diff viewer for reviewing Git changes and 
 - **Fast Local Reviews:** Review and commit changes in any Git repository.
 - **LLM Walkthroughs:** Run `codiff -w` to generate an optimized commit walkthrough.
 - **Inline Review Comments:** Comment directly on GitHub pull requests and GitLab merge requests, or copy review comments as Markdown for follow-ups.
+- **Lightweight Definition Navigation:** Mod/Ctrl-click an identifier to find likely local definitions without starting a language server.
 
 ## Download
 
@@ -166,8 +167,9 @@ counts; when it is `false`, Codiff hides those changes from the working-tree rev
 }
 ```
 
-Set `settings.editorCommand` to customize file opening. Use `{file}` for the selected file and
-`{repo}` for the repository root, for example `"subl \"{repo}\" \"{file}\""`.
+Set `settings.editorCommand` to customize file opening. Use `{file}` for the selected file,
+`{line}` for its line number when available, and `{repo}` for the repository root, for example
+`"subl \"{repo}\" \"{file}\""`.
 
 Choose `View > Diff > Split` or `View > Diff > Unified`, use Toggle Diff Layout in the command bar,
 or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.
@@ -271,6 +273,10 @@ For live development:
 vpr dev
 ELECTRON_RENDERER_URL=http://127.0.0.1:5173 vpr electron
 ```
+
+To try lightweight Mod/Ctrl-click definition navigation against a deterministic temporary Git
+repository, run `vpr example:definition-navigation`. See the
+[definition navigation example](examples/definition-navigation/README.md) for the expected flow.
 
 Useful checks:
 

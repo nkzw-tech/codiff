@@ -7,6 +7,8 @@ import type {
   CodiffMarkdownDocument,
   CodiffPreferences,
   CodiffUpdateStatus,
+  DefinitionSearchRequest,
+  DefinitionSearchResult,
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
@@ -51,6 +53,7 @@ declare global {
       ) => Promise<WalkthroughCommitResult>;
       decreaseCodeFontSize: () => Promise<void>;
       dismissUpdate: () => Promise<CodiffUpdateStatus>;
+      findDefinitions: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
       getAgentSkillStatus: () => Promise<AgentSkillStatus>;
       getConfig: () => Promise<CodiffConfig>;
       getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
@@ -98,7 +101,7 @@ declare global {
       onWalkthroughProgress: (callback: (progress: WalkthroughProgressEvent) => void) => () => void;
       onWindowFullScreenChanged: (callback: (isFullScreen: boolean) => void) => () => void;
       openConfigFile: () => Promise<void>;
-      openFile: (path: string) => Promise<void>;
+      openFile: (path: string, lineNumber?: number) => Promise<void>;
       openReleasePage: () => Promise<void>;
       openRepositoryFolder: () => Promise<void>;
       resetCodeFontSize: () => Promise<void>;

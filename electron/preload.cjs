@@ -133,9 +133,10 @@ const codiff = {
     ipcRenderer.on('codiff:updateStatusChanged', listener);
     return () => ipcRenderer.removeListener('codiff:updateStatusChanged', listener);
   },
+  findDefinitions: (request) => ipcRenderer.invoke('codiff:findDefinitions', request),
   openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
   openReleasePage: () => ipcRenderer.invoke('codiff:openReleasePage'),
-  openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
+  openFile: (path, lineNumber) => ipcRenderer.invoke('codiff:openFile', path, lineNumber),
   openRepositoryFolder: () => ipcRenderer.invoke('codiff:openRepositoryFolder'),
   resolvePullRequestUrl: (value) => ipcRenderer.invoke('codiff:resolvePullRequestUrl', value),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),

@@ -82,6 +82,10 @@ import {
   loadSectionContents,
   shouldLoadDiffSectionContents,
 } from '../../lib/diff.ts';
+import {
+  applyIdentifierNavigationState,
+  getIdentifierFromPointerEvent,
+} from '../../lib/identifier-navigation.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { sanitizeMarkdownImages } from '../../lib/markdown.tsx';
@@ -103,6 +107,9 @@ import type {
   ChangedFile,
   CodiffPreferences,
   CommitMetadata,
+  DefinitionCandidate,
+  DefinitionSearchRequest,
+  DefinitionSearchResult,
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
@@ -114,6 +121,7 @@ import type {
 } from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
 import { Button } from './Button.tsx';
+import { DefinitionPopover } from './DefinitionPopover.tsx';
 import {
   RepositoryMarkdownEditor,
   type MarkdownDocumentEditorHandle,
@@ -2462,9 +2470,11 @@ export function ReviewCodeView({
   onCommentDraftChange,
   onCreateComment,
   onDeleteComment,
+  onFindDefinitions,
   onLoadImageContent,
   onLoadSection,
   onLoadSectionContents,
+  onOpenDefinition,
   onOpenFile,
   onRefreshMarkdown,
   onResolveThread = noopResolveThread,
@@ -2522,9 +2532,11 @@ export function ReviewCodeView({
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCreateComment: (comment: Omit<ReviewComment, 'body' | 'id'>) => void;
   onDeleteComment: (commentId: string) => void;
+  onFindDefinitions?: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
   onLoadSection: (file: ChangedFile, section: DiffSection) => void;
   onLoadSectionContents?: (file: ChangedFile, section: DiffSection) => Promise<FileDiffLoadedFiles>;
+  onOpenDefinition?: (candidate: DefinitionCandidate) => void;
   onOpenFile?: (file: ChangedFile) => void;
   onRefreshMarkdown?: (file: ChangedFile, section: DiffSection) => Promise<boolean>;
   onResolveThread?: (threadId: string, resolved: boolean) => Promise<void> | void;
@@ -2559,6 +2571,7 @@ export function ReviewCodeView({
   const handledScrollRequestRef = useRef<number | null>(null);
   const handledHunkNavRef = useRef<number | null>(hunkNavigation?.request ?? null);
   const emptyCommentDeleteTimersRef = useRef<Map<string, number>>(new Map());
+  const definitionHighlightFrameRef = useRef<number | null>(null);
   const highlightFrameRef = useRef<number | null>(null);
   const ignoreNextLineSelectionEndRef = useRef(false);
   const navigatedSelectionRef = useRef<CodeViewLineSelection | null>(null);
@@ -2592,6 +2605,13 @@ export function ReviewCodeView({
     Readonly<Record<string, number>>
   >({});
   const [selectedLines, setSelectedLines] = useState<CodeViewLineSelection | null>(null);
+  const [definitionLookup, setDefinitionLookup] = useState<{
+    anchor: { x: number; y: number };
+    identifier: string;
+    result: DefinitionSearchResult | null;
+  } | null>(null);
+  const definitionLookupRequestRef = useRef(0);
+  const definitionModifierActiveRef = useRef(false);
   const selectedLinesRef = useRef<CodeViewLineSelection | null>(null);
   const commitMessageMetadata = source.type === 'commit' ? commitMetadata : null;
   const shouldShowCommitMessage = commitMessageMetadata != null;
@@ -3007,6 +3027,29 @@ export function ReviewCodeView({
     () => resolveRenderedSearchMatch(activeSearchMatch, itemMetadata, searchTargetsByBaseItemId),
     [activeSearchMatch, itemMetadata, searchTargetsByBaseItemId],
   );
+  const getDefinitionDiffTarget = useCallback(
+    (candidate: DefinitionCandidate) => {
+      for (const item of items) {
+        if (item.type !== 'diff') {
+          continue;
+        }
+        const metadata = itemMetadata.get(item.id);
+        const path =
+          candidate.side === 'deletions'
+            ? (metadata?.file.oldPath ?? metadata?.file.path)
+            : metadata?.file.path;
+        if (
+          metadata &&
+          path === candidate.path &&
+          lineIsVisibleInFileDiff(item.fileDiff, candidate.side, candidate.lineNumber)
+        ) {
+          return { item, metadata };
+        }
+      }
+      return null;
+    },
+    [itemMetadata, items],
+  );
 
   const setCodeViewSelectedLines = useCallback((selection: CodeViewLineSelection | null) => {
     if (
@@ -3180,6 +3223,42 @@ export function ReviewCodeView({
           createCommentForRange(range, context);
         },
         onLineClick: (line, context) => {
+          const isDefinitionNavigation = line.event.metaKey || line.event.ctrlKey;
+          if (isDefinitionNavigation && onFindDefinitions) {
+            line.event.preventDefault();
+            line.event.stopPropagation();
+            const lineElement = 'lineElement' in line ? line.lineElement : null;
+            const identifier = lineElement
+              ? getIdentifierFromPointerEvent(line.event, lineElement)
+              : null;
+            const meta = itemMetadata.get(context.item.id);
+            const side = 'annotationSide' in line ? line.annotationSide : null;
+            if (!identifier || !meta || !side) {
+              setDefinitionLookup(null);
+              return;
+            }
+            const requestId = ++definitionLookupRequestRef.current;
+            setDefinitionLookup({
+              anchor: { x: line.event.clientX, y: line.event.clientY },
+              identifier,
+              result: null,
+            });
+            void onFindDefinitions({
+              identifier,
+              kind: meta.section.kind,
+              lineNumber: line.lineNumber,
+              path: side === 'deletions' ? (meta.file.oldPath ?? meta.file.path) : meta.file.path,
+              side,
+              source,
+            }).then((result) => {
+              if (definitionLookupRequestRef.current === requestId) {
+                setDefinitionLookup((current) =>
+                  current?.identifier === identifier ? { ...current, result } : current,
+                );
+              }
+            });
+            return;
+          }
           if (isReadOnly) {
             return;
           }
@@ -3251,6 +3330,13 @@ export function ReviewCodeView({
             'codiff-loading-summary-item',
             Boolean(metadata && loadingSectionIds.has(metadata.section.id)),
           );
+          if (definitionModifierActiveRef.current) {
+            window.requestAnimationFrame(() => {
+              if (definitionModifierActiveRef.current && node.isConnected) {
+                applyIdentifierNavigationState([{ element: node }], true);
+              }
+            });
+          }
         },
         overflow: wordWrap ? 'wrap' : 'scroll',
         stickyHeaders: true,
@@ -3272,7 +3358,9 @@ export function ReviewCodeView({
       loadDiffFiles,
       loadingSectionIds,
       onCreateComment,
+      onFindDefinitions,
       onLoadSection,
+      source,
       theme,
       wordWrap,
     ],
@@ -3716,6 +3804,28 @@ export function ReviewCodeView({
     });
   }, [resolvedActiveSearchMatch, searchQuery]);
 
+  const updateRenderedIdentifierNavigation = useCallback(
+    (active: boolean, viewer?: CodeViewInstance) => {
+      const nextViewer = viewer ?? codeViewRef.current?.getInstance();
+      if (!nextViewer) {
+        return;
+      }
+      if (definitionHighlightFrameRef.current != null) {
+        window.cancelAnimationFrame(definitionHighlightFrameRef.current);
+        definitionHighlightFrameRef.current = null;
+      }
+      if (!active) {
+        applyIdentifierNavigationState(nextViewer.getRenderedItems(), false);
+        return;
+      }
+      definitionHighlightFrameRef.current = window.requestAnimationFrame(() => {
+        definitionHighlightFrameRef.current = null;
+        applyIdentifierNavigationState(nextViewer.getRenderedItems(), true);
+      });
+    },
+    [],
+  );
+
   const scheduleStickyHeaderStateUpdate = useCallback((viewer?: CodeViewInstance) => {
     const nextViewer = viewer ?? codeViewRef.current?.getInstance();
     if (!nextViewer) {
@@ -3739,6 +3849,9 @@ export function ReviewCodeView({
       }
       deferredTimersRef.current.clear();
       emptyCommentDeleteTimersRef.current.clear();
+      if (definitionHighlightFrameRef.current != null) {
+        window.cancelAnimationFrame(definitionHighlightFrameRef.current);
+      }
       if (highlightFrameRef.current != null) {
         window.cancelAnimationFrame(highlightFrameRef.current);
       }
@@ -3753,6 +3866,41 @@ export function ReviewCodeView({
     scheduleSearchHighlights();
     scheduleStickyHeaderStateUpdate();
   }, [items, scheduleSearchHighlights, scheduleStickyHeaderStateUpdate]);
+
+  useEffect(() => {
+    if (!onFindDefinitions) {
+      return;
+    }
+
+    const updateDefinitionModifierState = (active: boolean) => {
+      if (definitionModifierActiveRef.current === active) {
+        return;
+      }
+      definitionModifierActiveRef.current = active;
+      updateRenderedIdentifierNavigation(active);
+    };
+    const handleModifierChange = (event: KeyboardEvent) => {
+      updateDefinitionModifierState(event.metaKey || event.ctrlKey);
+    };
+    const handleModifierPointer = (event: PointerEvent) => {
+      updateDefinitionModifierState(event.metaKey || event.ctrlKey);
+    };
+    const clearDefinitionModifierState = () => updateDefinitionModifierState(false);
+
+    window.addEventListener('keydown', handleModifierChange);
+    window.addEventListener('keyup', handleModifierChange);
+    window.addEventListener('pointerdown', handleModifierPointer);
+    window.addEventListener('pointermove', handleModifierPointer);
+    window.addEventListener('blur', clearDefinitionModifierState);
+    return () => {
+      clearDefinitionModifierState();
+      window.removeEventListener('keydown', handleModifierChange);
+      window.removeEventListener('keyup', handleModifierChange);
+      window.removeEventListener('pointerdown', handleModifierPointer);
+      window.removeEventListener('pointermove', handleModifierPointer);
+      window.removeEventListener('blur', clearDefinitionModifierState);
+    };
+  }, [onFindDefinitions, updateRenderedIdentifierNavigation]);
 
   useEffect(() => {
     const handle = codeViewRef.current;
@@ -3996,6 +4144,9 @@ export function ReviewCodeView({
       }
       scheduleSearchHighlights();
       scheduleStickyHeaderStateUpdate(viewer);
+      if (definitionModifierActiveRef.current) {
+        updateRenderedIdentifierNavigation(true, viewer);
+      }
     },
     [
       itemBlockId,
@@ -4004,6 +4155,7 @@ export function ReviewCodeView({
       onSelectPathFromScroll,
       scheduleSearchHighlights,
       scheduleStickyHeaderStateUpdate,
+      updateRenderedIdentifierNavigation,
     ],
   );
 
@@ -4023,7 +4175,7 @@ export function ReviewCodeView({
     />
   );
 
-  return disableWorkerPool ? (
+  const renderedCodeView = disableWorkerPool ? (
     codeView
   ) : (
     <WorkerPoolContextProvider
@@ -4044,5 +4196,52 @@ export function ReviewCodeView({
         selectedLines={isReadOnly ? null : selectedLines}
       />
     </WorkerPoolContextProvider>
+  );
+
+  return (
+    <>
+      {renderedCodeView}
+      {definitionLookup && onOpenDefinition ? (
+        <DefinitionPopover
+          anchor={definitionLookup.anchor}
+          getDestination={(candidate) => (getDefinitionDiffTarget(candidate) ? 'diff' : 'editor')}
+          identifier={definitionLookup.identifier}
+          onClose={() => {
+            definitionLookupRequestRef.current++;
+            setDefinitionLookup(null);
+          }}
+          onOpen={(candidate) => {
+            const target = getDefinitionDiffTarget(candidate);
+            if (target) {
+              if (target.metadata.isCollapsed) {
+                onToggleCollapsed(target.metadata.file, true, target.metadata.reviewIdentity.key);
+              }
+              const scrollToDefinition = () =>
+                codeViewRef.current?.scrollTo({
+                  align: 'center',
+                  behavior: 'smooth-auto',
+                  id: target.item.id,
+                  lineNumber: candidate.lineNumber,
+                  offset: DEFAULT_PADDING,
+                  side: candidate.side,
+                  type: 'line',
+                });
+              if (target.metadata.isCollapsed) {
+                window.requestAnimationFrame(() =>
+                  window.requestAnimationFrame(scrollToDefinition),
+                );
+              } else {
+                scrollToDefinition();
+              }
+            } else {
+              onOpenDefinition(candidate);
+            }
+            definitionLookupRequestRef.current++;
+            setDefinitionLookup(null);
+          }}
+          result={definitionLookup.result}
+        />
+      ) : null}
+    </>
   );
 }
