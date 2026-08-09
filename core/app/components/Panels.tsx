@@ -423,7 +423,7 @@ export function CopyCommentsButton({
       }`}
       className={`copy-comments-button${copied ? ' copied' : ''}`}
       onClick={() => void copyComments()}
-      title="Copy review comments"
+      title="Copy review comments as markdown"
       type="button"
     >
       {copied ? (

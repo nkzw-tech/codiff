@@ -49,7 +49,7 @@ test('shows the pending comment count next to the copy icon', async () => {
 
   const button = app.container.querySelector<HTMLButtonElement>('.copy-comments-button');
   expect(button?.getAttribute('aria-label')).toBe('Copy 2 review comments');
-  expect(button?.getAttribute('title')).toBe('Copy review comments');
+  expect(button?.getAttribute('title')).toBe('Copy review comments as markdown');
   expect(button?.querySelector('.copy-comments-count')?.textContent).toBe('2');
   expect(button?.querySelector('.copy-comments-icon')).not.toBeNull();
 });

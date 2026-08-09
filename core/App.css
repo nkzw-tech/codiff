@@ -33,11 +33,6 @@
     --file-border: rgb(17 17 17 / 0.09);
     --inline-code-bg: rgb(242 242 242);
     --hover-wash: rgb(127 127 127 / 0.1);
-    --copy-comments-accent: #c2620e;
-    --copy-comments-accent-hover: #a75409;
-    --copy-comments-accent-text: #ffffff;
-    --copy-comments-copied: #1f7a44;
-    --copy-comments-copied-text: #ffffff;
     --copy-icon: rgb(17 17 17 / 0.62);
     --muted: rgb(17 17 17 / 0.48);
     --sidebar-bg: rgb(255 255 255 / 0.58);
@@ -67,11 +62,6 @@
       --file-border: rgb(230 230 230 / 0.1);
       --inline-code-bg: rgb(39 39 39);
       --hover-wash: rgb(127 127 127 / 0.14);
-      --copy-comments-accent: #e8912f;
-      --copy-comments-accent-hover: #f4a244;
-      --copy-comments-accent-text: #1a1206;
-      --copy-comments-copied: #6fd094;
-      --copy-comments-copied-text: #0d2015;
       --copy-icon: rgb(230 230 230 / 0.68);
       --muted: rgb(230 230 230 / 0.48);
       --sidebar-bg: rgb(38 38 38 / 0.58);
@@ -101,11 +91,6 @@
     --file-border: rgb(17 17 17 / 0.09);
     --inline-code-bg: rgb(242 242 242);
     --hover-wash: rgb(127 127 127 / 0.1);
-    --copy-comments-accent: #c2620e;
-    --copy-comments-accent-hover: #a75409;
-    --copy-comments-accent-text: #ffffff;
-    --copy-comments-copied: #1f7a44;
-    --copy-comments-copied-text: #ffffff;
     --copy-icon: rgb(17 17 17 / 0.62);
     --muted: rgb(17 17 17 / 0.48);
     --sidebar-bg: rgb(255 255 255 / 0.58);
@@ -134,11 +119,6 @@
     --file-border: rgb(230 230 230 / 0.1);
     --inline-code-bg: rgb(39 39 39);
     --hover-wash: rgb(127 127 127 / 0.14);
-    --copy-comments-accent: #e8912f;
-    --copy-comments-accent-hover: #f4a244;
-    --copy-comments-accent-text: #1a1206;
-    --copy-comments-copied: #6fd094;
-    --copy-comments-copied-text: #0d2015;
     --copy-icon: rgb(230 230 230 / 0.68);
     --muted: rgb(230 230 230 / 0.48);
     --sidebar-bg: rgb(38 38 38 / 0.58);
@@ -767,6 +747,9 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
 
 .review-top-bar-right {
   grid-column: 3;
+  /* Wider than the left group so the copy button reads as its own control
+     rather than as part of the source label it sits beside. */
+  gap: 16px;
   justify-content: flex-end;
 }
 
@@ -3636,11 +3619,10 @@ diffs-container .review-comment-thread {
 .copy-comments-button {
   -webkit-app-region: no-drag;
   align-items: center;
-  background: var(--copy-comments-accent);
-  border: 0;
+  background: color-mix(in srgb, var(--sidebar-ref) 12%, var(--code-bg));
+  border: 1px solid color-mix(in srgb, var(--sidebar-ref) 38%, transparent);
   border-radius: 14px;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
-  color: var(--copy-comments-accent-text);
+  color: var(--sidebar-ref);
   corner-shape: squircle;
   cursor: pointer;
   display: inline-flex;
@@ -3652,7 +3634,7 @@ diffs-container .review-comment-thread {
   padding: 0 10px;
   transition:
     background 150ms ease,
-    color 150ms ease,
+    border-color 150ms ease,
     transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -3806,7 +3788,8 @@ diffs-container .review-comment-thread {
 }
 
 .copy-comments-button:hover {
-  background: var(--copy-comments-accent-hover);
+  background: color-mix(in srgb, var(--sidebar-ref) 20%, var(--code-bg));
+  border-color: color-mix(in srgb, var(--sidebar-ref) 52%, transparent);
 }
 
 .copy-comments-button:active {
@@ -3816,12 +3799,6 @@ diffs-container .review-comment-thread {
 .review-submit-button:disabled {
   cursor: default;
   opacity: 0.58;
-}
-
-.copy-comments-button.copied,
-.copy-comments-button.copied:hover {
-  background: var(--copy-comments-copied);
-  color: var(--copy-comments-copied-text);
 }
 
 .copy-comments-count {
