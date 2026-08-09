@@ -1249,6 +1249,138 @@ test('review comment typing stays local until a comment action commits it', asyn
   expect(onAskCodex).toHaveBeenCalledWith('comment-1');
 });
 
+const renderLocalReviewComment = async ({
+  body,
+  onAskCodex,
+  onCommentDraftChange,
+  onDeleteComment,
+  onUpdateComment,
+}: {
+  body: string;
+  onAskCodex: () => void;
+  onCommentDraftChange?: () => void;
+  onDeleteComment?: () => void;
+  onUpdateComment: () => void;
+}) => {
+  const file = createChangedFile('src/comment.ts');
+  const comment = {
+    body,
+    filePath: file.path,
+    id: 'comment-1',
+    lineNumber: 1,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+  } satisfies ReviewComment;
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      comments={[comment]}
+      files={[file]}
+      onAskCodex={onAskCodex}
+      onCommentDraftChange={onCommentDraftChange}
+      onDeleteComment={onDeleteComment}
+      onUpdateComment={onUpdateComment}
+    />,
+  );
+  const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
+  if (!textarea) {
+    throw new Error('Expected review comment textarea.');
+  }
+
+  textarea.focus();
+  return { textarea, view };
+};
+
+const pressCommentShortcut = async (textarea: HTMLTextAreaElement, altKey: boolean) => {
+  await act(async () => {
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        altKey,
+        bubbles: true,
+        cancelable: true,
+        key: 'Enter',
+        metaKey: true,
+      }),
+    );
+  });
+};
+
+test('local review comments are added with Mod+Enter instead of asking the agent', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const onAskCodex = vi.fn();
+  const onCommentDraftChange = vi.fn();
+  const onUpdateComment = vi.fn();
+  const { textarea, view } = await renderLocalReviewComment({
+    body: '',
+    onAskCodex,
+    onCommentDraftChange,
+    onUpdateComment,
+  });
+
+  await using _view = view;
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      platform.mockRestore();
+    },
+  };
+  await setInputValue(textarea, 'Please check this.');
+  await pressCommentShortcut(textarea, false);
+  expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Please check this.');
+  expect(onAskCodex).not.toHaveBeenCalled();
+  expect(document.activeElement).not.toBe(textarea);
+  expect(onCommentDraftChange).toHaveBeenLastCalledWith(null);
+});
+
+test('local review comments ask the agent with Mod+Alt+Enter', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const onAskCodex = vi.fn();
+  const onUpdateComment = vi.fn();
+  const { textarea, view } = await renderLocalReviewComment({
+    body: '',
+    onAskCodex,
+    onUpdateComment,
+  });
+
+  await using _view = view;
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      platform.mockRestore();
+    },
+  };
+  await setInputValue(textarea, 'Explain this change.');
+  await pressCommentShortcut(textarea, true);
+  expect(onAskCodex).toHaveBeenCalledWith('comment-1');
+  expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Explain this change.');
+  expect(document.activeElement).toBe(textarea);
+});
+
+test('adding an empty local review comment with Mod+Enter discards it', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const onAskCodex = vi.fn();
+  const onDeleteComment = vi.fn();
+  const onUpdateComment = vi.fn();
+  const { textarea, view } = await renderLocalReviewComment({
+    body: '',
+    onAskCodex,
+    onDeleteComment,
+    onUpdateComment,
+  });
+
+  await using _view = view;
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      platform.mockRestore();
+    },
+  };
+  await pressCommentShortcut(textarea, false);
+  expect(onUpdateComment).not.toHaveBeenCalled();
+  expect(onAskCodex).not.toHaveBeenCalled();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  });
+  expect(onDeleteComment).toHaveBeenCalledTimes(1);
+  expect(onDeleteComment).toHaveBeenCalledWith('comment-1');
+});
+
 test('a Codex reply does not repeatedly invalidate the diff item layout', async () => {
   const file = createChangedFile('src/comment.ts');
   const comment = {

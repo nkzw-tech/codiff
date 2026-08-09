@@ -43,7 +43,7 @@ import claudeIconUrl from '../../assets/claude.svg';
 import codexIconUrl from '../../assets/codex.svg';
 import opencodeIconUrl from '../../assets/opencode.svg';
 import piIconUrl from '../../assets/pi.svg';
-import { matchesShortcut } from '../../config/keymap.ts';
+import { getShortcutLabel, matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffDiffStyle, CodiffKeymap } from '../../config/types.ts';
 import type {
   CodeViewInstance,
@@ -1521,6 +1521,14 @@ function ReviewCommentEditor({
     onCommentBlur(flushDraft(), draft);
   }, [draft, flushDraft, onCommentBlur]);
 
+  // Local reviews have nothing to submit a comment to, so adding one means
+  // finishing it the way clicking away does. `MarkdownEditorHandle` exposes no
+  // blur, so focus leaves through the focused element and the editor's own blur
+  // handler flushes the draft and closes the comment.
+  const handleAddComment = useCallback(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  }, []);
+
   const handleFocus = useCallback(() => {
     onCommentFocus(draftComment);
   }, [draftComment, onCommentFocus]);
@@ -1541,14 +1549,23 @@ function ReviewCommentEditor({
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
       if (matchesShortcut(event, keymap, 'submitComment')) {
-        if (supportsReviewCommentActions && commentCanSubmit) {
-          event.preventDefault();
-          event.stopPropagation();
-          handleSubmitComment();
+        if (supportsReviewCommentActions) {
+          if (commentCanSubmit) {
+            event.preventDefault();
+            event.stopPropagation();
+            handleSubmitComment();
+          }
           return;
         }
 
-        if (!supportsReviewCommentActions && canAskCodex) {
+        event.preventDefault();
+        event.stopPropagation();
+        handleAddComment();
+        return;
+      }
+
+      if (matchesShortcut(event, keymap, 'askAgent')) {
+        if (canAskCodex) {
           event.preventDefault();
           event.stopPropagation();
           handleAskCodex();
@@ -1577,6 +1594,7 @@ function ReviewCommentEditor({
       comment.id,
       comment.isReadOnly,
       draft,
+      handleAddComment,
       handleAskCodex,
       handleSubmitComment,
       keymap,
@@ -1651,7 +1669,9 @@ function ReviewCommentEditor({
                 disabled={!canAskCodex}
                 onClick={handleAskCodex}
                 title={
-                  canAskCodex ? `Ask ${agentLabel}` : `Write a note before asking ${agentLabel}`
+                  canAskCodex
+                    ? `Ask ${agentLabel} (${getShortcutLabel(keymap, 'askAgent')})`
+                    : `Write a note before asking ${agentLabel}`
                 }
                 type="button"
               >
