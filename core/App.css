@@ -721,6 +721,7 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   min-width: 0;
   padding: 0 14px 0 78px;
+  position: relative;
 }
 
 .share-shell .review-top-bar {
@@ -740,11 +741,26 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
 }
 
 .review-top-bar-left {
+  grid-column: 1;
   justify-content: flex-start;
 }
 
 .review-top-bar-right {
+  grid-column: 3;
   justify-content: flex-end;
+}
+
+.review-top-bar-center {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  left: 50%;
+  max-width: min(38%, 320px);
+  min-width: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .review-top-bar-repository-slot {
@@ -904,6 +920,40 @@ a.review-top-bar-source:focus-visible {
   background: var(--hover-wash);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
   color: var(--sidebar-text);
+}
+
+.sidebar .review-mode-control {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--sidebar-border);
+  border-radius: 0;
+  corner-shape: initial;
+  display: flex;
+  gap: 4px;
+  height: 38px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.sidebar .review-mode-control button {
+  flex: 1 1 0;
+  height: 26px;
+  overflow: hidden;
+  padding: 0 6px;
+}
+
+.sidebar .review-mode-control button > svg {
+  flex: none;
+}
+
+@container sidebar (max-width: 200px) {
+  .sidebar .review-mode-control button {
+    padding: 0 4px;
+  }
+
+  .sidebar .review-mode-label {
+    display: none;
+  }
 }
 
 .review-mode-label {
@@ -4256,11 +4306,11 @@ diffs-container .review-comment-thread {
 }
 
 @media (max-width: 480px) {
-  .review-mode-control button {
+  .review-top-bar .review-mode-control button {
     padding-inline: 7px;
   }
 
-  .review-mode-label {
+  .review-top-bar .review-mode-label {
     display: none;
   }
 }

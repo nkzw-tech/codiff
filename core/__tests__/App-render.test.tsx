@@ -438,11 +438,14 @@ test('stale persisted collapsed sidebar state does not hide the sidebar on launc
       false,
     );
     expect(app.container.querySelector('.sidebar')).not.toBeNull();
-    expect(app.container.querySelector('.sidebar [role="tablist"]')).toBeNull();
+    expect(app.container.querySelector('.sidebar [role="tablist"]')).not.toBeNull();
   });
 
   const topBar = app.container.querySelector('.review-top-bar');
-  const modes = topBar?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [];
+  expect(topBar?.querySelector('[role="tablist"]')).toBeNull();
+  const modeControl = app.container.querySelector('.sidebar .review-mode-control');
+  expect(modeControl?.nextElementSibling?.className).toBe('sidebar-search-row');
+  const modes = modeControl?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [];
   expect([...modes].map((mode) => mode.textContent)).toEqual(['Walkthrough', 'Tree', 'History']);
   const sidebarToggle = topBar?.querySelector<HTMLButtonElement>('.sidebar-toggle-button');
   await act(async () => sidebarToggle?.click());

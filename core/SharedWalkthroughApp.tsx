@@ -23,7 +23,8 @@ import {
   ReviewCodeView,
   type ReviewDiffBlock,
 } from './app/components/ReviewCodeView.tsx';
-import { ReviewTopBar, type ReviewModeItem } from './app/components/ReviewTopBar.tsx';
+import type { ReviewModeItem } from './app/components/ReviewModeControl.tsx';
+import { ReviewTopBar } from './app/components/ReviewTopBar.tsx';
 import { DiffLineCountBadge } from './app/components/Sidebar.tsx';
 import { NarrativeSidebar } from './app/components/walkthrough/NarrativeSidebar.tsx';
 import {

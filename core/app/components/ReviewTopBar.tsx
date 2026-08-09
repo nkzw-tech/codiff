@@ -1,17 +1,10 @@
 import { SidebarSimpleIcon as SidebarSimple } from '@phosphor-icons/react/SidebarSimple';
 import type { ReactNode } from 'react';
-
-export type ReviewModeItem<Mode extends string> = {
-  ariaLabel?: string;
-  icon: ReactNode;
-  indicator?: ReactNode;
-  label: string;
-  title?: string;
-  value: Mode;
-};
+import { ReviewModeControl, type ReviewModeItem } from './ReviewModeControl.tsx';
 
 export function ReviewTopBar<Mode extends string>({
   actions,
+  center,
   context,
   leading,
   mode,
@@ -25,18 +18,23 @@ export function ReviewTopBar<Mode extends string>({
   toggleTitle,
 }: {
   actions?: ReactNode;
+  center?: ReactNode;
   context?: ReactNode;
   leading?: ReactNode;
-  mode: Mode;
-  modes: ReadonlyArray<ReviewModeItem<Mode>>;
-  onModeChange: (mode: Mode) => void;
   onToggleSidebar: () => void;
   repository: ReactNode;
   repositoryTooltip?: string;
   sidebarCollapsed: boolean;
   sourceMenu?: ReactNode;
   toggleTitle: string;
-}) {
+} & (
+  | {
+      mode: Mode;
+      modes: ReadonlyArray<ReviewModeItem<Mode>>;
+      onModeChange: (mode: Mode) => void;
+    }
+  | { mode?: undefined; modes?: undefined; onModeChange?: undefined }
+)) {
   return (
     <header className="review-top-bar workspace-top-bar">
       <div className="review-top-bar-left">
@@ -55,23 +53,11 @@ export function ReviewTopBar<Mode extends string>({
           {repository}
         </div>
       </div>
-      <div aria-label="Review mode" className="review-mode-control" role="tablist">
-        {modes.map((item) => (
-          <button
-            aria-label={item.ariaLabel}
-            aria-selected={mode === item.value}
-            key={item.value}
-            onClick={() => onModeChange(item.value)}
-            role="tab"
-            title={item.title}
-            type="button"
-          >
-            {item.icon}
-            <span className="review-mode-label">{item.label}</span>
-            {item.indicator}
-          </button>
-        ))}
-      </div>
+      {modes ? (
+        <ReviewModeControl mode={mode} modes={modes} onModeChange={onModeChange} />
+      ) : (
+        <div className="review-top-bar-center">{center}</div>
+      )}
       <div className="review-top-bar-right">
         {context ? <div className="review-top-bar-context">{context}</div> : null}
         {actions ? <div className="review-top-bar-actions">{actions}</div> : null}

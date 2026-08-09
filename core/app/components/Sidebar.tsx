@@ -19,6 +19,7 @@ import type { ChangedFile, HistoryEntry, NarrativeWalkthrough, ReviewSource } fr
 import { Avatar } from './Avatar.tsx';
 import { Button } from './Button.tsx';
 import { ReviewFileTree } from './FileTree.tsx';
+import { ReviewModeControl, type ReviewModeItem } from './ReviewModeControl.tsx';
 import { NarrativeSidebar } from './walkthrough/NarrativeSidebar.tsx';
 import type { NarrativeNavigation } from './walkthrough/useNarrativeNavigation.ts';
 import { WalkthroughProgress } from './walkthrough/WalkthroughProgress.tsx';
@@ -34,10 +35,12 @@ export function Sidebar({
   historyLoading,
   keymap,
   mode,
+  modes,
   narrativeNavigation,
   narrativeWalkthrough,
   onActivatePath,
   onLoadMoreHistory,
+  onModeChange,
   onSearchQueryChange,
   onSelectSource,
   onShareWalkthrough,
@@ -63,10 +66,12 @@ export function Sidebar({
   historyLoading: boolean;
   keymap: CodiffKeymap;
   mode: SidebarMode;
+  modes: ReadonlyArray<ReviewModeItem<SidebarMode>>;
   narrativeNavigation: NarrativeNavigation;
   narrativeWalkthrough: NarrativeWalkthrough | null;
   onActivatePath: (path: string) => void;
   onLoadMoreHistory: () => void;
+  onModeChange: (mode: SidebarMode) => void;
   onSearchQueryChange: (query: string) => void;
   onSelectSource: (source: ReviewSource) => void;
   onShareWalkthrough?: () => void;
@@ -115,6 +120,7 @@ export function Sidebar({
 
   return (
     <>
+      <ReviewModeControl mode={mode} modes={modes} onModeChange={onModeChange} />
       <div className="sidebar-search-row">
         <input
           aria-label="Filter changed files"

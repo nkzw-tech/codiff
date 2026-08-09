@@ -23,7 +23,8 @@ import {
 } from './app/components/Panels.tsx';
 import { PlanEditorView } from './app/components/PlanEditorView.tsx';
 import { ReviewCodeView, type ReviewDiffBlock } from './app/components/ReviewCodeView.tsx';
-import { ReviewTopBar, type ReviewModeItem } from './app/components/ReviewTopBar.tsx';
+import type { ReviewModeItem } from './app/components/ReviewModeControl.tsx';
+import { ReviewTopBar } from './app/components/ReviewTopBar.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
 import { CommitView } from './app/components/walkthrough/CommitView.tsx';
 import {
@@ -1826,9 +1827,6 @@ export default function App() {
             ) : null}
           </>
         }
-        mode={sidebarMode}
-        modes={reviewModes}
-        onModeChange={changeSidebarMode}
         onToggleSidebar={toggleSidebar}
         repository={
           <span className="review-top-bar-repository review-top-bar-repository-path">
@@ -1922,10 +1920,12 @@ export default function App() {
           historyLoading={historyLoading}
           keymap={codiffConfig.keymap}
           mode={sidebarMode}
+          modes={reviewModes}
           narrativeNavigation={narrativeNavigation}
           narrativeWalkthrough={narrativeWalkthrough}
           onActivatePath={activatePath}
           onLoadMoreHistory={loadMoreHistory}
+          onModeChange={changeSidebarMode}
           onSearchQueryChange={
             sidebarMode === 'history' ? setHistorySearchQuery : setFileSearchQuery
           }
