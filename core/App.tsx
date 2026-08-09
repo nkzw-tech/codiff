@@ -58,6 +58,7 @@ import {
 import {
   type CodeViewInstance,
   type RepositoryLoadError,
+  type ReviewComment,
   type ReviewIdentity,
   type ReviewScrollBehavior,
   type ReviewScrollTarget,
@@ -123,6 +124,7 @@ import type {
   DiffSection,
 } from './types.ts';
 
+const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
 const emptyWalkthroughNotes = new Map<string, WalkthroughNote>();
 const disableCodeViewWorkerPool = process.env.NODE_ENV === 'test';
 
@@ -1804,14 +1806,12 @@ export default function App() {
       <div aria-hidden className="window-drag-region" />
       <ReviewTopBar
         actions={
-          isSwitchingSource ? undefined : (
-            <CopyCommentsButton
-              comments={reviewComments}
-              files={orderedFiles}
-              reviewCommentsPrefix={preferences.reviewCommentsPrefix}
-              showWhitespace={showWhitespace}
-            />
-          )
+          <CopyCommentsButton
+            comments={isSwitchingSource ? emptyReviewComments : reviewComments}
+            files={orderedFiles}
+            reviewCommentsPrefix={preferences.reviewCommentsPrefix}
+            showWhitespace={showWhitespace}
+          />
         }
         center={
           state.branch ? (

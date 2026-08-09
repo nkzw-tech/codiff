@@ -3616,26 +3616,27 @@ diffs-container .review-comment-thread {
   word-break: break-word;
 }
 
+/* Matches .review-top-bar-icon-button, the sidebar toggle two controls over,
+   so the two read as siblings rather than as different kinds of control. */
 .copy-comments-button {
   -webkit-app-region: no-drag;
   align-items: center;
-  background: color-mix(in srgb, var(--sidebar-ref) 12%, var(--code-bg));
-  border: 1px solid color-mix(in srgb, var(--sidebar-ref) 38%, transparent);
-  border-radius: 14px;
-  color: var(--sidebar-ref);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
   corner-shape: squircle;
   cursor: pointer;
   display: inline-flex;
   flex: none;
   font: 700 11px/1 var(--font-sans);
   gap: 5px;
-  height: 26px;
+  height: 28px;
   justify-content: center;
-  padding: 0 10px;
+  padding: 0 8px;
   transition:
-    background 150ms ease,
-    border-color 150ms ease,
-    transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .review-submit-button {
@@ -3787,13 +3788,20 @@ diffs-container .review-comment-thread {
   color: var(--text);
 }
 
-.copy-comments-button:hover {
-  background: color-mix(in srgb, var(--sidebar-ref) 20%, var(--code-bg));
-  border-color: color-mix(in srgb, var(--sidebar-ref) 52%, transparent);
+.copy-comments-button:hover:not(:disabled) {
+  background: rgb(127 127 127 / 0.14);
+  color: var(--sidebar-text);
 }
 
-.copy-comments-button:active {
-  transform: scale(0.96);
+.copy-comments-button:active:not(:disabled) {
+  background: rgb(127 127 127 / 0.2);
+  color: var(--sidebar-text);
+}
+
+.copy-comments-button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.5;
 }
 
 .review-submit-button:disabled {

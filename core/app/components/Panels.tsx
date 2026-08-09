@@ -412,16 +412,17 @@ export function CopyCommentsButton({
     markCopied();
   }, [comments, files, markCopied, reviewCommentsPrefix, showWhitespace]);
 
-  if (pendingCommentCount === 0) {
-    return null;
-  }
-
   return (
     <button
-      aria-label={`Copy ${pendingCommentCount} review ${
-        pendingCommentCount === 1 ? 'comment' : 'comments'
-      }`}
+      aria-label={
+        pendingCommentCount === 0
+          ? 'Copy review comments as markdown, no comments yet'
+          : `Copy ${pendingCommentCount} review ${
+              pendingCommentCount === 1 ? 'comment' : 'comments'
+            }`
+      }
       className={`copy-comments-button${copied ? ' copied' : ''}`}
+      disabled={pendingCommentCount === 0}
       onClick={() => void copyComments()}
       title="Copy review comments as markdown"
       type="button"
