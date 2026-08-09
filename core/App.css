@@ -747,9 +747,6 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
 
 .review-top-bar-right {
   grid-column: 3;
-  /* Wider than the left group so the copy button reads as its own control
-     rather than as part of the source label it sits beside. */
-  gap: 16px;
   justify-content: flex-end;
 }
 
