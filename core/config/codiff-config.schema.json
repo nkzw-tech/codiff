@@ -169,7 +169,12 @@
         "submitComment": {
           "type": "string",
           "default": "Mod+Enter",
-          "description": "Submit a remote review comment or ask Codex."
+          "description": "Add the review comment being written, submitting it remotely when the review source supports it."
+        },
+        "askAgent": {
+          "type": "string",
+          "default": "Mod+Alt+Enter",
+          "description": "Ask the configured agent about the review comment being written."
         },
         "discardComment": {
           "type": "string",

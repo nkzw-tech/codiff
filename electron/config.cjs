@@ -219,6 +219,8 @@ const mergeConfig = (raw) => {
 
   return {
     keymap: {
+      askAgent:
+        typeof rawKeymap.askAgent === 'string' ? rawKeymap.askAgent : defaults.keymap.askAgent,
       closeSearch:
         typeof rawKeymap.closeSearch === 'string'
           ? rawKeymap.closeSearch

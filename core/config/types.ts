@@ -29,6 +29,7 @@ export type KeyCombo = string;
 export type KeyComboBinding = KeyCombo | ReadonlyArray<KeyCombo>;
 
 export type CodiffKeymap = {
+  askAgent: KeyCombo;
   closeSearch: KeyCombo;
   commandBar: KeyCombo;
   diffSearch: KeyCombo;

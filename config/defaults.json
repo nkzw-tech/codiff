@@ -20,6 +20,7 @@
     "wordWrap": false
   },
   "keymap": {
+    "askAgent": "Mod+Alt+Enter",
     "closeSearch": "Escape",
     "commandBar": "Mod+Shift+p",
     "diffSearch": "Mod+f",
