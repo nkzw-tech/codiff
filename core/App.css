@@ -33,6 +33,11 @@
     --file-border: rgb(17 17 17 / 0.09);
     --inline-code-bg: rgb(242 242 242);
     --hover-wash: rgb(127 127 127 / 0.1);
+    --copy-comments-accent: #c2620e;
+    --copy-comments-accent-hover: #a75409;
+    --copy-comments-accent-text: #ffffff;
+    --copy-comments-copied: #1f7a44;
+    --copy-comments-copied-text: #ffffff;
     --copy-icon: rgb(17 17 17 / 0.62);
     --muted: rgb(17 17 17 / 0.48);
     --sidebar-bg: rgb(255 255 255 / 0.58);
@@ -62,6 +67,11 @@
       --file-border: rgb(230 230 230 / 0.1);
       --inline-code-bg: rgb(39 39 39);
       --hover-wash: rgb(127 127 127 / 0.14);
+      --copy-comments-accent: #e8912f;
+      --copy-comments-accent-hover: #f4a244;
+      --copy-comments-accent-text: #1a1206;
+      --copy-comments-copied: #6fd094;
+      --copy-comments-copied-text: #0d2015;
       --copy-icon: rgb(230 230 230 / 0.68);
       --muted: rgb(230 230 230 / 0.48);
       --sidebar-bg: rgb(38 38 38 / 0.58);
@@ -91,6 +101,11 @@
     --file-border: rgb(17 17 17 / 0.09);
     --inline-code-bg: rgb(242 242 242);
     --hover-wash: rgb(127 127 127 / 0.1);
+    --copy-comments-accent: #c2620e;
+    --copy-comments-accent-hover: #a75409;
+    --copy-comments-accent-text: #ffffff;
+    --copy-comments-copied: #1f7a44;
+    --copy-comments-copied-text: #ffffff;
     --copy-icon: rgb(17 17 17 / 0.62);
     --muted: rgb(17 17 17 / 0.48);
     --sidebar-bg: rgb(255 255 255 / 0.58);
@@ -119,6 +134,11 @@
     --file-border: rgb(230 230 230 / 0.1);
     --inline-code-bg: rgb(39 39 39);
     --hover-wash: rgb(127 127 127 / 0.14);
+    --copy-comments-accent: #e8912f;
+    --copy-comments-accent-hover: #f4a244;
+    --copy-comments-accent-text: #1a1206;
+    --copy-comments-copied: #6fd094;
+    --copy-comments-copied-text: #0d2015;
     --copy-icon: rgb(230 230 230 / 0.68);
     --muted: rgb(230 230 230 / 0.48);
     --sidebar-bg: rgb(38 38 38 / 0.58);
@@ -3613,41 +3633,27 @@ diffs-container .review-comment-thread {
   word-break: break-word;
 }
 
-.review-action-bar {
+.copy-comments-button {
   -webkit-app-region: no-drag;
   align-items: center;
-  bottom: 16px;
-  display: inline-flex;
-  gap: 12px;
-  position: fixed;
-  right: 16px;
-  z-index: 12;
-}
-
-.copy-comments-button {
-  align-items: center;
-  backdrop-filter: blur(22px) saturate(1.35);
-  background: color-mix(in srgb, var(--code-bg) 78%, transparent);
-  border: 1px solid var(--file-border);
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 0.16) inset,
-    0 0 0 1px var(--file-border),
-    0 18px 80px -54px rgb(0 0 0 / 0.8),
-    0 16px 46px -30px rgb(0 0 0 / 0.72),
-    0 12px 24px -18px rgb(0 0 0 / 0.9);
+  background: var(--copy-comments-accent);
+  border: 0;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
+  color: var(--copy-comments-accent-text);
+  corner-shape: squircle;
   cursor: pointer;
   display: inline-flex;
-  height: 46px;
+  flex: none;
+  font: 700 11px/1 var(--font-sans);
+  gap: 5px;
+  height: 26px;
   justify-content: center;
-  padding: 0;
-  transition: all 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
-  transform: scale(1);
-  width: 46px;
-}
-
-.copy-comments-button {
-  color: var(--copy-icon);
+  padding: 0 10px;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .review-submit-button {
@@ -3800,16 +3806,11 @@ diffs-container .review-comment-thread {
 }
 
 .copy-comments-button:hover {
-  box-shadow:
-    0 0 0 1px var(--file-border),
-    0 26px 96px -48px rgb(0 0 0 / 0.92),
-    0 22px 62px -30px rgb(0 0 0 / 0.82),
-    0 16px 32px -18px rgb(0 0 0 / 0.96);
-  transform: scale(1.05);
+  background: var(--copy-comments-accent-hover);
 }
 
 .copy-comments-button:active {
-  transform: scale(0.95);
+  transform: scale(0.96);
 }
 
 .review-submit-button:disabled {
@@ -3817,9 +3818,14 @@ diffs-container .review-comment-thread {
   opacity: 0.58;
 }
 
-.copy-comments-button.copied {
-  background: color-mix(in srgb, var(--code-bg) 80%, var(--viewed) 14%);
-  color: var(--viewed);
+.copy-comments-button.copied,
+.copy-comments-button.copied:hover {
+  background: var(--copy-comments-copied);
+  color: var(--copy-comments-copied-text);
+}
+
+.copy-comments-count {
+  font: 700 11px/1 var(--font-mono);
 }
 
 .copy-comments-icon {
@@ -3829,7 +3835,7 @@ diffs-container .review-comment-thread {
 }
 
 .copy-comments-icon.check {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .review-submit-icon {

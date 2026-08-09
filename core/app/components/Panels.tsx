@@ -427,10 +427,11 @@ export function CopyCommentsButton({
       type="button"
     >
       {copied ? (
-        <Check aria-hidden className="copy-comments-icon check" size={22} weight="bold" />
+        <Check aria-hidden className="copy-comments-icon check" size={15} weight="bold" />
       ) : (
-        <LucideCopy aria-hidden className="copy-comments-icon" size={21} strokeWidth={2.25} />
+        <LucideCopy aria-hidden className="copy-comments-icon" size={14} strokeWidth={2.25} />
       )}
+      <span className="copy-comments-count">{pendingCommentCount}</span>
     </button>
   );
 }

@@ -1803,6 +1803,16 @@ export default function App() {
     >
       <div aria-hidden className="window-drag-region" />
       <ReviewTopBar
+        actions={
+          isSwitchingSource ? undefined : (
+            <CopyCommentsButton
+              comments={reviewComments}
+              files={orderedFiles}
+              reviewCommentsPrefix={preferences.reviewCommentsPrefix}
+              showWhitespace={showWhitespace}
+            />
+          )
+        }
         center={
           state.branch ? (
             <span className="review-top-bar-branch" title={state.branch}>
@@ -1885,16 +1895,6 @@ export default function App() {
         />
       ) : null}
       <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
-      {!isSwitchingSource ? (
-        <div className="review-action-bar">
-          <CopyCommentsButton
-            comments={reviewComments}
-            files={orderedFiles}
-            reviewCommentsPrefix={preferences.reviewCommentsPrefix}
-            showWhitespace={showWhitespace}
-          />
-        </div>
-      ) : null}
       <aside className="squircle sidebar">
         <Sidebar
           branchSource={
