@@ -1,7 +1,10 @@
 import { MarkdownEditor } from '@nkzw/mdx-editor';
-import type { ComponentProps, ReactNode } from 'react';
-import { Suspense, useMemo } from 'react';
+import { CheckIcon as Check } from '@phosphor-icons/react/Check';
+import { Copy as LucideCopy } from 'lucide-react';
+import type { ComponentProps, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import { Suspense, useCallback, useMemo } from 'react';
 import { renderInlineMarkdown } from '../../lib/markdown.tsx';
+import { useCopiedState } from './useCopiedState.ts';
 
 type MarkdownEditorProps = ComponentProps<typeof MarkdownEditor>;
 
@@ -76,6 +79,45 @@ export const normalizeReadOnlyMarkdownValue = (value: string) => {
     : normalizedValue;
 };
 
+const isClosingFence = (marker: string, candidate: string | null) =>
+  candidate != null && candidate[0] === marker[0] && candidate.length >= marker.length;
+
+export const extractFencedCodeBlocks = (value: string): Array<string> => {
+  const blocks: Array<string> = [];
+  let fenceMarker: string | null = null;
+  let currentBlock: Array<string> = [];
+
+  for (const line of value.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')) {
+    const currentFenceMarker = getFenceMarker(line);
+
+    if (fenceMarker) {
+      if (isClosingFence(fenceMarker, currentFenceMarker)) {
+        blocks.push(currentBlock.join('\n'));
+        currentBlock = [];
+        fenceMarker = null;
+        continue;
+      }
+      currentBlock.push(line);
+      continue;
+    }
+
+    if (currentFenceMarker) {
+      fenceMarker = currentFenceMarker;
+    }
+  }
+
+  // An unterminated fence still renders as a code block, so it stays copyable.
+  // Its trailing newline has no closing fence to belong to, so it is dropped.
+  while (fenceMarker && currentBlock.at(-1) === '') {
+    currentBlock.pop();
+  }
+  if (fenceMarker && currentBlock.length > 0) {
+    blocks.push(currentBlock.join('\n'));
+  }
+
+  return blocks.filter((block) => block.trim().length > 0);
+};
+
 const parseMarkdownDetails = (value: string): Array<MarkdownPart> => {
   const parts: Array<MarkdownPart> = [];
   let lastIndex = 0;
@@ -104,6 +146,55 @@ const parseMarkdownDetails = (value: string): Array<MarkdownPart> => {
 
 const hasDetailsBlock = (parts: ReadonlyArray<MarkdownPart>) =>
   parts.some((part) => part.type === 'details');
+
+// Nested `<details>` render their own button, so only this level's code is copied.
+const getOwnFencedCode = (parts: ReadonlyArray<MarkdownPart>) =>
+  parts
+    .filter((part) => part.type === 'markdown')
+    .flatMap((part) => extractFencedCodeBlocks(part.value))
+    .join('\n\n');
+
+function CopyCodeButton({ code }: { code: string }) {
+  const [copied, markCopied] = useCopiedState(1600);
+
+  const handleClick = useCallback(
+    async (event: ReactMouseEvent<HTMLButtonElement>) => {
+      // The button lives inside `<summary>`, which would otherwise toggle.
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(code);
+      } catch {
+        return;
+      }
+      markCopied();
+    },
+    [code, markCopied],
+  );
+
+  const label = copied ? 'Code copied' : 'Copy code';
+
+  return (
+    <button
+      aria-label={label}
+      className={`codiff-copy-path-button codiff-copy-code-button${copied ? ' copied' : ''}`}
+      onClick={(event) => void handleClick(event)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.stopPropagation();
+        }
+      }}
+      title={label}
+      type="button"
+    >
+      {copied ? (
+        <Check aria-hidden className="codiff-copy-path-icon check" size={16} weight="bold" />
+      ) : (
+        <LucideCopy aria-hidden className="codiff-copy-path-icon" size={16} strokeWidth={2.25} />
+      )}
+    </button>
+  );
+}
 
 function MarkdownSegment({
   additionalPlugins,
@@ -175,6 +266,9 @@ function MarkdownParts({
       );
     }
 
+    const bodyParts = parseMarkdownDetails(part.body);
+    const code = getOwnFencedCode(bodyParts);
+
     return (
       <details
         className="codiff-markdown-details"
@@ -182,14 +276,19 @@ function MarkdownParts({
         onToggle={(event) => onHeightChange?.(event.currentTarget.getBoundingClientRect().height)}
         open={part.open}
       >
-        <summary>{renderInlineMarkdown(part.summary || 'Details')}</summary>
+        <summary>
+          <span className="codiff-markdown-details-summary-label">
+            {renderInlineMarkdown(part.summary || 'Details')}
+          </span>
+          {code ? <CopyCodeButton code={code} /> : null}
+        </summary>
         <MarkdownParts
           additionalPlugins={additionalPlugins}
           ariaLabel={`${ariaLabel} details`}
           contentClassName={contentClassName}
           editorClassName={editorClassName}
           onHeightChange={onHeightChange}
-          parts={parseMarkdownDetails(part.body)}
+          parts={bodyParts}
         />
       </details>
     );

@@ -2180,11 +2180,30 @@ html[data-codiff-platform='darwin'] .sidebar {
 }
 
 .codiff-markdown-details > summary {
+  align-items: center;
   color: var(--text);
   cursor: pointer;
+  display: flex;
   font: 600 13px/1.4 var(--font-sans);
+  gap: 8px;
   list-style: none;
   padding: 8px 10px;
+}
+
+.codiff-markdown-details-summary-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.codiff-markdown-details > summary .codiff-copy-code-button {
+  height: 24px;
+  margin: -4px 0;
+  width: 24px;
+}
+
+.codiff-markdown-details > summary:hover .codiff-copy-code-button,
+.codiff-markdown-details > summary:focus-within .codiff-copy-code-button {
+  opacity: 1;
 }
 
 .codiff-markdown-details > summary::-webkit-details-marker {
@@ -2194,9 +2213,9 @@ html[data-codiff-platform='darwin'] .sidebar {
 .codiff-markdown-details > summary::before {
   content: '\25B8';
   display: inline-block;
+  flex: none;
   font-size: 20px;
   line-height: 0.5;
-  margin-right: 8px;
 }
 
 .codiff-markdown-details > summary:hover {

@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 
-import { expect, test } from 'vite-plus/test';
+import { expect, test, vi } from 'vite-plus/test';
 import {
+  extractFencedCodeBlocks,
   normalizeReadOnlyMarkdownValue,
   ReadOnlyMarkdownView,
 } from '../app/components/ReadOnlyMarkdownView.tsx';
@@ -20,6 +21,59 @@ test('normalizeReadOnlyMarkdownValue collapses repeated blank lines outside fenc
   ).toBe(
     'First paragraph.\n\nSecond paragraph.\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\nThird paragraph.',
   );
+});
+
+test('extractFencedCodeBlocks returns the contents of each fenced block', () => {
+  expect(
+    extractFencedCodeBlocks('Intro.\n\n```sh\nnpm install\n```\n\nOutro.\n\n~~~\nplain\n~~~\n'),
+  ).toEqual(['npm install', 'plain']);
+  expect(extractFencedCodeBlocks('No code here, only `inline`.')).toEqual([]);
+  expect(extractFencedCodeBlocks('````\n```\nnested fence\n```\n````')).toEqual([
+    '```\nnested fence\n```',
+  ]);
+  expect(extractFencedCodeBlocks('```ts\nconst a = 1;\n')).toEqual(['const a = 1;']);
+  expect(extractFencedCodeBlocks('```\n\n```')).toEqual([]);
+});
+
+test('ReadOnlyMarkdownView copies the code inside a collapsible block', async () => {
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
+
+  await using view = await renderReact(
+    <ReadOnlyMarkdownView
+      ariaLabel="Markdown preview"
+      className="markdown-preview"
+      value={
+        '<details><summary>Fix in your Agent</summary>\n\nPaste this:\n\n```\nFix the issues.\n```\n\n</details>'
+      }
+      variant="embedded"
+    />,
+  );
+
+  const button = view.container.querySelector<HTMLButtonElement>('.codiff-copy-code-button');
+  expect(button).not.toBe(null);
+
+  button?.click();
+
+  await waitFor(() => {
+    expect(writeText).toHaveBeenCalledWith('Fix the issues.');
+  });
+});
+
+test('ReadOnlyMarkdownView omits the copy button for collapsibles without code', async () => {
+  await using view = await renderReact(
+    <ReadOnlyMarkdownView
+      ariaLabel="Markdown preview"
+      className="markdown-preview"
+      value={'<details><summary>Notes</summary>\n\nJust prose.\n\n</details>'}
+      variant="embedded"
+    />,
+  );
+
+  expect(view.container.querySelector('.codiff-copy-code-button')).toBe(null);
 });
 
 test('ReadOnlyMarkdownView does not render empty paragraph break blocks', async () => {
