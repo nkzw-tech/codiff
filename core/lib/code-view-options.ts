@@ -189,4 +189,11 @@ export const codeViewUnsafeCSS = `
   [data-selected-line] [data-gutter-utility-slot] {
     display: none;
   }
+
+  /* The imperative API wraps annotations in a node that resets white-space, but
+     the React API slots them in bare, so they inherit "pre" from the shadow
+     <pre> and prose never wraps. */
+  [data-annotation-content] slot::slotted(*) {
+    white-space: normal;
+  }
 `;
