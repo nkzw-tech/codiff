@@ -1721,6 +1721,15 @@ html[data-codiff-platform='darwin'] .sidebar {
   width: 100%;
 }
 
+.definition-popover-result:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.definition-popover-result:disabled:hover {
+  background: transparent;
+}
+
 .definition-popover-location {
   font-size: 11px;
   gap: 12px;

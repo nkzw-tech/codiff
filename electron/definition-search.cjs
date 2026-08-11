@@ -1,5 +1,6 @@
 // @ts-check
 
+const { spawn } = require('node:child_process');
 const { dirname, extname } = require('node:path');
 const { gitOrEmpty, validateRepositoryPath } = require('./git-state/common.cjs');
 
@@ -9,6 +10,9 @@ const { gitOrEmpty, validateRepositoryPath } = require('./git-state/common.cjs')
 
 const MAX_CANDIDATES = 12;
 const MAX_MATCHES_PER_FILE = 20;
+const MAX_SEARCH_MATCHES = 1000;
+const MAX_SEARCH_OUTPUT_BYTES = 256 * 1024;
+const SEARCH_TIMEOUT_MS = 1500;
 const identifierPattern = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u;
 const identifierCharacterPattern = /[$\u200C\u200D\p{ID_Continue}]/u;
 
@@ -161,6 +165,126 @@ const parseGrepOutput = (output, revision) => {
   return matches;
 };
 
+const createAbortError = () => {
+  const error = new Error('Definition search was cancelled.');
+  error.name = 'AbortError';
+  return error;
+};
+
+/**
+ * @param {string} repoPath
+ * @param {ReadonlyArray<string>} args
+ * @param {{maxMatches?: number; maxOutputBytes?: number; signal?: AbortSignal; spawnProcess?: typeof spawn; timeoutMs?: number}} [options]
+ * @returns {Promise<string>}
+ */
+const runBoundedGitGrep = (
+  repoPath,
+  args,
+  {
+    maxMatches = MAX_SEARCH_MATCHES,
+    maxOutputBytes = MAX_SEARCH_OUTPUT_BYTES,
+    signal,
+    spawnProcess = spawn,
+    timeoutMs = SEARCH_TIMEOUT_MS,
+  } = {},
+) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+
+    const child = spawnProcess('git', ['-C', repoPath, ...args], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    /** @type {Array<Buffer>} */
+    const stdout = [];
+    /** @type {Array<Buffer>} */
+    const stderr = [];
+    let matchCount = 0;
+    let outputBytes = 0;
+    let settled = false;
+    /** @type {'aborted' | 'limit' | 'timeout' | null} */
+    let stopReason = null;
+
+    /** @param {'aborted' | 'limit' | 'timeout'} reason */
+    const stop = (reason) => {
+      if (stopReason == null) {
+        stopReason = reason;
+        child.kill();
+      }
+    };
+    const abort = () => stop('aborted');
+    signal?.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(() => stop('timeout'), timeoutMs);
+    timer.unref?.();
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    child.stdout.on('data', (value) => {
+      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      const remainingBytes = maxOutputBytes - outputBytes;
+      const remainingMatches = maxMatches - matchCount;
+      if (remainingBytes <= 0 || remainingMatches <= 0) {
+        stop('limit');
+        return;
+      }
+
+      let allowedLength = Math.min(chunk.length, remainingBytes);
+      let chunkMatches = 0;
+      for (let index = 0; index < allowedLength; index += 1) {
+        if (chunk[index] === 10 && ++chunkMatches === remainingMatches) {
+          allowedLength = index + 1;
+          break;
+        }
+      }
+      if (allowedLength > 0) {
+        const allowed = chunk.subarray(0, allowedLength);
+        stdout.push(allowed);
+        outputBytes += allowed.length;
+        matchCount += chunkMatches;
+      }
+      if (
+        allowedLength < chunk.length ||
+        outputBytes >= maxOutputBytes ||
+        matchCount >= maxMatches
+      ) {
+        stop('limit');
+      }
+    });
+    child.stderr.on('data', (value) => {
+      if (Buffer.concat(stderr).length < 8192) {
+        stderr.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
+      }
+    });
+    child.on('error', fail);
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (stopReason === 'aborted') {
+        reject(createAbortError());
+      } else if (stopReason === 'timeout') {
+        reject(new Error('Definition search timed out.'));
+      } else if (code === 0 || code === 1 || stopReason === 'limit') {
+        resolve(Buffer.concat(stdout).toString('utf8'));
+      } else {
+        reject(
+          new Error(Buffer.concat(stderr).toString('utf8') || `git exited with status ${code}`),
+        );
+      }
+    });
+  });
+
 /** @param {DefinitionSearchRequest} request @param {string} repoPath */
 const resolveSearchRevision = async (request, repoPath) => {
   const { kind, side, source } = request;
@@ -208,8 +332,13 @@ const resolveSearchRevision = async (request, repoPath) => {
   return { cached: false, revision: base || `${head}^` };
 };
 
-/** @param {string} repoPath @param {DefinitionSearchRequest} request @returns {Promise<DefinitionSearchResult>} */
-const findDefinitions = async (repoPath, request) => {
+/**
+ * @param {string} repoPath
+ * @param {DefinitionSearchRequest} request
+ * @param {{signal?: AbortSignal}} [options]
+ * @returns {Promise<DefinitionSearchResult>}
+ */
+const findDefinitions = async (repoPath, request, options = {}) => {
   try {
     if (!identifierPattern.test(request.identifier) || request.identifier.length > 256) {
       return { reason: 'Select a valid identifier.', status: 'unavailable' };
@@ -234,7 +363,7 @@ const findDefinitions = async (repoPath, request) => {
     else if (snapshot.untracked) args.push('--untracked');
     if (snapshot.revision) args.push(snapshot.revision);
     args.push('--', ...pathspecs);
-    const output = await gitOrEmpty(repoPath, args);
+    const output = await runBoundedGitGrep(repoPath, args, options);
     const currentDirectory = dirname(currentPath);
     const candidates = parseGrepOutput(output, snapshot.revision)
       .filter((match) => containsIdentifier(request.identifier, match.line))
@@ -258,6 +387,7 @@ const findDefinitions = async (repoPath, request) => {
       if (!seen.has(key)) {
         seen.add(key);
         unique.push({
+          canOpenInEditor: snapshot.revision == null && !snapshot.cached,
           kind: candidate.kind,
           line: candidate.line.trim(),
           lineNumber: candidate.lineNumber,
@@ -276,4 +406,40 @@ const findDefinitions = async (repoPath, request) => {
   }
 };
 
-module.exports = { classifyDefinition, findDefinitions, parseGrepOutput };
+/** @param {typeof findDefinitions} [searchDefinitions] */
+const createDefinitionSearchCoordinator = (searchDefinitions = findDefinitions) => {
+  /** @type {Map<number, AbortController>} */
+  const active = new Map();
+  return {
+    /** @param {number} key */
+    cancel: (key) => {
+      active.get(key)?.abort();
+      active.delete(key);
+    },
+    /**
+     * @param {number} key
+     * @param {string} repoPath
+     * @param {DefinitionSearchRequest} request
+     */
+    find: async (key, repoPath, request) => {
+      active.get(key)?.abort();
+      const controller = new AbortController();
+      active.set(key, controller);
+      try {
+        return await searchDefinitions(repoPath, request, { signal: controller.signal });
+      } finally {
+        if (active.get(key) === controller) {
+          active.delete(key);
+        }
+      }
+    },
+  };
+};
+
+module.exports = {
+  classifyDefinition,
+  createDefinitionSearchCoordinator,
+  findDefinitions,
+  parseGrepOutput,
+  runBoundedGitGrep,
+};

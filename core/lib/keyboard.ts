@@ -12,6 +12,11 @@ export const isNativeInputTarget = (target: EventTarget | null) => {
 
 const isMacPlatform = (platform = navigator.platform) => platform.toLowerCase().includes('mac');
 
+export const isPrimaryModifier = (
+  event: Pick<KeyboardEvent, 'ctrlKey' | 'metaKey'>,
+  platform = navigator.platform,
+) => (isMacPlatform(platform) ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey);
+
 export const isDiffSearchShortcut = (
   event: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'key' | 'metaKey' | 'shiftKey'>,
   platform = navigator.platform,
@@ -20,7 +25,5 @@ export const isDiffSearchShortcut = (
     return false;
   }
 
-  return isMacPlatform(platform)
-    ? event.metaKey && !event.ctrlKey
-    : event.ctrlKey && !event.metaKey;
+  return isPrimaryModifier(event, platform);
 };

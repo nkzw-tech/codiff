@@ -80,7 +80,7 @@ const {
 } = require('./main/command-line.cjs');
 const { createSkillInstaller } = require('./main/agent-skill.cjs');
 const { createEditorOpener } = require('./main/editor.cjs');
-const { findDefinitions } = require('./definition-search.cjs');
+const { createDefinitionSearchCoordinator } = require('./definition-search.cjs');
 const { createTerminalHelper } = require('./main/terminal-helper.cjs');
 const {
   readWindowState,
@@ -219,6 +219,7 @@ const { openFileInEditor } = createEditorOpener({
   getEditorCommand: () => config.settings.editorCommand,
   shell,
 });
+const definitionSearchCoordinator = createDefinitionSearchCoordinator();
 
 const openConfigFile = async () => {
   initConfig();
@@ -1016,6 +1017,7 @@ const createWindow = (
   });
   window.on('closed', () => {
     openWindows.delete(window);
+    definitionSearchCoordinator.cancel(webContentsId);
     repositoryWatcherCoordinator.detach(webContentsId);
     clearMarkdownDocumentWatchers(webContentsId);
     completedPlanWindows.delete(webContentsId);
@@ -1028,6 +1030,7 @@ const createWindow = (
     windowLaunchOptions.delete(webContentsId);
   });
   window.webContents.on('render-process-gone', () => {
+    definitionSearchCoordinator.cancel(webContentsId);
     writePlanResult(webContentsId, 'canceled');
   });
   window.webContents.on(
@@ -1862,7 +1865,11 @@ ipcMain.handle('codiff:openRepositoryFolder', (event) =>
 );
 
 ipcMain.handle('codiff:findDefinitions', (event, request) =>
-  findDefinitions(getWindowRepositoryRoot(event.sender.id), request),
+  definitionSearchCoordinator.find(
+    event.sender.id,
+    getWindowRepositoryRoot(event.sender.id),
+    request,
+  ),
 );
 
 ipcMain.handle('codiff:openFile', async (event, filePath, lineNumber) => {

@@ -87,7 +87,7 @@ import {
   getIdentifierFromPointerEvent,
 } from '../../lib/identifier-navigation.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
-import { isNativeInputTarget } from '../../lib/keyboard.ts';
+import { isNativeInputTarget, isPrimaryModifier } from '../../lib/keyboard.ts';
 import { sanitizeMarkdownImages } from '../../lib/markdown.tsx';
 import { isGeneratedWalkthroughFile } from '../../lib/narrative-walkthrough-diff.js';
 import {
@@ -103,6 +103,7 @@ import {
 } from '../../lib/review-comments.ts';
 import { getReviewIdentity, isReviewIdentityViewed } from '../../lib/review-identity.ts';
 import { applySearchHighlights } from '../../lib/search-highlights.ts';
+import { getSourceKey } from '../../lib/source.ts';
 import type {
   ChangedFile,
   CodiffPreferences,
@@ -2609,9 +2610,16 @@ export function ReviewCodeView({
     anchor: { x: number; y: number };
     identifier: string;
     result: DefinitionSearchResult | null;
+    sourceKey: string;
   } | null>(null);
   const definitionLookupRequestRef = useRef(0);
   const definitionModifierActiveRef = useRef(false);
+  const sourceKey = getSourceKey(source);
+  const [definitionLookupSourceKey, setDefinitionLookupSourceKey] = useState(sourceKey);
+  if (definitionLookupSourceKey !== sourceKey) {
+    setDefinitionLookupSourceKey(sourceKey);
+    setDefinitionLookup(null);
+  }
   const selectedLinesRef = useRef<CodeViewLineSelection | null>(null);
   const commitMessageMetadata = source.type === 'commit' ? commitMetadata : null;
   const shouldShowCommitMessage = commitMessageMetadata != null;
@@ -3223,7 +3231,7 @@ export function ReviewCodeView({
           createCommentForRange(range, context);
         },
         onLineClick: (line, context) => {
-          const isDefinitionNavigation = line.event.metaKey || line.event.ctrlKey;
+          const isDefinitionNavigation = isPrimaryModifier(line.event);
           if (isDefinitionNavigation && onFindDefinitions) {
             line.event.preventDefault();
             line.event.stopPropagation();
@@ -3242,6 +3250,7 @@ export function ReviewCodeView({
               anchor: { x: line.event.clientX, y: line.event.clientY },
               identifier,
               result: null,
+              sourceKey,
             });
             void onFindDefinitions({
               identifier,
@@ -3250,13 +3259,31 @@ export function ReviewCodeView({
               path: side === 'deletions' ? (meta.file.oldPath ?? meta.file.path) : meta.file.path,
               side,
               source,
-            }).then((result) => {
-              if (definitionLookupRequestRef.current === requestId) {
-                setDefinitionLookup((current) =>
-                  current?.identifier === identifier ? { ...current, result } : current,
-                );
-              }
-            });
+            })
+              .then((result) => {
+                if (definitionLookupRequestRef.current === requestId) {
+                  setDefinitionLookup((current) =>
+                    current?.identifier === identifier && current.sourceKey === sourceKey
+                      ? { ...current, result }
+                      : current,
+                  );
+                }
+              })
+              .catch(() => {
+                if (definitionLookupRequestRef.current === requestId) {
+                  setDefinitionLookup((current) =>
+                    current?.identifier === identifier && current.sourceKey === sourceKey
+                      ? {
+                          ...current,
+                          result: {
+                            reason: 'Definition search is unavailable for this repository.',
+                            status: 'unavailable',
+                          },
+                        }
+                      : current,
+                  );
+                }
+              });
             return;
           }
           if (isReadOnly) {
@@ -3361,6 +3388,7 @@ export function ReviewCodeView({
       onFindDefinitions,
       onLoadSection,
       source,
+      sourceKey,
       theme,
       wordWrap,
     ],
@@ -3880,10 +3908,10 @@ export function ReviewCodeView({
       updateRenderedIdentifierNavigation(active);
     };
     const handleModifierChange = (event: KeyboardEvent) => {
-      updateDefinitionModifierState(event.metaKey || event.ctrlKey);
+      updateDefinitionModifierState(isPrimaryModifier(event));
     };
     const handleModifierPointer = (event: PointerEvent) => {
-      updateDefinitionModifierState(event.metaKey || event.ctrlKey);
+      updateDefinitionModifierState(isPrimaryModifier(event));
     };
     const clearDefinitionModifierState = () => updateDefinitionModifierState(false);
 
@@ -3901,6 +3929,11 @@ export function ReviewCodeView({
       window.removeEventListener('blur', clearDefinitionModifierState);
     };
   }, [onFindDefinitions, updateRenderedIdentifierNavigation]);
+
+  const invalidateDefinitionLookup = useCallback(() => {
+    definitionLookupRequestRef.current++;
+  }, []);
+  useEffect(() => invalidateDefinitionLookup, [invalidateDefinitionLookup]);
 
   useEffect(() => {
     const handle = codeViewRef.current;
@@ -4201,13 +4234,19 @@ export function ReviewCodeView({
   return (
     <>
       {renderedCodeView}
-      {definitionLookup && onOpenDefinition ? (
+      {definitionLookup?.sourceKey === sourceKey && onOpenDefinition ? (
         <DefinitionPopover
           anchor={definitionLookup.anchor}
-          getDestination={(candidate) => (getDefinitionDiffTarget(candidate) ? 'diff' : 'editor')}
+          getDestination={(candidate) =>
+            getDefinitionDiffTarget(candidate)
+              ? 'diff'
+              : candidate.canOpenInEditor
+                ? 'editor'
+                : 'unavailable'
+          }
           identifier={definitionLookup.identifier}
           onClose={() => {
-            definitionLookupRequestRef.current++;
+            invalidateDefinitionLookup();
             setDefinitionLookup(null);
           }}
           onOpen={(candidate) => {
@@ -4233,10 +4272,10 @@ export function ReviewCodeView({
               } else {
                 scrollToDefinition();
               }
-            } else {
+            } else if (candidate.canOpenInEditor) {
               onOpenDefinition(candidate);
             }
-            definitionLookupRequestRef.current++;
+            invalidateDefinitionLookup();
             setDefinitionLookup(null);
           }}
           result={definitionLookup.result}

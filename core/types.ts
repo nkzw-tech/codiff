@@ -728,6 +728,7 @@ export type DefinitionSearchRequest = {
 };
 
 export type DefinitionCandidate = {
+  canOpenInEditor: boolean;
   kind: string;
   line: string;
   lineNumber: number;

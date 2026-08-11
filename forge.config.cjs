@@ -129,6 +129,7 @@ module.exports = {
       /^\/README\.md$/,
       /^\/coverage(?:$|\/)/,
       /^\/docs(?:$|\/)/,
+      /^\/examples(?:$|\/)/,
       /^\/forge\.config\.cjs$/,
       /^\/index\.html$/,
       /^\/out(?:$|\/)/,

@@ -1,5 +1,6 @@
 import { ArrowSquareOutIcon as ArrowSquareOut } from '@phosphor-icons/react/ArrowSquareOut';
 import { CrosshairSimpleIcon as CrosshairSimple } from '@phosphor-icons/react/CrosshairSimple';
+import { ProhibitIcon as Prohibit } from '@phosphor-icons/react/Prohibit';
 import { XIcon as X } from '@phosphor-icons/react/X';
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -14,7 +15,7 @@ export function DefinitionPopover({
   result,
 }: {
   anchor: { x: number; y: number };
-  getDestination: (candidate: DefinitionCandidate) => 'diff' | 'editor';
+  getDestination: (candidate: DefinitionCandidate) => 'diff' | 'editor' | 'unavailable';
   identifier: string;
   onClose: () => void;
   onOpen: (candidate: DefinitionCandidate) => void;
@@ -69,10 +70,16 @@ export function DefinitionPopover({
         <div className="definition-popover-results">
           {result.candidates.map((candidate) => {
             const destination = getDestination(candidate);
-            const destinationLabel = destination === 'diff' ? 'Jump within diff' : 'Open in editor';
+            const destinationLabel =
+              destination === 'diff'
+                ? 'Jump within diff'
+                : destination === 'editor'
+                  ? 'Open in editor'
+                  : 'Unavailable outside this historical diff';
             return (
               <button
                 className="definition-popover-result"
+                disabled={destination === 'unavailable'}
                 key={`${candidate.path}:${candidate.lineNumber}`}
                 onClick={() => onOpen(candidate)}
                 type="button"
@@ -89,8 +96,10 @@ export function DefinitionPopover({
                     >
                       {destination === 'diff' ? (
                         <CrosshairSimple aria-hidden="true" size={13} />
-                      ) : (
+                      ) : destination === 'editor' ? (
                         <ArrowSquareOut aria-hidden="true" size={13} />
+                      ) : (
+                        <Prohibit aria-hidden="true" size={13} />
                       )}
                     </span>
                   </span>
