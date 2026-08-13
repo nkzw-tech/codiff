@@ -6,7 +6,7 @@ import { act } from 'react';
 import { expect, test, vi } from 'vite-plus/test';
 import { useResizableSidebar } from '../app/hooks/useResizableSidebar.ts';
 import { useReviewFileState } from '../app/hooks/useReviewState.ts';
-import type { ReviewIdentity, SidebarPosition } from '../lib/app-types.ts';
+import type { ReviewIdentity } from '../lib/app-types.ts';
 import { SIDEBAR_COLLAPSE_THRESHOLD } from '../lib/sidebar-width.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact } from './helpers/react.tsx';
@@ -87,7 +87,7 @@ function ResizableSidebarHarness({
   collapseThreshold?: number;
   onCollapse?: () => void;
   onWidthCommit: (width: number) => void;
-  position: SidebarPosition;
+  position: 'left' | 'right';
 }) {
   const { resizeSidebar, sidebarWidth } = useResizableSidebar({
     collapseThreshold,

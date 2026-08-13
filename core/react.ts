@@ -16,4 +16,3 @@ export {
   type ReviewSurfaceProps,
   type ReviewWalkthroughStatus,
 } from './SharedWalkthroughApp.tsx';
-export type { SidebarPosition } from './lib/app-types.ts';

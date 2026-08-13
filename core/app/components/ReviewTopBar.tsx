@@ -1,6 +1,5 @@
 import { SidebarSimpleIcon as SidebarSimple } from '@phosphor-icons/react/SidebarSimple';
 import type { ReactNode } from 'react';
-import type { SidebarPosition } from '../../lib/app-types.ts';
 import { ReviewModeControl, type ReviewModeItem } from './ReviewModeControl.tsx';
 
 export function ReviewTopBar<Mode extends string>({
@@ -27,7 +26,7 @@ export function ReviewTopBar<Mode extends string>({
   repository: ReactNode;
   repositoryTooltip?: string;
   sidebarCollapsed: boolean;
-  sidebarPosition?: SidebarPosition;
+  sidebarPosition?: 'left' | 'right';
   sourceMenu?: ReactNode;
   toggleTitle: string;
 } & (

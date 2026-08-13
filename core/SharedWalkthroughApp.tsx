@@ -45,12 +45,7 @@ import { useReviewFileState } from './app/hooks/useReviewState.ts';
 import { createDefaultConfig } from './config/defaults.ts';
 import { matchesShortcut } from './config/keymap.ts';
 import { getAgentLabel } from './lib/app-constants.ts';
-import type {
-  CodeViewInstance,
-  ReviewComment,
-  ReviewScrollTarget,
-  SidebarPosition,
-} from './lib/app-types.ts';
+import type { CodeViewInstance, ReviewComment, ReviewScrollTarget } from './lib/app-types.ts';
 import {
   fileHasVisibleDiff,
   getDiffLineCount,
@@ -176,7 +171,7 @@ export type ReviewSurfaceProps = {
   providerLabel?: string;
   repositoryUrl?: string;
   settingsBar?: ReactNode;
-  sidebarPosition?: SidebarPosition;
+  sidebarPosition?: 'left' | 'right';
   signInLabel?: string;
   snapshot: SharedWalkthroughSnapshot;
   sourceDescriptionFooterAside?: ReactNode;

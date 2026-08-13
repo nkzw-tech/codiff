@@ -96,40 +96,28 @@ const sharedWalkthroughSnapshot = {
   },
 } satisfies SharedWalkthroughSnapshot;
 
-test('review top bar renders its leading and sidebar controls at opposite edges', async () => {
-  const container = document.createElement('div');
-  document.body.append(container);
-  const root = createRoot(container);
-
-  await act(async () => {
-    root.render(
-      <ReviewTopBar
-        leading={<button className="codiff-logo">Codiff</button>}
-        mode="tree"
-        modes={[{ icon: null, label: 'Tree', value: 'tree' }]}
-        onModeChange={() => {}}
-        onToggleSidebar={() => {}}
-        repository="cloudflare/voidzero/codiff-web"
-        sidebarCollapsed={false}
-        sidebarPosition="right"
-        toggleTitle="Collapse sidebar"
-      />,
-    );
-  });
-
-  const leftRegion = container.querySelector('.review-top-bar-left');
-  expect(leftRegion?.firstElementChild?.className).toBe('codiff-logo');
-  expect(leftRegion?.nextElementSibling?.classList.contains('review-mode-control')).toBe(true);
-  expect(leftRegion?.nextElementSibling?.nextElementSibling?.className).toBe(
-    'review-top-bar-right',
+test.each([
+  { iconTransform: null, position: 'left' },
+  { iconTransform: 'scale(-1, 1)', position: 'right' },
+] as const)('review top bar places its sidebar control on the $position', async (testCase) => {
+  await using view = await renderReact(
+    <ReviewTopBar
+      mode="tree"
+      modes={[{ icon: null, label: 'Tree', value: 'tree' }]}
+      onModeChange={() => {}}
+      onToggleSidebar={() => {}}
+      repository="cloudflare/voidzero/codiff-web"
+      sidebarCollapsed={false}
+      sidebarPosition={testCase.position}
+      toggleTitle="Collapse sidebar"
+    />,
   );
-  const rightRegion = leftRegion?.nextElementSibling?.nextElementSibling;
-  const toggle = rightRegion?.lastElementChild;
-  expect(toggle?.classList.contains('sidebar-toggle-button')).toBe(true);
-  expect(toggle?.querySelector('svg')?.getAttribute('transform')).toBe('scale(-1, 1)');
 
-  await act(async () => root.unmount());
-  container.remove();
+  const toggle = view.container.querySelector(
+    `.review-top-bar-${testCase.position} > .sidebar-toggle-button`,
+  );
+  expect(toggle).not.toBeNull();
+  expect(toggle?.querySelector('svg')?.getAttribute('transform')).toBe(testCase.iconTransform);
 });
 
 test.each([

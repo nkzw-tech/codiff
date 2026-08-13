@@ -1,12 +1,11 @@
 import { useCallback, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { SidebarPosition } from '../../lib/app-types.ts';
 import { clampSidebarWidth } from '../../lib/sidebar-width.ts';
 
 type UseResizableSidebarOptions = {
   collapseThreshold?: number;
   onCollapse?: () => void;
   onWidthCommit: (width: number) => void;
-  position: SidebarPosition;
+  position: 'left' | 'right';
   readWidth: () => number;
 };
 
