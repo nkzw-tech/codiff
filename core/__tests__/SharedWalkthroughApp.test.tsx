@@ -102,6 +102,7 @@ test.each([
 ] as const)('review top bar places its sidebar control on the $position', async (testCase) => {
   await using view = await renderReact(
     <ReviewTopBar
+      leading={<button className="codiff-logo">Codiff</button>}
       mode="tree"
       modes={[{ icon: null, label: 'Tree', value: 'tree' }]}
       onModeChange={() => {}}
@@ -113,6 +114,12 @@ test.each([
     />,
   );
 
+  const leftRegion = view.container.querySelector('.review-top-bar-left');
+  expect(leftRegion?.firstElementChild?.className).toBe('codiff-logo');
+  expect(leftRegion?.nextElementSibling?.classList.contains('review-mode-control')).toBe(true);
+  expect(leftRegion?.nextElementSibling?.nextElementSibling?.className).toBe(
+    'review-top-bar-right',
+  );
   const toggle = view.container.querySelector(
     `.review-top-bar-${testCase.position} > .sidebar-toggle-button`,
   );
