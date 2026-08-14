@@ -27,6 +27,7 @@ type Coordinator = {
   attach: (subscriber: {
     getState: () => SubscriberState;
     id: number;
+    initialSnapshot?: Snapshot | Promise<Snapshot>;
     notify: (root: string) => void;
     root: string;
   }) => Promise<void>;
@@ -50,6 +51,7 @@ type Coordinator = {
 const require = createRequire(import.meta.url);
 const {
   createRepositoryWatcherCoordinator,
+  getRepositoryWatcherInitialSnapshot,
   getRepositoryWatcherPollInterval,
   normalizeRepositoryWatcherPath,
   parseRepositoryWatcherStatus,
@@ -65,6 +67,7 @@ const {
     ) => Promise<Snapshot>;
     setTimeoutImpl?: (callback: () => void, delay: number) => unknown;
   }) => Coordinator;
+  getRepositoryWatcherInitialSnapshot: (state: object) => Promise<Snapshot> | undefined;
   getRepositoryWatcherPollInterval: (states: ReadonlyArray<SubscriberState>) => number;
   normalizeRepositoryWatcherPath: (path: string, pathSeparator?: string) => string;
   parseRepositoryWatcherStatus: (raw: string) => { head: string; paths: Array<string> };
@@ -78,6 +81,9 @@ const {
     right: Snapshot,
     expectedPathVersions: ReadonlyMap<string, string>,
   ) => boolean;
+};
+const { readRepositoryState } = require('../git-state.cjs') as {
+  readRepositoryState: (launchPath: string) => Promise<object>;
 };
 
 const execFileAsync = promisify(execFile);
@@ -125,6 +131,44 @@ test('parses porcelain-v2 branch information and dirty paths', () => {
     head: `${hash}\0feature`,
     paths: ['src/app file.ts', 'src/new.ts', 'src/old.ts', 'conflicted.ts', 'untracked file.txt'],
   });
+});
+
+test('parses porcelain-v2 unmerged records as conflicted', () => {
+  const hash = '1'.repeat(40);
+  const { parsePorcelainV2Status } = require('../git-state/working-tree.cjs') as {
+    parsePorcelainV2Status: (raw: string) => Array<{
+      conflictStage?: 1 | 2 | 3;
+      path: string;
+      staged: boolean;
+      status: string;
+      unstaged: boolean;
+      untracked: boolean;
+    }>;
+  };
+  const unmerged = [
+    ['UU', 'both-modified.ts', 2],
+    ['AA', 'both-added.ts', 2],
+    ['DD', 'both-deleted.ts', 1],
+    ['AU', 'added-by-us.ts', 2],
+    ['UA', 'added-by-them.ts'],
+    ['DU', 'deleted-by-us.ts'],
+    ['UD', 'deleted-by-them.ts', 2],
+  ] as const;
+  const raw = unmerged
+    .map(([xy, path]) => `u ${xy} N... 100644 100644 100644 100644 ${hash} ${hash} ${hash} ${path}`)
+    .concat('')
+    .join('\0');
+
+  expect(parsePorcelainV2Status(raw)).toEqual(
+    unmerged.map(([, path, conflictStage]) => ({
+      ...(conflictStage ? { conflictStage } : {}),
+      path,
+      staged: false,
+      status: 'conflicted',
+      unstaged: true,
+      untracked: false,
+    })),
+  );
 });
 
 test('ignores only expected app-written paths', () => {
@@ -201,6 +245,56 @@ test('never ignores repository HEAD changes', () => {
     ),
   ).toBe(false);
 });
+
+test('compares an adopted startup snapshot immediately after watcher attachment', async () => {
+  await using directory = await createTemporaryDirectory('codiff-initial-watcher-');
+  const repository = await realpath(directory.path);
+  const timers: Array<{ callback: () => void; cleared: boolean; delay: number }> = [];
+  let reads = 0;
+  const coordinator = createRepositoryWatcherCoordinator({
+    clearTimeoutImpl: (timer) => {
+      (timer as (typeof timers)[number]).cleared = true;
+    },
+    readSnapshot: async (root, exactPaths, knownDirtyPaths) => {
+      reads += 1;
+      return readRepositoryWatcherSnapshot(root, exactPaths, knownDirtyPaths);
+    },
+    setTimeoutImpl: (callback, delay) => {
+      const timer = { callback, cleared: false, delay };
+      timers.push(timer);
+      return timer;
+    },
+  });
+
+  try {
+    await git(repository, ['init']);
+    await writeFile(join(repository, 'file.txt'), 'before\n');
+    await git(repository, ['add', 'file.txt']);
+    await git(repository, ['commit', '-m', 'initial']);
+
+    const state = await readRepositoryState(repository);
+    const initialSnapshot = getRepositoryWatcherInitialSnapshot(state);
+    if (!initialSnapshot) {
+      throw new Error('Expected the initial repository state to retain a watcher snapshot.');
+    }
+
+    await writeFile(join(repository, 'file.txt'), 'after\n');
+    const notifications: Array<string> = [];
+    await coordinator.attach({
+      getState: () => ({ focused: true, visible: true }),
+      id: 1,
+      initialSnapshot,
+      notify: (root) => notifications.push(root),
+      root: repository,
+    });
+
+    await initialSnapshot;
+    expect(reads).toBe(1);
+    expect(notifications).toEqual([repository]);
+  } finally {
+    coordinator.detach(1);
+  }
+}, 30_000);
 
 test('shares one watcher per repository and adapts polling to window state', async () => {
   const timers: Array<{ callback: () => void; cleared: boolean; delay: number }> = [];
