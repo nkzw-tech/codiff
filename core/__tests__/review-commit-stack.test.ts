@@ -1,5 +1,10 @@
 import { expect, test } from 'vite-plus/test';
-import { orderReviewCommitStack, validateReviewCommitStack } from '../lib/review-commit-stack.ts';
+import {
+  isReviewCommitAncestor,
+  orderReviewCommitStack,
+  reviewCommitRange,
+  validateReviewCommitStack,
+} from '../lib/review-commit-stack.ts';
 import type { GitSha } from '../types.ts';
 
 const gitSha = (value: string) => value as GitSha;
@@ -46,3 +51,26 @@ test('rejects duplicate and cyclic commit graphs', () => {
   const second = stackCommit('b', '2026-01-02T00:00:00.000Z', [gitSha('a')]);
   expect(() => orderReviewCommitStack([first, second])).toThrow('contains a cycle');
 });
+
+test('derives ancestry and first-parent range membership from the commit graph', () => {
+  const first = stackCommit('a', '2026-01-01T00:00:00.000Z', [gitSha('base')]);
+  const second = stackCommit('b', '2026-01-02T00:00:00.000Z', [first.sha]);
+  const parallel = stackCommit('p', '2026-01-02T12:00:00.000Z', [first.sha]);
+  const merge = stackCommit('c', '2026-01-03T00:00:00.000Z', [second.sha, parallel.sha]);
+  const stack = orderReviewCommitStack([merge, parallel, second, first]);
+
+  expect(isReviewCommitAncestor(stack, first.sha, merge.sha)).toBe(true);
+  expect(isReviewCommitAncestor(stack, parallel.sha, second.sha)).toBe(false);
+  expect(reviewCommitRange(stack, first.sha, merge.sha)).toMatchObject({
+    baseSha: 'base',
+    headSha: 'c',
+    members: [{ sha: 'a' }, { sha: 'b' }, { sha: 'p' }, { sha: 'c' }],
+  });
+  expect(() => reviewCommitRange(stack, parallel.sha, second.sha)).toThrow(
+    'From must be an ancestor of To',
+  );
+  expect(() => reviewCommitRange(stack, gitSha('missing'), merge.sha)).toThrow(
+    'endpoints must both exist',
+  );
+});
+
