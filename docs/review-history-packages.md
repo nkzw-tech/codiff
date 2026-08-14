@@ -51,3 +51,8 @@ same-commit request stays an empty same-commit result.
 `createReviewArtifactRun` deduplicates overlapping reads only within one
 request. Range reads are cached and diagnosed by their requested selector
 pair, not by a provider-resolved effective pair.
+
+Durable cache keys (`createCommitArtifactKey`, `createRangeArtifactKey`,
+`createBlobArtifactKey`), `ReviewVersionRecord`, and `ReviewProviderAdapter`
+are for later persisted history and provider-history packages.
+

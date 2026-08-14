@@ -1,4 +1,4 @@
-import type { GitFileStatus, GitSha, ReviewCommitSummary } from '../types.ts';
+import type { GitFileStatus, GitSha, ReviewCommitSummary, ReviewVersionId } from '../types.ts';
 import { validateReviewCommitStack } from './review-commit-stack.ts';
 
 export const reviewArtifactSchemaVersion = 'review-artifact-v1';
@@ -16,6 +16,13 @@ export type ReviewArtifactProvenance = {
   project: ReviewArtifactProject;
 };
 
+export type ReviewVersionRecord = {
+  createdAt: string;
+  effectiveBaseSha: GitSha;
+  headSha: GitSha;
+  positionStartSha: GitSha;
+  versionId: ReviewVersionId;
+};
 export type StackSnapshot = {
   baseSha: GitSha;
   commits: ReadonlyArray<ReviewCommitSummary>;
@@ -91,7 +98,26 @@ export type FileBlobArtifactRequest = {
   ref: GitSha;
 };
 
-export interface ReviewArtifactSource {
+export type CommitArtifactKey = {
+  commitSha: GitSha;
+  parentSha: GitSha | null;
+  project: ReviewArtifactProject;
+  schemaVersion: typeof reviewArtifactSchemaVersion;
+};
+
+export type RangeArtifactKey = {
+  baseSha: GitSha;
+  diffSemantics: string;
+  headSha: GitSha;
+  project: ReviewArtifactProject;
+  schemaVersion: typeof reviewArtifactSchemaVersion;
+};
+
+export type BlobArtifactKey = {
+  objectId: string;
+  project: ReviewArtifactProject;
+};
+
   readBlobs(
     objectIds: ReadonlyArray<string>,
     signal: AbortSignal,
@@ -114,7 +140,13 @@ export interface ReviewArtifactSource {
   ): Promise<ReviewArtifactRangeResult>;
 }
 
-export type ReviewArtifactRunDiagnostics = {
+export interface ReviewProviderAdapter<ReviewReference, CurrentReview> {
+  createArtifactSource(
+    reference: ReviewReference,
+  ): ReviewArtifactSource | Promise<ReviewArtifactSource>;
+  readCurrentReview(reference: ReviewReference, signal: AbortSignal): Promise<CurrentReview>;
+}
+
   acquired: {
     blobs: Readonly<Record<string, number>>;
     commits: Readonly<Record<string, number>>;
@@ -142,8 +174,32 @@ export type ReviewArtifactRun = ReviewArtifactSource & {
   readonly signal: AbortSignal;
 };
 
+const encodeKeyPart = (value: string) => encodeURIComponent(value);
+
+const projectKey = ({ host, project, provider }: ReviewArtifactProject) =>
+  [provider, host.toLowerCase(), project].map(encodeKeyPart).join('/');
+
+export const createCommitArtifactKey = ({
+  commitSha,
+  parentSha,
+  project,
+  schemaVersion,
+}: CommitArtifactKey) =>
+  `commit/${projectKey(project)}/${encodeKeyPart(commitSha)}/${encodeKeyPart(parentSha ?? 'root')}/${schemaVersion}`;
+
+export const createRangeArtifactKey = ({
+  baseSha,
+  diffSemantics,
+  headSha,
+  project,
+  schemaVersion,
+}: RangeArtifactKey) =>
+  `range/${projectKey(project)}/${encodeKeyPart(baseSha)}/${encodeKeyPart(headSha)}/${encodeKeyPart(diffSemantics)}/${schemaVersion}`;
+
+export const createBlobArtifactKey = ({ objectId, project }: BlobArtifactKey) =>
+  `blob/${projectKey(project)}/${encodeKeyPart(objectId)}`;
+
 export const createFileBlobArtifactRequestKey = ({ path, ref }: FileBlobArtifactRequest) =>
-  `${ref}:${path}`;
 
 export const createCommitArtifactRequestKey = ({
   commitSha,

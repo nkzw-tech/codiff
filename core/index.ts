@@ -47,9 +47,12 @@ export {
   type ReviewContextExpansionState,
 } from './lib/review-context-expansion.ts';
 export {
+  createBlobArtifactKey,
+  createCommitArtifactKey,
   createCommitArtifactRequestKey,
   createFileBlobArtifactRequestKey,
   createReviewArtifactRun,
+  createRangeArtifactKey,
   reviewArtifactSchemaVersion,
   validateCommitArtifact,
   validateRangeArtifact,
@@ -58,11 +61,14 @@ export {
   type ArtifactCoverage,
   type ArtifactFile,
   type BlobArtifact,
+  type BlobArtifactKey,
   type CommitArtifact,
+  type CommitArtifactKey,
   type CommitArtifactRequest,
   type CommitArtifactRequestKey,
   type FileBlobArtifactRequest,
   type RangeArtifact,
+  type RangeArtifactKey,
   type ReviewArtifactProject,
   type ReviewArtifactRangeRequest,
   type ReviewArtifactRangeResult,
@@ -70,6 +76,8 @@ export {
   type ReviewArtifactRun,
   type ReviewArtifactRunDiagnostics,
   type ReviewArtifactSource,
+  type ReviewProviderAdapter,
+  type ReviewVersionRecord,
   type StackSnapshot,
 } from './lib/review-artifacts.ts';
 export {
