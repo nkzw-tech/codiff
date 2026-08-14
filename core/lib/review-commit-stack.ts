@@ -90,3 +90,85 @@ export const validateReviewCommitStack = <Commit extends ReviewCommitStackItem>(
   }
   return commits;
 };
+
+const reachableCommitShas = <Commit extends ReviewCommitStackItem>(
+  bySha: ReadonlyMap<GitSha, Commit>,
+  startSha: GitSha,
+) => {
+  const reachable = new Set<GitSha>();
+  const pending = [startSha];
+  while (pending.length > 0) {
+    const sha = pending.pop()!;
+    if (reachable.has(sha)) {
+      continue;
+    }
+    reachable.add(sha);
+    for (const parentSha of bySha.get(sha)?.parentShas ?? []) {
+      if (bySha.has(parentSha)) {
+        pending.push(parentSha);
+      }
+    }
+  }
+  return reachable;
+};
+
+/** Whether `ancestorSha` is equal to or an ancestor of `descendantSha`. */
+export const isReviewCommitAncestor = <Commit extends ReviewCommitStackItem>(
+  commits: ReadonlyArray<Commit>,
+  ancestorSha: GitSha,
+  descendantSha: GitSha,
+) => {
+  const bySha = indexCommitGraph(validateReviewCommitStack(commits));
+  if (!bySha.has(ancestorSha) || !bySha.has(descendantSha)) {
+    return false;
+  }
+  return reachableCommitShas(bySha, descendantSha).has(ancestorSha);
+};
+
+export type ReviewCommitRange<Commit extends ReviewCommitStackItem = ReviewCommitSummary> = {
+  baseSha: GitSha;
+  from: Commit;
+  headSha: GitSha;
+  members: ReviewCommitStack<Commit>;
+  to: Commit;
+};
+
+/**
+ * Validate and materialize `first-parent(From)..To` from a canonical stack.
+ * Membership follows Git reachability rather than a visual index slice.
+ */
+export const reviewCommitRange = <Commit extends ReviewCommitStackItem>(
+  commits: ReadonlyArray<Commit>,
+  fromSha: GitSha,
+  toSha: GitSha,
+): ReviewCommitRange<Commit> => {
+  const stack = validateReviewCommitStack(commits);
+  const bySha = indexCommitGraph(stack);
+  const from = bySha.get(fromSha);
+  const to = bySha.get(toSha);
+  if (!from || !to) {
+    throw new Error('Review commit range endpoints must both exist in the commit stack.');
+  }
+  if (!reachableCommitShas(bySha, toSha).has(fromSha)) {
+    throw new Error('Review commit range From must be an ancestor of To.');
+  }
+  const baseSha = from.parentShas[0];
+  if (!baseSha) {
+    throw new Error('Review commit range From has no resolvable first parent.');
+  }
+
+  const headAncestors = reachableCommitShas(bySha, toSha);
+  const baseAncestors = bySha.has(baseSha)
+    ? reachableCommitShas(bySha, baseSha)
+    : new Set<GitSha>();
+  return {
+    baseSha,
+    from,
+    headSha: toSha,
+    members: stack.filter(
+      (commit) => headAncestors.has(commit.sha) && !baseAncestors.has(commit.sha),
+    ),
+    to,
+  };
+};
+

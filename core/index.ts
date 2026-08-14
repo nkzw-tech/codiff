@@ -30,8 +30,11 @@ export {
   workingCopyRevision,
 } from './lib/review-history.ts';
 export {
+  isReviewCommitAncestor,
   orderReviewCommitStack,
+  reviewCommitRange,
   validateReviewCommitStack,
+  type ReviewCommitRange,
   type ReviewCommitStack,
   type ReviewCommitStackItem,
 } from './lib/review-commit-stack.ts';
