@@ -1727,6 +1727,121 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding-inline: 12px;
 }
 
+.definition-popover {
+  animation: review-submit-popover-in 120ms ease;
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.2);
+  color: var(--text);
+  max-height: 300px;
+  overflow: hidden;
+  position: fixed;
+  width: min(420px, calc(100vw - 24px));
+  z-index: 100;
+}
+
+.definition-popover-header,
+.definition-popover-location {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.definition-popover-header {
+  border-bottom: 1px solid var(--file-border);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 9px 10px 9px 12px;
+}
+
+.definition-popover-header code {
+  font-family: var(--codiff-font-mono);
+}
+
+.definition-popover-header button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  display: flex;
+  padding: 3px;
+}
+
+.definition-popover-header button:hover,
+.definition-popover-result:hover {
+  background: var(--hover-wash);
+}
+
+.definition-popover-message {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 18px 12px;
+}
+
+.definition-popover-results {
+  max-height: 252px;
+  overflow: auto;
+  padding: 5px;
+}
+
+.definition-popover-result {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  display: block;
+  padding: 7px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.definition-popover-result:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.definition-popover-result:disabled:hover {
+  background: transparent;
+}
+
+.definition-popover-location {
+  font-size: 11px;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.definition-popover-meta,
+.definition-popover-destination {
+  align-items: center;
+  display: inline-flex;
+}
+
+.definition-popover-meta {
+  color: var(--muted);
+  gap: 7px;
+}
+
+.definition-popover-destination {
+  opacity: 0.72;
+}
+
+.definition-popover-result:hover .definition-popover-destination {
+  color: var(--text);
+  opacity: 1;
+}
+
+.definition-popover-result code {
+  color: var(--muted);
+  display: block;
+  font-family: var(--codiff-font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .codiff-header-toggle.codiff-header-toggle-static {
   cursor: default;
   grid-template-columns: minmax(0, 1fr);

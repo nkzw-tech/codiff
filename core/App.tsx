@@ -115,6 +115,7 @@ import type {
   CodiffMarkdownDocument,
   CodiffPreferences,
   CodiffUpdateStatus,
+  DefinitionCandidate,
   GitIdentity,
   HistoryEntry,
   OpenReviewSourceKind,
@@ -1730,9 +1731,13 @@ export default function App() {
     onCommentDraftChange: updateActiveReviewCommentDraft,
     onCreateComment: createComment,
     onDeleteComment: deleteComment,
+    onFindDefinitions: window.codiff.findDefinitions,
     onLoadImageContent: window.codiff.getDiffImageContent,
     onLoadSection: loadDiffSection,
     onLoadSectionContents: loadDiffSectionContents,
+    onOpenDefinition: (candidate: DefinitionCandidate) => {
+      void window.codiff.openFile(candidate.path, candidate.lineNumber).catch(() => {});
+    },
     onOpenFile: openFile,
     onRefreshMarkdown: refreshMarkdownFile,
     onSaveCommentEdit: updateComment,

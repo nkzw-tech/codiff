@@ -718,6 +718,35 @@ export type DiffSectionContentRequest = {
   source?: ReviewSource;
 };
 
+export type DefinitionSearchRequest = {
+  identifier: string;
+  kind: DiffSection['kind'];
+  lineNumber: number;
+  path: string;
+  side: 'additions' | 'deletions';
+  source: ReviewSource;
+};
+
+export type DefinitionCandidate = {
+  canOpenInEditor: boolean;
+  kind: string;
+  line: string;
+  lineNumber: number;
+  path: string;
+  side: 'additions' | 'deletions';
+};
+
+export type DefinitionSearchResult =
+  | {
+      candidates: ReadonlyArray<DefinitionCandidate>;
+      identifier: string;
+      status: 'ready';
+    }
+  | {
+      reason: string;
+      status: 'unavailable';
+    };
+
 export type DiffImageContentRequest = {
   kind: DiffSection['kind'];
   path: string;

@@ -5,7 +5,7 @@ const { dirname } = require('node:path');
 
 /**
  * @typedef {{args: Array<string>; command: string}} EditorCommand
- * @typedef {{repoPath?: string}} EditorCommandContext
+ * @typedef {{lineNumber?: number; repoPath?: string}} EditorCommandContext
  */
 
 /** @param {{getEditorCommand?: () => string; platform?: NodeJS.Platform; shell: import('electron').Shell}} options */
@@ -34,6 +34,7 @@ const createEditorOpener = ({
   const replaceEditorPlaceholders = (arg, absolutePath, context) =>
     arg
       .replaceAll('{file}', absolutePath)
+      .replaceAll('{line}', context.lineNumber ? String(context.lineNumber) : '')
       .replaceAll('{repo}', context.repoPath || dirname(absolutePath));
 
   /**
@@ -69,7 +70,7 @@ const createEditorOpener = ({
 
     for (const command of ['/opt/homebrew/bin/code', '/usr/local/bin/code', 'code']) {
       commands.push({
-        args: ['-g', absolutePath],
+        args: ['-g', context.lineNumber ? `${absolutePath}:${context.lineNumber}` : absolutePath],
         command,
       });
     }

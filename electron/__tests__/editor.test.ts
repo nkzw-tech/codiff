@@ -13,6 +13,7 @@ const { createEditorOpener } = require('../main/editor.cjs') as {
     getEditorCommands: (
       absolutePath: string,
       context?: {
+        lineNumber?: number;
         repoPath?: string;
       },
     ) => Array<{
@@ -91,6 +92,25 @@ test('expands the repo placeholder in configured editor commands', () => {
   ).toEqual({
     args: ['/Users/test/project', '/Users/test/project/src/file.ts'],
     command: 'subl',
+  });
+});
+
+test('opens definitions at their line in configured and built-in editors', () => {
+  const opener = createOpener({
+    getEditorCommand: () => 'cursor --goto "{file}:{line}"',
+  });
+
+  const commands = opener.getEditorCommands('/Users/test/project/src/file.ts', {
+    lineNumber: 42,
+    repoPath: '/Users/test/project',
+  });
+  expect(commands[0]).toEqual({
+    args: ['--goto', '/Users/test/project/src/file.ts:42'],
+    command: 'cursor',
+  });
+  expect(commands).toContainEqual({
+    args: ['-g', '/Users/test/project/src/file.ts:42'],
+    command: 'code',
   });
 });
 

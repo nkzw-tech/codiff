@@ -154,6 +154,11 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     currentVersion: '1.9.2',
     phase: 'idle' as const,
   })),
+  findDefinitions: vi.fn(async (request) => ({
+    candidates: [],
+    identifier: request.identifier,
+    status: 'ready' as const,
+  })),
   getAgentSkillStatus: vi.fn(async () => ({
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',

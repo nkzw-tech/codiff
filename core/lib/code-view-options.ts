@@ -163,6 +163,20 @@ export const codeViewUnsafeCSS = `
     cursor: progress;
   }
 
+  :host([data-codiff-definition-mode]) [data-codiff-identifier] {
+    cursor: pointer;
+    text-decoration-color: color-mix(in srgb, currentColor 38%, transparent);
+    text-decoration-line: underline;
+    text-decoration-style: dotted;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  :host([data-codiff-definition-mode]) [data-codiff-identifier]:hover {
+    text-decoration-color: currentColor;
+    text-decoration-style: solid;
+  }
+
   .codiff-search-mark {
     background: var(--diffs-find-highlight-bg, rgb(255 216 92 / 0.65));
     border-radius: 3px;

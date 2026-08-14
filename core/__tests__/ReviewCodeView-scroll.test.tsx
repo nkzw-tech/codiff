@@ -10,7 +10,12 @@ import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
 } from '../lib/review-identity.ts';
-import type { ChangedFile, PullRequestCodeQualityFinding, ReviewSource } from '../types.ts';
+import type {
+  ChangedFile,
+  DefinitionSearchResult,
+  PullRequestCodeQualityFinding,
+  ReviewSource,
+} from '../types.ts';
 import { createChangedFile, createChangedFileWithPatch } from './helpers/fixtures.ts';
 import { renderReact, setInputValue, waitFor } from './helpers/react.tsx';
 import {
@@ -1709,6 +1714,7 @@ type ReviewLineClickHandler = (
   line: {
     annotationSide: 'additions' | 'deletions';
     event: unknown;
+    lineElement?: HTMLElement;
     lineNumber: number;
   },
   context: { item: unknown },
@@ -1735,6 +1741,474 @@ const getReviewCodeViewHandlers = () => {
 };
 
 const nonInteractivePointerEvent = { composedPath: () => [] };
+
+test('modifier-clicking an identifier finds and opens its definition without commenting', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('Win32');
+  const onCreateComment = vi.fn();
+  const onFindDefinitions = vi.fn(async () => ({
+    candidates: [
+      {
+        canOpenInEditor: true,
+        kind: 'function',
+        line: 'export function formatGreeting() {}',
+        lineNumber: 1,
+        path: 'src/greeting.ts',
+        side: 'additions' as const,
+      },
+    ],
+    identifier: 'formatGreeting',
+    status: 'ready' as const,
+  }));
+  const onOpenDefinition = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/main.ts',
+    'diff --git a/src/main.ts b/src/main.ts\n@@ -1 +1 @@\n-old()\n+formatGreeting()\n',
+  );
+  const lineElement = document.createElement('div');
+  const token = document.createElement('span');
+  token.textContent = 'formatGreeting';
+  lineElement.append(token, '()');
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onCreateComment={onCreateComment}
+      onFindDefinitions={onFindDefinitions}
+      onOpenDefinition={onOpenDefinition}
+    />,
+  );
+  await using _platform = {
+    [Symbol.dispose]() {
+      platform.mockRestore();
+    },
+  };
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: {
+          clientX: 120,
+          clientY: 80,
+          composedPath: () => [],
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          target: token,
+        },
+        lineElement,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+
+  await waitFor(() => {
+    expect(document.querySelector('.definition-popover-result')).not.toBeNull();
+  });
+  expect(onFindDefinitions).toHaveBeenCalledWith({
+    identifier: 'formatGreeting',
+    kind: 'unstaged',
+    lineNumber: 1,
+    path: 'src/main.ts',
+    side: 'additions',
+    source: { type: 'working-tree' },
+  });
+  expect(onCreateComment).not.toHaveBeenCalled();
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>('.definition-popover-result')?.click();
+  });
+  expect(onOpenDefinition).toHaveBeenCalledWith(
+    expect.objectContaining({ lineNumber: 1, path: 'src/greeting.ts' }),
+  );
+});
+
+test('macOS Control-click keeps the context-menu gesture instead of finding a definition', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const onFindDefinitions = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/main.ts',
+    'diff --git a/src/main.ts b/src/main.ts\n@@ -1 +1 @@\n-old()\n+formatGreeting()\n',
+  );
+  const lineElement = document.createElement('div');
+  const token = document.createElement('span');
+  token.textContent = 'formatGreeting';
+  lineElement.append(token, '()');
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness files={[file]} onFindDefinitions={onFindDefinitions} />,
+  );
+  await using _platform = {
+    [Symbol.dispose]() {
+      platform.mockRestore();
+    },
+  };
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+  const preventDefault = vi.fn();
+  const stopPropagation = vi.fn();
+
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: {
+          clientX: 120,
+          clientY: 80,
+          composedPath: () => [],
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault,
+          stopPropagation,
+          target: token,
+        },
+        lineElement,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+
+  expect(onFindDefinitions).not.toHaveBeenCalled();
+  expect(preventDefault).not.toHaveBeenCalled();
+  expect(stopPropagation).not.toHaveBeenCalled();
+});
+
+test('definition results inside the rendered diff jump in Codiff instead of opening an editor', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const onFindDefinitions = vi.fn(async () => ({
+    candidates: [
+      {
+        canOpenInEditor: false,
+        kind: 'function',
+        line: 'function formatGreeting() {}',
+        lineNumber: 1,
+        path: 'src/main.ts',
+        side: 'additions' as const,
+      },
+    ],
+    identifier: 'formatGreeting',
+    status: 'ready' as const,
+  }));
+  const onOpenDefinition = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/main.ts',
+    'diff --git a/src/main.ts b/src/main.ts\n@@ -1 +1 @@\n-old()\n+formatGreeting()\n',
+  );
+  const lineElement = document.createElement('div');
+  const token = document.createElement('span');
+  token.textContent = 'formatGreeting';
+  lineElement.append(token, '()');
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onFindDefinitions={onFindDefinitions}
+      onOpenDefinition={onOpenDefinition}
+    />,
+  );
+  await using _platform = {
+    [Symbol.dispose]() {
+      platform.mockRestore();
+    },
+  };
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: {
+          clientX: 120,
+          clientY: 80,
+          composedPath: () => [],
+          ctrlKey: false,
+          metaKey: true,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          target: token,
+        },
+        lineElement,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+
+  await waitFor(() => {
+    expect(document.querySelector('.definition-popover-result')).not.toBeNull();
+  });
+  expect(document.querySelector('[aria-label="Jump within diff"]')).not.toBeNull();
+
+  await act(async () => {
+    document.querySelector<HTMLButtonElement>('.definition-popover-result')?.click();
+  });
+  expect(codeViewMock.scrollTo).toHaveBeenCalledWith({
+    align: 'center',
+    behavior: 'smooth-auto',
+    id: item.id,
+    lineNumber: 1,
+    offset: 11,
+    side: 'additions',
+    type: 'line',
+  });
+  expect(onOpenDefinition).not.toHaveBeenCalled();
+});
+
+test('historical definitions outside the diff do not open the current checkout', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const onFindDefinitions = vi.fn(async () => ({
+    candidates: [
+      {
+        canOpenInEditor: false,
+        kind: 'function',
+        line: 'function formatGreeting() {}',
+        lineNumber: 20,
+        path: 'src/greeting.ts',
+        side: 'additions' as const,
+      },
+    ],
+    identifier: 'formatGreeting',
+    status: 'ready' as const,
+  }));
+  const onOpenDefinition = vi.fn();
+  const file = createChangedFile('src/main.ts', {
+    kind: 'commit',
+    patch: 'diff --git a/src/main.ts b/src/main.ts\n@@ -1 +1 @@\n-old()\n+formatGreeting()\n',
+  });
+  const lineElement = document.createElement('div');
+  const token = document.createElement('span');
+  token.textContent = 'formatGreeting';
+  lineElement.append(token, '()');
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onFindDefinitions={onFindDefinitions}
+      onOpenDefinition={onOpenDefinition}
+      source={{ ref: 'abcdef0', type: 'commit' }}
+    />,
+  );
+  await using _platform = {
+    [Symbol.dispose]() {
+      platform.mockRestore();
+    },
+  };
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: {
+          clientX: 120,
+          clientY: 80,
+          composedPath: () => [],
+          ctrlKey: false,
+          metaKey: true,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          target: token,
+        },
+        lineElement,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+
+  await waitFor(() => {
+    expect(document.querySelector('.definition-popover-result')).not.toBeNull();
+  });
+  const result = document.querySelector<HTMLButtonElement>('.definition-popover-result');
+  expect(result?.disabled).toBe(true);
+  expect(
+    document.querySelector('[aria-label="Unavailable outside this historical diff"]'),
+  ).not.toBeNull();
+  await act(async () => result?.click());
+  expect(onOpenDefinition).not.toHaveBeenCalled();
+});
+
+test('definition search rejection becomes an unavailable result', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('Win32');
+  const onFindDefinitions = vi.fn(async () => {
+    throw new Error('IPC unavailable');
+  });
+  const file = createChangedFileWithPatch(
+    'src/main.ts',
+    'diff --git a/src/main.ts b/src/main.ts\n@@ -1 +1 @@\n-old()\n+formatGreeting()\n',
+  );
+  const lineElement = document.createElement('div');
+  const token = document.createElement('span');
+  token.textContent = 'formatGreeting';
+  lineElement.append(token, '()');
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onFindDefinitions={onFindDefinitions}
+      onOpenDefinition={() => {}}
+    />,
+  );
+  await using _platform = {
+    [Symbol.dispose]() {
+      platform.mockRestore();
+    },
+  };
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: {
+          clientX: 120,
+          clientY: 80,
+          composedPath: () => [],
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          target: token,
+        },
+        lineElement,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+
+  await waitFor(() => {
+    expect(document.querySelector('.definition-popover-message')?.textContent).toBe(
+      'Definition search is unavailable for this repository.',
+    );
+  });
+});
+
+test('definition result is invalidated when the review source changes', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('Win32');
+  let resolveSearch: ((result: DefinitionSearchResult) => void) | undefined;
+  const onFindDefinitions = vi.fn(
+    () =>
+      new Promise<DefinitionSearchResult>((resolve) => {
+        resolveSearch = resolve;
+      }),
+  );
+  const file = createChangedFileWithPatch(
+    'src/main.ts',
+    'diff --git a/src/main.ts b/src/main.ts\n@@ -1 +1 @@\n-old()\n+formatGreeting()\n',
+  );
+  const lineElement = document.createElement('div');
+  const token = document.createElement('span');
+  token.textContent = 'formatGreeting';
+  lineElement.append(token, '()');
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onFindDefinitions={onFindDefinitions}
+      onOpenDefinition={() => {}}
+    />,
+  );
+  await using _platform = {
+    [Symbol.dispose]() {
+      platform.mockRestore();
+    },
+  };
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: {
+          clientX: 120,
+          clientY: 80,
+          composedPath: () => [],
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          target: token,
+        },
+        lineElement,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+  expect(document.querySelector('.definition-popover')).not.toBeNull();
+
+  await view.rerender(
+    <ReviewCodeViewHarness
+      files={[createChangedFile('src/next.ts', { kind: 'commit' })]}
+      onFindDefinitions={onFindDefinitions}
+      onOpenDefinition={() => {}}
+      source={{ ref: 'abcdef0', type: 'commit' }}
+    />,
+  );
+  await act(async () => {
+    resolveSearch?.({ candidates: [], identifier: 'formatGreeting', status: 'ready' });
+  });
+  expect(document.querySelector('.definition-popover')).toBeNull();
+});
+
+test('modifier navigation follows file hosts reused by CodeView virtualization', async () => {
+  const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  const onFindDefinitions = vi.fn(async () => ({
+    candidates: [],
+    identifier: 'formatGreeting',
+    status: 'ready' as const,
+  }));
+  const file = createChangedFileWithPatch(
+    'src/main.ts',
+    'diff --git a/src/main.ts b/src/main.ts\n@@ -1 +1 @@\n-old()\n+formatGreeting()\n',
+  );
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness files={[file]} onFindDefinitions={onFindDefinitions} />,
+  );
+  await using _platform = {
+    [Symbol.dispose]() {
+      platform.mockRestore();
+    },
+  };
+  const { item } = getReviewCodeViewHandlers();
+  const onPostRender = codeViewMock.lastOptions?.onPostRender as
+    | ((
+        node: HTMLElement,
+        instance: unknown,
+        phase: 'update',
+        context: { item: typeof item },
+      ) => void)
+    | undefined;
+  const host = document.createElement('diffs-container');
+  const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
+  document.body.append(host);
+
+  await using _host = {
+    [Symbol.dispose]() {
+      host.remove();
+    },
+  };
+  const renderLine = (identifier: string) => {
+    const line = document.createElement('div');
+    line.dataset.line = '1';
+    line.textContent = `${identifier}();`;
+    root.replaceChildren(line);
+    onPostRender?.(host, {}, 'update', { item });
+  };
+
+  await act(async () => {
+    window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, metaKey: true }));
+    renderLine('firstFileSymbol');
+  });
+  await waitFor(() => {
+    expect(root.querySelector('[data-codiff-identifier]')?.textContent).toBe('firstFileSymbol');
+  });
+
+  await act(async () => renderLine('newlyVirtualizedFileSymbol'));
+  await waitFor(() => {
+    expect(root.querySelector('[data-codiff-identifier]')?.textContent).toBe(
+      'newlyVirtualizedFileSymbol',
+    );
+  });
+});
 
 test('line content clicks create review comments unless text is selected', async () => {
   const onCreateComment = vi.fn();
