@@ -106,9 +106,6 @@ type GitStateModule = {
     launchPath: string,
     request: DiffSectionContentRequest,
   ) => Promise<DiffSection>;
-  readRepositoryChangeSignature: (
-    launchPath: string,
-  ) => Promise<{ root: string; signature: string }>;
   readRepositoryState: (
     launchPath: string,
     source?: ReviewSource,
@@ -168,7 +165,6 @@ const {
   parseStatus,
   PENDING_REVIEW_COMMENT_ERROR,
   readDiffSectionContent,
-  readRepositoryChangeSignature,
   readRepositoryState,
   readWalkthroughRepositoryState,
   readWorkingTreeState,
@@ -177,6 +173,12 @@ const {
   submitPullRequestComment,
   validateRepositoryPath,
 } = require('../../electron/git-state.cjs') as GitStateModule;
+const { readRepositoryWatcherSnapshot: readRepositoryChangeSignature } =
+  require('../../electron/repository-watcher.cjs') as {
+    readRepositoryWatcherSnapshot: (
+      repoRoot: string,
+    ) => Promise<{ root: string; signature: string }>;
+  };
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
   const { stdout } = await execFileAsync('git', ['-C', repo, ...args], {
