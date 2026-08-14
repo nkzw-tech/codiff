@@ -153,6 +153,16 @@ const isEditableWorkingTreeSection = (
   file.sections.at(-1)?.id === section.id &&
   (section.kind === 'staged' || section.kind === 'unstaged');
 
+// The repository root carries platform separators while Git file paths always
+// use forward slashes, so join with the root's own separator style.
+const copyLineReference = (repositoryRoot: string, filePath: string, lineNumber: number) => {
+  const separator = repositoryRoot.includes('\\') ? '\\' : '/';
+  const root = repositoryRoot.endsWith(separator) ? repositoryRoot.slice(0, -1) : repositoryRoot;
+  void navigator.clipboard
+    .writeText(`${root}${separator}${filePath}:${lineNumber}`)
+    .catch(() => {});
+};
+
 function CopyFilePathButton({ path }: { path: string }) {
   const [copied, markCopied] = useCopiedState(1600);
 
@@ -2497,6 +2507,7 @@ export function ReviewCodeView({
   onUpdateSourceDescription,
   onUpdateSourceTitle,
   onUploadSourceDescriptionAsset,
+  repositoryRoot,
   reviewIdentityByPath,
   scrollTarget,
   searchQuery,
@@ -2557,6 +2568,7 @@ export function ReviewCodeView({
   onUpdateSourceDescription?: (body: string) => Promise<void> | void;
   onUpdateSourceTitle?: (title: string) => Promise<void> | void;
   onUploadSourceDescriptionAsset?: (file: File) => Promise<string> | string;
+  repositoryRoot?: string;
   reviewIdentityByPath?: ReadonlyMap<string, ReviewIdentity>;
   scrollTarget: ReviewScrollTarget | null;
   searchQuery: string;
@@ -3221,6 +3233,13 @@ export function ReviewCodeView({
             return;
           }
 
+          if (line.event.metaKey || line.event.ctrlKey) {
+            if (repositoryRoot != null) {
+              copyLineReference(repositoryRoot, meta.file.path, line.lineNumber);
+            }
+            return;
+          }
+
           const side = 'annotationSide' in line ? line.annotationSide : null;
           if (!side) {
             return;
@@ -3293,6 +3312,7 @@ export function ReviewCodeView({
       loadingSectionIds,
       onCreateComment,
       onLoadSection,
+      repositoryRoot,
       theme,
       wordWrap,
     ],

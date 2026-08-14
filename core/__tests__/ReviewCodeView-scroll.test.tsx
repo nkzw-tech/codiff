@@ -1820,3 +1820,69 @@ test('line content clicks create review comments unless text is selected', async
   });
   expect(onCreateComment).toHaveBeenCalledTimes(3);
 });
+
+test('mod-clicking a line copies its absolute path and line number', async () => {
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
+  const onCreateComment = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/click.ts',
+    'diff --git a/src/click.ts b/src/click.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onCreateComment={onCreateComment}
+      repositoryRoot="/home/reviewer/project"
+    />,
+  );
+
+  expect(view.container).not.toBeNull();
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: { composedPath: () => [], metaKey: true },
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+  expect(writeText).toHaveBeenCalledWith('/home/reviewer/project/src/click.ts:1');
+  expect(onCreateComment).not.toHaveBeenCalled();
+});
+
+test('mod-clicking a line without a repository root neither copies nor comments', async () => {
+  const writeText = vi.fn(async () => {});
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  });
+  const onCreateComment = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/click.ts',
+    'diff --git a/src/click.ts b/src/click.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+  await using view = await renderReact(
+    <ReviewCodeViewHarness files={[file]} onCreateComment={onCreateComment} />,
+  );
+
+  expect(view.container).not.toBeNull();
+  const { item, onLineClick } = getReviewCodeViewHandlers();
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: { composedPath: () => [], ctrlKey: true },
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+  expect(writeText).not.toHaveBeenCalled();
+  expect(onCreateComment).not.toHaveBeenCalled();
+});
