@@ -42,6 +42,8 @@ export type ChangedFile = {
 };
 
 export type GitSha = string & { readonly __gitSha: unique symbol };
+export type EvolutionUnitId = string & { readonly __evolutionUnitId: unique symbol };
+export type ReviewVersionId = string & { readonly __reviewVersionId: unique symbol };
 
 /** Sources that can be entered from the palette or native application menu. */
 export type OpenReviewSourceKind = 'branch' | 'commit' | 'pull-request';
@@ -97,6 +99,7 @@ export type Revision =
   | { aliases?: ReadonlyArray<RevisionLabel>; kind: 'working-copy'; label: RevisionLabel };
 
 export type DiffRange = { base: Revision; head: Revision };
+export type DiffComparison = { after: DiffRange; before: DiffRange };
 
 export type ReviewContextRequest = {
   baseSha: GitSha;
