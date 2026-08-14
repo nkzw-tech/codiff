@@ -1,6 +1,11 @@
 // @ts-check
 
-const { readRepositoryChangeSignature } = require('../repository-watcher.cjs');
+const {
+  createRepositoryWatcherSnapshot,
+  parseRepositoryWatcherStatus,
+  readRepositoryChangeSignature,
+  setRepositoryWatcherInitialSnapshot,
+} = require('../repository-watcher.cjs');
 const {
   createSection,
   createSummary,
@@ -12,6 +17,7 @@ const {
   getWhitespaceDiffArgs,
   git,
   MAX_UNTRACKED_INITIAL_ITEMS,
+  normalizeStatus,
   parseStatus,
   readFileStat,
   readGitImageFile,
@@ -32,6 +38,94 @@ const {
  */
 
 const diffGitHeaderPattern = /^diff --git (.+)$/;
+
+/** @param {string} record @param {number} count */
+const readPorcelainV2StatusPath = (record, count) => {
+  let index = 0;
+  for (let field = 0; field < count; field += 1) {
+    index = record.indexOf(' ', index);
+    if (index === -1) {
+      return '';
+    }
+    index += 1;
+  }
+  return record.slice(index);
+};
+
+/** @param {string} x @param {string} y @param {string} path @param {string} [oldPath] */
+const createPorcelainV2StatusItem = (x, y, path, oldPath) => {
+  const conflictCode = `${x}${y}`;
+  const conflicted = ['AA', 'AU', 'DD', 'DU', 'UA', 'UD', 'UU'].includes(conflictCode);
+  if (conflicted) {
+    return {
+      ...(oldPath ? { oldPath } : {}),
+      ...(conflictCode === 'DD'
+        ? { conflictStage: 1 }
+        : conflictCode === 'DU' || conflictCode === 'UA'
+          ? {}
+          : { conflictStage: 2 }),
+      path,
+      staged: false,
+      status: 'conflicted',
+      unstaged: true,
+      untracked: false,
+    };
+  }
+  const staged = x !== '.' && x !== ' ';
+  const unstaged = y !== '.' && y !== ' ';
+  return {
+    ...(oldPath ? { oldPath } : {}),
+    path,
+    staged,
+    status: normalizeStatus(staged ? x : y),
+    unstaged,
+    untracked: false,
+  };
+};
+
+/** @param {string} raw @returns {Array<StatusItem>} */
+const parsePorcelainV2Status = (raw) => {
+  const files = [];
+  const records = raw.split('\0').filter(Boolean);
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.startsWith('? ')) {
+      files.push({
+        path: record.slice(2),
+        staged: false,
+        status: 'untracked',
+        unstaged: true,
+        untracked: true,
+      });
+      continue;
+    }
+    if (record.startsWith('1 ')) {
+      files.push(
+        createPorcelainV2StatusItem(record[2], record[3], readPorcelainV2StatusPath(record, 8)),
+      );
+      continue;
+    }
+    if (record.startsWith('2 ')) {
+      files.push(
+        createPorcelainV2StatusItem(
+          record[2],
+          record[3],
+          readPorcelainV2StatusPath(record, 9),
+          records[++index],
+        ),
+      );
+      continue;
+    }
+    if (record.startsWith('u ')) {
+      files.push(
+        createPorcelainV2StatusItem(record[2], record[3], readPorcelainV2StatusPath(record, 10)),
+      );
+    }
+  }
+
+  return files;
+};
 
 /** @param {string} value */
 const unquoteGitPath = (value) => {
@@ -214,16 +308,24 @@ const listUntrackedItems = async (repoRoot) => {
 
 /**
  * @param {string} launchPath
- * @param {{eagerContents?: boolean; showWhitespace?: boolean}} [options]
+ * @param {{eagerContents?: boolean; repositoryRoot?: string; showWhitespace?: boolean}} [options]
  * @returns {Promise<RepositoryState>}
  */
 const readWorkingTreeState = async (launchPath, options = {}) => {
-  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-  const [trackedStatus, untrackedItems] = await Promise.all([
-    git(repoRoot, ['status', '--porcelain=v1', '-z', '-uno']),
+  const repoRoot =
+    options.repositoryRoot || (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const [watcherStatus, untrackedItems] = await Promise.all([
+    git(repoRoot, ['status', '--porcelain=v2', '--branch', '-z', '-uall']),
     listUntrackedItems(repoRoot),
   ]);
-  const status = [...parseStatus(trackedStatus), ...untrackedItems].sort(fileSort);
+  const initialWatcherSnapshot = createRepositoryWatcherSnapshot(
+    repoRoot,
+    parseRepositoryWatcherStatus(watcherStatus),
+  );
+  const status = [
+    ...parsePorcelainV2Status(watcherStatus).filter(({ untracked }) => !untracked),
+    ...untrackedItems,
+  ].sort(fileSort);
   const shouldUsePatchOnly = options.eagerContents === false;
   const [stagedPatches, unstagedPatches] = shouldUsePatchOnly
     ? await Promise.all([
@@ -281,15 +383,18 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
     });
   }
 
-  return {
-    files,
-    generatedAt: Date.now(),
-    launchPath,
-    root: repoRoot,
-    source: {
-      type: 'working-tree',
+  return setRepositoryWatcherInitialSnapshot(
+    {
+      files,
+      generatedAt: Date.now(),
+      launchPath,
+      root: repoRoot,
+      source: {
+        type: 'working-tree',
+      },
     },
-  };
+    initialWatcherSnapshot,
+  );
 };
 
 /** @param {string} repoRoot @param {string} path @returns {Promise<StatusItem>} */
@@ -404,6 +509,7 @@ const readGitIdentity = async (launchPath) => {
 };
 
 module.exports = {
+  parsePorcelainV2Status,
   readDiffSectionContent,
   readDiffImageContent,
   readGitIdentity,

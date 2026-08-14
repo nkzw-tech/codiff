@@ -23,7 +23,12 @@ const {
   readRangeSectionContent,
   readRangeState,
 } = require('./git-state/commit.cjs');
-const { parseRepositoryWatcherStatus } = require('./repository-watcher.cjs');
+const {
+  createRepositoryWatcherSnapshot,
+  parseRepositoryWatcherStatus,
+  setRepositoryWatcherInitialSnapshot,
+  transferRepositoryWatcherInitialSnapshot,
+} = require('./repository-watcher.cjs');
 const {
   PENDING_REVIEW_COMMENT_ERROR,
   collectResolvedReviewCommentIds,
@@ -80,7 +85,7 @@ const { annotateGeneratedFiles } = require('./generated-files.cjs');
  * @typedef {import('../core/types.ts').ReviewSource} ReviewSource
  */
 
-/** @param {string} launchPath @param {ReviewSource} [source] @param {{showWhitespace?: boolean}} [options] @returns {Promise<RepositoryState>} */
+/** @param {string} launchPath @param {ReviewSource} [source] @param {{repositoryRoot?: string; showWhitespace?: boolean}} [options] @returns {Promise<RepositoryState>} */
 const readRepositoryState = async (launchPath, source = { type: 'working-tree' }, options = {}) => {
   const state =
     source.type === 'pull-request'
@@ -100,6 +105,7 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
                 })
               : await readWorkingTreeState(launchPath, {
                   eagerContents: false,
+                  repositoryRoot: options.repositoryRoot,
                   showWhitespace: options.showWhitespace,
                 });
   const comparisonState =
@@ -113,7 +119,10 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
       : gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD']),
     comparisonState ? state : annotateGeneratedFiles(state),
   ]);
-  return { ...annotatedState, branch: branch.trim() || null };
+  return transferRepositoryWatcherInitialSnapshot(state, {
+    ...annotatedState,
+    branch: branch.trim() || null,
+  });
 };
 
 /**
@@ -152,16 +161,19 @@ const readWalkthroughRepositoryState = async (launchPath, source, options = {}) 
     return { ...state, branch };
   }
 
-  return {
-    branch,
-    files: [],
-    generatedAt: Date.now(),
-    launchPath,
-    root: repoRoot,
-    source: {
-      type: 'working-tree',
+  return setRepositoryWatcherInitialSnapshot(
+    {
+      branch,
+      files: [],
+      generatedAt: Date.now(),
+      launchPath,
+      root: repoRoot,
+      source: {
+        type: 'working-tree',
+      },
     },
-  };
+    createRepositoryWatcherSnapshot(repoRoot, status),
+  );
 };
 
 /** @param {Extract<ReviewSource, {type: 'pull-request'}>} source */

@@ -9,6 +9,19 @@ const HIDDEN_POLL_INTERVAL = 30_000;
 const SELF_WRITE_CHECK_DELAY = 250;
 const VISIBLE_POLL_INTERVAL = 10_000;
 
+/**
+ * @typedef {{
+ *   head: string;
+ *   pathSignatures: Record<string, string>;
+ *   pathVersions: Record<string, string>;
+ *   root: string;
+ *   signature: string;
+ * }} RepositoryWatcherSnapshot
+ */
+
+/** @type {WeakMap<object, Promise<RepositoryWatcherSnapshot>>} */
+const initialRepositoryWatcherSnapshots = new WeakMap();
+
 /** @param {string} path @param {string} [pathSeparator] */
 const normalizeRepositoryWatcherPath = (path, pathSeparator = sep) =>
   pathSeparator === '\\' ? path.replaceAll('\\', '/') : path;
@@ -105,43 +118,39 @@ const readRepositoryWatcherPathState = async (repoRoot, path, exact) => {
 };
 
 /**
- * Read a repository watcher snapshot with one Git process. `repoRoot` must
- * already be the repository root.
+ * Build a repository watcher snapshot from a parsed porcelain-v2 status.
+ * `repoRoot` must already be the repository root.
  *
  * @param {string} repoRoot
+ * @param {{head: string; paths: Iterable<string>}} status
  * @param {Iterable<string>} [exactPaths]
  * @param {Iterable<string>} [knownDirtyPaths]
+ * @returns {Promise<RepositoryWatcherSnapshot>}
  */
-const readRepositoryWatcherSnapshot = async (repoRoot, exactPaths = [], knownDirtyPaths = []) => {
+const createRepositoryWatcherSnapshot = async (
+  repoRoot,
+  status,
+  exactPaths = [],
+  knownDirtyPaths = [],
+) => {
   const knownDirtyPathSet = new Set(knownDirtyPaths);
-  const statusArgs = ['status', '--porcelain=v2', '--branch', '-z', '-uall'];
-  // Git status hashes modified tracked files. Known dirty paths are monitored
-  // through metadata instead, while this command discovers all new changes.
-  if (knownDirtyPathSet.size > 0) {
-    statusArgs.push(
-      '--',
-      '.',
-      ...[...knownDirtyPathSet].map((path) => `:(exclude,literal)${path}`),
-    );
-  }
-  const status = parseRepositoryWatcherStatus(await git(repoRoot, statusArgs));
   const normalizedExactPaths = new Set(
     [...exactPaths].map((path) => normalizeRepositoryWatcherPath(path)),
   );
   const statusPaths = new Set([...status.paths, ...knownDirtyPathSet]);
   const paths = new Set([...statusPaths, ...normalizedExactPaths]);
   const states = await Promise.all(
-    [...paths].map(async (path) => [
+    [...paths].map(async (path) => ({
       path,
-      await readRepositoryWatcherPathState(repoRoot, path, normalizedExactPaths.has(path)),
-    ]),
+      state: await readRepositoryWatcherPathState(repoRoot, path, normalizedExactPaths.has(path)),
+    })),
   );
   /** @type {Record<string, string>} */
   const pathSignatures = {};
   /** @type {Record<string, string>} */
   const pathVersions = {};
 
-  for (const [path, state] of states) {
+  for (const { path, state } of states) {
     if (statusPaths.has(path)) {
       pathSignatures[path] = state.metadata;
     }
@@ -162,6 +171,66 @@ const readRepositoryWatcherSnapshot = async (repoRoot, exactPaths = [], knownDir
       [status.head, ...sortedSignatures.map(([, signature]) => signature)].join('\0'),
     ),
   };
+};
+
+/**
+ * Read a repository watcher snapshot with one Git process. `repoRoot` must
+ * already be the repository root.
+ *
+ * @param {string} repoRoot
+ * @param {Iterable<string>} [exactPaths]
+ * @param {Iterable<string>} [knownDirtyPaths]
+ * @returns {Promise<RepositoryWatcherSnapshot>}
+ */
+const readRepositoryWatcherSnapshot = async (repoRoot, exactPaths = [], knownDirtyPaths = []) => {
+  const knownDirtyPathSet = new Set(knownDirtyPaths);
+  const statusArgs = ['status', '--porcelain=v2', '--branch', '-z', '-uall'];
+  // Git status hashes modified tracked files. Known dirty paths are monitored
+  // through metadata instead, while this command discovers all new changes.
+  if (knownDirtyPathSet.size > 0) {
+    statusArgs.push(
+      '--',
+      '.',
+      ...[...knownDirtyPathSet].map((path) => `:(exclude,literal)${path}`),
+    );
+  }
+  return createRepositoryWatcherSnapshot(
+    repoRoot,
+    parseRepositoryWatcherStatus(await git(repoRoot, statusArgs)),
+    exactPaths,
+    knownDirtyPathSet,
+  );
+};
+
+/**
+ * Keep the startup snapshot out of the serialized repository state while it
+ * moves through state composition. Attach a rejection handler immediately so
+ * callers that do not start a watcher do not create an unhandled rejection.
+ *
+ * @template {object} State
+ * @param {State} state
+ * @param {Promise<RepositoryWatcherSnapshot> | RepositoryWatcherSnapshot} snapshot
+ * @returns {State}
+ */
+const setRepositoryWatcherInitialSnapshot = (state, snapshot) => {
+  const promise = Promise.resolve(snapshot);
+  promise.catch(() => {});
+  initialRepositoryWatcherSnapshots.set(state, promise);
+  return state;
+};
+
+/** @param {object} state */
+const getRepositoryWatcherInitialSnapshot = (state) => initialRepositoryWatcherSnapshots.get(state);
+
+/**
+ * @template {object} State
+ * @param {object} previousState
+ * @param {State} nextState
+ * @returns {State}
+ */
+const transferRepositoryWatcherInitialSnapshot = (previousState, nextState) => {
+  const snapshot = getRepositoryWatcherInitialSnapshot(previousState);
+  return snapshot ? setRepositoryWatcherInitialSnapshot(nextState, snapshot) : nextState;
 };
 
 /** @param {string} launchPath @param {Iterable<string>} [exactPaths] */
@@ -216,7 +285,7 @@ const getRepositoryWatcherPollInterval = (states) => {
 /**
  * @param {{
  *   clearTimeoutImpl?: typeof clearTimeout;
- *   readSnapshot: (root: string, exactPaths: Iterable<string>, knownDirtyPaths: Iterable<string>) => Promise<{head: string; pathSignatures: Record<string, string>; pathVersions?: Record<string, string>; root: string; signature: string}>;
+ *   readSnapshot: (root: string, exactPaths: Iterable<string>, knownDirtyPaths: Iterable<string>) => Promise<RepositoryWatcherSnapshot>;
  *   setTimeoutImpl?: typeof setTimeout;
  * }} options
  */
@@ -228,12 +297,14 @@ const createRepositoryWatcherCoordinator = ({
   /**
    * @typedef {{
    *   checking: boolean;
+   *   initialSnapshotFresh: boolean;
    *   pendingSelfWrites: Map<string, {completed: boolean; generation: number; ownerId: number; version?: string}>;
+   *   initialSnapshot?: Promise<RepositoryWatcherSnapshot>;
    *   recheckRequested: boolean;
    *   resetRequested: Set<number>;
    *   root: string;
-   *   snapshot?: Awaited<ReturnType<typeof readSnapshot>>;
-   *   subscribers: Map<number, {changed: boolean; getState: () => {focused: boolean; visible: boolean}; notify: (root: string) => void; snapshot?: Awaited<ReturnType<typeof readSnapshot>>}>;
+   *   snapshot?: RepositoryWatcherSnapshot;
+   *   subscribers: Map<number, {changed: boolean; getState: () => {focused: boolean; visible: boolean}; notify: (root: string) => void; snapshot?: RepositoryWatcherSnapshot}>;
    *   timer?: ReturnType<typeof setTimeout>;
    * }} RepositoryWatcher
    */
@@ -283,6 +354,42 @@ const createRepositoryWatcherCoordinator = ({
     }
   };
 
+  /** @param {RepositoryWatcher} watcher */
+  const adoptInitialSnapshot = async (watcher) => {
+    const initialSnapshot = watcher.initialSnapshot;
+    if (!initialSnapshot) {
+      return false;
+    }
+
+    try {
+      const snapshot = await initialSnapshot;
+      if (
+        watchers.get(watcher.root) !== watcher ||
+        watcher.subscribers.size === 0 ||
+        watcher.snapshot != null ||
+        snapshot.root !== watcher.root
+      ) {
+        return watcher.snapshot != null;
+      }
+
+      watcher.snapshot = snapshot;
+      watcher.initialSnapshotFresh = true;
+      for (const subscriber of watcher.subscribers.values()) {
+        if (subscriber.snapshot == null) {
+          subscriber.changed = false;
+          subscriber.snapshot = snapshot;
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (watcher.initialSnapshot === initialSnapshot) {
+        watcher.initialSnapshot = undefined;
+      }
+    }
+  };
+
   /**
    * @param {RepositoryWatcher} watcher
    * @param {Iterable<number>} [resetIds]
@@ -292,6 +399,11 @@ const createRepositoryWatcherCoordinator = ({
       return;
     }
     clearTimer(watcher);
+    const adoptedInitialSnapshot =
+      watcher.snapshot == null && (await adoptInitialSnapshot(watcher));
+    if (watchers.get(watcher.root) !== watcher || watcher.subscribers.size === 0) {
+      return;
+    }
     if (watcher.checking) {
       watcher.recheckRequested = true;
       for (const id of resetIds) {
@@ -301,7 +413,11 @@ const createRepositoryWatcherCoordinator = ({
     }
 
     watcher.checking = true;
-    const requestedResetIds = new Set([...watcher.resetRequested, ...resetIds]);
+    watcher.initialSnapshotFresh = false;
+    const requestedResetIds = new Set([
+      ...watcher.resetRequested,
+      ...(adoptedInitialSnapshot ? [] : resetIds),
+    ]);
     watcher.resetRequested.clear();
     const pendingSelfWrites = new Map(watcher.pendingSelfWrites);
     try {
@@ -411,6 +527,7 @@ const createRepositoryWatcherCoordinator = ({
      * @param {{
      *   getState: () => {focused: boolean; visible: boolean};
      *   id: number;
+     *   initialSnapshot?: Promise<RepositoryWatcherSnapshot> | RepositoryWatcherSnapshot;
      *   notify: (root: string) => void;
      *   root: string;
      * }} subscriber
@@ -425,6 +542,7 @@ const createRepositoryWatcherCoordinator = ({
       if (!watcher) {
         watcher = {
           checking: false,
+          initialSnapshotFresh: false,
           pendingSelfWrites: new Map(),
           recheckRequested: false,
           resetRequested: new Set(),
@@ -432,6 +550,13 @@ const createRepositoryWatcherCoordinator = ({
           subscribers: new Map(),
         };
         watchers.set(subscriber.root, watcher);
+      }
+      if (
+        watcher.snapshot == null &&
+        watcher.initialSnapshot == null &&
+        subscriber.initialSnapshot
+      ) {
+        watcher.initialSnapshot = Promise.resolve(subscriber.initialSnapshot);
       }
       watcher.subscribers.set(subscriber.id, {
         changed: false,
@@ -506,7 +631,11 @@ const createRepositoryWatcherCoordinator = ({
       const root = subscriberRoots.get(id);
       const watcher = root ? watchers.get(root) : undefined;
       if (watcher?.subscribers.get(id)?.changed === false) {
-        schedule(watcher, 0);
+        if (watcher.initialSnapshotFresh) {
+          schedulePoll(watcher);
+        } else {
+          schedule(watcher, 0);
+        }
       }
     },
 
@@ -540,11 +669,15 @@ const createRepositoryWatcherCoordinator = ({
 };
 
 module.exports = {
+  createRepositoryWatcherSnapshot,
   createRepositoryWatcherCoordinator,
+  getRepositoryWatcherInitialSnapshot,
   getRepositoryWatcherPollInterval,
   normalizeRepositoryWatcherPath,
   parseRepositoryWatcherStatus,
   readRepositoryChangeSignature,
   readRepositoryWatcherSnapshot,
   repositoryWatcherSnapshotsMatchExpectedWrites,
+  setRepositoryWatcherInitialSnapshot,
+  transferRepositoryWatcherInitialSnapshot,
 };
