@@ -31,11 +31,19 @@ export const useNarrativeNavigation = (
   );
   const [mode, setMode] = useState<NarrativeViewMode>('stop');
   const [index, setIndex] = useState(0);
-  const [scrollTarget, setScrollTarget] = useState<{ index: number; nonce: number }>({
+  // One shared nonce sequence covers both stop and support scroll requests, so
+  // a scroll command is identified by a single monotonically increasing number
+  // and a mode change derived from scrolling can never resurface an
+  // already-handled request as a new one.
+  const [scrollTarget, setScrollTarget] = useState<{
+    index: number;
+    kind: 'stop' | 'support';
+    nonce: number;
+  }>({
     index: 0,
+    kind: 'stop',
     nonce: 0,
   });
-  const [supportScrollRequest, setSupportScrollRequest] = useState(0);
   const [supportVisited, setSupportVisited] = useState(false);
   const [visited, setVisited] = useState<ReadonlySet<string>>(() => {
     const stopId = firstStopId(walkthrough);
@@ -85,8 +93,7 @@ export const useNarrativeNavigation = (
     if (mode !== 'commit') {
       setMode('stop');
       setIndex(0);
-      setScrollTarget({ index: 0, nonce: 0 });
-      setSupportScrollRequest(0);
+      setScrollTarget({ index: 0, kind: 'stop', nonce: 0 });
       setSupportVisited(false);
       const stopId = firstStopId(walkthrough);
       setVisited(new Set(stopId ? [stopId] : []));
@@ -163,7 +170,7 @@ export const useNarrativeNavigation = (
       markVisited(walkthroughView.sequence[clamped]?.id);
       pendingStopScrollRef.current = { index: clamped, walkthrough };
       pendingSupportScrollRef.current = null;
-      setScrollTarget((current) => ({ index: clamped, nonce: current.nonce + 1 }));
+      setScrollTarget((current) => ({ index: clamped, kind: 'stop', nonce: current.nonce + 1 }));
     },
     [walkthrough, walkthroughView, markVisited],
   );
@@ -217,16 +224,25 @@ export const useNarrativeNavigation = (
     }
     setMode('support');
     pendingSupportScrollRef.current = { walkthrough };
-    setSupportScrollRequest((current) => current + 1);
+    setScrollTarget((current) => ({ ...current, kind: 'support', nonce: current.nonce + 1 }));
     setSupportVisited(true);
   }, [walkthrough, walkthroughView, leaveStopMode]);
 
+  // Scrolling across a support block while a clicked stop is still being
+  // scrolled to must not hijack the flight into support mode; the lock is
+  // released when the target stop is reached or by direct user scroll input.
   const syncSupportFromScroll = useCallback(() => {
+    const pendingStop = pendingStopScrollRef.current;
+    if (pendingStop) {
+      if (pendingStop.walkthrough === walkthrough) {
+        return;
+      }
+      pendingStopScrollRef.current = null;
+    }
     pendingSupportScrollRef.current = null;
-    pendingStopScrollRef.current = null;
     setMode('support');
     setSupportVisited(true);
-  }, []);
+  }, [walkthrough]);
 
   const enterCommit = useCallback(() => {
     leaveStopMode();
@@ -275,7 +291,6 @@ export const useNarrativeNavigation = (
     scrollTarget,
     setCommitBody,
     setCommitSubject,
-    supportScrollRequest,
     supportVisited,
     syncIndexFromScroll,
     syncSupportFromScroll,

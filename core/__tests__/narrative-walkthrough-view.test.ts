@@ -222,18 +222,14 @@ test('walkthrough scrolling skips the initial stop but keeps explicit navigation
     getWalkthroughBlockScrollTarget({
       activeBlockId: 'walkthrough:first',
       firstSupportBlockId: null,
-      mode: 'stop',
-      stopScrollRequest: 0,
-      supportScrollRequest: 0,
+      scrollTarget: { index: 0, kind: 'stop', nonce: 0 },
     }),
   ).toBeNull();
   expect(
     getWalkthroughBlockScrollTarget({
       activeBlockId: 'walkthrough:first',
       firstSupportBlockId: null,
-      mode: 'stop',
-      stopScrollRequest: 1,
-      supportScrollRequest: 0,
+      scrollTarget: { index: 0, kind: 'stop', nonce: 1 },
     }),
   ).toEqual({
     behavior: 'smooth',
@@ -244,14 +240,38 @@ test('walkthrough scrolling skips the initial stop but keeps explicit navigation
     getWalkthroughBlockScrollTarget({
       activeBlockId: 'walkthrough:first',
       firstSupportBlockId: 'walkthrough:support',
-      mode: 'support',
-      stopScrollRequest: 0,
-      supportScrollRequest: 1,
+      scrollTarget: { index: 0, kind: 'support', nonce: 2 },
     }),
   ).toEqual({
     behavior: 'smooth',
     blockId: 'walkthrough:support',
-    request: 1,
+    request: 2,
+  });
+});
+
+test('walkthrough scroll targets track explicit navigation, not scroll-derived mode', () => {
+  // A stop was clicked (nonce 3); scrolling into the support region flips the
+  // mode but must not surface a support target with a fresh request.
+  const stopTarget = getWalkthroughBlockScrollTarget({
+    activeBlockId: 'walkthrough:first',
+    firstSupportBlockId: 'walkthrough:support',
+    scrollTarget: { index: 0, kind: 'stop', nonce: 3 },
+  });
+  expect(stopTarget).toEqual({
+    behavior: 'smooth',
+    blockId: 'walkthrough:first',
+    request: 3,
+  });
+  expect(
+    getWalkthroughBlockScrollTarget({
+      activeBlockId: null,
+      firstSupportBlockId: 'walkthrough:support',
+      scrollTarget: { index: 0, kind: 'support', nonce: 4 },
+    }),
+  ).toEqual({
+    behavior: 'smooth',
+    blockId: 'walkthrough:support',
+    request: 4,
   });
 });
 

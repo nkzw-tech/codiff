@@ -2743,6 +2743,7 @@ export function ReviewCodeView({
     itemMetadata,
     items,
     searchTargetsByBaseItemId,
+    selectedHeaderItemIds,
   } = useMemo(() => {
     const nextItems: Array<CodeViewItem<ReviewAnnotationMetadata>> = [];
     const nextFirstItemByBlockId = new Map<string, string>();
@@ -2750,6 +2751,7 @@ export function ReviewCodeView({
     const nextItemBlockId = new Map<string, string>();
     const nextItemMetadata = new Map<string, CodeViewItemMetadata>();
     const nextSearchTargetsByBaseItemId = new Map<string, Array<RenderedSearchTarget>>();
+    const nextSelectedHeaderItemIds = new Set<string>();
     const fontLayoutKey = `line-height:${diffLineHeight}`;
 
     for (const block of reviewBlocks) {
@@ -2757,6 +2759,9 @@ export function ReviewCodeView({
         const headerId = getBlockHeaderItemId(block);
         nextFirstItemByBlockId.set(block.id, nextFirstItemByBlockId.get(block.id) ?? headerId);
         nextItemBlockId.set(headerId, block.id);
+        if ((block.headerSelected ?? block.selected) === true) {
+          nextSelectedHeaderItemIds.add(headerId);
+        }
         nextItems.push({
           annotations: [
             {
@@ -2776,11 +2781,11 @@ export function ReviewCodeView({
           },
           id: headerId,
           type: 'file',
-          version: getItemVersion(
-            `${block.id}:walkthrough-header:${
-              (block.headerSelected ?? block.selected) === true ? 'selected' : 'idle'
-            }`,
-          ),
+          // Selection stays out of the version: a scroll-driven current-stop
+          // change must not re-measure the header item, or the viewer's scroll
+          // anchoring yanks the scroll position at every stop boundary. The
+          // accent is applied through `codiff-selected-item` in onPostRender.
+          version: getItemVersion(`${block.id}:walkthrough-header`),
         });
       }
 
@@ -3000,6 +3005,7 @@ export function ReviewCodeView({
       itemMetadata: nextItemMetadata,
       items: nextItems,
       searchTargetsByBaseItemId: nextSearchTargetsByBaseItemId,
+      selectedHeaderItemIds: nextSelectedHeaderItemIds,
     };
   }, [
     collapsed,
@@ -3359,7 +3365,10 @@ export function ReviewCodeView({
           const metadata = itemMetadata.get(context.item.id);
           const isWalkthroughHeaderItem = context.item.id.endsWith(':walkthrough-header');
           node.classList.toggle('codiff-walkthrough-header-item', isWalkthroughHeaderItem);
-          node.classList.toggle('codiff-selected-item', metadata?.isSelected === true);
+          node.classList.toggle(
+            'codiff-selected-item',
+            metadata?.isSelected === true || selectedHeaderItemIds.has(context.item.id),
+          );
           node.classList.toggle(
             'codiff-markdown-preview-item',
             metadata?.isMarkdownPreview === true,
@@ -3407,6 +3416,7 @@ export function ReviewCodeView({
       onCreateComment,
       onFindDefinitions,
       onLoadSection,
+      selectedHeaderItemIds,
       source,
       sourceKey,
       theme,
