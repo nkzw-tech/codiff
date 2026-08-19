@@ -221,6 +221,7 @@ show_help() {
   printf '  %-32s%s%s%s\n' "codiff pr 75" "$gray" "Review pull request #75 (alternate syntax)." "$reset"
   printf '  %-32s%s%s%s\n' "codiff pr owner:feature" "$gray" "Review the open pull request for a branch." "$reset"
   printf '  %-32s%s%s%s\n' "codiff mr 75" "$gray" "Review GitLab merge request !75." "$reset"
+  printf '  %-32s%s%s%s\n' "codiff ado 75" "$gray" "Review Azure DevOps pull request #75." "$reset"
   printf '  %-32s%s%s%s\n' "codiff --plan plan.md" "$gray" "Edit a plan and wait for handoff." "$reset"
   printf '  %-32s%s%s%s\n' "codiff --plan plan.md --share" "$gray" "Share a Markdown plan." "$reset"
   printf '  %-32s%s%s%s\n' "codiff -w" "$gray" "Walk through local changes, or HEAD when clean." "$reset"
@@ -323,7 +324,8 @@ is_explicit_path_arg() {
 # Matches review links as pasted from a browser: an optional scheme, an optional `/-/` separator,
 # and any trailing tab segment, query or anchor. Electron canonicalizes the link it receives.
 is_review_url_arg() {
-  printf '%s' "$1" | grep -Eq '^(https?://[^/]+|[^/[:space:]:@]+\.[^/[:space:]:@]+(:[0-9]+)?)/(.+/)?[^/]+/(-/)?(merge_requests|pull)/[1-9][0-9]*([/?#].*)?$'
+  printf '%s' "$1" | grep -Eq '^(https?://[^/]+|[^/[:space:]:@]+\.[^/[:space:]:@]+(:[0-9]+)?)/(.+/)?[^/]+/(-/)?(merge_requests|pull)/[1-9][0-9]*([/?#].*)?$' ||
+    printf '%s' "$1" | grep -Eqi '^(https?://[^/]+|[^/[:space:]:@]+\.[^/[:space:]:@]+(:[0-9]+)?)/.+/_git/[^/]+/pullrequests?/[1-9][0-9]*([/?#].*)?$'
 }
 
 is_git_branch_ref() {
@@ -531,6 +533,9 @@ for arg in "$@"; do
         expect_pull_request_value=1
       elif [ -z "$pull_request_source" ] && printf '%s' "$arg" | grep -Eiq '^(mr|merge-request)$'; then
         pull_request_provider="mr"
+        expect_pull_request_value=1
+      elif [ -z "$pull_request_source" ] && printf '%s' "$arg" | grep -Eiq '^(ado|azdo|azure|azure-devops)$'; then
+        pull_request_provider="ado"
         expect_pull_request_value=1
       elif [ -z "$pull_request_source" ] && printf '%s' "$arg" | grep -Eq '^#[1-9][0-9]*$'; then
         pull_request_source="$arg"

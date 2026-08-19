@@ -165,7 +165,7 @@ export type ReviewSource =
       number?: number;
       owner?: string;
       projectPath?: string;
-      provider?: 'github' | 'gitlab';
+      provider?: 'github' | 'gitlab' | 'azure-devops';
       repo?: string;
       reviewers?: ReadonlyArray<PullRequestReviewer>;
       reviewStatus?: PullRequestReviewStatus;

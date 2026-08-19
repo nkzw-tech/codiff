@@ -123,7 +123,9 @@ export const getSourceLabel = (source: ReviewSource) =>
               ? `${source.provider === 'gitlab' ? 'MR' : 'PR'} #${source.number}`
               : source.provider === 'gitlab'
                 ? 'Merge request'
-                : 'Pull request'
+                : source.provider === 'azure-devops'
+                  ? 'Azure DevOps pull request'
+                  : 'Pull request'
             : 'Uncommitted';
 
 export const getHistorySource = (source: ReviewSource): ReviewSource | undefined =>

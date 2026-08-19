@@ -145,6 +145,15 @@ test('parseArguments canonicalizes review URLs copied from a review tab', () => 
       pullRequestUrl: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23',
     });
   }
+
+  for (const value of [
+    'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492?_a=files',
+    'dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullRequest/492',
+  ]) {
+    expect(parseArguments([value])).toMatchObject({
+      pullRequestUrl: 'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492',
+    });
+  }
 });
 
 test('parseArguments treats plain branch refs as branch refs', async () => {
@@ -410,6 +419,27 @@ test('parseArguments treats GitLab MR marker values as review sources', () => {
   });
 });
 
+test('parseArguments treats Azure DevOps PR marker values as review sources', () => {
+  expect(parseArguments(['ado', '42'])).toMatchObject({
+    pullRequestNumber: 42,
+    pullRequestProvider: 'azure-devops',
+  });
+  expect(parseArguments(['azdo', '#42'])).toMatchObject({
+    pullRequestNumber: 42,
+    pullRequestProvider: 'azure-devops',
+  });
+});
+
+test('parseArguments accepts Azure DevOps pull request URLs', () => {
+  expect(
+    parseArguments([
+      'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492?_a=files',
+    ]),
+  ).toMatchObject({
+    pullRequestUrl: 'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492',
+  });
+});
+
 test('parseArguments accepts nested GitLab merge request URLs', () => {
   expect(
     parseArguments(['https://gitlab.example.com/group/subgroup/project/-/merge_requests/23']),
@@ -445,6 +475,44 @@ test('resolvePullRequestUrl builds GitLab MR URLs from an arbitrary GitLab remot
 
   expect(resolvePullRequestUrl(repositoryPath, 23, 'gitlab')).toBe(
     'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23',
+  );
+});
+
+test('resolvePullRequestUrl builds Azure DevOps PR URLs from SSH remotes', async () => {
+  await using directory = await createTemporaryDirectory('codiff-cli-');
+  const repositoryPath = directory.path;
+
+  await git(repositoryPath, ['init']);
+  await git(repositoryPath, [
+    'remote',
+    'add',
+    'origin',
+    'git@ssh.dev.azure.com:v3/mpc-tech-hub/MPCM/Dashboard',
+  ]);
+
+  expect(resolvePullRequestUrl(repositoryPath, 492, 'azure-devops')).toBe(
+    'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492',
+  );
+  expect(resolvePullRequestUrl(repositoryPath, 492, 'github')).toBe(
+    'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492',
+  );
+});
+
+test('resolvePullRequestUrl prefers GitHub remotes when both GitHub and Azure exist', async () => {
+  await using directory = await createTemporaryDirectory('codiff-cli-');
+  const repositoryPath = directory.path;
+
+  await git(repositoryPath, ['init']);
+  await git(repositoryPath, [
+    'remote',
+    'add',
+    'azure',
+    'git@ssh.dev.azure.com:v3/mpc-tech-hub/MPCM/Dashboard',
+  ]);
+  await git(repositoryPath, ['remote', 'add', 'origin', 'git@github.com:nkzw-tech/codiff.git']);
+
+  expect(resolvePullRequestUrl(repositoryPath, 75, 'github')).toBe(
+    'https://github.com/nkzw-tech/codiff/pull/75',
   );
 });
 
@@ -573,6 +641,23 @@ test('packaged terminal helper forwards GitLab MR markers to Electron', async ()
   ]);
 });
 
+test('packaged terminal helper forwards Azure DevOps PR markers to Electron', async () => {
+  await using logger = await createFakeOpenLogger();
+
+  await execFileAsync(resolve('bin/codiff-app'), ['ado', '492'], {
+    env: logger.env,
+  });
+
+  expect(await logger.readArgs()).toEqual([
+    '-n',
+    resolve('bin/../../../..'),
+    '--args',
+    'ado',
+    '492',
+    process.cwd(),
+  ]);
+});
+
 test('packaged terminal helper forwards review URLs copied from a review tab', async () => {
   for (const value of [
     'https://github.com/nkzw-tech/codiff/pull/1728/changes#r4821',
@@ -581,6 +666,7 @@ test('packaged terminal helper forwards review URLs copied from a review tab', a
     'github.com/nkzw-tech/codiff/pull/1728',
     'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23/diffs#note_991',
     'https://gitlab.example.com/group/subgroup/project/merge_requests/23',
+    'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492?_a=files',
   ]) {
     await using logger = await createFakeOpenLogger();
 
@@ -1395,6 +1481,7 @@ test('formatHelpText includes version and all flags', () => {
   expect(text).toContain('codiff --share');
   expect(text).toContain('codiff --share HEAD');
   expect(text).toContain('codiff pr owner:feature');
+  expect(text).toContain('codiff ado 75');
 });
 
 test('formatHelpText styles titles and descriptions', () => {

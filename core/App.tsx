@@ -1757,7 +1757,10 @@ export default function App() {
         reviewStatus={state.source.type === 'pull-request' ? state.source.reviewStatus : undefined}
         showCommentReview={
           state.source.type === 'pull-request' &&
-          (state.source.provider === 'github' || state.source.host === 'github.com')
+          (state.source.provider === 'github' ||
+            state.source.provider === 'azure-devops' ||
+            state.source.host === 'github.com' ||
+            state.source.host === 'dev.azure.com')
         }
       />
     ) : undefined,

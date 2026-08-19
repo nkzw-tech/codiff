@@ -120,6 +120,7 @@ const usageExamples = [
     description: 'Review the open pull request for a branch.',
   },
   { command: 'codiff mr 75', description: 'Review GitLab merge request !75.' },
+  { command: 'codiff ado 75', description: 'Review Azure DevOps pull request #75.' },
   { command: 'codiff update', description: 'Update Codiff to the latest release.' },
   { command: 'codiff --plan plan.md', description: 'Edit a plan and wait for handoff.' },
   { command: 'codiff --plan plan.md --share', description: 'Share a Markdown plan.' },
@@ -135,8 +136,11 @@ export const getReviewSource = ({
   pullRequestProvider,
   pullRequestUrl,
   range,
-}) =>
-  range
+}) => {
+  const resolvedProvider = pullRequestUrl
+    ? parseReviewUrl(pullRequestUrl)?.provider || pullRequestProvider
+    : pullRequestProvider;
+  return range
     ? {
         base: range.base,
         head: range.head,
@@ -145,7 +149,7 @@ export const getReviewSource = ({
       }
     : pullRequestUrl
       ? {
-          ...(pullRequestProvider ? { provider: pullRequestProvider } : {}),
+          ...(resolvedProvider ? { provider: resolvedProvider } : {}),
           type: 'pull-request',
           url: pullRequestUrl,
         }
@@ -154,6 +158,7 @@ export const getReviewSource = ({
         : branchRef
           ? { ref: branchRef, type: 'branch-working-tree' }
           : undefined;
+};
 
 const parseArgsOptions = Object.fromEntries(
   flagDefinitions.map(({ name, short, type }) => [name, { type, ...(short ? { short } : {}) }]),
@@ -271,7 +276,9 @@ const getReviewProviderMarker = (arg) =>
     ? 'github'
     : /^(?:mr|merge-request)$/i.test(arg)
       ? 'gitlab'
-      : null;
+      : /^(?:ado|azdo|azure|azure-devops)$/i.test(arg)
+        ? 'azure-devops'
+        : null;
 
 // Store the canonical form so pasted review tabs, queries and anchors never reach the Git layer.
 const parsePullRequestUrlArgument = (arg) => parseReviewUrl(arg)?.url ?? null;

@@ -19,7 +19,7 @@ const dialogCopy: Record<
     title: 'Open Commit',
   },
   'pull-request': {
-    description: 'Paste a PR number or a GitHub or GitLab pull request link.',
+    description: 'Paste a PR number or a GitHub, GitLab, or Azure DevOps pull request link.',
     label: 'Pull request',
     placeholder: '#123 or https://github.com/owner/repo/pull/123',
     title: 'Open PR',

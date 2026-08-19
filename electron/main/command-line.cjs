@@ -93,7 +93,9 @@ const getReviewProviderMarker = (arg) =>
     ? 'github'
     : /^(?:mr|merge-request)$/i.test(arg)
       ? 'gitlab'
-      : null;
+      : /^(?:ado|azdo|azure|azure-devops)$/i.test(arg)
+        ? 'azure-devops'
+        : null;
 
 /** Stores the canonical form so pasted review tabs, queries and anchors never reach the Git layer.
  * @param {string} arg */
@@ -299,7 +301,9 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     undefined;
   const sourcePullRequestNumber = envPullRequestNumber ?? pullRequestNumber;
   const sourceReviewProvider =
-    envReviewProvider === 'github' || envReviewProvider === 'gitlab'
+    envReviewProvider === 'github' ||
+    envReviewProvider === 'gitlab' ||
+    envReviewProvider === 'azure-devops'
       ? envReviewProvider
       : pullRequestProvider;
   const sourceRef = envCommitRef || commitRef;
@@ -375,20 +379,22 @@ const getCommandLineLaunchOptions = (commandLine = process.argv, fallbackPath = 
     return launchOptions;
   }
 
+  const url = resolvePullRequestUrl(
+    resolve(
+      (commandLine === process.argv ? process.env.CODIFF_REPOSITORY_PATH : '') ||
+        repositoryPath ||
+        fallbackPath,
+    ),
+    pullRequestNumber,
+    pullRequestProvider ?? undefined,
+  );
+  const resolvedProvider = parseReviewUrl(url)?.provider || pullRequestProvider;
   return {
     ...launchOptions,
     source: {
       type: 'pull-request',
-      url: resolvePullRequestUrl(
-        resolve(
-          (commandLine === process.argv ? process.env.CODIFF_REPOSITORY_PATH : '') ||
-            repositoryPath ||
-            fallbackPath,
-        ),
-        pullRequestNumber,
-        pullRequestProvider ?? undefined,
-      ),
-      ...(pullRequestProvider ? { provider: pullRequestProvider } : {}),
+      url,
+      ...(resolvedProvider ? { provider: resolvedProvider } : {}),
     },
   };
 };

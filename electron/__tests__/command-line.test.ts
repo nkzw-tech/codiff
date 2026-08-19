@@ -395,6 +395,20 @@ test('canonicalizes GitLab merge request URLs copied from a review tab', () => {
   }
 });
 
+test('canonicalizes Azure DevOps pull request URLs copied from a review tab', () => {
+  for (const value of [
+    'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492?_a=files',
+    'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492?discussionId=18',
+    'dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullRequest/492',
+  ]) {
+    expect(readCommandLine(['codiff', value, '/repo']).launchOptions.source).toEqual({
+      provider: 'azure-devops',
+      type: 'pull-request',
+      url: 'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492',
+    });
+  }
+});
+
 test('resolves GitHub and GitLab review markers through repository remotes', async () => {
   await using directory = await createTemporaryDirectory('codiff-review-markers-');
   const githubRepo = join(directory.path, 'github');
@@ -425,6 +439,31 @@ test('resolves GitHub and GitLab review markers through repository remotes', asy
     provider: 'gitlab',
     type: 'pull-request',
     url: 'https://gitlab.example.com/group/subgroup/project/-/merge_requests/23',
+  });
+});
+
+test('resolves Azure DevOps review markers through repository remotes', async () => {
+  await using directory = await createTemporaryDirectory('codiff-azure-review-markers-');
+  const azureRepo = join(directory.path, 'azure');
+
+  await mkdir(azureRepo);
+  await git(azureRepo, ['init']);
+  await git(azureRepo, [
+    'remote',
+    'add',
+    'origin',
+    'git@ssh.dev.azure.com:v3/mpc-tech-hub/MPCM/Dashboard',
+  ]);
+
+  expect(getCommandLineLaunchOptions(['codiff', 'ado', '492', azureRepo]).source).toEqual({
+    provider: 'azure-devops',
+    type: 'pull-request',
+    url: 'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492',
+  });
+  expect(getCommandLineLaunchOptions(['codiff', 'pr', '492', azureRepo]).source).toEqual({
+    provider: 'azure-devops',
+    type: 'pull-request',
+    url: 'https://dev.azure.com/mpc-tech-hub/MPCM/_git/Dashboard/pullrequest/492',
   });
 });
 

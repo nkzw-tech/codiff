@@ -9,7 +9,7 @@ Codiff is a beautiful, minimal, local diff viewer for reviewing Git changes and 
 
 - **Fast Local Reviews:** Review and commit changes in any Git repository.
 - **LLM Walkthroughs:** Run `codiff -w` to generate an optimized commit walkthrough.
-- **Inline Review Comments:** Comment directly on GitHub pull requests and GitLab merge requests, or copy review comments as Markdown for follow-ups.
+- **Inline Review Comments:** Comment directly on GitHub pull requests, GitLab merge requests, and Azure DevOps pull requests, or copy review comments as Markdown for follow-ups.
 - **Lightweight Definition Navigation:** Mod/Ctrl-click an identifier to find likely local definitions without starting a language server.
 
 ## Download
@@ -48,20 +48,23 @@ Review the current branch against a target branch:
 codiff main
 ```
 
-Review a GitHub pull request or GitLab merge request using the current repository remote:
+Review a GitHub pull request, GitLab merge request, or Azure DevOps pull request using the current repository remote:
 
 ```bash
 codiff pr 75
 codiff pr owner:my-feature-branch
 codiff mr 23
+codiff ado 75
 ```
 
 Branch lookup uses `gh` and selects an open GitHub pull request. Include `owner:` for pull
-requests from forks.
+requests from forks. `codiff pr 75` also works against an Azure DevOps remote. `codiff ado 75`
+forces Azure DevOps when a repository has more than one review host.
 
-Full GitHub and GitLab review URLs are also supported. GitLab hosts and nested project paths are
-derived from the URL or local Git remote and authenticated through `glab`; Codiff does not require
-instance-specific configuration.
+Full GitHub, GitLab, and Azure DevOps review URLs are also supported. GitLab hosts and nested
+project paths are derived from the URL or local Git remote and authenticated through `glab`. Azure
+DevOps uses `az` (`az login`); Codiff searches PATH plus the usual Homebrew and `~/.local/bin`
+install locations, or `CODIFF_AZ_PATH` for an explicit binary.
 
 Start with an LLM-generated narrative walkthrough. When generating a walkthrough without an
 explicit target, Codiff uses local changes when present and falls back to `HEAD` when the working
