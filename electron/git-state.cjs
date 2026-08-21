@@ -1,6 +1,12 @@
 // @ts-check
 
-const { git, gitOrEmpty, parseStatus, validateRepositoryPath } = require('./git-state/common.cjs');
+const {
+  git,
+  gitOrEmpty,
+  parseStatus,
+  setFileLimits,
+  validateRepositoryPath,
+} = require('./git-state/common.cjs');
 const {
   listRepositoryHistory,
   readBranchImageContent,
@@ -251,6 +257,7 @@ module.exports = {
   readWalkthroughRepositoryState,
   readWorkingTreeState,
   resolvePullRequestContentRefs,
+  setFileLimits,
   submitPullRequestComment: (launchPath, request) =>
     (isGitLabReviewSource(request.source) ? submitMergeRequestComment : submitPullRequestComment)(
       launchPath,

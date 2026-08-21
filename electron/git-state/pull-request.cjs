@@ -6,10 +6,10 @@ const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
 const { getCommandEnvironment } = require('../login-shell-environment.cjs');
 const {
-  IMAGE_FILE_LIMIT,
   bufferToImageRevision,
   createSummary,
   formatBytes,
+  getFileLimits,
   getFingerprint,
   getImageMimeType,
   git,
@@ -413,7 +413,7 @@ const readGitHubImageFile = async (repoRoot, repository, ref, path) => {
     return undefined;
   }
 
-  if (buffer.length > IMAGE_FILE_LIMIT) {
+  if (buffer.length > getFileLimits().imageFileLimit) {
     throw new Error(`Image is ${formatBytes(buffer.length)}, so Codiff skipped rendering it.`);
   }
 

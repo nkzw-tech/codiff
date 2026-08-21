@@ -10,8 +10,12 @@ export type CodiffSettings = {
   codeFontSize: number;
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
+  eagerTextFileSizeMB: number;
   editorCommand: string;
+  imageFileSizeMB: number;
   lastRepositoryPath: string;
+  manualTextFileSizeMB: number;
+  maxUntrackedFiles: number;
   openAIModel: string;
   opencodeModel: string;
   piModel: string;

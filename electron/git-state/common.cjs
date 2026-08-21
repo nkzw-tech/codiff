@@ -6,6 +6,9 @@ const { createHash } = require('node:crypto');
 const { isAbsolute, join, normalize, sep } = require('node:path');
 const { promisify } = require('node:util');
 
+/** @type {import('../../core/config/types.ts').CodiffConfig} */
+const defaultConfigTemplate = require('../../config/defaults.json');
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -112,10 +115,50 @@ const gitBufferWithInput = (repoPath, args, input, options = {}) =>
     child.stdin.end(input);
   });
 
-const EAGER_TEXT_FILE_LIMIT = 1024 * 1024;
-const MANUAL_TEXT_FILE_LIMIT = 2 * 1024 * 1024;
-const IMAGE_FILE_LIMIT = 32 * 1024 * 1024;
-const MAX_UNTRACKED_INITIAL_ITEMS = 1000;
+const BYTES_PER_MEGABYTE = 1024 * 1024;
+
+/**
+ * @typedef {Pick<
+ *   import('../../core/config/types.ts').CodiffSettings,
+ *   'eagerTextFileSizeMB' | 'imageFileSizeMB' | 'manualTextFileSizeMB' | 'maxUntrackedFiles'
+ * >} FileLimitSettings
+ *
+ * @typedef {{
+ *   eagerTextFileLimit: number,
+ *   imageFileLimit: number,
+ *   manualTextFileLimit: number,
+ *   maxUntrackedInitialItems: number,
+ * }} FileLimits
+ */
+
+/**
+ * The config expresses sizes in megabytes because that is what a person edits,
+ * while every call site here compares byte counts. Convert once on the way in.
+ * @param {FileLimitSettings} settings
+ * @returns {FileLimits}
+ */
+const toFileLimits = (settings) => ({
+  eagerTextFileLimit: Math.round(settings.eagerTextFileSizeMB * BYTES_PER_MEGABYTE),
+  imageFileLimit: Math.round(settings.imageFileSizeMB * BYTES_PER_MEGABYTE),
+  manualTextFileLimit: Math.round(settings.manualTextFileSizeMB * BYTES_PER_MEGABYTE),
+  maxUntrackedInitialItems: settings.maxUntrackedFiles,
+});
+
+/** @type {FileLimits} */
+let fileLimits = toFileLimits(defaultConfigTemplate.settings);
+
+/** @returns {FileLimits} */
+const getFileLimits = () => fileLimits;
+
+/**
+ * Apply configured limits. Each process entry point calls this once it has read
+ * the Codiff config, and again whenever the config file changes.
+ * @param {FileLimitSettings} settings
+ */
+const setFileLimits = (settings) => {
+  fileLimits = toFileLimits(settings);
+};
+
 const imageMimeTypes = new Map([
   ['.apng', 'image/apng'],
   ['.avif', 'image/avif'],
@@ -277,7 +320,7 @@ const bufferToImageRevision = (path, buffer) => {
     throw new Error('Unsupported image file type.');
   }
 
-  if (buffer.length > IMAGE_FILE_LIMIT) {
+  if (buffer.length > getFileLimits().imageFileLimit) {
     throw new Error(`Image is ${formatBytes(buffer.length)}, so Codiff skipped rendering it.`);
   }
 
@@ -375,7 +418,7 @@ const readImageSpec = async (repoRoot, spec, path) => {
     return undefined;
   }
 
-  if (size > IMAGE_FILE_LIMIT) {
+  if (size > getFileLimits().imageFileLimit) {
     throw new Error(`Image is ${formatBytes(size)}, so Codiff skipped rendering it.`);
   }
 
@@ -405,7 +448,7 @@ const readWorkingTreeImageFile = async (repoRoot, path) => {
     return undefined;
   }
 
-  if (stat.size > IMAGE_FILE_LIMIT) {
+  if (stat.size > getFileLimits().imageFileLimit) {
     throw new Error(`Image is ${formatBytes(stat.size)}, so Codiff skipped rendering it.`);
   }
 
@@ -420,7 +463,8 @@ const readWorkingTreeImageFile = async (repoRoot, path) => {
  * @returns {Promise<FileContentResult>}
  */
 const readGitFile = async (repoRoot, ref, path, options = {}) => {
-  const limit = options.force ? MANUAL_TEXT_FILE_LIMIT : EAGER_TEXT_FILE_LIMIT;
+  const { eagerTextFileLimit, manualTextFileLimit } = getFileLimits();
+  const limit = options.force ? manualTextFileLimit : eagerTextFileLimit;
   const spec = `${ref}:${path}`;
 
   try {
@@ -428,13 +472,13 @@ const readGitFile = async (repoRoot, ref, path, options = {}) => {
     if (size != null && size > limit) {
       return {
         binary: false,
-        loadState: size > MANUAL_TEXT_FILE_LIMIT ? 'too-large' : 'deferred',
+        loadState: size > manualTextFileLimit ? 'too-large' : 'deferred',
         summary: createSummary(
-          size > MANUAL_TEXT_FILE_LIMIT
+          size > manualTextFileLimit
             ? `File is ${formatBytes(size)}, so Codiff skipped rendering it.`
             : `File is ${formatBytes(size)} and will be loaded on demand.`,
           {
-            canLoad: size <= MANUAL_TEXT_FILE_LIMIT,
+            canLoad: size <= manualTextFileLimit,
             limit,
             size,
           },
@@ -464,7 +508,8 @@ const readGitFile = async (repoRoot, ref, path, options = {}) => {
  * @returns {Promise<FileContentResult>}
  */
 const readIndexFile = async (repoRoot, path, options = {}, stage) => {
-  const limit = options.force ? MANUAL_TEXT_FILE_LIMIT : EAGER_TEXT_FILE_LIMIT;
+  const { eagerTextFileLimit, manualTextFileLimit } = getFileLimits();
+  const limit = options.force ? manualTextFileLimit : eagerTextFileLimit;
   const spec = stage ? `:${stage}:${path}` : `:${path}`;
 
   try {
@@ -472,13 +517,13 @@ const readIndexFile = async (repoRoot, path, options = {}, stage) => {
     if (size != null && size > limit) {
       return {
         binary: false,
-        loadState: size > MANUAL_TEXT_FILE_LIMIT ? 'too-large' : 'deferred',
+        loadState: size > manualTextFileLimit ? 'too-large' : 'deferred',
         summary: createSummary(
-          size > MANUAL_TEXT_FILE_LIMIT
+          size > manualTextFileLimit
             ? `File is ${formatBytes(size)}, so Codiff skipped rendering it.`
             : `File is ${formatBytes(size)} and will be loaded on demand.`,
           {
-            canLoad: size <= MANUAL_TEXT_FILE_LIMIT,
+            canLoad: size <= manualTextFileLimit,
             limit,
             size,
           },
@@ -507,7 +552,8 @@ const readIndexFile = async (repoRoot, path, options = {}, stage) => {
  * @returns {Promise<FileContentResult>}
  */
 const readWorkingTreeFile = async (repoRoot, path, options = {}) => {
-  const limit = options.force ? MANUAL_TEXT_FILE_LIMIT : EAGER_TEXT_FILE_LIMIT;
+  const { eagerTextFileLimit, manualTextFileLimit } = getFileLimits();
+  const limit = options.force ? manualTextFileLimit : eagerTextFileLimit;
 
   try {
     const stat = await readFileStat(repoRoot, path);
@@ -532,13 +578,13 @@ const readWorkingTreeFile = async (repoRoot, path, options = {}) => {
       if (size > limit) {
         return {
           binary: false,
-          loadState: size > MANUAL_TEXT_FILE_LIMIT ? 'too-large' : 'deferred',
+          loadState: size > manualTextFileLimit ? 'too-large' : 'deferred',
           summary: createSummary(
-            size > MANUAL_TEXT_FILE_LIMIT
+            size > manualTextFileLimit
               ? `Symlink target is ${formatBytes(size)}, so Codiff skipped rendering it.`
               : `Symlink target is ${formatBytes(size)} and will be loaded on demand.`,
             {
-              canLoad: size <= MANUAL_TEXT_FILE_LIMIT,
+              canLoad: size <= manualTextFileLimit,
               limit,
               size,
             },
@@ -570,13 +616,13 @@ const readWorkingTreeFile = async (repoRoot, path, options = {}) => {
     if (stat.size > limit) {
       return {
         binary: false,
-        loadState: stat.size > MANUAL_TEXT_FILE_LIMIT ? 'too-large' : 'deferred',
+        loadState: stat.size > manualTextFileLimit ? 'too-large' : 'deferred',
         summary: createSummary(
-          stat.size > MANUAL_TEXT_FILE_LIMIT
+          stat.size > manualTextFileLimit
             ? `File is ${formatBytes(stat.size)}, so Codiff skipped rendering it.`
             : `File is ${formatBytes(stat.size)} and will be loaded on demand.`,
           {
-            canLoad: stat.size <= MANUAL_TEXT_FILE_LIMIT,
+            canLoad: stat.size <= manualTextFileLimit,
             limit,
             size: stat.size,
           },
@@ -856,10 +902,6 @@ const gitOrEmpty = async (repoRoot, args) => {
 };
 
 module.exports = {
-  EAGER_TEXT_FILE_LIMIT,
-  IMAGE_FILE_LIMIT,
-  MANUAL_TEXT_FILE_LIMIT,
-  MAX_UNTRACKED_INITIAL_ITEMS,
   bufferToTextFile,
   bufferToImageRevision,
   createSection,
@@ -868,6 +910,7 @@ module.exports = {
   formatBytes,
   generatedDirectoryPathspecExcludes,
   generatedDirectoryPathspecs,
+  getFileLimits,
   getFingerprint,
   getGravatarHash,
   getImageMimeType,
@@ -882,6 +925,7 @@ module.exports = {
   readGitImageFile,
   readIndexImageFile,
   readWorkingTreeImageFile,
+  setFileLimits,
   summarizeContent,
   validateRepositoryPath,
 };

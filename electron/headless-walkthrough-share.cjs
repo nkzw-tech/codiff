@@ -8,6 +8,7 @@ const {
   readGitIdentity,
   readRepositoryState,
   readWalkthroughRepositoryState,
+  setFileLimits,
 } = require('./git-state.cjs');
 const {
   normalizeNarrativeWalkthrough,
@@ -175,6 +176,7 @@ const shareWalkthroughFile = async ({
   walkthroughFile,
 }) => {
   const config = readConfig();
+  setFileLimits(config.settings);
   const [state, uploader] = await readShareState(repositoryPath, source, config);
 
   let input;
@@ -236,6 +238,7 @@ const generateAndShareWalkthrough = async ({
   walkthroughContextPath,
 }) => {
   const config = readConfig();
+  setFileLimits(config.settings);
   const agent = getAgent(agentOverride || config.settings.agentBackend);
   const [state, uploader] = await readGeneratedShareState(repositoryPath, source, config);
   const sessionIds = {

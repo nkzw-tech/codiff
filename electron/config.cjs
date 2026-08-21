@@ -26,6 +26,16 @@ const SCHEMA_URL =
 const CODE_FONT_SIZE_DEFAULT = 13;
 const CODE_FONT_SIZE_MAX = 32;
 const CODE_FONT_SIZE_MIN = 10;
+const EAGER_TEXT_FILE_SIZE_DEFAULT = 1;
+const IMAGE_FILE_SIZE_DEFAULT = 32;
+const IMAGE_FILE_SIZE_MAX = 512;
+const IMAGE_FILE_SIZE_MIN = 1;
+const MANUAL_TEXT_FILE_SIZE_DEFAULT = 2;
+const MAX_UNTRACKED_FILES_DEFAULT = 1000;
+const MAX_UNTRACKED_FILES_MAX = 100000;
+const MAX_UNTRACKED_FILES_MIN = 1;
+const TEXT_FILE_SIZE_MAX = 64;
+const TEXT_FILE_SIZE_MIN = 0.25;
 
 /** @returns {CodiffConfig} */
 const createDefaultConfig = () => ({
@@ -174,6 +184,30 @@ const normalizeCodeFontSize = (size) => {
   return Math.min(CODE_FONT_SIZE_MAX, Math.max(CODE_FONT_SIZE_MIN, Math.round(size)));
 };
 
+/**
+ * Clamp a megabyte size setting into a range Codiff can render without
+ * stalling, falling back to its default when the value is not a usable number.
+ * @param {unknown} size
+ * @param {{fallback: number, max: number, min: number}} bounds
+ * @returns {number}
+ */
+const normalizeFileSizeMB = (size, bounds) => {
+  if (typeof size !== 'number' || !Number.isFinite(size)) {
+    return bounds.fallback;
+  }
+
+  return Math.min(bounds.max, Math.max(bounds.min, size));
+};
+
+/** @param {unknown} count @returns {number} */
+const normalizeMaxUntrackedFiles = (count) => {
+  if (typeof count !== 'number' || !Number.isFinite(count)) {
+    return MAX_UNTRACKED_FILES_DEFAULT;
+  }
+
+  return Math.min(MAX_UNTRACKED_FILES_MAX, Math.max(MAX_UNTRACKED_FILES_MIN, Math.round(count)));
+};
+
 /** @param {unknown} path */
 const normalizeLastRepositoryPath = (path) =>
   typeof path === 'string' && path.length > 0 ? path : '';
@@ -219,6 +253,11 @@ const mergeConfig = (raw) => {
     typeof obj.keymap === 'object' && obj.keymap !== null
       ? /** @type {Record<string, unknown>} */ (obj.keymap)
       : {};
+  const eagerTextFileSizeMB = normalizeFileSizeMB(rawSettings.eagerTextFileSizeMB, {
+    fallback: EAGER_TEXT_FILE_SIZE_DEFAULT,
+    max: TEXT_FILE_SIZE_MAX,
+    min: TEXT_FILE_SIZE_MIN,
+  });
 
   return {
     keymap: {
@@ -290,11 +329,28 @@ const mergeConfig = (raw) => {
           ? rawSettings.copyCommentsOnClose
           : defaults.settings.copyCommentsOnClose,
       diffStyle: normalizeDiffStyle(rawSettings.diffStyle),
+      eagerTextFileSizeMB,
       editorCommand:
         typeof rawSettings.editorCommand === 'string'
           ? rawSettings.editorCommand
           : defaults.settings.editorCommand,
+      imageFileSizeMB: normalizeFileSizeMB(rawSettings.imageFileSizeMB, {
+        fallback: IMAGE_FILE_SIZE_DEFAULT,
+        max: IMAGE_FILE_SIZE_MAX,
+        min: IMAGE_FILE_SIZE_MIN,
+      }),
       lastRepositoryPath: normalizeLastRepositoryPath(rawSettings.lastRepositoryPath),
+      // A manual limit below the eager limit would defer files Codiff already
+      // loads automatically, so treat the eager limit as the floor.
+      manualTextFileSizeMB: Math.max(
+        eagerTextFileSizeMB,
+        normalizeFileSizeMB(rawSettings.manualTextFileSizeMB, {
+          fallback: MANUAL_TEXT_FILE_SIZE_DEFAULT,
+          max: TEXT_FILE_SIZE_MAX,
+          min: TEXT_FILE_SIZE_MIN,
+        }),
+      ),
+      maxUntrackedFiles: normalizeMaxUntrackedFiles(rawSettings.maxUntrackedFiles),
       openAIModel:
         typeof rawSettings.openAIModel === 'string'
           ? rawSettings.openAIModel

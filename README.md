@@ -143,8 +143,12 @@ counts; when it is `false`, Codiff hides those changes from the working-tree rev
     "codeFontSize": 13,
     "copyCommentsOnClose": false,
     "diffStyle": "split",
+    "eagerTextFileSizeMB": 1,
     "editorCommand": "",
+    "imageFileSizeMB": 32,
     "lastRepositoryPath": "",
+    "manualTextFileSizeMB": 2,
+    "maxUntrackedFiles": 1000,
     "openAIModel": "gpt-5.6-terra",
     "opencodeModel": "opencode-default",
     "sidebarPosition": "left",
@@ -174,6 +178,14 @@ Set `settings.editorCommand` to customize file opening. Use `{file}` for the sel
 `"subl \"{repo}\" \"{file}\""`.
 Set `settings.sidebarPosition` to `left` or `right` to choose which side of the desktop window shows
 the file sidebar.
+
+Codiff caps how much it reads per file so a huge blob cannot stall a review. Raise the caps when you
+review large files. `settings.eagerTextFileSizeMB` is the size a text file can reach and still load
+automatically, and `settings.manualTextFileSizeMB` is the size it can reach and still be loaded on
+demand from the diff; files larger than the manual cap are never rendered. A manual cap below the
+eager cap is raised to match it. `settings.imageFileSizeMB` caps images rendered in a diff, and
+`settings.maxUntrackedFiles` caps how many untracked files a working-tree review lists individually
+before collapsing the rest into one summary row.
 
 Choose `View > Diff > Split` or `View > Diff > Unified`, use Toggle Diff Layout in the command bar,
 or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.

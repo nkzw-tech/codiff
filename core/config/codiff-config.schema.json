@@ -53,15 +53,43 @@
           "default": "split",
           "description": "Diff layout style. 'split' shows deleted and added lines side by side; 'unified' shows them in one column."
         },
+        "eagerTextFileSizeMB": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 64,
+          "default": 1,
+          "description": "Maximum size in megabytes of a text file Codiff loads automatically. Files between this size and manualTextFileSizeMB are loaded on demand instead."
+        },
         "editorCommand": {
           "type": "string",
           "default": "",
           "description": "Command used to open files from Codiff. Use {file} as the file path placeholder, {line} as the optional line number, and {repo} as the repository root placeholder, for example \"subl \\\"{repo}\\\" \\\"{file}\\\"\", or leave empty to use Codiff's default editor lookup."
         },
+        "imageFileSizeMB": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 512,
+          "default": 32,
+          "description": "Maximum size in megabytes of an image Codiff renders in a diff."
+        },
         "lastRepositoryPath": {
           "type": "string",
           "default": "",
           "description": "The last repository opened by Codiff when no path was explicitly provided."
+        },
+        "manualTextFileSizeMB": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 64,
+          "default": 2,
+          "description": "Maximum size in megabytes of a text file Codiff can load on demand. Files larger than this are never rendered. Values below eagerTextFileSizeMB are raised to it."
+        },
+        "maxUntrackedFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000,
+          "default": 1000,
+          "description": "Maximum number of untracked files listed individually in a working-tree review. Remaining files are collapsed into a single summary row."
         },
         "openAIModel": {
           "type": "string",

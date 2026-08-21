@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
+import { defaultSettings } from '../config/defaults.ts';
 import { fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
 import type {
   DiffSection,
@@ -166,6 +167,15 @@ const {
   submitPullRequestComment,
   validateRepositoryPath,
 } = require('../../electron/git-state.cjs') as GitStateModule;
+const { getFileLimits, setFileLimits } = require('../../electron/git-state/common.cjs') as {
+  getFileLimits: () => {
+    eagerTextFileLimit: number;
+    imageFileLimit: number;
+    manualTextFileLimit: number;
+    maxUntrackedInitialItems: number;
+  };
+  setFileLimits: (settings: typeof defaultSettings) => void;
+};
 
 const git = async (repo: string, args: ReadonlyArray<string>) => {
   const { stdout } = await execFileAsync('git', ['-C', repo, ...args], {
@@ -1577,6 +1587,46 @@ test('readWorkingTreeState summarizes extremely large untracked files', async ()
     expect(section?.summary?.canLoad).toBe(false);
     expect(section?.newFile).toBeUndefined();
     expect(section?.patch).toBe('');
+  });
+});
+
+test('setFileLimits converts megabyte settings into byte limits', () => {
+  setFileLimits({
+    ...defaultSettings,
+    eagerTextFileSizeMB: 0.5,
+    imageFileSizeMB: 64,
+    manualTextFileSizeMB: 8,
+    maxUntrackedFiles: 25,
+  });
+
+  try {
+    expect(getFileLimits()).toEqual({
+      eagerTextFileLimit: 512 * 1024,
+      imageFileLimit: 64 * 1024 * 1024,
+      manualTextFileLimit: 8 * 1024 * 1024,
+      maxUntrackedInitialItems: 25,
+    });
+  } finally {
+    setFileLimits(defaultSettings);
+  }
+});
+
+test('a raised manual text limit defers files the defaults would skip', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'tracked.txt', 'tracked\n');
+    await commitAll(repo, 'initial commit');
+    await writeRepoFile(repo, 'huge.txt', 'x'.repeat(3 * 1024 * 1024));
+
+    setFileLimits({ ...defaultSettings, manualTextFileSizeMB: 4 });
+    try {
+      const state = await readWorkingTreeState(repo);
+      const section = state.files.find((file) => file.path === 'huge.txt')?.sections[0];
+
+      expect(section?.loadState).toBe('deferred');
+      expect(section?.summary?.canLoad).toBe(true);
+    } finally {
+      setFileLimits(defaultSettings);
+    }
   });
 });
 

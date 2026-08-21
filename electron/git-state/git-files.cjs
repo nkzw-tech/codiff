@@ -1,11 +1,10 @@
 // @ts-check
 
 const {
-  EAGER_TEXT_FILE_LIMIT,
-  MANUAL_TEXT_FILE_LIMIT,
   bufferToTextFile,
   createSummary,
   formatBytes,
+  getFileLimits,
   git,
   gitBufferWithInput,
 } = require('./common.cjs');
@@ -163,20 +162,24 @@ const readObjectContents = async (repoRoot, objects) => {
  * @param {number} size
  * @param {number} limit
  */
-const createLargeBlobResult = (size, limit) => ({
-  binary: false,
-  loadState: size > MANUAL_TEXT_FILE_LIMIT ? 'too-large' : 'deferred',
-  summary: createSummary(
-    size > MANUAL_TEXT_FILE_LIMIT
-      ? `File is ${formatBytes(size)}, so Codiff skipped rendering it.`
-      : `File is ${formatBytes(size)} and will be loaded on demand.`,
-    {
-      canLoad: size <= MANUAL_TEXT_FILE_LIMIT,
-      limit,
-      size,
-    },
-  ),
-});
+const createLargeBlobResult = (size, limit) => {
+  const { manualTextFileLimit } = getFileLimits();
+
+  return {
+    binary: false,
+    loadState: size > manualTextFileLimit ? 'too-large' : 'deferred',
+    summary: createSummary(
+      size > manualTextFileLimit
+        ? `File is ${formatBytes(size)}, so Codiff skipped rendering it.`
+        : `File is ${formatBytes(size)} and will be loaded on demand.`,
+      {
+        canLoad: size <= manualTextFileLimit,
+        limit,
+        size,
+      },
+    ),
+  };
+};
 
 /**
  * @param {string} path
@@ -202,7 +205,8 @@ const createEmptyFileContent = (path, ref, refScoped = false) => ({
  * @returns {Promise<Map<string, import('./common.cjs').FileContentResult>>}
  */
 const readGitFiles = async (repoRoot, ref, paths, options = {}) => {
-  const limit = options.force ? MANUAL_TEXT_FILE_LIMIT : EAGER_TEXT_FILE_LIMIT;
+  const { eagerTextFileLimit, manualTextFileLimit } = getFileLimits();
+  const limit = options.force ? manualTextFileLimit : eagerTextFileLimit;
   const entries = await readTreeEntries(repoRoot, ref, paths);
   const sizes = await readObjectSizes(
     repoRoot,

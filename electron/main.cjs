@@ -23,6 +23,7 @@ const {
   readGitIdentity,
   readRepositoryState,
   readWalkthroughRepositoryState,
+  setFileLimits,
   submitPullRequestComment,
   submitPullRequestReview,
   validateRepositoryPath,
@@ -1322,6 +1323,7 @@ if (squirrelStartup || !lock) {
       writeConfig(config);
     }
     refreshInstalledAgentFiles();
+    setFileLimits(config.settings);
     nativeTheme.themeSource = config.settings.theme;
     Menu.setApplicationMenu(buildApplicationMenu());
 
@@ -1362,6 +1364,7 @@ if (squirrelStartup || !lock) {
       };
       updater?.setUpdatesEnabled(config.settings.checkForUpdates);
       refreshInstalledAgentFiles();
+      setFileLimits(config.settings);
       nativeTheme.themeSource = config.settings.theme;
       sendConfigChanged();
       Menu.setApplicationMenu(buildApplicationMenu());

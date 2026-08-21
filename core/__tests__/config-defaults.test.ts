@@ -88,6 +88,73 @@ test('electron config normalizes sidebar position', () => {
   ).toBe('left');
 });
 
+test('electron config normalizes file size limits', () => {
+  expect(readElectronConfig({}).settings).toMatchObject({
+    eagerTextFileSizeMB: 1,
+    imageFileSizeMB: 32,
+    manualTextFileSizeMB: 2,
+    maxUntrackedFiles: 1000,
+  });
+
+  expect(
+    readElectronConfig({
+      settings: {
+        eagerTextFileSizeMB: 4,
+        imageFileSizeMB: 128,
+        manualTextFileSizeMB: 8,
+        maxUntrackedFiles: 5000,
+      },
+    }).settings,
+  ).toMatchObject({
+    eagerTextFileSizeMB: 4,
+    imageFileSizeMB: 128,
+    manualTextFileSizeMB: 8,
+    maxUntrackedFiles: 5000,
+  });
+
+  expect(
+    readElectronConfig({
+      settings: {
+        eagerTextFileSizeMB: 'big',
+        imageFileSizeMB: null,
+        manualTextFileSizeMB: [],
+        maxUntrackedFiles: 'all',
+      },
+    }).settings,
+  ).toMatchObject({
+    eagerTextFileSizeMB: 1,
+    imageFileSizeMB: 32,
+    manualTextFileSizeMB: 2,
+    maxUntrackedFiles: 1000,
+  });
+});
+
+test('electron config clamps file size limits to a usable range', () => {
+  expect(
+    readElectronConfig({ settings: { eagerTextFileSizeMB: 0, manualTextFileSizeMB: 0 } }).settings,
+  ).toMatchObject({ eagerTextFileSizeMB: 0.25, manualTextFileSizeMB: 0.25 });
+  expect(
+    readElectronConfig({ settings: { eagerTextFileSizeMB: 1024, manualTextFileSizeMB: 4096 } })
+      .settings,
+  ).toMatchObject({ eagerTextFileSizeMB: 64, manualTextFileSizeMB: 64 });
+  expect(readElectronConfig({ settings: { imageFileSizeMB: 4096 } }).settings.imageFileSizeMB).toBe(
+    512,
+  );
+  expect(readElectronConfig({ settings: { imageFileSizeMB: 0 } }).settings.imageFileSizeMB).toBe(1);
+  expect(
+    readElectronConfig({ settings: { maxUntrackedFiles: 2.7 } }).settings.maxUntrackedFiles,
+  ).toBe(3);
+  expect(
+    readElectronConfig({ settings: { maxUntrackedFiles: 0 } }).settings.maxUntrackedFiles,
+  ).toBe(1);
+});
+
+test('electron config raises the manual text limit to the eager limit', () => {
+  expect(
+    readElectronConfig({ settings: { eagerTextFileSizeMB: 16, manualTextFileSizeMB: 4 } }).settings,
+  ).toMatchObject({ eagerTextFileSizeMB: 16, manualTextFileSizeMB: 16 });
+});
+
 test('electron config keeps custom walkthrough prompt text only when it is a string', () => {
   expect(
     readElectronConfig({

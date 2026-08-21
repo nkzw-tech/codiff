@@ -7,11 +7,11 @@ const {
   fileSort,
   generatedDirectoryPathspecExcludes,
   generatedDirectoryPathspecs,
+  getFileLimits,
   getFingerprint,
   getGravatarHash,
   getWhitespaceDiffArgs,
   git,
-  MAX_UNTRACKED_INITIAL_ITEMS,
   parseStatus,
   readFileStat,
   readGitImageFile,
@@ -157,8 +157,9 @@ const listUntrackedItems = async (repoRoot) => {
     ...generatedDirectoryPathspecExcludes,
   ]);
   const paths = rawFiles.split('\0').filter(Boolean).sort();
+  const { maxUntrackedInitialItems } = getFileLimits();
   /** @type {Array<StatusItem>} */
-  const items = paths.slice(0, MAX_UNTRACKED_INITIAL_ITEMS).map((path) => ({
+  const items = paths.slice(0, maxUntrackedInitialItems).map((path) => ({
     path,
     staged: false,
     status: 'untracked',
@@ -166,8 +167,8 @@ const listUntrackedItems = async (repoRoot) => {
     untracked: true,
   }));
 
-  if (paths.length > MAX_UNTRACKED_INITIAL_ITEMS) {
-    const omitted = paths.length - MAX_UNTRACKED_INITIAL_ITEMS;
+  if (paths.length > maxUntrackedInitialItems) {
+    const omitted = paths.length - maxUntrackedInitialItems;
     items.push({
       directory: true,
       path: `Untracked files not shown (${omitted} more)`,
