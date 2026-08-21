@@ -71,7 +71,7 @@
         "opencodeModel": {
           "type": "string",
           "default": "opencode-default",
-          "description": "The OpenCode model to use for review assistance, walkthroughs, and the managed /codiff command when agentBackend is 'opencode'. Use 'opencode-default' to preserve OpenCode's configured default, or a provider-qualified model id such as 'anthropic/claude-sonnet-4-6'."
+          "description": "The OpenCode model to use for review assistance, walkthroughs, and the managed /codiff command when agentBackend is 'opencode'. Use 'opencode-default' to preserve OpenCode's configured default, or a provider-qualified model id such as 'anthropic/claude-sonnet-4-6' or 'orcarouter/auto'."
         },
         "piModel": {
           "type": "string",

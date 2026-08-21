@@ -235,11 +235,17 @@ once and complete `/login` if you have not already.
 
 OpenCode keeps its own configured model when `settings.opencodeModel` is `opencode-default`.
 Choose another model from the application `Model` menu, or set a provider-qualified id such as
-`anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`, or another model available to your OpenCode
-account. When Codiff launches OpenCode for walkthroughs or review assistance and an explicit model
-is unavailable, it retries with OpenCode's configured default and persists that fallback. The
-managed `/codiff` command runs directly in OpenCode, so OpenCode reports access errors for its
-selected model; choose `opencode-default` when portability is more important than pinning.
+`anthropic/claude-sonnet-4-6`, `openai/gpt-5.5`, `orcarouter/auto`, or another model available to
+your OpenCode account. When Codiff launches OpenCode for walkthroughs or review assistance and an
+explicit model is unavailable, it retries with OpenCode's configured default and persists that
+fallback. The managed `/codiff` command runs directly in OpenCode, so OpenCode reports access errors
+for its selected model; choose `opencode-default` when portability is more important than pinning.
+
+To use [OrcaRouter](https://www.orcarouter.ai) as an OpenCode model provider, set
+`settings.opencodeModel` to `orcarouter/auto` and configure OpenCode with your OrcaRouter API key
+(`sk-orca-...`) and the `https://api.orcarouter.ai/v1` endpoint. It also runs gateway-level,
+zero-trust security for AI agents on the same endpoint — screening every prompt/response and
+governing every tool call on a default-deny basis, with no application code changes.
 
 Set `settings.walkthroughPrompt` to add custom instructions to generated walkthrough prompts. Use it
 to request a specific language, tone, or level of detail while Codiff keeps its walkthrough guide,

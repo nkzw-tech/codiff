@@ -27,6 +27,7 @@ const OPENCODE_MODELS = Object.freeze([
   { id: DEFAULT_OPENCODE_MODEL, label: 'OpenCode configured default' },
   { id: 'anthropic/claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
   { id: 'openai/gpt-5.5', label: 'GPT-5.5' },
+  { id: 'orcarouter/auto', label: 'OrcaRouter auto' },
 ]);
 const OPENCODE_MODEL_PATTERN = /^[a-z0-9][a-z0-9._:-]*(?:\/[@a-z0-9][@a-z0-9._:-]*)+$/i;
 
