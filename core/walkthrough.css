@@ -558,7 +558,10 @@
   transition: box-shadow 220ms ease;
   width: 100%;
 }
-.wt-stop-block-header.current {
+/* The current-stop accent comes from the virtualized item container so the
+   header's own content never re-renders (and never re-measures) when scrolling
+   moves the selection. */
+.codiff-selected-item .wt-stop-block-header {
   box-shadow: inset 3px 0 0 var(--tree-selection-focus);
 }
 

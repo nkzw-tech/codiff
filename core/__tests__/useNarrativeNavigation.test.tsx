@@ -134,3 +134,66 @@ test('support navigation holds support mode until the support block is reached',
   expect(getNavigation().mode).toBe('stop');
   expect(getNavigation().index).toBe(1);
 });
+
+test('scrolling across support blocks does not hijack a pending stop scroll', async () => {
+  const navigationRef: { current: NarrativeNavigation | null } = {
+    current: null,
+  };
+  const getNavigation = () => {
+    if (!navigationRef.current) {
+      throw new Error('Navigation did not render.');
+    }
+    return navigationRef.current;
+  };
+
+  await using _view = await renderReact(
+    <NavigationHarness onNavigation={(next) => (navigationRef.current = next)} />,
+  );
+
+  await act(async () => {
+    getNavigation().goStop(1);
+  });
+  expect(getNavigation().mode).toBe('stop');
+  await act(async () => {
+    getNavigation().syncSupportFromScroll();
+  });
+  expect(getNavigation().mode).toBe('stop');
+  expect(getNavigation().index).toBe(1);
+  await act(async () => {
+    getNavigation().syncIndexFromScroll(1);
+  });
+  await act(async () => {
+    getNavigation().syncSupportFromScroll();
+  });
+  expect(getNavigation().mode).toBe('support');
+});
+
+test('stop and support scroll requests share one monotonic nonce sequence', async () => {
+  const navigationRef: { current: NarrativeNavigation | null } = {
+    current: null,
+  };
+  const getNavigation = () => {
+    if (!navigationRef.current) {
+      throw new Error('Navigation did not render.');
+    }
+    return navigationRef.current;
+  };
+
+  await using _view = await renderReact(
+    <NavigationHarness onNavigation={(next) => (navigationRef.current = next)} />,
+  );
+
+  expect(getNavigation().scrollTarget).toEqual({ index: 0, kind: 'stop', nonce: 0 });
+  await act(async () => {
+    getNavigation().goStop(2);
+  });
+  expect(getNavigation().scrollTarget).toEqual({ index: 2, kind: 'stop', nonce: 1 });
+  await act(async () => {
+    getNavigation().openSupport();
+  });
+  expect(getNavigation().scrollTarget).toMatchObject({ kind: 'support', nonce: 2 });
+  await act(async () => {
+    getNavigation().goStop(0);
+  });
+  expect(getNavigation().scrollTarget).toEqual({ index: 0, kind: 'stop', nonce: 3 });
+});

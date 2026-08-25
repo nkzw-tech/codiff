@@ -119,6 +119,14 @@ const getCodeViewItemVersion = (id: string) =>
   (codeViewMock.lastItems.find((item) => item.id === id) as { version?: number } | undefined)
     ?.version;
 
+const getWalkthroughHeaderNode = (blockId: string) => {
+  const index = codeViewMock.lastItems.findIndex(
+    (item) => item.id === `${blockId}:walkthrough-header`,
+  );
+  expect(index).toBeGreaterThanOrEqual(0);
+  return codeViewMock.postRenderNodes[index];
+};
+
 const createLoadedMarkdownFile = (contents: string, fingerprint: string) => {
   const file = createChangedFileWithPatch(
     'plan.md',
@@ -483,6 +491,44 @@ test('scroll selection updates do not publish new item versions', async () => {
   expect(codeViewMock.lastItems.map((item) => item.version)).toEqual(firstVersions);
   expect(codeViewMock.postRenderNodes[0]?.classList.contains('codiff-selected-item')).toBe(false);
   expect(codeViewMock.postRenderNodes[1]?.classList.contains('codiff-selected-item')).toBe(true);
+});
+
+test('walkthrough stop selection updates do not publish new header item versions', async () => {
+  const firstFile = createChangedFile('src/first.ts');
+  const secondFile = createChangedFile('src/second.ts');
+  const blocks = (currentIndex: number): ReadonlyArray<ReviewDiffBlock> => [
+    {
+      file: firstFile,
+      header: <div>Stop one</div>,
+      headerSelected: currentIndex === 0,
+      id: 'walkthrough:s1',
+      itemIdPrefix: 'walkthrough:s1',
+    },
+    {
+      file: secondFile,
+      header: <div>Stop two</div>,
+      headerSelected: currentIndex === 1,
+      id: 'walkthrough:s2',
+      itemIdPrefix: 'walkthrough:s2',
+    },
+  ];
+  await using view = await renderReact(<ReviewCodeViewHarness blocks={blocks(0)} files={[]} />);
+
+  const firstVersions = codeViewMock.lastItems.map((item) => item.version);
+  expect(
+    getWalkthroughHeaderNode('walkthrough:s1')?.classList.contains('codiff-selected-item'),
+  ).toBe(true);
+  expect(
+    getWalkthroughHeaderNode('walkthrough:s2')?.classList.contains('codiff-selected-item'),
+  ).toBe(false);
+  await view.rerender(<ReviewCodeViewHarness blocks={blocks(1)} files={[]} />);
+  expect(codeViewMock.lastItems.map((item) => item.version)).toEqual(firstVersions);
+  expect(
+    getWalkthroughHeaderNode('walkthrough:s1')?.classList.contains('codiff-selected-item'),
+  ).toBe(false);
+  expect(
+    getWalkthroughHeaderNode('walkthrough:s2')?.classList.contains('codiff-selected-item'),
+  ).toBe(true);
 });
 
 test('walkthrough header chrome does not leak inline styles onto reused diff nodes', async () => {

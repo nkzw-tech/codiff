@@ -51,30 +51,29 @@ export type WalkthroughBlockScrollTarget = {
   request: number;
 };
 
+// The target derives from the last explicit navigation action (goStop or
+// openSupport), never from the scroll-derived mode: a mode change caused by
+// scrolling must not issue a competing scroll command mid-flight.
 export const getWalkthroughBlockScrollTarget = ({
   activeBlockId,
   firstSupportBlockId,
-  mode,
-  stopScrollRequest,
-  supportScrollRequest,
+  scrollTarget,
 }: {
   activeBlockId: string | null | undefined;
   firstSupportBlockId: string | null;
-  mode: NarrativeNavigation['mode'];
-  stopScrollRequest: number;
-  supportScrollRequest: number;
+  scrollTarget: NarrativeNavigation['scrollTarget'];
 }): WalkthroughBlockScrollTarget | null =>
-  mode === 'support' && firstSupportBlockId
+  scrollTarget.kind === 'support' && firstSupportBlockId
     ? {
         behavior: 'smooth',
         blockId: firstSupportBlockId,
-        request: supportScrollRequest,
+        request: scrollTarget.nonce,
       }
-    : mode === 'stop' && activeBlockId && stopScrollRequest > 0
+    : scrollTarget.kind === 'stop' && activeBlockId && scrollTarget.nonce > 0
       ? {
           behavior: 'smooth',
           blockId: activeBlockId,
-          request: stopScrollRequest,
+          request: scrollTarget.nonce,
         }
       : null;
 
@@ -145,9 +144,12 @@ const emptyWalkthroughBlockSet: WalkthroughBlockSet = {
   stopIndexByBlockId: new Map(),
 };
 
-function StopHeader({ current, stop }: { current: boolean; stop: WalkthroughStopView }) {
+// The current-stop accent is not rendered here: it is applied through the
+// `codiff-selected-item` class on the virtualized item container, so the header
+// item's content and version stay stable while scrolling moves the selection.
+function StopHeader({ stop }: { stop: WalkthroughStopView }) {
   return (
-    <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
+    <div className="wt-stop-block wt-stop-block-header">
       <div className="wt-stage-title-row">
         <h2 className="wt-stage-title">{stop.title ?? walkthroughItemTitleFallback(stop)}</h2>
         <ImportancePill importance={stop.importance} />
@@ -157,9 +159,9 @@ function StopHeader({ current, stop }: { current: boolean; stop: WalkthroughStop
   );
 }
 
-function SupportHeader({ current }: { current: boolean }) {
+function SupportHeader() {
   return (
-    <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
+    <div className="wt-stop-block wt-stop-block-header">
       <div className="wt-stage-title-row">
         <h2 className="wt-stage-title">Support</h2>
         <ImportancePill importance="normal" />
@@ -185,7 +187,7 @@ const createWalkthroughBlocks = (
       firstBlockIdByStop[stop.index] = blockId;
       stopIndexByBlockId.set(blockId, stop.index);
       blocks.push({
-        header: <StopHeader current={stop.index === currentIndex} stop={stop} />,
+        header: <StopHeader stop={stop} />,
         headerSelected: stop.index === currentIndex,
         id: blockId,
       });
@@ -199,8 +201,7 @@ const createWalkthroughBlocks = (
       stopIndexByBlockId.set(blockId, stop.index);
       blocks.push({
         file,
-        header:
-          runIndex === 0 ? <StopHeader current={stop.index === currentIndex} stop={stop} /> : null,
+        header: runIndex === 0 ? <StopHeader stop={stop} /> : null,
         headerSelected: stop.index === currentIndex,
         id: blockId,
         itemIdPrefix: blockId,
@@ -240,7 +241,7 @@ const createSupportBlocks = (
         const isFirstBlock = blocks.length === 0;
         blocks.push({
           file,
-          header: isFirstBlock ? <SupportHeader current={selected} /> : null,
+          header: isFirstBlock ? <SupportHeader /> : null,
           headerSelected: selected,
           id: blockId,
           itemIdPrefix: blockId,
@@ -257,7 +258,7 @@ const createSupportBlocks = (
     const isFirstBlock = blocks.length === 0;
     blocks.push({
       file,
-      header: isFirstBlock ? <SupportHeader current={selected} /> : null,
+      header: isFirstBlock ? <SupportHeader /> : null,
       headerSelected: selected,
       id: blockId,
       itemIdPrefix: blockId,
@@ -552,9 +553,7 @@ export function NarrativeWalkthroughView({
   const reviewBlockScrollTarget = getWalkthroughBlockScrollTarget({
     activeBlockId,
     firstSupportBlockId,
-    mode: navigation.mode,
-    stopScrollRequest: navigation.scrollTarget.nonce,
-    supportScrollRequest: navigation.supportScrollRequest,
+    scrollTarget: navigation.scrollTarget,
   });
   const handleActiveBlockChange = useCallback(
     (blockId: string) => {
