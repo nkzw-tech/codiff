@@ -1,0 +1,21 @@
+core/__tests__/SharedWalkthroughApp.test.tsx
+  s_0269ef130b43de::t_055c7838eb05d1 141-199
+web/src/sharing/WalkthroughPage.tsx
+  s_0269ef130b43de::t_c1c4e8757a8266 18,156,379-381,384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ffb57ad6b67c9845b8520e507fa95a218866344b",
+  "prompts": {},
+  "sessions": {
+    "s_0269ef130b43de": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03ba2-a8ff-75c0-9072-2091117cec83",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
