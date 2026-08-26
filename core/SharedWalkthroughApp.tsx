@@ -93,12 +93,62 @@ const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
 const emptyGeneralCommentThreads: ReadonlyArray<PullRequestGeneralCommentThread> = [];
 const emptyPaths = new Set<string>();
 const emptyWalkthroughNotes = new Map();
+const reviewSurfacePreferencesKey = 'codiff:web-review-surface-preferences:v1';
+const getLocationHashTarget = () => {
+  const hash = window.location.hash.slice(1);
+  if (!hash) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(hash);
+  } catch {
+    return hash;
+  }
+};
+const commentMatchesHashTarget = (
+  comment: { id: string; threadId?: string; url?: string },
+  target: string,
+) =>
+  comment.id === target ||
+  comment.threadId === target ||
+  comment.url?.slice(comment.url.lastIndexOf('#') + 1) === target;
 const readSharedSidebarWidth = () =>
   typeof localStorage === 'undefined' ? SIDEBAR_DEFAULT_WIDTH : readSidebarWidth();
 
 const writeSharedSidebarWidth = (width: number) => {
   if (typeof localStorage !== 'undefined') {
     writeSidebarWidth(width);
+  }
+};
+
+const readStoredSidebarCollapsed = (): boolean | null => {
+  if (typeof localStorage === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = JSON.parse(localStorage.getItem(reviewSurfacePreferencesKey) ?? '{}') as unknown;
+    if (
+      stored &&
+      typeof stored === 'object' &&
+      'sidebarCollapsed' in stored &&
+      typeof stored.sidebarCollapsed === 'boolean'
+    ) {
+      return stored.sidebarCollapsed;
+    }
+  } catch {
+    // Ignore unavailable or invalid browser storage and use the viewport default.
+  }
+  return null;
+};
+
+const writeStoredSidebarCollapsed = (sidebarCollapsed: boolean) => {
+  if (typeof localStorage === 'undefined') {
+    return;
+  }
+  try {
+    localStorage.setItem(reviewSurfacePreferencesKey, JSON.stringify({ sidebarCollapsed }));
+  } catch {
+    // Ignore unavailable or full browser storage; the preference remains in memory.
   }
 };
 
@@ -178,6 +228,12 @@ export type ReviewSurfaceProps = {
   title?: string;
 };
 
+const mobileSidebarMediaQuery = '(max-width: 720px)';
+
+const shouldCollapseSidebarInitially = () =>
+  readStoredSidebarCollapsed() ??
+  (typeof window !== 'undefined' && window.matchMedia(mobileSidebarMediaQuery).matches);
+
 export function ReviewSurface({
   commenting,
   externalUrl,
@@ -233,19 +289,43 @@ export function ReviewSurface({
   const [uncontrolledSidebarMode, setUncontrolledSidebarMode] = useState<ReviewMode>(
     () => initialMode ?? (interactive ? 'tree' : 'walkthrough'),
   );
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean | null>(null);
+  const sidebarCollapsedRef = useRef<boolean | null>(null);
+  const sidebarInteractedRef = useRef(false);
+  const updateSidebarCollapsed = useCallback((value: boolean, persist: boolean) => {
+    sidebarCollapsedRef.current = value;
+    setSidebarCollapsed(value);
+    if (persist) {
+      writeStoredSidebarCollapsed(value);
+    }
+  }, []);
+  const toggleSidebar = useCallback(() => {
+    sidebarInteractedRef.current = true;
+    updateSidebarCollapsed(
+      !(sidebarCollapsedRef.current ?? shouldCollapseSidebarInitially()),
+      true,
+    );
+  }, [updateSidebarCollapsed]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      if (!sidebarInteractedRef.current) {
+        updateSidebarCollapsed(shouldCollapseSidebarInitially(), false);
+      }
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [updateSidebarCollapsed]);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || !matchesShortcut(event, keymap, 'toggleSidebar')) {
         return;
       }
       event.preventDefault();
-      setSidebarCollapsed((current) => !current);
+      toggleSidebar();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [keymap]);
+  }, [keymap, toggleSidebar]);
   const isSidebarModeControlled = Boolean(initialMode && onModeChange);
   const sidebarMode =
     isSidebarModeControlled && initialMode ? initialMode : uncontrolledSidebarMode;
@@ -265,7 +345,10 @@ export function ReviewSurface({
   });
   const { resizeSidebar, sidebarWidth } = useResizableSidebar({
     collapseThreshold: SIDEBAR_COLLAPSE_THRESHOLD,
-    onCollapse: () => setSidebarCollapsed(true),
+    onCollapse: () => {
+      sidebarInteractedRef.current = true;
+      updateSidebarCollapsed(true, true);
+    },
     onWidthCommit: writeSharedSidebarWidth,
     position: sidebarPosition,
     readWidth: readSharedSidebarWidth,
@@ -296,6 +379,7 @@ export function ReviewSurface({
     clearCommentFocus,
     createComment,
     deleteComment: deleteLocalComment,
+    focusComment,
     focusCommentId,
     focusCommentRequest,
     reviewCommentsRef,
@@ -334,6 +418,7 @@ export function ReviewSurface({
   const walkthroughRequestPendingRef = useRef(false);
   const [walkthroughRequestId, setWalkthroughRequestId] = useState(0);
   const interactiveRef = useRef(interactive);
+  const handledHashTargetRef = useRef<string | null>(null);
 
   const visibleFiles = useMemo(
     () =>
@@ -744,6 +829,58 @@ export function ReviewSurface({
     },
     [setSelectedPath],
   );
+  const activateReviewComment = useCallback(
+    (comment: ReviewComment) => {
+      changeSidebarMode('tree');
+      setSelectedPath(comment.filePath);
+      focusComment(comment.id);
+      setTreeScrollTarget((current) => ({
+        behavior: 'smooth',
+        commentId: comment.id,
+        path: comment.filePath,
+        request: (current?.request ?? 0) + 1,
+      }));
+    },
+    [changeSidebarMode, focusComment, setSelectedPath],
+  );
+  const activateHashTarget = useCallback(() => {
+    const target = getLocationHashTarget();
+    if (!target || handledHashTargetRef.current === target) {
+      return;
+    }
+
+    const reviewComment = reviewComments.find((comment) =>
+      commentMatchesHashTarget(comment, target),
+    );
+    if (reviewComment) {
+      handledHashTargetRef.current = target;
+      activateReviewComment(reviewComment);
+      return;
+    }
+
+    for (const thread of generalCommentThreads) {
+      const generalComment =
+        thread.comments.find((comment) => commentMatchesHashTarget(comment, target)) ??
+        (thread.id === target ? thread.comments[0] : undefined);
+      if (generalComment) {
+        handledHashTargetRef.current = target;
+        activateGeneralComment(generalComment.id);
+        return;
+      }
+    }
+  }, [activateGeneralComment, activateReviewComment, generalCommentThreads, reviewComments]);
+  useEffect(() => {
+    const timeout = window.setTimeout(activateHashTarget, 0);
+    return () => window.clearTimeout(timeout);
+  }, [activateHashTarget]);
+  useEffect(() => {
+    const handleHashChange = () => {
+      handledHashTargetRef.current = null;
+      activateHashTarget();
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [activateHashTarget]);
   const updateSelectedPathFromScroll = useCallback(
     (viewer: CodeViewInstance) => {
       const nextPath = getSelectedPathFromScroll(
@@ -979,12 +1116,12 @@ export function ReviewSurface({
   return (
     <div
       className={`app-shell share-shell${interactive ? ' merge-request-shell' : ''}${
-        sidebarCollapsed ? ' sidebar-collapsed' : ''
+        sidebarCollapsed === null ? ' sidebar-auto' : sidebarCollapsed ? ' sidebar-collapsed' : ''
       }`}
       data-sidebar-position={sidebarPosition}
       data-theme={shellTheme}
       style={
-        sidebarCollapsed
+        sidebarCollapsed !== false
           ? undefined
           : {
               gridTemplateColumns:
@@ -1044,7 +1181,7 @@ export function ReviewSurface({
         mode={sidebarMode}
         modes={reviewModes}
         onModeChange={changeSidebarMode}
-        onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        onToggleSidebar={toggleSidebar}
         repository={
           repositoryLinkUrl ? (
             <a
@@ -1060,7 +1197,7 @@ export function ReviewSurface({
           )
         }
         repositoryTooltip={snapshot.repository.root}
-        sidebarCollapsed={sidebarCollapsed}
+        sidebarCollapsed={sidebarCollapsed ?? false}
         sidebarPosition={sidebarPosition}
         toggleTitle={`${sidebarCollapsed ? 'Expand' : 'Collapse'} sidebar`}
       />
@@ -1145,6 +1282,7 @@ export function ReviewSurface({
             onCancelEdit={cancelEditGeneralComment}
             onChangeDraft={setGeneralCommentDraft}
             onChangeEditDraft={setGeneralCommentEditDraft}
+            onResolveDiscussion={resolveDiscussion}
             onSaveEdit={saveGeneralCommentEdit}
             onStartEdit={startEditGeneralComment}
             onSubmit={submitGeneralComment}

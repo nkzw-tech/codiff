@@ -1,6 +1,7 @@
 import { expect, test } from 'vite-plus/test';
 import {
   getWalkthroughBlockScrollTarget,
+  getWalkthroughKeyboardForwardIndex,
   getWalkthroughNavigationKeyDirection,
 } from '../app/components/walkthrough/NarrativeWalkthroughView.tsx';
 import { parseSectionDiffWithOptions } from '../lib/diff.ts';
@@ -215,6 +216,12 @@ test('walkthrough keyboard navigation ignores editor shortcut chords', () => {
   expect(getWalkthroughNavigationKeyDirection(keyEvent('k', { metaKey: true }))).toBe(0);
   expect(getWalkthroughNavigationKeyDirection(keyEvent('k', { ctrlKey: true }))).toBe(0);
   expect(getWalkthroughNavigationKeyDirection(keyEvent('j', { shiftKey: true }))).toBe(0);
+});
+
+test('walkthrough keyboard navigation enters the first stop before advancing', () => {
+  expect(getWalkthroughKeyboardForwardIndex({ index: 0, scrollRequest: 0 })).toBe(0);
+  expect(getWalkthroughKeyboardForwardIndex({ index: 0, scrollRequest: 1 })).toBe(1);
+  expect(getWalkthroughKeyboardForwardIndex({ index: 1, scrollRequest: 1 })).toBe(2);
 });
 
 test('walkthrough scrolling skips the initial stop but keeps explicit navigation', () => {

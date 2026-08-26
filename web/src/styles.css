@@ -109,6 +109,217 @@ body {
   overflow: hidden;
 }
 
+.codiff-web-settings-bar {
+  align-items: center;
+  display: flex;
+  width: auto;
+}
+
+.codiff-web-settings-trigger,
+.codiff-web-settings-close {
+  border-radius: 15px;
+  height: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+.codiff-web-settings-trigger {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  color: var(--sidebar-text);
+}
+
+.codiff-web-settings-trigger:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.codiff-web-settings-backdrop {
+  backdrop-filter: blur(2px);
+  background: rgb(0 0 0 / 0.18);
+  inset: 0;
+  position: fixed;
+  z-index: 120;
+}
+
+.codiff-web-settings-viewport {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 121;
+}
+
+.codiff-web-settings-dialog {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 28px;
+  box-shadow:
+    0 24px 80px -50px rgb(0 0 0 / 0.78),
+    0 10px 32px -24px rgb(0 0 0 / 0.82);
+  color: var(--text);
+  corner-shape: squircle;
+  max-height: min(720px, calc(100dvh - 48px));
+  max-width: min(430px, calc(100vw - 48px));
+  min-width: min(430px, calc(100vw - 48px));
+  outline: none;
+  overflow: auto;
+  padding: 10px;
+  transform-origin: center;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.codiff-web-settings-dialog[data-starting-style],
+.codiff-web-settings-dialog[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+.codiff-web-settings-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 4px 10px 12px;
+}
+
+.codiff-web-settings-title {
+  font: 700 15px/1.25 var(--font-sans);
+}
+
+.codiff-web-settings-close {
+  border: 1px solid transparent;
+}
+
+.codiff-web-settings-content {
+  display: grid;
+  gap: 8px;
+}
+
+.codiff-web-settings-field {
+  border: 1px solid var(--file-border);
+  border-radius: 24px;
+  corner-shape: squircle;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.codiff-web-settings-field > legend,
+.codiff-web-settings-control > span,
+.codiff-web-settings-row strong {
+  color: var(--text);
+  font: 700 13px/1.25 var(--font-sans);
+}
+
+.codiff-web-settings-segmented {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 24px;
+  corner-shape: squircle;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  padding: 2px;
+}
+
+.codiff-web-settings-segmented button {
+  background: transparent;
+  border-radius: 18px;
+  color: var(--muted);
+  corner-shape: squircle;
+  cursor: pointer;
+  font: 700 12px/1 var(--font-sans);
+  min-height: 28px;
+  text-transform: capitalize;
+}
+
+.codiff-web-settings-segmented button:hover {
+  background: var(--hover-wash);
+  color: var(--text);
+}
+
+.codiff-web-settings-segmented button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--hover-wash) 78%, var(--code-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent);
+  color: var(--text);
+}
+
+.codiff-web-settings-row {
+  align-items: center;
+  border: 1px solid var(--file-border);
+  border-radius: 20px;
+  corner-shape: squircle;
+  cursor: pointer;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.codiff-web-settings-row > span:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.codiff-web-settings-row small {
+  color: var(--muted);
+  font: 12px/1.35 var(--font-sans);
+}
+
+.codiff-web-settings-row input[type='checkbox'] {
+  accent-color: var(--viewed);
+}
+
+.codiff-web-settings-row:has(input:checked) .codiff-viewed-checkbox {
+  background: var(--viewed);
+  border-color: var(--viewed);
+}
+
+.codiff-web-settings-control {
+  display: grid;
+  gap: 8px;
+}
+
+.codiff-web-settings-text-input {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 16px;
+  color: var(--text);
+  corner-shape: squircle;
+  font: 14px/1.35 var(--font-sans);
+  height: 34px;
+  outline: none;
+  padding: 0 11px;
+  width: 100%;
+}
+
+.codiff-web-settings-text-input:focus {
+  box-shadow: 0 0 0 2px rgb(61 135 245 / 0.32);
+}
+
+.codiff-web-settings-stepper {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 34px minmax(0, 1fr) 34px 34px;
+}
+
+.codiff-web-settings-stepper output {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 16px;
+  color: var(--text);
+  corner-shape: squircle;
+  font: 700 13px/1 var(--font-mono);
+  min-height: 34px;
+  padding: 10px 12px 0;
+  text-align: center;
+}
+
 .codiff-web-page-thinking {
   align-items: center;
   display: flex;

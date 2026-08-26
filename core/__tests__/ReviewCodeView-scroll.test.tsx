@@ -827,6 +827,176 @@ test('read-only review comments render safe details blocks', async () => {
   expect(view.container.textContent).toContain('AI Code Reviewer');
 });
 
+test('resolved review threads collapse inline, expand when focused, and can be reopened', async () => {
+  const file = createChangedFile('src/resolved.ts');
+  const comments = [
+    {
+      author: { login: 'reviewer' },
+      body: 'Please keep this explicit.',
+      canResolveThread: true,
+      filePath: file.path,
+      id: 'gitlab:99',
+      isReadOnly: true,
+      isThreadResolved: true,
+      lineNumber: 1,
+      sectionId: file.sections[0].id,
+      side: 'additions',
+      threadId: 'discussion-1',
+    },
+    {
+      author: { login: 'author' },
+      body: 'Resolved in the latest update.',
+      canResolveThread: true,
+      filePath: file.path,
+      id: 'gitlab:103',
+      isReadOnly: true,
+      isThreadResolved: true,
+      lineNumber: 1,
+      sectionId: file.sections[0].id,
+      side: 'additions',
+      threadId: 'discussion-1',
+    },
+  ] satisfies ReadonlyArray<ReviewComment>;
+  let finishResolve: (() => void) | null = null;
+  const onResolveThread = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finishResolve = resolve;
+      }),
+  );
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      comments={comments}
+      files={[file]}
+      onResolveThread={onResolveThread}
+      supportsReviewCommentActions
+    />,
+  );
+
+  const toggle = () => view.container.querySelector<HTMLButtonElement>('.resolved-thread-toggle');
+  expect(toggle()?.getAttribute('aria-expanded')).toBe('false');
+  expect(toggle()?.textContent).toContain('Resolved conversation');
+  expect(toggle()?.textContent).toContain('2 comments');
+  expect(toggle()?.querySelectorAll('svg')).toHaveLength(1);
+  expect(view.container.textContent).not.toContain('Please keep this explicit.');
+
+  await act(async () => toggle()?.click());
+  expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
+  expect(view.container.textContent).toContain('Please keep this explicit.');
+
+  await view.rerender(
+    <ReviewCodeViewHarness
+      comments={comments}
+      files={[file]}
+      focusCommentId="gitlab:103"
+      focusCommentRequest={1}
+      onResolveThread={onResolveThread}
+      supportsReviewCommentActions
+    />,
+  );
+  expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
+
+  const reopen = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Reopen',
+  );
+  await act(async () => reopen?.click());
+  expect(onResolveThread).toHaveBeenCalledWith('discussion-1', false);
+  expect(view.container.querySelector('.resolved-thread-toggle')).toBeNull();
+  expect(view.container.textContent).toContain('Please keep this explicit.');
+  expect(
+    [...view.container.querySelectorAll<HTMLButtonElement>('button')].some(
+      (button) => button.textContent === 'Reply',
+    ),
+  ).toBe(false);
+
+  await act(async () => finishResolve?.());
+  expect(
+    [...view.container.querySelectorAll<HTMLButtonElement>('button')].some(
+      (button) => button.textContent === 'Reply',
+    ),
+  ).toBe(true);
+});
+
+test('resolving an open review thread collapses it in place', async () => {
+  const file = createChangedFile('src/open-thread.ts');
+  const comment = {
+    author: { login: 'reviewer' },
+    body: 'Please keep this explicit.',
+    canResolveThread: true,
+    filePath: file.path,
+    id: 'gitlab:99',
+    isReadOnly: true,
+    lineNumber: 1,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+    threadId: 'discussion-1',
+  } satisfies ReviewComment;
+  let finishResolve: (() => void) | null = null;
+  const onResolveThread = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finishResolve = resolve;
+      }),
+  );
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      comments={[comment]}
+      files={[file]}
+      onResolveThread={onResolveThread}
+      supportsReviewCommentActions
+    />,
+  );
+
+  const resolve = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Resolve',
+  );
+  await act(async () => resolve?.click());
+
+  expect(onResolveThread).toHaveBeenCalledWith('discussion-1', true);
+  expect(
+    view.container
+      .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
+      ?.getAttribute('aria-expanded'),
+  ).toBe('false');
+  expect(view.container.textContent).not.toContain('Please keep this explicit.');
+
+  await act(async () => finishResolve?.());
+});
+
+test('comment scroll targets navigate directly to their diff annotation', async () => {
+  const file = createChangedFile('src/deep-link.ts');
+  const comment = {
+    author: { login: 'reviewer' },
+    body: 'Linked review comment.',
+    filePath: file.path,
+    id: 'gitlab:99',
+    isReadOnly: true,
+    lineNumber: 1,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+    threadId: 'discussion-1',
+  } satisfies ReviewComment;
+
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness
+      comments={[comment]}
+      files={[file]}
+      scrollTarget={{ commentId: comment.id, request: 1 }}
+    />,
+  );
+
+  await waitFor(() => {
+    expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: `diff:${file.sections[0].id}`,
+        lineNumber: 1,
+        side: 'additions',
+        type: 'line',
+      }),
+    );
+  });
+});
+
 test('walkthrough hunk viewed state is keyed independently from file path', async () => {
   const filePath = 'src/shared.ts';
   const firstFile = {

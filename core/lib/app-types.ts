@@ -72,6 +72,7 @@ export type ReviewScrollBehavior = 'instant' | 'smooth';
 export type ReviewScrollTarget = {
   behavior?: ReviewScrollBehavior;
   blockId?: string;
+  commentId?: string;
   path?: string;
   request: number;
 };

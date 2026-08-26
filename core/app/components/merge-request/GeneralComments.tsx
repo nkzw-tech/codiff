@@ -24,6 +24,7 @@ import type {
 import { Avatar } from '../Avatar.tsx';
 import { Button } from '../Button.tsx';
 import { ReadOnlyMarkdownView } from '../ReadOnlyMarkdownView.tsx';
+import { ResolvedThreadDisclosure } from '../ResolvedThreadDisclosure.tsx';
 
 export type ReviewCommenting = {
   canComment: boolean;
@@ -302,6 +303,7 @@ function GeneralCommentThreadCard({
   editingCommentId,
   editSubmitting,
   focusedCommentId,
+  focusedCommentRequest,
   keymap,
   onCancelEdit,
   onChangeEditDraft,
@@ -318,6 +320,7 @@ function GeneralCommentThreadCard({
   editingCommentId: string | null;
   editSubmitting: boolean;
   focusedCommentId: string | null;
+  focusedCommentRequest: number;
   keymap: CodiffKeymap;
   onCancelEdit: () => void;
   onChangeEditDraft: (draft: string) => void;
@@ -334,6 +337,15 @@ function GeneralCommentThreadCard({
   const [showReply, setShowReply] = useState(false);
   const [resolving, setResolving] = useState(false);
   const resolved = thread.isResolved === true;
+  const hasFocusedComment =
+    focusedCommentId != null && thread.comments.some((comment) => comment.id === focusedCommentId);
+  const [resolutionOverride, setResolutionOverride] = useState<{
+    base: boolean;
+    value: boolean;
+  } | null>(null);
+  const effectiveResolved =
+    resolutionOverride?.base === resolved ? resolutionOverride.value : resolved;
+
   const submitReply = useCallback(() => {
     const body = replyDraft.trim();
     if (!body || replying) {
@@ -355,16 +367,19 @@ function GeneralCommentThreadCard({
     if (resolving) {
       return;
     }
+    const nextResolved = !effectiveResolved;
+    setResolutionOverride({ base: resolved, value: nextResolved });
     setResolving(true);
-    void onResolve(thread.id, !resolved)
+    void onResolve(thread.id, nextResolved)
       .catch((error: unknown) => {
+        setResolutionOverride(null);
         window.alert(error instanceof Error ? error.message : String(error));
       })
       .finally(() => setResolving(false));
-  }, [onResolve, resolved, resolving, thread.id]);
+  }, [effectiveResolved, onResolve, resolved, resolving, thread.id]);
 
-  return (
-    <section className="general-comment-thread">
+  const threadContent = (
+    <>
       {thread.comments.map((comment) => (
         <GeneralCommentCard
           comment={comment}
@@ -382,7 +397,7 @@ function GeneralCommentThreadCard({
           onStartEdit={onStartEdit}
         />
       ))}
-      {thread.canReply && canComment && !resolved ? (
+      {thread.canReply && canComment && !effectiveResolved && !resolving ? (
         showReply ? (
           <GeneralCommentComposer
             disabled={false}
@@ -414,11 +429,26 @@ function GeneralCommentThreadCard({
             onClick={toggleResolved}
             type="button"
           >
-            {resolving ? 'Saving' : resolved ? 'Reopen' : 'Resolve'}
+            {resolving ? 'Saving' : effectiveResolved ? 'Reopen' : 'Resolve'}
           </button>
         </div>
       ) : null}
+    </>
+  );
+
+  return effectiveResolved ? (
+    <section className="general-comment-thread">
+      <ResolvedThreadDisclosure
+        commentCount={thread.comments.length}
+        focused={hasFocusedComment}
+        focusRequest={focusedCommentRequest}
+        saving={resolving}
+      >
+        {threadContent}
+      </ResolvedThreadDisclosure>
     </section>
+  ) : (
+    <section className="general-comment-thread">{threadContent}</section>
   );
 }
 
@@ -563,6 +593,7 @@ export function MergeRequestCommentsView({
   onCancelEdit,
   onChangeDraft,
   onChangeEditDraft,
+  onResolveDiscussion,
   onSaveEdit,
   onStartEdit,
   onSubmit,
@@ -586,6 +617,7 @@ export function MergeRequestCommentsView({
   onCancelEdit: () => void;
   onChangeDraft: (draft: string) => void;
   onChangeEditDraft: (draft: string) => void;
+  onResolveDiscussion?: (discussionId: string, resolved: boolean) => Promise<void>;
   onSaveEdit: () => void;
   onStartEdit: (comment: PullRequestGeneralComment) => void;
   onSubmit: () => void;
@@ -624,6 +656,7 @@ export function MergeRequestCommentsView({
               editingCommentId={editingCommentId}
               editSubmitting={editSubmitting}
               focusedCommentId={focusedCommentId}
+              focusedCommentRequest={focusedCommentRequest}
               key={thread.id}
               keymap={keymap}
               onCancelEdit={onCancelEdit}
@@ -638,6 +671,7 @@ export function MergeRequestCommentsView({
                 Promise.reject(new Error('Replying is unavailable.'))
               }
               onResolve={(threadId, resolved) =>
+                onResolveDiscussion?.(threadId, resolved) ??
                 commenting?.onResolveDiscussion(threadId, resolved) ??
                 Promise.reject(new Error('Resolving is unavailable.'))
               }

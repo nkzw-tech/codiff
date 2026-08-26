@@ -65,6 +65,7 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
+  window.localStorage.clear();
   rendered.props = null;
   fate.useFateClient.mockReset().mockReturnValue(fate.client);
   fate.useRequest.mockReset().mockReturnValue({
@@ -177,5 +178,88 @@ test('optimistically adds walkthrough-level comments and replies', async () => {
       updatedAt: expect.any(Date),
     },
     view: {},
+  });
+});
+
+test('passes device-local review preferences and settings to the public viewer', async () => {
+  window.localStorage.setItem(
+    'codiff:web-review-preferences:v1',
+    JSON.stringify({
+      codeFontFamily: 'JetBrains Mono',
+      codeFontSize: 15,
+      diffStyle: 'unified',
+      showWhitespace: true,
+      theme: 'dark',
+      wordWrap: true,
+    }),
+  );
+
+  await act(async () => {
+    root.render(
+      <Suspense fallback={null}>
+        <WalkthroughPage slug="optimistic-walkthrough" />
+      </Suspense>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect(rendered.props?.settingsBar).toBeTruthy();
+  const snapshot = rendered.props?.snapshot as { preferences?: unknown } | undefined;
+  expect(snapshot?.preferences).toEqual({
+    codeFontFamily: 'JetBrains Mono',
+    codeFontSize: 15,
+    diffStyle: 'unified',
+    showWhitespace: true,
+    theme: 'dark',
+    wordWrap: true,
+  });
+});
+
+test('preserves snapshot defaults for missing device-local preferences', async () => {
+  fate.useLiveView.mockReturnValue({
+    canDelete: false,
+    canResolveComments: true,
+    commentThreads: {},
+    id: 'walkthrough-id',
+    slug: 'fallback-walkthrough',
+  });
+  vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+    Response.json({
+      kind: 'codiff-walkthrough-share',
+      preferences: {
+        codeFontFamily: 'Fira Code',
+        codeFontSize: 18,
+        diffStyle: 'split',
+        showWhitespace: true,
+        theme: 'light',
+        wordWrap: true,
+      },
+      repository: {},
+      version: 1,
+      walkthrough: { chapters: [], title: 'Walkthrough' },
+    }),
+  );
+  window.localStorage.setItem(
+    'codiff:web-review-preferences:v1',
+    JSON.stringify({ codeFontFamily: 'JetBrains Mono' }),
+  );
+
+  await act(async () => {
+    root.render(
+      <Suspense fallback={null}>
+        <WalkthroughPage slug="fallback-walkthrough" />
+      </Suspense>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  const snapshot = rendered.props?.snapshot as { preferences?: unknown } | undefined;
+  expect(snapshot?.preferences).toEqual({
+    codeFontFamily: 'JetBrains Mono',
+    codeFontSize: 18,
+    diffStyle: 'split',
+    showWhitespace: true,
+    theme: 'light',
+    wordWrap: true,
   });
 });

@@ -138,7 +138,178 @@ test.each([
 
   const shell = view.container.querySelector<HTMLElement>('.app-shell');
   expect(shell?.dataset.sidebarPosition).toBe(testCase.position);
-  expect(shell?.style.gridTemplateColumns).toBe(testCase.columns);
+  await waitFor(() => {
+    expect(shell?.style.gridTemplateColumns).toBe(testCase.columns);
+  });
+});
+
+test('review surface starts with the sidebar collapsed on mobile viewports', async () => {
+  window.localStorage.clear();
+  const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query) =>
+      ({
+        addEventListener() {},
+        addListener() {},
+        dispatchEvent: () => false,
+        matches: query === '(max-width: 720px)',
+        media: query,
+        onchange: null,
+        removeEventListener() {},
+        removeListener() {},
+      }) as MediaQueryList,
+  );
+
+  try {
+    await using view = await renderReact(<ReviewSurface snapshot={sharedWalkthroughSnapshot} />);
+
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('.app-shell')?.classList.contains('sidebar-collapsed'),
+      ).toBe(true);
+      expect(
+        view.container
+          .querySelector<HTMLButtonElement>('.sidebar-toggle-button')
+          ?.getAttribute('aria-label'),
+      ).toBe('Expand sidebar');
+    });
+
+    await act(async () => {
+      view.container.querySelector<HTMLButtonElement>('.sidebar-toggle-button')?.click();
+    });
+    expect(
+      view.container.querySelector('.app-shell')?.classList.contains('sidebar-collapsed'),
+    ).toBe(false);
+    expect(
+      JSON.parse(window.localStorage.getItem('codiff:web-review-surface-preferences:v1') ?? '{}'),
+    ).toEqual({ sidebarCollapsed: false });
+
+    await using persistedView = await renderReact(
+      <ReviewSurface snapshot={sharedWalkthroughSnapshot} />,
+    );
+    await waitFor(() => {
+      expect(
+        persistedView.container
+          .querySelector('.app-shell')
+          ?.classList.contains('sidebar-collapsed'),
+      ).toBe(false);
+    });
+  } finally {
+    window.localStorage.clear();
+    matchMedia.mockRestore();
+  }
+});
+
+test('a resolved general discussion stays collapsed unless its hash targets the thread', async () => {
+  let finishResolve: (() => void) | null = null;
+  const onResolveDiscussion = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finishResolve = resolve;
+      }),
+  );
+  const resolvedSnapshot = {
+    ...sharedWalkthroughSnapshot,
+    repository: {
+      ...sharedWalkthroughSnapshot.repository,
+      generalComments: [
+        {
+          canReply: true,
+          canResolve: true,
+          comments: [
+            {
+              author: { login: 'reviewer' },
+              body: 'This conversation is resolved.',
+              id: 'gitlab:200',
+              url: 'https://gitlab.example.com/group/project/-/merge_requests/1#note_200',
+            },
+          ],
+          id: 'general-discussion',
+          isResolved: true,
+        },
+      ],
+    },
+  } satisfies SharedWalkthroughSnapshot;
+
+  window.history.replaceState(null, '', '/review');
+  await using collapsedView = await renderReact(
+    <ReviewSurface
+      commenting={{ ...commenting, canComment: true, onResolveDiscussion }}
+      initialMode="comments"
+      snapshot={resolvedSnapshot}
+    />,
+  );
+  expect(
+    collapsedView.container
+      .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
+      ?.getAttribute('aria-expanded'),
+  ).toBe('false');
+  expect(collapsedView.container.querySelector('.resolved-thread-content')).toBeNull();
+
+  window.history.replaceState(null, '', '/review#general-discussion');
+  window.dispatchEvent(new HashChangeEvent('hashchange'));
+  await waitFor(() => {
+    expect(
+      collapsedView.container
+        .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
+        ?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    expect(collapsedView.container.textContent).toContain('This conversation is resolved.');
+  });
+
+  const reopen = [...collapsedView.container.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === 'Reopen',
+  );
+  await act(async () => reopen?.click());
+  expect(onResolveDiscussion).toHaveBeenCalledWith('general-discussion', false);
+  expect(collapsedView.container.querySelector('.resolved-thread-toggle')).toBeNull();
+  expect(
+    [...collapsedView.container.querySelectorAll<HTMLButtonElement>('button')].some(
+      (button) => button.textContent === 'Reply',
+    ),
+  ).toBe(false);
+
+  await act(async () => finishResolve?.());
+  expect(
+    [...collapsedView.container.querySelectorAll<HTMLButtonElement>('button')].some(
+      (button) => button.textContent === 'Reply',
+    ),
+  ).toBe(true);
+  window.history.replaceState(null, '', '/');
+});
+
+test('a resolved inline discussion expands when its note hash is targeted', async () => {
+  const resolvedSnapshot = {
+    ...sharedWalkthroughSnapshot,
+    reviewComments: [
+      {
+        author: { login: 'reviewer' },
+        body: 'This inline conversation is resolved.',
+        canResolveThread: true,
+        filePath: 'src/app.ts',
+        id: 'gitlab:99',
+        isThreadResolved: true,
+        lineNumber: 1,
+        side: 'additions',
+        threadId: 'line-discussion',
+        url: 'https://gitlab.example.com/group/project/-/merge_requests/1#note_99',
+      },
+    ],
+  } satisfies SharedWalkthroughSnapshot;
+
+  window.history.replaceState(null, '', '/review#note_99');
+  await using view = await renderReact(
+    <ReviewSurface commenting={commenting} initialMode="tree" snapshot={resolvedSnapshot} />,
+  );
+
+  await waitFor(() => {
+    expect(
+      view.container
+        .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
+        ?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    expect(view.container.textContent).toContain('This inline conversation is resolved.');
+  });
+  window.history.replaceState(null, '', '/');
 });
 
 test('share viewer shows the complete repository path when there is no repository link', async () => {

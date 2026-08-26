@@ -138,6 +138,14 @@ export const getWalkthroughNavigationKeyDirection = (
   return 0;
 };
 
+export const getWalkthroughKeyboardForwardIndex = ({
+  index,
+  scrollRequest,
+}: {
+  index: number;
+  scrollRequest: number;
+}) => (index === 0 && scrollRequest === 0 ? 0 : index + 1);
+
 const emptyWalkthroughBlockSet: WalkthroughBlockSet = {
   blocks: [],
   firstBlockIdByStop: [],
@@ -603,8 +611,12 @@ export function NarrativeWalkthroughView({
       if (direction === 1) {
         event.preventDefault();
         if (navigation.mode === 'stop') {
-          if (navigation.index < walkthroughView.sequence.length - 1) {
-            navigation.goNext();
+          const targetIndex = getWalkthroughKeyboardForwardIndex({
+            index: navigation.index,
+            scrollRequest: navigation.scrollTarget.nonce,
+          });
+          if (targetIndex < walkthroughView.sequence.length) {
+            navigation.goStop(targetIndex);
           } else if (supportAvailable) {
             navigation.openSupport();
           } else if (committable) {

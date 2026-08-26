@@ -15,6 +15,7 @@ import { use } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { type ViewRef, useFateClient, useLiveView, useRequest, view } from 'react-fate';
 import { auth } from 'void/client/react';
+import { CodiffSettingsBar, useOnlineCodiffPreferences } from '../ReviewSettings.tsx';
 import {
   ShareComments,
   ShareCommentMessageView,
@@ -152,6 +153,7 @@ const Viewer = ({ walkthrough: walkthroughRef }: { walkthrough: ViewRef<'Walkthr
   const walkthrough = useLiveView(WalkthroughPageView, walkthroughRef);
   const snapshot = use(getManifest(walkthrough.slug));
   usePageTitle(snapshot.walkthrough.title);
+  const [preferences, setPreferences] = useOnlineCodiffPreferences(snapshot.preferences ?? {});
   const { data: session } = auth.useSession();
   const username = sessionUsername(session?.user);
   const deleteShare = walkthrough.canDelete
@@ -374,8 +376,12 @@ const Viewer = ({ walkthrough: walkthroughRef }: { walkthrough: ViewRef<'Walkthr
           }
           onDeleteShare={deleteShare}
           providerLabel="GitHub"
+          settingsBar={
+            <CodiffSettingsBar preferences={preferences} setPreferences={setPreferences} />
+          }
           snapshot={{
             ...snapshot,
+            preferences,
             repository: {
               ...snapshot.repository,
               generalComments: generalComments(

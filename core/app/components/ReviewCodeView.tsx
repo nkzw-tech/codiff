@@ -128,6 +128,7 @@ import {
   type MarkdownDocumentEditorHandle,
 } from './MarkdownDocumentEditor.tsx';
 import { ReadOnlyMarkdownView } from './ReadOnlyMarkdownView.tsx';
+import { ResolvedThreadDisclosure } from './ResolvedThreadDisclosure.tsx';
 import { DiffLineCountBadge } from './Sidebar.tsx';
 import { useCopiedState } from './useCopiedState.ts';
 
@@ -1876,6 +1877,7 @@ function ReviewCommentThreadGroup({
   agentLabel,
   comments,
   focusCommentId,
+  focusCommentRequest,
   focusEditorRef,
   identity,
   keymap,
@@ -1895,6 +1897,7 @@ function ReviewCommentThreadGroup({
   agentLabel: string;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
+  focusCommentRequest: number;
   focusEditorRef: (node: MarkdownEditorHandle | null) => void;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
@@ -1918,6 +1921,15 @@ function ReviewCommentThreadGroup({
   const lastComment = comments.at(-1);
   const threadId = lastComment?.threadId;
   const threadResolved = comments.some((comment) => comment.isThreadResolved === true);
+  const hasFocusedComment =
+    focusCommentId != null && comments.some((comment) => comment.id === focusCommentId);
+  const [resolutionOverride, setResolutionOverride] = useState<{
+    base: boolean;
+    value: boolean;
+  } | null>(null);
+  const effectiveThreadResolved =
+    resolutionOverride?.base === threadResolved ? resolutionOverride.value : threadResolved;
+  const resolving = resolveState.threadId === threadId && resolveState.submitting;
   const canResolveThread =
     supportsReviewCommentActions &&
     threadId != null &&
@@ -1928,9 +1940,9 @@ function ReviewCommentThreadGroup({
     comments.some((comment) => comment.isReadOnly) &&
     !comments.some((comment) => !comment.isReadOnly) &&
     !comments.some((comment) => comment.canReplyThread === false) &&
-    !threadResolved;
+    !effectiveThreadResolved &&
+    !resolving;
   const hasThreadActions = canReplyToThread || canResolveThread;
-  const resolving = resolveState.threadId === threadId && resolveState.submitting;
   const resolveError = resolveState.threadId === threadId ? resolveState.error : null;
 
   const handleReply = useCallback(() => {
@@ -1944,20 +1956,23 @@ function ReviewCommentThreadGroup({
     if (!threadId || resolving) {
       return;
     }
+    const nextResolved = !effectiveThreadResolved;
+    setResolutionOverride({ base: threadResolved, value: nextResolved });
     setResolveState({ error: null, submitting: true, threadId });
-    void Promise.resolve(onResolveThread(threadId, !threadResolved))
+    void Promise.resolve(onResolveThread(threadId, nextResolved))
       .then(() => setResolveState({ error: null, submitting: false, threadId }))
       .catch((error: unknown) => {
+        setResolutionOverride(null);
         setResolveState({
           error: error instanceof Error ? error.message : String(error),
           submitting: false,
           threadId,
         });
       });
-  }, [onResolveThread, resolving, threadId, threadResolved]);
+  }, [effectiveThreadResolved, onResolveThread, resolving, threadId, threadResolved]);
 
-  return (
-    <div className="review-comment-thread-group">
+  const threadContent = (
+    <>
       {comments.map((comment) => {
         const displayName = comment.author
           ? getReviewAuthorDisplayName(comment.author)
@@ -2004,13 +2019,27 @@ function ReviewCommentThreadGroup({
                 onClick={handleResolve}
                 type="button"
               >
-                {resolving ? 'Saving' : threadResolved ? 'Reopen' : 'Resolve'}
+                {resolving ? 'Saving' : effectiveThreadResolved ? 'Reopen' : 'Resolve'}
               </button>
             ) : null}
           </div>
         </div>
       ) : null}
-    </div>
+    </>
+  );
+
+  return effectiveThreadResolved ? (
+    <ResolvedThreadDisclosure
+      commentCount={comments.length}
+      focused={hasFocusedComment}
+      focusRequest={focusCommentRequest}
+      initialExpanded={Boolean(resolveError)}
+      saving={resolving}
+    >
+      {threadContent}
+    </ResolvedThreadDisclosure>
+  ) : (
+    <div className="review-comment-thread-group">{threadContent}</div>
   );
 }
 
@@ -2106,6 +2135,7 @@ function ReviewAnnotation({
           agentLabel={agentLabel}
           comments={group.comments}
           focusCommentId={focusCommentId}
+          focusCommentRequest={focusCommentRequest}
           focusEditorRef={setFocusEditorRef}
           identity={identity}
           key={group.key}
@@ -2737,6 +2767,7 @@ export function ReviewCodeView({
   }, []);
 
   const {
+    commentTargetById,
     firstItemByBlockId,
     firstItemByPath,
     itemBlockId,
@@ -2746,6 +2777,10 @@ export function ReviewCodeView({
     selectedHeaderItemIds,
   } = useMemo(() => {
     const nextItems: Array<CodeViewItem<ReviewAnnotationMetadata>> = [];
+    const nextCommentTargetById = new Map<
+      string,
+      { id: string; lineNumber?: number; side?: 'additions' | 'deletions' }
+    >();
     const nextFirstItemByBlockId = new Map<string, string>();
     const nextFirstItemByPath = new Map<string, string>();
     const nextItemBlockId = new Map<string, string>();
@@ -2843,6 +2878,18 @@ export function ReviewCodeView({
           ...blockSectionComments,
         ]);
         for (const comment of sectionComments) {
+          if (!nextCommentTargetById.has(comment.id)) {
+            nextCommentTargetById.set(
+              comment.id,
+              isLineReviewComment(comment)
+                ? {
+                    id,
+                    lineNumber: comment.lineNumber,
+                    side: comment.side,
+                  }
+                : { id },
+            );
+          }
           const key = getCommentKey(comment);
           const existing = annotationMap.get(key);
           if (existing && existing.metadata.type === 'review-comment') {
@@ -2999,6 +3046,7 @@ export function ReviewCodeView({
     }
 
     return {
+      commentTargetById: nextCommentTargetById,
       firstItemByBlockId: nextFirstItemByBlockId,
       firstItemByPath: nextFirstItemByPath,
       itemBlockId: nextItemBlockId,
@@ -3549,20 +3597,39 @@ export function ReviewCodeView({
     [],
   );
 
-  const requestScrollItemHeaderIntoView = useCallback(
-    (itemId: string, behavior: ReviewScrollBehavior = 'instant') => {
+  const requestScrollTargetIntoView = useCallback(
+    (
+      itemId: string,
+      behavior: ReviewScrollBehavior = 'instant',
+      commentTarget?: {
+        lineNumber?: number;
+        side?: 'additions' | 'deletions';
+      },
+    ) => {
       const handle = codeViewRef.current;
       const viewer = handle?.getInstance();
       if (!handle || !viewer || viewer.getTopForItem(itemId) == null) {
         return false;
       }
 
-      handle.scrollTo({
-        behavior: getEffectiveScrollBehavior(behavior),
-        id: itemId,
-        offset: DEFAULT_PADDING,
-        type: 'item',
-      });
+      handle.scrollTo(
+        commentTarget?.lineNumber != null && commentTarget.side
+          ? {
+              align: 'center',
+              behavior: getEffectiveScrollBehavior(behavior),
+              id: itemId,
+              lineNumber: commentTarget.lineNumber,
+              offset: DEFAULT_PADDING,
+              side: commentTarget.side,
+              type: 'line',
+            }
+          : {
+              behavior: getEffectiveScrollBehavior(behavior),
+              id: itemId,
+              offset: DEFAULT_PADDING,
+              type: 'item',
+            },
+      );
 
       return true;
     },
@@ -3575,11 +3642,16 @@ export function ReviewCodeView({
     }
 
     const behavior = scrollTarget.behavior ?? 'instant';
-    const itemId = scrollTarget.blockId
-      ? firstItemByBlockId.get(scrollTarget.blockId)
-      : scrollTarget.path
-        ? firstItemByPath.get(scrollTarget.path)
-        : null;
+    const commentTarget = scrollTarget.commentId
+      ? commentTargetById.get(scrollTarget.commentId)
+      : undefined;
+    const itemId =
+      commentTarget?.id ??
+      (scrollTarget.blockId
+        ? firstItemByBlockId.get(scrollTarget.blockId)
+        : scrollTarget.path
+          ? firstItemByPath.get(scrollTarget.path)
+          : null);
     if (!itemId) {
       return;
     }
@@ -3593,7 +3665,7 @@ export function ReviewCodeView({
         return;
       }
 
-      if (requestScrollItemHeaderIntoView(itemId, behavior)) {
+      if (requestScrollTargetIntoView(itemId, behavior, commentTarget)) {
         handledScrollRequestRef.current = scrollTarget.request;
         return;
       }
@@ -3612,7 +3684,13 @@ export function ReviewCodeView({
         window.cancelAnimationFrame(frame);
       }
     };
-  }, [firstItemByBlockId, firstItemByPath, requestScrollItemHeaderIntoView, scrollTarget]);
+  }, [
+    commentTargetById,
+    firstItemByBlockId,
+    firstItemByPath,
+    requestScrollTargetIntoView,
+    scrollTarget,
+  ]);
 
   useEffect(() => {
     selectedLinesRef.current = selectedLines;
