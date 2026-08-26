@@ -437,13 +437,12 @@ test('stale persisted collapsed sidebar state does not hide the sidebar on launc
       false,
     );
     expect(app.container.querySelector('.sidebar')).not.toBeNull();
-    expect(app.container.querySelector('.sidebar [role="tablist"]')).not.toBeNull();
+    expect(app.container.querySelector('.review-top-bar [role="tablist"]')).not.toBeNull();
   });
 
   const topBar = app.container.querySelector('.review-top-bar');
-  expect(topBar?.querySelector('[role="tablist"]')).toBeNull();
-  const modeControl = app.container.querySelector('.sidebar .review-mode-control');
-  expect(modeControl?.nextElementSibling?.className).toBe('sidebar-search-row');
+  expect(app.container.querySelector('.sidebar [role="tablist"]')).toBeNull();
+  const modeControl = topBar?.querySelector('.review-mode-control');
   const modes = modeControl?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [];
   expect([...modes].map((mode) => mode.textContent)).toEqual(['Walkthrough', 'Tree', 'History']);
   const sidebarToggle = topBar?.querySelector<HTMLButtonElement>('.sidebar-toggle-button');
@@ -551,7 +550,7 @@ test('repository label is plain text and clicking it does nothing', async () => 
   expect(openRepositoryFolder).not.toHaveBeenCalled();
 });
 
-test('the branch name renders in the center of the top bar', async () => {
+test('the branch name renders in the top bar context', async () => {
   window.codiff = createCodiffMock();
 
   await using app = await renderReact(<App />);
@@ -560,8 +559,7 @@ test('the branch name renders in the center of the top bar', async () => {
   const branch = app.container.querySelector<HTMLElement>('.review-top-bar-branch');
   expect(branch?.textContent).toBe('main');
   expect(branch?.getAttribute('title')).toBe('main');
-  expect(branch?.parentElement?.className).toBe('review-top-bar-center');
-  expect(app.container.querySelector('.review-top-bar-context .review-top-bar-branch')).toBeNull();
+  expect(branch?.parentElement?.className).toBe('review-top-bar-context');
 });
 
 test('empty repository state fills the review pane for centered layout', async () => {

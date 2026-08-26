@@ -1827,30 +1827,33 @@ export default function App() {
             showWhitespace={showWhitespace}
           />
         }
-        center={
-          state.branch ? (
-            <span className="review-top-bar-branch" title={state.branch}>
-              {state.branch}
-            </span>
-          ) : null
-        }
         context={
-          sidebarSourceLabel ? (
-            pullRequestUrl ? (
-              <a
-                className="review-top-bar-source"
-                href={pullRequestUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                <span>{sidebarSourceLabel}</span>
-                <ArrowSquareOut aria-hidden size={14} weight="bold" />
-              </a>
-            ) : (
-              <span className="review-top-bar-source">{sidebarSourceLabel}</span>
-            )
-          ) : null
+          <>
+            {state.branch ? (
+              <span className="review-top-bar-branch" title={state.branch}>
+                {state.branch}
+              </span>
+            ) : null}
+            {sidebarSourceLabel ? (
+              pullRequestUrl ? (
+                <a
+                  className="review-top-bar-source"
+                  href={pullRequestUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <span>{sidebarSourceLabel}</span>
+                  <ArrowSquareOut aria-hidden size={14} weight="bold" />
+                </a>
+              ) : (
+                <span className="review-top-bar-source">{sidebarSourceLabel}</span>
+              )
+            ) : null}
+          </>
         }
+        mode={sidebarMode}
+        modes={reviewModes}
+        onModeChange={changeSidebarMode}
         onToggleSidebar={toggleSidebar}
         repository={
           <span className="review-top-bar-repository review-top-bar-repository-path">
@@ -1935,12 +1938,10 @@ export default function App() {
           historyLoading={historyLoading}
           keymap={codiffConfig.keymap}
           mode={sidebarMode}
-          modes={reviewModes}
           narrativeNavigation={narrativeNavigation}
           narrativeWalkthrough={narrativeWalkthrough}
           onActivatePath={activatePath}
           onLoadMoreHistory={loadMoreHistory}
-          onModeChange={changeSidebarMode}
           onSearchQueryChange={
             sidebarMode === 'history' ? setHistorySearchQuery : setFileSearchQuery
           }

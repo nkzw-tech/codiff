@@ -931,40 +931,6 @@ a.review-top-bar-source:focus-visible {
   color: var(--sidebar-text);
 }
 
-.sidebar .review-mode-control {
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--sidebar-border);
-  border-radius: 0;
-  corner-shape: initial;
-  display: flex;
-  gap: 4px;
-  height: 38px;
-  padding: 6px 8px;
-  width: 100%;
-}
-
-.sidebar .review-mode-control button {
-  flex: 1 1 0;
-  height: 26px;
-  overflow: hidden;
-  padding: 0 6px;
-}
-
-.sidebar .review-mode-control button > svg {
-  flex: none;
-}
-
-@container sidebar (max-width: 200px) {
-  .sidebar .review-mode-control button {
-    padding: 0 4px;
-  }
-
-  .sidebar .review-mode-label {
-    display: none;
-  }
-}
-
 .review-mode-label {
   min-width: 0;
   overflow: hidden;
@@ -4451,11 +4417,11 @@ diffs-container .review-comment-thread {
 }
 
 @media (max-width: 480px) {
-  .review-top-bar .review-mode-control button {
+  .review-mode-control button {
     padding-inline: 7px;
   }
 
-  .review-top-bar .review-mode-label {
+  .review-mode-label {
     display: none;
   }
 }
