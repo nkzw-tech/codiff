@@ -48,29 +48,6 @@ class StubWorker extends EventTarget {
 }
 reactActEnvironment.Worker ??= StubWorker as unknown as typeof Worker;
 
-const createMemoryStorage = (): Storage => {
-  const values = new Map<string, string>();
-  return {
-    clear: () => values.clear(),
-    getItem: (key) => values.get(key) ?? null,
-    key: (index) => Array.from(values.keys())[index] ?? null,
-    get length() {
-      return values.size;
-    },
-    removeItem: (key) => values.delete(key),
-    setItem: (key, value) => values.set(key, value),
-  };
-};
-
-Object.defineProperty(globalThis, 'localStorage', {
-  configurable: true,
-  value: createMemoryStorage(),
-});
-Object.defineProperty(globalThis, 'sessionStorage', {
-  configurable: true,
-  value: createMemoryStorage(),
-});
-
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -2567,52 +2544,50 @@ test('closing plan mode flushes and returns a closed handoff', async () => {
       path: '/tmp/plan.md',
       version: 'plan-version',
     })),
-    getPlanReview: vi.fn(
-      async (): Promise<PlanReview> => ({
-        document: {
-          id: 'plan:/tmp/plan.md',
-          path: '/tmp/plan.md',
-          version: 'plan-version',
-        },
-        threads: [
-          {
-            anchor: {
-              block: {
-                fingerprint: 'heading-fingerprint',
-                path: [0],
-                text: 'Execute this plan',
-                type: 'heading',
-              },
-              kind: 'block',
-              version: 1,
+    getPlanReview: vi.fn(async (): Promise<PlanReview> => ({
+      document: {
+        id: 'plan:/tmp/plan.md',
+        path: '/tmp/plan.md',
+        version: 'plan-version',
+      },
+      threads: [
+        {
+          anchor: {
+            block: {
+              fingerprint: 'heading-fingerprint',
+              path: [0],
+              text: 'Execute this plan',
+              type: 'heading',
             },
-            createdAt: '2026-06-24T00:00:00.000Z',
-            createdBy: {
-              email: 'reviewer@example.com',
-              id: 'reviewer@example.com',
-              name: 'Reviewer',
-            },
-            id: 'thread-1',
-            messages: [
-              {
-                author: {
-                  email: 'reviewer@example.com',
-                  id: 'reviewer@example.com',
-                  name: 'Reviewer',
-                },
-                body: 'Keep this requirement.',
-                createdAt: '2026-06-24T00:00:00.000Z',
-                id: 'message-1',
-                updatedAt: '2026-06-24T00:00:00.000Z',
-              },
-            ],
-            status: 'open',
-            updatedAt: '2026-06-24T00:00:00.000Z',
+            kind: 'block',
+            version: 1,
           },
-        ],
-        version: 1,
-      }),
-    ),
+          createdAt: '2026-06-24T00:00:00.000Z',
+          createdBy: {
+            email: 'reviewer@example.com',
+            id: 'reviewer@example.com',
+            name: 'Reviewer',
+          },
+          id: 'thread-1',
+          messages: [
+            {
+              author: {
+                email: 'reviewer@example.com',
+                id: 'reviewer@example.com',
+                name: 'Reviewer',
+              },
+              body: 'Keep this requirement.',
+              createdAt: '2026-06-24T00:00:00.000Z',
+              id: 'message-1',
+              updatedAt: '2026-06-24T00:00:00.000Z',
+            },
+          ],
+          status: 'open',
+          updatedAt: '2026-06-24T00:00:00.000Z',
+        },
+      ],
+      version: 1,
+    })),
     onPlanCloseRequested: vi.fn((callback) => {
       requestClose = callback;
       return () => {

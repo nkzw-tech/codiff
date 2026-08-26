@@ -4,6 +4,31 @@ declare global {
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+const createMemoryStorage = (): Storage => {
+  const values = new Map<string, string>();
+  return {
+    clear: () => values.clear(),
+    getItem: (key) => values.get(key) ?? null,
+    key: (index) => Array.from(values.keys())[index] ?? null,
+    get length() {
+      return values.size;
+    },
+    removeItem: (key) => values.delete(key),
+    setItem: (key, value) => values.set(key, value),
+  };
+};
+
+if (typeof window !== 'undefined') {
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: createMemoryStorage(),
+  });
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: createMemoryStorage(),
+  });
+}
+
 if (typeof window !== 'undefined' && !window.matchMedia) {
   window.matchMedia = () =>
     ({
