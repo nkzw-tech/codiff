@@ -1,6 +1,6 @@
 {
   "name": "codiff",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "private": true,
   "description": "A fast local diff viewer.",
   "license": "MIT",
