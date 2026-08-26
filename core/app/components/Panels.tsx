@@ -659,6 +659,7 @@ export function PullRequestReviewButtons({
   disabled,
   hasPendingComments,
   onClosePullRequest,
+  onMarkPullRequestReady,
   onSubmitReview,
   reviewStatus,
   showCommentReview = false,
@@ -667,6 +668,7 @@ export function PullRequestReviewButtons({
   disabled: boolean;
   hasPendingComments: boolean;
   onClosePullRequest?: () => void;
+  onMarkPullRequestReady?: () => void;
   onSubmitReview: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   reviewStatus?: PullRequestReviewStatus;
   showCommentReview?: boolean;
@@ -676,9 +678,12 @@ export function PullRequestReviewButtons({
   const requestChangesBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'REQUEST_CHANGES');
   const closeStatus = reviewStatus?.close;
   const closeVisible = onClosePullRequest && closeStatus && closeStatus.disabled !== true;
+  const markReadyStatus = reviewStatus?.markReady;
+  const markReadyVisible =
+    onMarkPullRequestReady && markReadyStatus && markReadyStatus.disabled !== true;
   const commentVisible = showCommentReview && !commentBlocked;
   const hasReviewActions =
-    commentVisible || !approveBlocked || !requestChangesBlocked || closeVisible;
+    commentVisible || !approveBlocked || !requestChangesBlocked || markReadyVisible || closeVisible;
   if (!hasReviewActions && !children) {
     return null;
   }
@@ -739,6 +744,20 @@ export function PullRequestReviewButtons({
             'Request changes',
           )}
         />
+      ) : null}
+      {markReadyVisible ? (
+        <Button
+          action={onMarkPullRequestReady}
+          aria-label="Mark merge request as ready"
+          className="review-submit-button ready"
+          disabled={disabled}
+          pendingPlaceholder="Marking ready…"
+          title={markReadyStatus.reason ?? 'Mark merge request as ready'}
+          type="button"
+        >
+          <CheckCircle aria-hidden className="review-submit-icon ready" size={15} weight="bold" />
+          <span>Mark ready</span>
+        </Button>
       ) : null}
       {closeVisible ? (
         <Button

@@ -65,6 +65,7 @@ export type PullRequestReviewStatus = {
   approve?: PullRequestReviewActionStatus;
   close?: PullRequestReviewActionStatus;
   comment?: PullRequestReviewActionStatus;
+  markReady?: PullRequestReviewActionStatus;
   requestChanges?: PullRequestReviewActionStatus;
 };
 
@@ -159,6 +160,7 @@ export type ReviewSource =
       canEditReviewers?: boolean;
       canEditTitle?: boolean;
       description?: string;
+      draft?: boolean;
       headSha?: string;
       host?: string;
       mergeState?: PullRequestMergeState;

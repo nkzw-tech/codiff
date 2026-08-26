@@ -162,3 +162,46 @@ test('non-GitHub reviews keep the existing review actions', async () => {
   expect(view.container.querySelector('[aria-label="Approve review"]')).not.toBeNull();
   expect(view.container.querySelector('[aria-label="Request changes"]')).not.toBeNull();
 });
+
+test('marks a draft merge request as ready when the action is available', async () => {
+  const onMarkPullRequestReady = vi.fn(async () => {});
+  await using view = await renderReact(
+    <PullRequestReviewButtons
+      disabled={false}
+      hasPendingComments={false}
+      onMarkPullRequestReady={onMarkPullRequestReady}
+      onSubmitReview={vi.fn()}
+      reviewStatus={{
+        markReady: {
+          reason: 'Mark merge request as ready',
+        },
+      }}
+    />,
+  );
+
+  const markReady = view.container.querySelector<HTMLButtonElement>(
+    '[aria-label="Mark merge request as ready"]',
+  );
+  expect(markReady?.textContent).toContain('Mark ready');
+  await act(async () => markReady?.click());
+  expect(onMarkPullRequestReady).toHaveBeenCalledOnce();
+});
+
+test('hides the mark ready action when it is unavailable', async () => {
+  await using view = await renderReact(
+    <PullRequestReviewButtons
+      disabled={false}
+      hasPendingComments={false}
+      onMarkPullRequestReady={vi.fn()}
+      onSubmitReview={vi.fn()}
+      reviewStatus={{
+        markReady: {
+          disabled: true,
+          reason: 'You cannot update this merge request.',
+        },
+      }}
+    />,
+  );
+
+  expect(view.container.querySelector('[aria-label="Mark merge request as ready"]')).toBeNull();
+});

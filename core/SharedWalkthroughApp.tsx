@@ -195,6 +195,7 @@ export type ReviewSurfaceProps = {
     onClosePullRequest?: () => Promise<void> | void;
     onGenerateWalkthrough: () => Promise<void> | void;
     onHome: () => void;
+    onMarkPullRequestReady?: () => Promise<void> | void;
     onMergePullRequest?: (
       options: PullRequestMergeOptions & { autoMerge: boolean },
     ) => Promise<void> | void;
@@ -413,6 +414,7 @@ export function ReviewSurface({
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
     useState<PullRequestReviewEvent | null>(null);
   const [pullRequestCloseSubmitting, setPullRequestCloseSubmitting] = useState(false);
+  const [pullRequestReadySubmitting, setPullRequestReadySubmitting] = useState(false);
   const [pullRequestMergeSubmitting, setPullRequestMergeSubmitting] = useState(false);
   const [walkthroughRequestPending, setWalkthroughRequestPending] = useState(false);
   const walkthroughRequestPendingRef = useRef(false);
@@ -663,6 +665,25 @@ export function ReviewSurface({
       })
       .finally(() => setPullRequestCloseSubmitting(false));
   }, [interactive, pullRequestCloseSubmitting, snapshot.repository.source]);
+  const markPullRequestReady = useCallback(() => {
+    const source = snapshot.repository.source;
+    if (
+      !interactive?.onMarkPullRequestReady ||
+      pullRequestReadySubmitting ||
+      source.type !== 'pull-request' ||
+      source.reviewStatus?.markReady?.disabled === true ||
+      !source.reviewStatus?.markReady
+    ) {
+      return;
+    }
+
+    setPullRequestReadySubmitting(true);
+    return Promise.resolve(interactive.onMarkPullRequestReady())
+      .catch((error: unknown) => {
+        window.alert(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => setPullRequestReadySubmitting(false));
+  }, [interactive, pullRequestReadySubmitting, snapshot.repository.source]);
   const mergePullRequest = useCallback(
     (options: PullRequestMergeOptions & { autoMerge: boolean }) => {
       if (!interactive?.onMergePullRequest || pullRequestMergeSubmitting) {
@@ -954,12 +975,17 @@ export function ReviewSurface({
   const sourceDescriptionActions =
     interactive && source.type === 'pull-request' ? (
       <PullRequestReviewButtons
-        disabled={pullRequestReviewSubmitting != null || pullRequestCloseSubmitting}
+        disabled={
+          pullRequestReviewSubmitting != null ||
+          pullRequestCloseSubmitting ||
+          pullRequestReadySubmitting
+        }
         hasPendingComments={
           getPendingPullRequestReviewComments(localReviewComments, activeReviewCommentDraftState)
             .length > 0
         }
         onClosePullRequest={closePullRequest}
+        onMarkPullRequestReady={markPullRequestReady}
         onSubmitReview={submitReview}
         reviewStatus={source.reviewStatus}
         showCommentReview={source.provider === 'github' || source.host === 'github.com'}

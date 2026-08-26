@@ -927,7 +927,6 @@ a.review-top-bar-source:focus-visible {
 
 .review-mode-control button[aria-selected='true'] {
   background: var(--hover-wash);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
   color: var(--sidebar-text);
 }
 
@@ -3836,7 +3835,7 @@ diffs-container .review-comment-thread {
   z-index: 13;
 }
 
-.review-submit-button:not(.close) {
+.review-submit-button:is(.approve, .comment, .request-changes) {
   cursor: default;
   gap: 0;
   padding: 0;
