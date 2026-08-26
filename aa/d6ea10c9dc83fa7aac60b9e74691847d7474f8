@@ -1,0 +1,28 @@
+web/src/sharing/WalkthroughPage.tsx
+  s_0269ef130b43de::t_c1c4e8757a8266 18,156,379-381,384
+core/__tests__/SharedWalkthroughApp.test.tsx
+  s_0269ef130b43de::t_055c7838eb05d1 141-200,233,243-244,250,254,259,283,285-286,292
+  s_0269ef130b43de::t_0e03fe4b132b93 201-232,234-242,245-249,251-253,255-258,260-282,284,287-291,293
+core/__tests__/ReviewCodeView-scroll.test.tsx
+  s_0269ef130b43de::t_bf1c5f0138c805 829-979
+core/app/components/ReviewCodeView.tsx
+  s_0269ef130b43de::t_a0b7bd8d050a32 131,1880,1900,1924-1931,1942,1958-1959,1961,1964,1971,1973-1974,2021,2027-2041,2137,2769,2779-2782,2880-2891,3048,3599-3607,3614-3631,3644-3653,3667,3686-3692
+core/app/components/merge-request/GeneralComments.tsx
+  s_0269ef130b43de::t_4bad7c7cbb22f4 27,306,323,340-348,370-371,373,375,379,381-382,400,432,436-448,450-451,596,620,659,674
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aad6ea10c9dc83fa7aac60b9e74691847d7474f8",
+  "prompts": {},
+  "sessions": {
+    "s_0269ef130b43de": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03ba2-a8ff-75c0-9072-2091117cec83",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
