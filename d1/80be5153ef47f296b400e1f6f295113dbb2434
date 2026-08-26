@@ -1,0 +1,19 @@
+core/__tests__/PullRequestReviewButtons.test.tsx
+  s_44c0a104568c92::t_648bef10105c56 165-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d180be5153ef47f296b400e1f6f295113dbb2434",
+  "prompts": {},
+  "sessions": {
+    "s_44c0a104568c92": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03c77-9c46-7b10-9840-f64dfab2c527",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
