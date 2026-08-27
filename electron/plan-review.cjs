@@ -3,7 +3,6 @@
 const { createHash, randomUUID } = require('node:crypto');
 const { mkdir, open, readFile, rename, unlink } = require('node:fs/promises');
 const { dirname, join, resolve } = require('node:path');
-const lockfile = require('proper-lockfile');
 
 const MAX_PLAN_REVIEW_BYTES = 2 * 1024 * 1024;
 const PLAN_REVIEW_LOCK_STALE_MS = 10_000;
@@ -144,7 +143,9 @@ const readPlanReviewAtPath = async (path) => {
 /** @template T @param {string} path @param {() => Promise<T>} operation */
 const withPlanReviewLock = async (path, operation) => {
   await mkdir(dirname(path), { recursive: true });
-  const release = await lockfile.lock(path, {
+  // Only plan reviews take this lock, so `proper-lockfile` and its dependency
+  // tree stay out of the startup path.
+  const release = await require('proper-lockfile').lock(path, {
     realpath: false,
     retries: {
       factor: 1,

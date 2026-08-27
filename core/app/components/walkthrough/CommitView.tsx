@@ -2,7 +2,7 @@ import { ArrowsClockwiseIcon as ArrowsClockwise } from '@phosphor-icons/react/Ar
 import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { GitBranchIcon as GitBranch } from '@phosphor-icons/react/GitBranch';
 import { XIcon as X } from '@phosphor-icons/react/X';
-import { init as initGhostty, Terminal } from 'ghostty-web';
+import type { Terminal } from 'ghostty-web';
 import { useEffect, useRef, useState } from 'react';
 import {
   changeTypeLabel,
@@ -78,6 +78,16 @@ function resolveBackdrop(element: HTMLElement): string {
   return '#00000000';
 }
 
+// `ghostty-web` inlines its WASM binary as a ~550KB base64 data URL, and only
+// the commit log terminal needs it. Importing it on demand keeps that payload
+// out of the entry bundle every window parses before first paint.
+let ghosttyModule: Promise<typeof import('ghostty-web')> | null = null;
+const loadGhostty = async () => {
+  const ghostty = await (ghosttyModule ??= import('ghostty-web'));
+  await ghostty.init();
+  return ghostty;
+};
+
 /**
  * Read-only ghostty-web terminal that replays the streamed commit output, so
  * ANSI colors and cursor movement from pre-commit hooks render as they would
@@ -97,7 +107,7 @@ function CommitLogTerminal({ output }: { output: string }) {
     let instance: Terminal | null = null;
     // ghostty-web loads its WASM module asynchronously; output streamed in the
     // meantime is replayed by the write effect once the terminal exists.
-    void initGhostty().then(() => {
+    void loadGhostty().then(({ Terminal }) => {
       if (disposed) {
         return;
       }
