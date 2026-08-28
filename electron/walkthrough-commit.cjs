@@ -9,9 +9,12 @@ const { accessSync, chmodSync, constants, mkdtempSync, rmSync, writeFileSync } =
 const { tmpdir } = require('node:os');
 const { dirname, join } = require('node:path');
 
-const pty = require('node-pty');
-
 const { git, validateRepositoryPath } = require('./git-state/common.cjs');
+
+// `node-pty` is a native addon and only a walkthrough commit needs it, so it is
+// loaded on first use rather than at startup.
+/** @returns {typeof import('node-pty')} */
+const loadPty = () => require('node-pty');
 
 /**
  * @typedef {import('../core/types.ts').WalkthroughCommitRequest} WalkthroughCommitRequest
@@ -73,6 +76,7 @@ const normalizeTerminalOutput = (text) =>
  */
 const gitStreaming = (repoPath, args, onOutput) =>
   new Promise((resolve, reject) => {
+    const pty = loadPty();
     ensureSpawnHelperIsExecutable();
     /** @type {import('node-pty').IPty} */
     let child;
