@@ -1,9 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
-const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const fixtureRoot = join(import.meta.dirname, 'fixtures');
 
 /** @param {string} repositoryPath */
 export const createDefinitionNavigationRepository = (repositoryPath) => {

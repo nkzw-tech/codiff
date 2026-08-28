@@ -102,7 +102,11 @@ test.each([
 ] as const)('review top bar places its sidebar control on the $position', async (testCase) => {
   await using view = await renderReact(
     <ReviewTopBar
-      leading={<button className="codiff-logo">Codiff</button>}
+      leading={
+        <button className="codiff-logo" type="button">
+          Codiff
+        </button>
+      }
       mode="tree"
       modes={[{ icon: null, label: 'Tree', value: 'tree' }]}
       onModeChange={() => {}}

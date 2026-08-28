@@ -2,12 +2,11 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { getSectionWalkthroughHunks } = require('../core/lib/narrative-walkthrough-diff.cjs');
 
-export const root = dirname(dirname(fileURLToPath(import.meta.url)));
+export const root = dirname(import.meta.dirname);
 export const runsRoot = join(root, 'evals', 'runs');
 
 export const nowMs = () => performance.now();

@@ -3,9 +3,8 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
 import { createDefinitionNavigationRepository } from './create-repository.mjs';
 
 const keep = process.argv.includes('--keep');
@@ -18,7 +17,7 @@ process.stdout.write(
 );
 const result = spawnSync(
   process.execPath,
-  [resolve(dirname(fileURLToPath(import.meta.url)), '../../bin/codiff.js'), repositoryPath],
+  [resolve(import.meta.dirname, '../../bin/codiff.js'), repositoryPath],
   { stdio: 'inherit' },
 );
 if (keep) {
