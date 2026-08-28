@@ -6,15 +6,9 @@ settings:
 
 catalogs:
   default:
-    vite:
-      specifier: npm:@voidzero-dev/vite-plus-core@^0.3.0
-      version: 0.3.0
     vite-plus:
       specifier: ^0.3.0
       version: 0.3.0
-    vitest:
-      specifier: 4.1.11
-      version: 4.1.11
 
 overrides:
   extract-zip>yauzl: ^3.4.0
@@ -111,13 +105,13 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@^0.3.0
         version: '@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.0)(tsx@4.23.12)(typescript@7.0.2)'
       vite-plus:
         specifier: 'catalog:'
         version: 0.3.0(@types/node@26.3.0)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.0)(tsx@4.23.12)(typescript@7.0.2))(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.0.1(@noble/hashes@2.3.0))(terser@5.51.0)(tsx@4.23.12)(typescript@7.0.2)
       vitest:
-        specifier: 'catalog:'
+        specifier: 4.1.11
         version: 4.1.11(@types/node@26.3.0)(@vitest/browser-preview@4.1.11)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.0)(tsx@4.23.12)(typescript@7.0.2))(jsdom@30.0.1(@noble/hashes@2.3.0))
 
   core:
@@ -238,7 +232,7 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
       vite:
-        specifier: 'catalog:'
+        specifier: npm:@voidzero-dev/vite-plus-core@^0.3.0
         version: '@voidzero-dev/vite-plus-core@0.3.0(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.0)(tsx@4.23.12)(typescript@7.0.2)'
       vite-plus:
         specifier: 'catalog:'
