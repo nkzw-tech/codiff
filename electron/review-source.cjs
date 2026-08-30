@@ -106,7 +106,9 @@ const parseRemoteUrl = (value) => {
     const projectPath = url.pathname.replaceAll(/^\/+|\.git$/gi, '');
     return projectPath
       ? {
-          host: url.host.toLowerCase(),
+          // `url.host` includes the port (e.g. a custom SSH port in `ssh://` remotes);
+          // glab's `--hostname` rejects `host:port`, so use the bare hostname.
+          host: url.hostname.toLowerCase(),
           projectPath,
           provider: /** @type {ReviewProvider} */ (
             url.hostname.toLowerCase() === 'github.com' ? 'github' : 'gitlab'
@@ -175,6 +177,7 @@ const resolveReviewUrl = (repositoryPath, number, provider) => {
 };
 
 module.exports = {
+  parseRemoteUrl,
   parseReviewUrl,
   readReviewRemotes,
   resolveReviewUrl,

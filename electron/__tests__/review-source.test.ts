@@ -3,7 +3,12 @@ import { expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
 
-const { parseReviewUrl } = require('../review-source.cjs') as {
+const { parseRemoteUrl, parseReviewUrl } = require('../review-source.cjs') as {
+  parseRemoteUrl: (value: string) => {
+    host: string;
+    projectPath: string;
+    provider: 'github' | 'gitlab';
+  } | null;
   parseReviewUrl: (value: string) => {
     host: string;
     number: number;
@@ -128,4 +133,33 @@ test('parseReviewUrl rejects values that are not review URLs', () => {
   ]) {
     expect(parseReviewUrl(value)).toBe(null);
   }
+});
+
+test('parseRemoteUrl drops a custom port from `ssh://` remotes', () => {
+  expect(parseRemoteUrl('ssh://git@gitlab.example.com:2222/group/project.git')).toEqual({
+    host: 'gitlab.example.com',
+    projectPath: 'group/project',
+    provider: 'gitlab',
+  });
+});
+
+test('parseRemoteUrl drops a custom port from `https://` remotes', () => {
+  expect(parseRemoteUrl('https://gitlab.example.com:8443/group/subgroup/project.git')).toEqual({
+    host: 'gitlab.example.com',
+    projectPath: 'group/subgroup/project',
+    provider: 'gitlab',
+  });
+});
+
+test('parseRemoteUrl reads scp-style and GitHub remotes', () => {
+  expect(parseRemoteUrl('git@gitlab.example.com:group/project.git')).toEqual({
+    host: 'gitlab.example.com',
+    projectPath: 'group/project',
+    provider: 'gitlab',
+  });
+  expect(parseRemoteUrl('https://github.com/nkzw-tech/codiff.git')).toEqual({
+    host: 'github.com',
+    projectPath: 'nkzw-tech/codiff',
+    provider: 'github',
+  });
 });
