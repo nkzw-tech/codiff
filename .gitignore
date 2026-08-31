@@ -2,6 +2,7 @@
 .fate/
 .void/
 .wrangler/
+.worktrees/
 **/.fate/
 **/.void/
 **/.wrangler/
