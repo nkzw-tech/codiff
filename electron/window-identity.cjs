@@ -216,13 +216,16 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
 const getWindowIdentityForSource = (repositoryPath, source) =>
   getWindowIdentity(repositoryPath, { source });
 
-/** @param {{root: string; source: ReviewSource}} state */
-const getWindowIdentityForRepositoryState = (state) => {
+/** @param {{root: string; source: ReviewSource}} state @param {Partial<CodiffLaunchOptions>} [launchOptions] */
+const getWindowIdentityForRepositoryState = (state, launchOptions = {}) => {
   const repositoryRoot = getRealPath(state.root);
   const sourceKey = getResolvedSourceKey(state.source);
+  const handoffKey = launchOptions.reviewResultFile
+    ? `\0review:${getRealPath(launchOptions.reviewResultFile)}`
+    : '';
   return sourceKey
     ? {
-        key: `${repositoryRoot}\0${sourceKey}`,
+        key: `${repositoryRoot}\0${sourceKey}${handoffKey}`,
         repositoryRoot,
         sourceKey,
       }

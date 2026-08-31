@@ -39,13 +39,16 @@ const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepos
         reviewResultFile?: string;
       },
     ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
-    getWindowIdentityForRepositoryState: (state: {
-      root: string;
-      source:
-        | { type: 'working-tree' }
-        | { ref: string; type: 'commit' }
-        | { baseRef: string; headRef: string; ref: string; type: 'branch-diff' };
-    }) => { key: string; repositoryRoot: string; sourceKey: string } | null;
+    getWindowIdentityForRepositoryState: (
+      state: {
+        root: string;
+        source:
+          | { type: 'working-tree' }
+          | { ref: string; type: 'commit' }
+          | { baseRef: string; headRef: string; ref: string; type: 'branch-diff' };
+      },
+      launchOptions?: { reviewResultFile?: string },
+    ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
   };
 
 const execFileAsync = promisify(execFile);
@@ -148,15 +151,23 @@ test.sequential('resolved repository states build identities without invoking Gi
   );
   await chmod(join(fakeBin.path, 'git'), 0o755);
 
-  expect(
-    getWindowIdentityForRepositoryState({
-      root: repository.path,
-      source: { ref: head, type: 'commit' },
-    }),
-  ).toMatchObject({
+  const state = {
+    root: repository.path,
+    source: { ref: head, type: 'commit' as const },
+  };
+  expect(getWindowIdentityForRepositoryState(state)).toMatchObject({
     repositoryRoot: await realpath(repository.path),
     sourceKey: `commit:${head}`,
   });
+  expect(
+    getWindowIdentityForRepositoryState(state, {
+      reviewResultFile: '/tmp/review-a.json',
+    })?.key,
+  ).not.toBe(
+    getWindowIdentityForRepositoryState(state, {
+      reviewResultFile: '/tmp/review-b.json',
+    })?.key,
+  );
   expect(await readFile(gitMarker, 'utf8').catch(() => null)).toBeNull();
 });
 

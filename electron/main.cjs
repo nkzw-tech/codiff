@@ -254,7 +254,7 @@ const storeResolvedRepositoryState = (webContentsId, state) => {
       source: state.source,
     });
   }
-  const identity = getWindowIdentityForRepositoryState(state);
+  const identity = getWindowIdentityForRepositoryState(state, launchOptions);
   if (identity) {
     windowIdentities.set(webContentsId, identity);
   }
