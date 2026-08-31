@@ -352,5 +352,7 @@ module.exports = {
   createAgentReviewHandoffController,
   createAgentReviewHandoffLifecycle,
   validateAgentReviewRepository,
+  validateFeedback,
+  validateReviewSource,
   writeAgentReviewResult,
 };

@@ -29,6 +29,7 @@ const resolveRepositoryRoot = (repositoryPath) => {
     return getRealPath(
       execFileSync('git', ['-C', resolvedPath, 'rev-parse', '--show-toplevel'], {
         encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
       }).trim(),
     );
   } catch {
@@ -252,7 +253,9 @@ const findMatchingWindowIdentity = (identity, existingIdentities) => {
 
 module.exports = {
   findMatchingWindowIdentity,
+  getRealPath,
   getWindowIdentity,
   getWindowIdentityForRepositoryState,
   getWindowIdentityForSource,
+  resolveRepositoryRoot,
 };
