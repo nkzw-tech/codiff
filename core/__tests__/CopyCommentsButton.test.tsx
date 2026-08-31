@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 
-import { expect, test } from 'vite-plus/test';
-import { CopyCommentsButton } from '../app/components/Panels.tsx';
+import { act } from 'react';
+import { expect, test, vi } from 'vite-plus/test';
+import { CopyCommentsButton, SendFeedbackButton } from '../app/components/Panels.tsx';
 import type { ReviewComment } from '../lib/app-types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact } from './helpers/react.tsx';
@@ -73,4 +74,61 @@ test('shows the pending comment count next to the copy icon', async () => {
   expect(button?.getAttribute('title')).toBe('Copy review comments as markdown');
   expect(button?.querySelector('.copy-comments-count')?.textContent).toBe('2');
   expect(button?.querySelector('.copy-comments-icon')).not.toBeNull();
+});
+
+test('send feedback stays disabled until feedback exists', async () => {
+  await using app = await renderReact(<SendFeedbackButton count={0} onSend={vi.fn()} />);
+
+  const button = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
+  expect(button?.disabled).toBe(true);
+  expect(button?.textContent).toContain('Send feedback');
+  expect(button?.textContent).toContain('0');
+});
+
+test('send feedback shows the pending comment count', async () => {
+  await using app = await renderReact(<SendFeedbackButton count={2} onSend={vi.fn()} />);
+
+  const button = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
+  expect(button?.disabled).toBe(false);
+  expect(button?.textContent).toContain('Send feedback');
+  expect(button?.textContent).toContain('2');
+});
+
+test('send feedback ignores duplicate clicks while submission is pending', async () => {
+  let resolveSend: (() => void) | undefined;
+  const onSend = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        resolveSend = resolve;
+      }),
+  );
+  await using app = await renderReact(<SendFeedbackButton count={1} onSend={onSend} />);
+  const button = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
+
+  await act(async () => {
+    button?.click();
+    button?.click();
+  });
+  expect(onSend).toHaveBeenCalledTimes(1);
+  expect(button?.disabled).toBe(true);
+  expect(button?.textContent).toContain('Sending...');
+
+  await act(async () => resolveSend?.());
+  expect(button?.disabled).toBe(false);
+});
+
+test('send feedback reports failures and can be retried', async () => {
+  const onSend = vi.fn(async () => {
+    throw new Error('Could not send feedback.');
+  });
+  await using app = await renderReact(<SendFeedbackButton count={1} onSend={onSend} />);
+  const button = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
+
+  await act(async () => button?.click());
+
+  expect(app.container.querySelector('[role="alert"]')?.textContent).toBe(
+    'Could not send feedback.',
+  );
+  expect(button?.disabled).toBe(false);
+  expect(button?.textContent).toContain('Send feedback');
 });

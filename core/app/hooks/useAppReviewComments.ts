@@ -249,11 +249,22 @@ export function useAppReviewComments({
 
   const hasPendingReviewComments =
     getPendingPullRequestReviewComments(reviewComments, activeReviewCommentDraftState).length > 0;
+  const pendingReviewCommentCount = reviewComments.filter((comment) => {
+    if (comment.isReadOnly) {
+      return false;
+    }
+    const body =
+      activeReviewCommentDraftState?.id === comment.id
+        ? activeReviewCommentDraftState.body
+        : comment.body;
+    return body.trim().length > 0;
+  }).length;
 
   return {
     ...commentDrafts,
     askCodex,
     hasPendingReviewComments,
+    pendingReviewCommentCount,
     pullRequestReviewSubmitting,
     reviewComments,
     setReviewComments,

@@ -3821,6 +3821,35 @@ diffs-container .review-comment-thread {
     color 120ms ease;
 }
 
+.send-feedback-action {
+  flex: none;
+  position: relative;
+}
+
+.send-feedback-button {
+  color: var(--sidebar-text);
+}
+
+.send-feedback-icon {
+  display: block;
+  flex: none;
+}
+
+.send-feedback-error {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.16);
+  color: var(--danger);
+  font: 600 11px/1.35 var(--font-sans);
+  padding: 7px 9px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  white-space: nowrap;
+  z-index: 80;
+}
+
 .review-submit-button {
   color: var(--text);
 }

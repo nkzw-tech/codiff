@@ -328,6 +328,38 @@ const dispatchModK = () => {
   window.dispatchEvent(new KeyboardEvent('keydown', { ctrlKey: !isMac, key: 'k', metaKey: isMac }));
 };
 
+const findInOpenShadowRoots = <ElementType extends Element>(
+  root: ParentNode,
+  selector: string,
+): ElementType | null => {
+  const match = root.querySelector<ElementType>(selector);
+  if (match) {
+    return match;
+  }
+  for (const element of root.querySelectorAll('*')) {
+    if (element.shadowRoot) {
+      const shadowMatch = findInOpenShadowRoots<ElementType>(element.shadowRoot, selector);
+      if (shadowMatch) {
+        return shadowMatch;
+      }
+    }
+  }
+  return null;
+};
+
+const setMarkdownEditorValue = async (editor: HTMLElement, value: string) => {
+  await act(async () => {
+    editor.textContent = value;
+    editor.dispatchEvent(
+      new InputEvent('input', {
+        bubbles: true,
+        data: value,
+        inputType: 'insertText',
+      }),
+    );
+  });
+};
+
 const renderAppForOpenFileShortcut = async (file: ChangedFile) => {
   const openFile = vi.fn(async () => {});
 
@@ -403,6 +435,138 @@ test('desktop app places the sidebar on the configured side', async () => {
     expect(shell?.dataset.sidebarPosition).toBe('right');
     expect(shell?.style.gridTemplateColumns).toBe('minmax(0, 1fr) 0 292px');
   });
+});
+
+test('desktop app only shows send feedback for an agent review handoff', async () => {
+  window.codiff = createCodiffMock();
+  await using defaultApp = await renderReact(<App />);
+  await waitFor(() => expect(defaultApp.container.querySelector('.loading')).toBeNull());
+  expect(defaultApp.container.querySelector('.send-feedback-button')).toBeNull();
+
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      reviewResultFile: '/tmp/review-result.json',
+      walkthrough: false,
+    })),
+  });
+  await using handoffApp = await renderReact(<App />);
+  await waitFor(() => expect(handoffApp.container.querySelector('.loading')).toBeNull());
+  expect(handoffApp.container.querySelector('.send-feedback-button')).not.toBeNull();
+});
+
+test('agent review feedback sends a focused draft with repository identity', async () => {
+  const file = createChangedFile('src/app.ts');
+  const completeAgentReview = vi.fn(async () => {});
+  window.codiff = createCodiffMock({
+    completeAgentReview,
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      reviewResultFile: '/tmp/review-result.json',
+      walkthrough: false,
+    })),
+    getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
+  });
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
+
+  const line = findInOpenShadowRoots<HTMLElement>(
+    app.container,
+    '[data-line="1"][data-line-type="change-addition"]',
+  );
+  expect(line).not.toBeNull();
+  await act(async () => line?.click());
+  await waitFor(() =>
+    expect(
+      app.container.querySelector<HTMLElement>(
+        '[contenteditable="true"][aria-label^="Comment on"]',
+      ),
+    ).not.toBeNull(),
+  );
+  const editor = app.container.querySelector<HTMLElement>(
+    '[contenteditable="true"][aria-label^="Comment on"]',
+  );
+  if (!editor) {
+    throw new Error('Expected review comment editor.');
+  }
+  await act(async () => editor.focus());
+  await setMarkdownEditorValue(editor, 'Focused feedback');
+
+  await waitFor(() =>
+    expect(app.container.querySelector<HTMLButtonElement>('.send-feedback-button')?.disabled).toBe(
+      false,
+    ),
+  );
+  const send = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
+  await act(async () => send?.click());
+  await waitFor(() => expect(completeAgentReview).toHaveBeenCalledTimes(1));
+  expect(completeAgentReview).toHaveBeenCalledWith(
+    expect.objectContaining({
+      comments: [expect.objectContaining({ body: 'Focused feedback', filePath: 'src/app.ts' })],
+      repository: {
+        root: '/repo',
+        source: { type: 'working-tree' },
+      },
+      version: 1,
+    }),
+  );
+  expect(editor.textContent).toBe('Focused feedback');
+});
+
+test('failed agent review feedback preserves the editable focused draft', async () => {
+  const file = createChangedFile('src/app.ts');
+  window.codiff = createCodiffMock({
+    completeAgentReview: vi.fn(async () => {
+      throw new Error('Result file unavailable.');
+    }),
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      reviewResultFile: '/tmp/review-result.json',
+      walkthrough: false,
+    })),
+    getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
+  });
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
+
+  const line = findInOpenShadowRoots<HTMLElement>(
+    app.container,
+    '[data-line="1"][data-line-type="change-addition"]',
+  );
+  await act(async () => line?.click());
+  await waitFor(() =>
+    expect(
+      app.container.querySelector<HTMLElement>(
+        '[contenteditable="true"][aria-label^="Comment on"]',
+      ),
+    ).not.toBeNull(),
+  );
+  const editor = app.container.querySelector<HTMLElement>(
+    '[contenteditable="true"][aria-label^="Comment on"]',
+  );
+  if (!editor) {
+    throw new Error('Expected review comment editor.');
+  }
+  await act(async () => editor.focus());
+  await setMarkdownEditorValue(editor, 'Keep this feedback');
+  await waitFor(() =>
+    expect(app.container.querySelector<HTMLButtonElement>('.send-feedback-button')?.disabled).toBe(
+      false,
+    ),
+  );
+  const send = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
+  await act(async () => send?.click());
+
+  await waitFor(() =>
+    expect(app.container.querySelector('[role="alert"]')?.textContent).toBe(
+      'Result file unavailable.',
+    ),
+  );
+  expect(app.container.querySelector('[contenteditable="true"][aria-label^="Comment on"]')).toBe(
+    editor,
+  );
+  expect(editor.textContent).toBe('Keep this feedback');
+  expect(send?.disabled).toBe(false);
 });
 
 test('empty code font family removes the root CSS variable', async () => {

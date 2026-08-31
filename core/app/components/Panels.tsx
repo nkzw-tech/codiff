@@ -5,6 +5,7 @@ import { ChatCircleIcon as ChatCircle } from '@phosphor-icons/react/ChatCircle';
 import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { CheckCircleIcon as CheckCircle } from '@phosphor-icons/react/CheckCircle';
 import { CircleNotchIcon as CircleNotch } from '@phosphor-icons/react/CircleNotch';
+import { PaperPlaneTiltIcon as PaperPlaneTilt } from '@phosphor-icons/react/PaperPlaneTilt';
 import { PowerIcon as Power } from '@phosphor-icons/react/Power';
 import { SealQuestionIcon as SealQuestion } from '@phosphor-icons/react/SealQuestion';
 import { WarningOctagonIcon as WarningOctagon } from '@phosphor-icons/react/WarningOctagon';
@@ -434,6 +435,57 @@ export function CopyCommentsButton({
       )}
       <span className="copy-comments-count">{pendingCommentCount}</span>
     </button>
+  );
+}
+
+export function SendFeedbackButton({
+  count,
+  onSend,
+}: {
+  count: number;
+  onSend: () => Promise<void>;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+
+  const sendFeedback = useCallback(async () => {
+    if (count === 0 || sendingRef.current) {
+      return;
+    }
+
+    sendingRef.current = true;
+    setSending(true);
+    setError(null);
+    try {
+      await onSend();
+    } catch (sendError) {
+      setError(sendError instanceof Error ? sendError.message : String(sendError));
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }, [count, onSend]);
+
+  return (
+    <div className="send-feedback-action">
+      <button
+        className="copy-comments-button send-feedback-button"
+        disabled={count === 0 || sending}
+        onClick={() => void sendFeedback()}
+        title="Send feedback"
+        type="button"
+      >
+        <PaperPlaneTilt aria-hidden className="send-feedback-icon" size={14} weight="bold" />
+        <span>{sending ? 'Sending...' : 'Send feedback'}</span>
+        <span className="copy-comments-count">{count}</span>
+      </button>
+      {error ? (
+        <div className="send-feedback-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

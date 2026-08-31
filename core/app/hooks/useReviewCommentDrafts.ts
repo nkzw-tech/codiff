@@ -133,6 +133,16 @@ export function useReviewCommentDrafts({
     [setComments],
   );
 
+  const flushActiveReviewCommentDraft = useCallback(() => {
+    const draft = activeReviewCommentDraftRef.current;
+    const next = draft
+      ? updateCommentBody(reviewCommentsRef.current, draft.id, draft.body)
+      : reviewCommentsRef.current;
+    reviewCommentsRef.current = next;
+    setComments(next);
+    return next;
+  }, [setComments]);
+
   const deleteComment = useCallback(
     (commentId: string) => {
       const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
@@ -152,6 +162,7 @@ export function useReviewCommentDrafts({
     clearCommentFocus,
     createComment,
     deleteComment,
+    flushActiveReviewCommentDraft,
     focusComment,
     focusCommentId,
     focusCommentRequest,

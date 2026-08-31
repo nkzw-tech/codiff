@@ -18,6 +18,7 @@ import {
   RepositoryChangeBanner,
   RepositoryLoadErrorPanel,
   ReviewSourceLoading,
+  SendFeedbackButton,
   UpdatePill,
   WalkthroughOutdatedBanner,
 } from './app/components/Panels.tsx';
@@ -84,6 +85,7 @@ import {
 } from './lib/reload-selection.ts';
 import { resolveReviewCommandTarget } from './lib/review-command-target.ts';
 import {
+  buildAgentReviewFeedback,
   buildReviewCommentsMarkdown,
   getReviewCommentsFromState,
   getVisibleReviewComments,
@@ -266,9 +268,11 @@ export default function App() {
     askCodex,
     createComment,
     deleteComment,
+    flushActiveReviewCommentDraft,
     focusCommentId,
     focusCommentRequest,
     hasPendingReviewComments,
+    pendingReviewCommentCount,
     pullRequestReviewSubmitting,
     resetCommentFocus,
     reviewComments,
@@ -1603,6 +1607,26 @@ export default function App() {
   const activeAgentBackend = launchOptions.agentBackend ?? codiffConfig.settings.agentBackend;
   const agentLabel = getAgentLabel(activeAgentBackend);
   const agentSkillLabel = `${agentLabel} Skill`;
+  const sendAgentReviewFeedback = useCallback(async () => {
+    const comments = flushActiveReviewCommentDraft();
+    const content = buildAgentReviewFeedback(
+      stateRef.current!.files,
+      comments,
+      preferencesRef.current.showWhitespace,
+      preferencesRef.current.reviewCommentsPrefix,
+    );
+    if (content.comments.length === 0) {
+      return;
+    }
+    await window.codiff.completeAgentReview({
+      ...content,
+      repository: {
+        root: stateRef.current!.root,
+        source: stateRef.current!.source,
+      },
+      version: 1,
+    });
+  }, [flushActiveReviewCommentDraft]);
 
   if (launchOptions.planFile) {
     if (planLoadError) {
@@ -1820,12 +1844,20 @@ export default function App() {
       <div aria-hidden className="window-drag-region" />
       <ReviewTopBar
         actions={
-          <CopyCommentsButton
-            comments={isSwitchingSource ? emptyReviewComments : reviewComments}
-            files={orderedFiles}
-            reviewCommentsPrefix={preferences.reviewCommentsPrefix}
-            showWhitespace={showWhitespace}
-          />
+          <>
+            <CopyCommentsButton
+              comments={isSwitchingSource ? emptyReviewComments : reviewComments}
+              files={orderedFiles}
+              reviewCommentsPrefix={preferences.reviewCommentsPrefix}
+              showWhitespace={showWhitespace}
+            />
+            {launchOptions.reviewResultFile ? (
+              <SendFeedbackButton
+                count={pendingReviewCommentCount}
+                onSend={sendAgentReviewFeedback}
+              />
+            ) : null}
+          </>
         }
         context={
           <>

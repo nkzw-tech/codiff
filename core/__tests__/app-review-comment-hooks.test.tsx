@@ -201,3 +201,23 @@ test('app review comments submit and clear pending review drafts', async () => {
   expect(getState().reviewComments).toEqual([]);
   expect(getState().pullRequestReviewSubmitting).toBeNull();
 });
+
+test('app review comments synchronously flush the active editor draft', async () => {
+  await using view = await renderAppReviewComments(workingTreeState);
+  const { getState } = view;
+
+  await act(async () => {
+    getState().setReviewComments([{ ...comment, body: 'Old feedback' }]);
+  });
+  await act(async () => {
+    getState().updateActiveReviewCommentDraft({
+      body: 'Focused feedback',
+      id: comment.id,
+    });
+  });
+  expect(getState().pendingReviewCommentCount).toBe(1);
+
+  const snapshot = getState().flushActiveReviewCommentDraft();
+  expect(snapshot[0]?.body).toBe('Focused feedback');
+  expect(getState().reviewCommentsRef.current[0]?.body).toBe('Focused feedback');
+});
