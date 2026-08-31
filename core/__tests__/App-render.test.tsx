@@ -455,6 +455,23 @@ test('desktop app only shows send feedback for an agent review handoff', async (
   expect(handoffApp.container.querySelector('.send-feedback-button')).not.toBeNull();
 });
 
+test('desktop app hides send feedback when the agent review IPC is unavailable', async () => {
+  const codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      reviewResultFile: '/tmp/review-result.json',
+      walkthrough: false,
+    })),
+  });
+  Reflect.deleteProperty(codiff, 'completeAgentReview');
+  window.codiff = codiff;
+
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.loading')).toBeNull());
+
+  expect(app.container.querySelector('.send-feedback-button')).toBeNull();
+});
+
 test('agent review feedback sends a focused draft with repository identity', async () => {
   const file = createChangedFile('src/app.ts');
   const completeAgentReview = vi.fn(async () => {});

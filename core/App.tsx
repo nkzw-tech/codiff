@@ -1608,6 +1608,10 @@ export default function App() {
   const agentLabel = getAgentLabel(activeAgentBackend);
   const agentSkillLabel = `${agentLabel} Skill`;
   const sendAgentReviewFeedback = useCallback(async () => {
+    const completeAgentReview = window.codiff.completeAgentReview;
+    if (typeof completeAgentReview !== 'function') {
+      return;
+    }
     const comments = flushActiveReviewCommentDraft();
     const content = buildAgentReviewFeedback(
       stateRef.current!.files,
@@ -1618,7 +1622,7 @@ export default function App() {
     if (content.comments.length === 0) {
       return;
     }
-    await window.codiff.completeAgentReview({
+    await completeAgentReview({
       ...content,
       repository: {
         root: stateRef.current!.root,
@@ -1851,7 +1855,8 @@ export default function App() {
               reviewCommentsPrefix={preferences.reviewCommentsPrefix}
               showWhitespace={showWhitespace}
             />
-            {launchOptions.reviewResultFile ? (
+            {launchOptions.reviewResultFile &&
+            typeof window.codiff.completeAgentReview === 'function' ? (
               <SendFeedbackButton
                 count={pendingReviewCommentCount}
                 onSend={sendAgentReviewFeedback}
