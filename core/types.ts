@@ -468,6 +468,8 @@ export type CodiffLaunchOptions = {
   /** Result file used to resume the waiting agent process. */
   planResultFile?: string;
   repositoryPathProvided: boolean;
+  /** Result file used to resume the waiting agent review process. */
+  reviewResultFile?: string;
   source?: ReviewSource;
   walkthrough: boolean;
   walkthroughContext?: WalkthroughContext;

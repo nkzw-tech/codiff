@@ -276,6 +276,7 @@ walkthrough_context_path=""
 walkthrough_file_path=""
 plan_file_path=""
 plan_result_file_path=""
+review_result_file_path=""
 expect_codex_session=0
 expect_claude_session=0
 expect_opencode_session=0
@@ -288,6 +289,7 @@ expect_walkthrough_context=0
 expect_walkthrough_file=0
 expect_plan_file=0
 expect_plan_result_file=0
+expect_review_result_file=0
 walkthrough=0
 
 is_commit_ref_arg() {
@@ -403,6 +405,12 @@ for arg in "$@"; do
   if [ "$expect_plan_result_file" -eq 1 ]; then
     plan_result_file_path="$arg"
     expect_plan_result_file=0
+    continue
+  fi
+
+  if [ "$expect_review_result_file" -eq 1 ]; then
+    review_result_file_path="$arg"
+    expect_review_result_file=0
     continue
   fi
 
@@ -523,6 +531,12 @@ for arg in "$@"; do
     --plan-result-file=*)
       plan_result_file_path="${arg#--plan-result-file=}"
       ;;
+    --review-result-file)
+      expect_review_result_file=1
+      ;;
+    --review-result-file=*)
+      review_result_file_path="${arg#--review-result-file=}"
+      ;;
     -*)
       ;;
     *)
@@ -611,6 +625,13 @@ if [ -n "$plan_result_file_path" ]; then
   esac
 fi
 
+if [ -n "$review_result_file_path" ]; then
+  case "$review_result_file_path" in
+    /*) ;;
+    *) review_result_file_path="$PWD/$review_result_file_path" ;;
+  esac
+fi
+
 if [ -n "$pull_request_branch" ]; then
   if ! pull_request_source="$(
     cd "$repository_path" 2>/dev/null &&
@@ -630,7 +651,10 @@ open_codiff() {
   # Prepend optional flags in reverse of their final order so the resulting
   # argument list reads: --codex-session --claude-session --opencode-session
   # --agent --walkthrough-context --walkthrough-file --plan-file
-  # --plan-result-file <trailing>.
+  # --plan-result-file --review-result-file <trailing>.
+  if [ -n "$review_result_file_path" ]; then
+    set -- --review-result-file "$review_result_file_path" "$@"
+  fi
   if [ -n "$plan_result_file_path" ]; then
     set -- --plan-result-file "$plan_result_file_path" "$@"
   fi

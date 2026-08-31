@@ -78,6 +78,12 @@ export const flagDefinitions = [
     type: 'boolean',
   },
   {
+    argument: '<file>',
+    hidden: true,
+    name: 'review-result-file',
+    type: 'string',
+  },
+  {
     description: 'Show version number and exit.',
     name: 'version',
     short: 'v',
@@ -335,6 +341,8 @@ export const parseArguments = (args) => {
     typeof values['opencode-session'] === 'string' ? values['opencode-session'] : null;
   const piSessionId = typeof values['pi-session'] === 'string' ? values['pi-session'] : null;
   const planFilePath = typeof values.plan === 'string' ? values.plan : null;
+  const reviewResultFilePath =
+    typeof values['review-result-file'] === 'string' ? values['review-result-file'] : null;
   // `--completions` without a value parses as `true`; keep it as an empty shell
   // so the command can tell "no shell given" apart from "flag not used".
   const completionShell =
@@ -464,6 +472,7 @@ export const parseArguments = (args) => {
     ...(pullRequestProvider ? { pullRequestProvider } : {}),
     pullRequestUrl,
     ...(values.public === true ? { public: true } : {}),
+    ...(reviewResultFilePath ? { reviewResultFilePath: resolve(reviewResultFilePath) } : {}),
     requestedPath: resolve(requestedPath ?? process.cwd()),
     ...(values.share === true ? { share: true } : {}),
     version: values.version === true,

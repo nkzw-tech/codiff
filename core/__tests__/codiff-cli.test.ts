@@ -511,6 +511,29 @@ test('packaged terminal helper forwards --commit HEAD to Electron', async () => 
   ]);
 });
 
+test('packaged terminal helper forwards agent review handoff result files to Electron', async () => {
+  await using logger = await createFakeOpenLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+  const resultFile = '/tmp/review.json';
+
+  await mkdir(repositoryPath);
+
+  await execFileAsync(
+    resolve('bin/codiff-app'),
+    ['--review-result-file', resultFile, repositoryPath],
+    { env: logger.env },
+  );
+
+  expect(await logger.readArgs()).toEqual([
+    '-n',
+    resolve('bin/../../../..'),
+    '--args',
+    '--review-result-file',
+    resultFile,
+    repositoryPath,
+  ]);
+});
+
 test('packaged terminal helper resolves GitHub PR branches to canonical URLs', async () => {
   await using logger = await createFakeOpenLogger();
   const ghArgsPath = join(logger.directory, 'gh-args.txt');
@@ -1386,6 +1409,7 @@ test('formatHelpText includes version and all flags', () => {
   expect(text).toContain('--codex-session');
   expect(text).toContain('--opencode-session');
   expect(text).toContain('--plan');
+  expect(text).not.toContain('--review-result-file');
   expect(text).toContain('--share');
   expect(text).toContain('--walkthrough');
   expect(text).toContain('--walkthrough-context');

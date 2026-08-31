@@ -200,9 +200,12 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
   const sourceKey = implicitWalkthroughHead
     ? `commit:${implicitWalkthroughHead}`
     : getSourceKey(repositoryRoot, launchOptions.source);
+  const handoffKey = launchOptions.reviewResultFile
+    ? `\0review:${getRealPath(launchOptions.reviewResultFile)}`
+    : '';
   return sourceKey
     ? {
-        key: `${repositoryRoot}\0${sourceKey}`,
+        key: `${repositoryRoot}\0${sourceKey}${handoffKey}`,
         repositoryRoot,
         sourceKey,
       }

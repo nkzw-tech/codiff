@@ -36,6 +36,7 @@ const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepos
         walkthroughFile?: string;
         planFile?: string;
         planResultFile?: string;
+        reviewResultFile?: string;
       },
     ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
     getWindowIdentityForRepositoryState: (state: {
@@ -98,6 +99,15 @@ test('window identities match working-tree launches inside the same repository',
   await mkdir(nestedPath);
 
   expect(getWindowIdentity(nestedPath)?.key).toBe(getWindowIdentity(directory.path)?.key);
+});
+
+test('window identities distinguish agent review handoffs', async () => {
+  await using directory = await createTemporaryDirectory('codiff-window-identity-');
+  await initRepository(directory.path);
+
+  expect(
+    getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-a.json' })?.key,
+  ).not.toBe(getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-b.json' })?.key);
 });
 
 test('window identities resolve commit refs to the same commit sha', async () => {

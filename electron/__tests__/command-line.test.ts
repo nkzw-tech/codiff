@@ -22,6 +22,7 @@ const { getCommandLineLaunchOptions, getCommandLineRepositoryPath, getInitialRep
       codexSessionId?: string;
       planFile?: string;
       planResultFile?: string;
+      reviewResultFile?: string;
       repositoryPathProvided: boolean;
       source?:
         | { ref: string; type: 'branch-working-tree' }
@@ -150,6 +151,19 @@ test('parses plan handoff command-line options', () => {
       planFile: '/tmp/plan.md',
       planResultFile: '/tmp/result.json',
       repositoryPathProvided: true,
+      walkthrough: false,
+    },
+    repositoryPath: '/repo',
+  });
+});
+
+test('parses agent review handoff command-line options', () => {
+  expect(
+    readCommandLine(['codiff', '--review-result-file', '/tmp/review.json', '/repo']),
+  ).toMatchObject({
+    launchOptions: {
+      repositoryPathProvided: true,
+      reviewResultFile: '/tmp/review.json',
       walkthrough: false,
     },
     repositoryPath: '/repo',

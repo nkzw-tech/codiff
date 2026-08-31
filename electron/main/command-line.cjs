@@ -145,6 +145,9 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       'plan-result-file': {
         type: 'string',
       },
+      'review-result-file': {
+        type: 'string',
+      },
       'walkthrough-context': {
         type: 'string',
       },
@@ -254,6 +257,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   const envPiSessionId = useEnvironment ? process.env.CODIFF_PI_SESSION_ID || '' : '';
   const envPlanFilePath = useEnvironment ? process.env.CODIFF_PLAN_FILE || '' : '';
   const envPlanResultFilePath = useEnvironment ? process.env.CODIFF_PLAN_RESULT_FILE || '' : '';
+  const envReviewResultFilePath = useEnvironment ? process.env.CODIFF_REVIEW_RESULT_FILE || '' : '';
   const envAgentBackend = useEnvironment ? process.env.CODIFF_AGENT_BACKEND || '' : '';
   const envWalkthroughContextPath = useEnvironment
     ? process.env.CODIFF_WALKTHROUGH_CONTEXT || ''
@@ -279,6 +283,10 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   const planResultFilePath =
     (typeof values['plan-result-file'] === 'string' ? values['plan-result-file'] : '') ||
     envPlanResultFilePath ||
+    undefined;
+  const reviewResultFilePath =
+    (typeof values['review-result-file'] === 'string' ? values['review-result-file'] : '') ||
+    envReviewResultFilePath ||
     undefined;
   const rawAgentBackend =
     (typeof values.agent === 'string' ? values.agent : '') || envAgentBackend || '';
@@ -324,6 +332,7 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       ...(piSessionId ? { piSessionId } : {}),
       ...(planFilePath ? { planFile: resolve(planFilePath) } : {}),
       ...(planResultFilePath ? { planResultFile: resolve(planResultFilePath) } : {}),
+      ...(reviewResultFilePath ? { reviewResultFile: resolve(reviewResultFilePath) } : {}),
       repositoryPathProvided,
       source:
         sourceRange && sourcePullRequestNumber == null
