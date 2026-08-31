@@ -8,6 +8,14 @@ resolves hunk ids on load, and renders the real current diff.
 Write the JSON document to a **temporary file outside the repository** and pass it to
 Codiff with `--walkthrough-file`.
 
+For a desktop agent handoff, use the blocking launcher and read its single
+`CODIFF_REVIEW_RESULT` record after Codiff closes. For `status: "closed"`, stop without making
+feedback-driven edits. For `status: "submitted"`, validate the repository root and source, then
+continue with the submitted feedback. Address every returned comment in order using its file, line
+or range anchor, and diff context.
+Ask one focused question if feedback is materially ambiguous. Summarize the feedback handled and
+decide whether another review would be useful. Do not automatically reopen Codiff.
+
 Default to the **staged** diff (`git diff --staged`). If the user named a target, use that:
 a commit, branch, pull request, ref range, or repository path. If nothing is staged, fall back
 to the working tree (`git diff`) and say so. Anchor every `hunkId` against whichever diff you

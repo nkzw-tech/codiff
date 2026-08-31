@@ -116,6 +116,11 @@ test('keeps skill instructions identical outside agent integration details', asy
   const documents = await Promise.all(paths.map((path) => readFile(path, 'utf8')));
   const normalized = documents.map((document) => {
     expect(document).toContain('   **Agent integration:**');
+    expect(document).toContain('CODIFF_REVIEW_RESULT');
+    expect(document).toContain('status: "submitted"');
+    expect(document).toContain('status: "closed"');
+    expect(document).toContain('Address every returned comment');
+    expect(document).toContain('Do not automatically reopen Codiff');
     return document.replace(
       /   \*\*Agent integration:\*\*[\s\S]*?\n\n/,
       '   **Agent integration:** <agent-specific>\n\n',

@@ -1988,6 +1988,11 @@ test('codiff --walkthrough-guide prints the guide and embedded schema, then exit
   expect(stdout).toContain('Narrative walkthrough — authoring guide');
   expect(stdout).toContain('chapters');
   expect(stdout).toContain('support');
+  expect(stdout).toContain('CODIFF_REVIEW_RESULT');
+  expect(stdout).toContain('status: "submitted"');
+  expect(stdout).toContain('status: "closed"');
+  expect(stdout).toContain('Address every returned comment');
+  expect(stdout).toContain('Do not automatically reopen Codiff');
   // ...followed by the live JSON schema, embedded as a fenced block.
   expect(stdout).toContain('```json');
   expect(stdout).toContain('"chapters"');

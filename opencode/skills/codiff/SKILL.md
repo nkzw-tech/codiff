@@ -100,6 +100,14 @@ approval document.
    node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json /path/to/repository
    ```
 
+   The desktop launcher blocks until Codiff closes, then prints one `CODIFF_REVIEW_RESULT` record.
+   For `status: "closed"`, stop without making feedback-driven edits. For
+   `status: "submitted"`, validate that the repository root and source identify the change you
+   opened. Address every returned comment in order, using its file, line or range anchor, and diff
+   context. If feedback is materially ambiguous, ask one focused question instead of guessing.
+   Do not automatically reopen Codiff. Summarize the feedback you handled and decide whether
+   another review would be useful.
+
    Share mode:
 
    ```bash
