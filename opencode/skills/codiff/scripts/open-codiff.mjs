@@ -17,6 +17,12 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
+import {
+  cleanupAgentReviewResultPath,
+  createAgentReviewResultPath,
+  formatAgentReviewResult,
+  readAgentReviewResult,
+} from '../../../../bin/agent-review-result.js';
 
 const skillRoot = resolve(import.meta.dirname, '..');
 const codiffRoot = resolve(skillRoot, '../../..');
@@ -364,6 +370,7 @@ const sessionId =
   findOpenCodeSessionIdForCwd(sessionCwd) ||
   '';
 const codiffCommand = getCodiffCommand();
+const reviewResultPath = createAgentReviewResultPath();
 const args = [
   ...codiffCommand.args,
   '-w',
@@ -374,15 +381,35 @@ const args = [
   ...(sessionId ? ['--opencode-session', sessionId] : []),
   ...forwardedArgs,
   ...(hasRepositoryTarget ? [] : [sessionCwd]),
+  '--review-result-file',
+  reviewResultPath.path,
 ];
-const result = spawnSync(codiffCommand.command, args, {
-  encoding: 'utf8',
-  stdio: 'inherit',
-});
-
-if (result.error) {
-  process.stderr.write(`${result.error.message}\n`);
-  process.exit(1);
+let exitCode = 0;
+try {
+  const result = spawnSync(codiffCommand.command, args, {
+    encoding: 'utf8',
+    stdio: 'inherit',
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    exitCode = result.status ?? 1;
+  } else {
+    const repositoryTarget = forwardedArgs.find(
+      (arg) => !arg.startsWith('-') && existsSync(resolve(sessionCwd, arg)),
+    );
+    const reviewResult = readAgentReviewResult(
+      reviewResultPath.path,
+      repositoryTarget ? resolve(sessionCwd, repositoryTarget) : sessionCwd,
+    );
+    process.stdout.write(formatAgentReviewResult(reviewResult));
+  }
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  exitCode = 1;
+} finally {
+  cleanupAgentReviewResultPath(reviewResultPath.directory);
 }
 
-process.exit(result.status ?? 0);
+process.exit(exitCode);

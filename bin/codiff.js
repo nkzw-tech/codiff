@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import packageJson from '../package.json' with { type: 'json' };
+import { waitForAgentReviewResult } from './agent-review-result.js';
 import {
   formatHelpText,
   getReviewSource,
@@ -356,6 +357,15 @@ const run = async () => {
       process.exitCode = 1;
     } finally {
       rmSync(planResultDirectory, { force: true, recursive: true });
+    }
+  } else if (reviewResultFilePath) {
+    try {
+      await waitForAgentReviewResult(reviewResultFilePath, child);
+    } catch (error) {
+      process.stderr.write(
+        `${error instanceof Error ? error.message : 'Codiff exited without a review result.'}\n`,
+      );
+      process.exitCode = 1;
     }
   }
 };
