@@ -1,6 +1,7 @@
 import { expect, test } from 'vite-plus/test';
 import type { ReviewComment } from '../lib/app-types.ts';
 import {
+  buildAgentReviewFeedback,
   findReusableReviewCommentDraft,
   getPendingPullRequestReviewComments,
   getReviewCommentsFromState,
@@ -10,6 +11,7 @@ import {
   toPullRequestReviewComment,
 } from '../lib/review-comments.ts';
 import type { RepositoryState } from '../types.ts';
+import { createChangedFile } from './helpers/fixtures.ts';
 
 const createReviewComment = (overrides: Partial<ReviewComment>): ReviewComment => ({
   body: 'A comment.',
@@ -64,6 +66,59 @@ const createPullRequestState = (): RepositoryState => ({
     type: 'pull-request',
     url: 'https://github.com/nkzw-tech/codiff/pull/1',
   },
+});
+
+test('buildAgentReviewFeedback returns ordered structured comments and matching markdown', () => {
+  const files = [createChangedFile('src/a.ts'), createChangedFile('src/b.ts')];
+  const comments = [
+    createReviewComment({
+      body: '  Second file.  ',
+      filePath: 'src/b.ts',
+      id: 'b',
+      lineNumber: 9,
+      sectionId: files[1]!.sections[0]!.id,
+    }),
+    createReviewComment({
+      body: 'First range.',
+      filePath: 'src/a.ts',
+      id: 'a',
+      lineNumber: 7,
+      startLineNumber: 5,
+      startSide: 'deletions',
+    }),
+    createReviewComment({ body: 'Remote.', id: 'remote', isReadOnly: true }),
+  ];
+
+  const feedback = buildAgentReviewFeedback(files, comments, false, '# Fix these');
+
+  expect(feedback.comments.map(({ body, filePath, order }) => ({ body, filePath, order }))).toEqual(
+    [
+      { body: 'First range.', filePath: 'src/a.ts', order: 1 },
+      { body: 'Second file.', filePath: 'src/b.ts', order: 2 },
+    ],
+  );
+  expect(feedback.comments[0]).toMatchObject({
+    anchor: 'line',
+    lineNumber: 7,
+    startLineNumber: 5,
+    startSide: 'deletions',
+  });
+  expect(feedback.markdown).toContain('# Fix these');
+  expect(feedback.markdown.indexOf('src/a.ts')).toBeLessThan(feedback.markdown.indexOf('src/b.ts'));
+  expect(feedback.markdown).toContain('First range.');
+  expect(feedback.markdown).toContain('Second file.');
+});
+
+test('buildAgentReviewFeedback excludes empty and read-only comments', () => {
+  const file = createChangedFile('src/a.ts');
+  expect(
+    buildAgentReviewFeedback(
+      [file],
+      [createReviewComment({ body: ' ' }), createReviewComment({ isReadOnly: true })],
+      false,
+      '',
+    ),
+  ).toEqual({ comments: [], markdown: '' });
 });
 
 test('getReviewCommentsFromState carries the outdated flag through to review comments', () => {

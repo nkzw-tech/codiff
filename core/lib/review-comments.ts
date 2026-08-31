@@ -1,4 +1,5 @@
 import type {
+  AgentReviewFeedbackContent,
   ChangedFile,
   DiffSection,
   PullRequestExistingReviewComment,
@@ -337,12 +338,12 @@ const getReviewCommentPatchContext = (
   return section.summary?.reason || section.patch.trim() || 'No patch context available.';
 };
 
-export const buildReviewCommentsMarkdown = (
+export const buildAgentReviewFeedback = (
   files: ReadonlyArray<ChangedFile>,
   comments: ReadonlyArray<ReviewComment>,
   showWhitespace: boolean,
   prefix?: string,
-) => {
+): AgentReviewFeedbackContent => {
   const pendingComments = comments.filter((comment) => !comment.isReadOnly && comment.body.trim());
   const filesByPath = new Map(files.map((file) => [file.path, file]));
   const orderedComments = pendingComments.sort((left, right) => {
@@ -355,30 +356,52 @@ export const buildReviewCommentsMarkdown = (
     );
   });
 
-  const markdown = orderedComments
-    .map((comment, index) => {
-      const file = filesByPath.get(comment.filePath);
-      const section = file?.sections.find((candidate) => candidate.id === comment.sectionId);
-      const context =
-        file && section
-          ? getReviewCommentPatchContext(file, section, comment, showWhitespace)
-          : 'No patch context available.';
-      const fence = getMarkdownFence(context);
+  const feedbackComments = orderedComments.map((comment, index) => {
+    const file = filesByPath.get(comment.filePath);
+    const section = file?.sections.find((candidate) => candidate.id === comment.sectionId);
+    const context =
+      file && section
+        ? getReviewCommentPatchContext(file, section, comment, showWhitespace)
+        : 'No patch context available.';
+
+    return {
+      anchor: comment.anchor ?? ('line' as const),
+      body: comment.body.trim(),
+      context,
+      filePath: comment.filePath,
+      lineNumber: comment.lineNumber,
+      order: index + 1,
+      sectionId: comment.sectionId,
+      side: comment.side,
+      startLineNumber: comment.startLineNumber,
+      startSide: comment.startSide,
+    };
+  });
+  const markdown = feedbackComments
+    .map((comment) => {
+      const fence = getMarkdownFence(comment.context);
 
       return [
-        `${index + 1}. **${comment.filePath}** (${getReviewCommentLineLabel(comment)})`,
+        `${comment.order}. **${comment.filePath}** (${getReviewCommentLineLabel(comment)})`,
         '',
-        indentMarkdown(`${fence}diff\n${context}\n${fence}`),
+        indentMarkdown(`${fence}diff\n${comment.context}\n${fence}`),
         '',
-        indentMarkdown(comment.body.trim()),
+        indentMarkdown(comment.body),
       ].join('\n');
     })
     .join('\n\n');
 
   const resolvedPrefix =
     prefix == null ? '# Address these Review Comments\n\n' : prefix ? `${prefix}\n\n` : '';
-  return markdown ? `${resolvedPrefix}${markdown}` : '';
+  return { comments: feedbackComments, markdown: markdown ? `${resolvedPrefix}${markdown}` : '' };
 };
+
+export const buildReviewCommentsMarkdown = (
+  files: ReadonlyArray<ChangedFile>,
+  comments: ReadonlyArray<ReviewComment>,
+  showWhitespace: boolean,
+  prefix?: string,
+) => buildAgentReviewFeedback(files, comments, showWhitespace, prefix).markdown;
 
 export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArray<ReviewComment> =>
   (state.reviewComments ?? []).flatMap((comment) => {

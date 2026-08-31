@@ -423,6 +423,39 @@ export type WalkthroughContext = {
   version: 1;
 };
 
+export type AgentReviewFeedbackComment = {
+  anchor: 'file' | 'line';
+  body: string;
+  context: string;
+  filePath: string;
+  lineNumber?: number;
+  order: number;
+  sectionId: string;
+  side?: 'additions' | 'deletions';
+  startLineNumber?: number;
+  startSide?: 'additions' | 'deletions';
+};
+
+export type AgentReviewFeedbackContent = {
+  comments: ReadonlyArray<AgentReviewFeedbackComment>;
+  markdown: string;
+};
+
+export type AgentReviewFeedback = AgentReviewFeedbackContent & {
+  repository: { root: string; source: ReviewSource };
+  version: 1;
+};
+
+export type AgentReviewResult =
+  | (AgentReviewFeedback & { status: 'submitted' })
+  | {
+      comments: [];
+      markdown: '';
+      repository: { root: string; source: ReviewSource };
+      status: 'closed';
+      version: 1;
+    };
+
 export type CodiffLaunchOptions = {
   agentBackend?: 'codex' | 'claude' | 'opencode' | 'pi';
   applyUpdate?: boolean;
