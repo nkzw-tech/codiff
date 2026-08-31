@@ -106,9 +106,10 @@ const parseRemoteUrl = (value) => {
     const projectPath = url.pathname.replaceAll(/^\/+|\.git$/gi, '');
     return projectPath
       ? {
-          // `url.host` includes the port (e.g. a custom SSH port in `ssh://` remotes);
-          // glab's `--hostname` rejects `host:port`, so use the bare hostname.
-          host: url.hostname.toLowerCase(),
+          // A custom SSH port (`ssh://git@host:2222/...`) is transport detail, not part
+          // of the instance identifier, and glab's `--hostname` rejects `host:port` —
+          // strip it. An explicit port on `https://` remotes stays: it identifies the instance.
+          host: (url.protocol === 'ssh:' ? url.hostname : url.host).toLowerCase(),
           projectPath,
           provider: /** @type {ReviewProvider} */ (
             url.hostname.toLowerCase() === 'github.com' ? 'github' : 'gitlab'

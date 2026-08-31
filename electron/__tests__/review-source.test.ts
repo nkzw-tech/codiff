@@ -143,9 +143,9 @@ test('parseRemoteUrl drops a custom port from `ssh://` remotes', () => {
   });
 });
 
-test('parseRemoteUrl drops a custom port from `https://` remotes', () => {
+test('parseRemoteUrl keeps an explicit port on `https://` remotes', () => {
   expect(parseRemoteUrl('https://gitlab.example.com:8443/group/subgroup/project.git')).toEqual({
-    host: 'gitlab.example.com',
+    host: 'gitlab.example.com:8443',
     projectPath: 'group/subgroup/project',
     provider: 'gitlab',
   });
