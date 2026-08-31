@@ -115,10 +115,7 @@ const {
 const { getPlanReviewPath, readPlanReview, writePlanReview } = require('./plan-review.cjs');
 const { createSharedPlanSnapshot } = require('./shared-plan.cjs');
 const { createWalkthroughProgressReporter } = require('./walkthrough-progress.cjs');
-const {
-  createAgentReviewHandoffController,
-  validateAgentReviewRepository,
-} = require('./agent-review-handoff.cjs');
+const { createAgentReviewHandoffLifecycle } = require('./agent-review-handoff.cjs');
 
 /**
  * @typedef {import('../core/config/types.ts').CodiffConfig} CodiffConfig
@@ -141,8 +138,6 @@ const windowRepositories = new Map();
 const windowLaunchOptions = new Map();
 /** @type {Map<number, Promise<RepositoryState>>} */
 const windowInitialRepositoryStates = new Map();
-/** @type {Map<number, {root: string; source: ReviewSource}>} */
-const windowResolvedRepositories = new Map();
 /** @type {Map<number, number>} */
 const walkthroughProgressGenerations = new Map();
 /** @type {Map<number, string>} */
@@ -156,7 +151,7 @@ const completedPlanWindows = new Set();
 /** @type {Set<import('electron').BrowserWindow>} */
 const openWindows = new Set();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
-const agentReviewHandoffController = createAgentReviewHandoffController();
+const agentReviewHandoffLifecycle = createAgentReviewHandoffLifecycle();
 /** @type {CodiffConfig} */
 let config = createDefaultConfig();
 
@@ -248,7 +243,10 @@ const getMarkdownDocumentContext = (webContentsId) => ({
 /** @param {number} webContentsId @param {RepositoryState} state */
 const storeResolvedRepositoryState = (webContentsId, state) => {
   windowRepositories.set(webContentsId, state.root);
-  windowResolvedRepositories.set(webContentsId, { root: state.root, source: state.source });
+  agentReviewHandoffLifecycle.setRepository(webContentsId, {
+    root: state.root,
+    source: state.source,
+  });
   const browserWindow = BrowserWindow.getAllWindows().find(
     (window) => window.webContents.id === webContentsId,
   );
@@ -268,17 +266,17 @@ const storeResolvedRepositoryState = (webContentsId, state) => {
   }
 };
 
-/** @param {number} webContentsId */
-const closeAgentReviewHandoff = (webContentsId) => {
-  const resultPath = windowLaunchOptions.get(webContentsId)?.reviewResultFile;
-  const repository = windowResolvedRepositories.get(webContentsId);
-  if (!resultPath || !repository) {
-    return;
-  }
-  try {
-    agentReviewHandoffController.close(webContentsId, resultPath, repository);
-  } catch {
-    // Closing must continue if the waiting process removed or cannot write its result path.
+/**
+ * @param {import('electron').BrowserWindow} window
+ * @param {unknown} error
+ */
+const reportAgentReviewHandoffError = (window, error) => {
+  if (!window.isDestroyed()) {
+    void dialog.showMessageBox(window, {
+      message: 'Codiff could not write the agent review result.',
+      detail: error instanceof Error ? error.message : String(error),
+      type: 'error',
+    });
   }
 };
 
@@ -960,6 +958,13 @@ const createWindow = (
   if (initialRepositoryState) {
     windowInitialRepositoryStates.set(webContentsId, initialRepositoryState);
   }
+  if (launchOptions.reviewResultFile && initialRepositoryState) {
+    agentReviewHandoffLifecycle.register(
+      webContentsId,
+      launchOptions.reviewResultFile,
+      initialRepositoryState.then((state) => ({ root: state.root, source: state.source })),
+    );
+  }
   if (
     !launchOptions.planFile &&
     (!launchOptions.source ||
@@ -991,6 +996,8 @@ const createWindow = (
   window.on('show', () => repositoryWatcherCoordinator.focus(webContentsId));
   window.once('ready-to-show', () => window.show());
   let allowClose = false;
+  let allowAgentReviewClose = false;
+  let closingAgentReview = false;
   let copyingPendingCommentsBeforeClose = false;
   window.on('close', (event) => {
     try {
@@ -1005,7 +1012,26 @@ const createWindow = (
       });
     } catch {}
 
-    closeAgentReviewHandoff(webContentsId);
+    if (launchOptions.reviewResultFile && !allowAgentReviewClose) {
+      event.preventDefault();
+      if (!closingAgentReview) {
+        closingAgentReview = true;
+        void agentReviewHandoffLifecycle.close(webContentsId).then(
+          () => {
+            closingAgentReview = false;
+            allowAgentReviewClose = true;
+            if (!window.isDestroyed()) {
+              window.close();
+            }
+          },
+          (error) => {
+            closingAgentReview = false;
+            reportAgentReviewHandoffError(window, error);
+          },
+        );
+      }
+      return;
+    }
 
     if (launchOptions.planFile) {
       if (completedPlanWindows.has(webContentsId)) {
@@ -1044,7 +1070,7 @@ const createWindow = (
     definitionSearchCoordinator.cancel(webContentsId);
     repositoryWatcherCoordinator.detach(webContentsId);
     clearMarkdownDocumentWatchers(webContentsId);
-    agentReviewHandoffController.clear(webContentsId);
+    agentReviewHandoffLifecycle.clear(webContentsId);
     completedPlanWindows.delete(webContentsId);
     planInitialVersions.delete(webContentsId);
     readyPlanWindows.delete(webContentsId);
@@ -1052,19 +1078,26 @@ const createWindow = (
     windowInitialRepositoryStates.delete(webContentsId);
     walkthroughProgressGenerations.delete(webContentsId);
     windowRepositories.delete(webContentsId);
-    windowResolvedRepositories.delete(webContentsId);
     windowLaunchOptions.delete(webContentsId);
   });
   window.webContents.on('render-process-gone', () => {
     definitionSearchCoordinator.cancel(webContentsId);
-    closeAgentReviewHandoff(webContentsId);
+    if (launchOptions.reviewResultFile) {
+      void agentReviewHandoffLifecycle
+        .close(webContentsId)
+        .catch((error) => reportAgentReviewHandoffError(window, error));
+    }
     writePlanResult(webContentsId, 'canceled');
   });
   window.webContents.on(
     'did-fail-load',
     (_event, errorCode, _errorDescription, _url, isMainFrame) => {
       if (isMainFrame && errorCode !== -3) {
-        closeAgentReviewHandoff(webContentsId);
+        if (launchOptions.reviewResultFile) {
+          void agentReviewHandoffLifecycle
+            .close(webContentsId)
+            .catch((error) => reportAgentReviewHandoffError(window, error));
+        }
         writePlanResult(webContentsId, 'canceled');
       }
     },
@@ -1477,23 +1510,12 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
 
 ipcMain.handle('codiff:completeAgentReview', async (event, feedback) => {
   const webContentsId = event.sender.id;
-  const resultPath = windowLaunchOptions.get(webContentsId)?.reviewResultFile;
-  if (!resultPath) {
+  if (!windowLaunchOptions.get(webContentsId)?.reviewResultFile) {
     throw new Error('This window does not have an agent review result file.');
   }
-
-  let repository = windowResolvedRepositories.get(webContentsId);
-  if (!repository) {
-    const initialState = windowInitialRepositoryStates.get(webContentsId);
-    if (!initialState) {
-      throw new Error('The sender repository is not available.');
-    }
-    const state = await initialState;
-    repository = { root: state.root, source: state.source };
+  if (!(await agentReviewHandoffLifecycle.complete(webContentsId, feedback))) {
+    throw new Error('Another terminal agent review result was already written.');
   }
-
-  validateAgentReviewRepository(feedback?.repository, repository);
-  agentReviewHandoffController.complete(webContentsId, resultPath, feedback);
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
