@@ -2,6 +2,7 @@ import type { NativeKeyboardLayout } from './config/keyboard-layout.ts';
 import type { CodiffConfig } from './config/types.ts';
 import type {
   AgentSkillStatus,
+  AgentReviewFeedback,
   CodiffFeatureFlags,
   CodiffLaunchOptions,
   CodiffMarkdownDocument,
@@ -47,6 +48,7 @@ declare global {
     codiff: {
       applyUpdate: () => Promise<CodiffUpdateStatus>;
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
+      completeAgentReview: (feedback: AgentReviewFeedback) => Promise<void>;
       completePlan: (review: PlanReview, status: PlanHandoffStatus) => Promise<void>;
       createWalkthroughCommit: (
         request: WalkthroughCommitRequest,
