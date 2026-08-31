@@ -245,6 +245,8 @@ Set `settings.walkthroughPrompt` to add custom instructions to generated walkthr
 to request a specific language, tone, or level of detail while Codiff keeps its walkthrough guide,
 hunk ids, review-order constraints, and JSON schema in place.
 
+### Agent Integration
+
 To drive Codiff from your agent, install its integration from the application menu under
 `Install Skill`, then choose Codex, Claude Code, Pi, or OpenCode. Codiff updates keep the installed
 skill current. The OpenCode integration also installs a managed `/codiff` command that uses
@@ -262,9 +264,15 @@ current session and therefore uses that session's active model.
 narrative walkthrough JSON to a temporary file, and opens Codiff on it with `--walkthrough-file`
 plus the current session id. Because the guidance lives in Codiff, the installed skill stays a thin
 shim while the walkthrough sees the original conversation context without a lossy summary handoff.
-The agent waits while the desktop window is open. Add local inline or file comments, then choose
-**Send feedback** to close Codiff and resume the same agent turn with those comments. Closing Codiff
-normally resumes the agent without feedback-driven edits.
+The agent waits while the desktop window is open. **Send feedback** appears only for agent-launched
+desktop handoffs and is disabled when there is no feedback. Add local inline or file comments;
+submission includes the focused comment draft without requiring blur. Successful submission closes
+Codiff and resumes the same agent turn with those comments.
+
+If submission fails, Codiff remains open and the window, comments, and draft stay intact for retry.
+Closing Codiff normally returns `status: "closed"` with no actionable feedback or feedback-driven
+edits. Do not automatically reopen Codiff; decide whether another review is useful after handling
+the submitted feedback.
 
 ## Development
 

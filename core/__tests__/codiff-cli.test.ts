@@ -34,6 +34,19 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+const expectAgentReviewDocumentation = (document: string) => {
+  const normalized = document.replaceAll(/\s+/g, ' ');
+  expect(normalized).toContain('only for agent-launched desktop handoffs');
+  expect(normalized).toContain('focused comment draft without requiring blur');
+  expect(normalized).toContain('window, comments, and draft stay intact');
+  expect(normalized).toContain('disabled when there is no feedback');
+  expect(normalized).toContain('status: "closed"');
+  expect(normalized).toContain('no actionable feedback');
+  expect(normalized).toContain('Successful submission closes Codiff');
+  expect(normalized).toContain('same agent turn');
+  expect(normalized).toContain('Do not automatically reopen Codiff');
+};
+
 const submittedAgentReviewResult = (root: string) => ({
   comments: [
     {
@@ -1993,11 +2006,22 @@ test('codiff --walkthrough-guide prints the guide and embedded schema, then exit
   expect(stdout).toContain('status: "closed"');
   expect(stdout).toContain('Address every returned comment');
   expect(stdout).toContain('Do not automatically reopen Codiff');
+  const agentReviewSection = stdout.match(/## Agent Review Handoff[\s\S]*?(?=\n## )/)?.[0];
+  expect(agentReviewSection).toBeDefined();
+  expectAgentReviewDocumentation(agentReviewSection!);
   // ...followed by the live JSON schema, embedded as a fenced block.
   expect(stdout).toContain('```json');
   expect(stdout).toContain('"chapters"');
   expect(stdout).toContain('"hunkId"');
   expect(stdout).toContain('"const": 4');
+});
+
+test('README documents the complete agent review lifecycle in its integration section', async () => {
+  const readme = await readFile(resolve('README.md'), 'utf8');
+  const agentIntegrationSection = readme.match(/### Agent Integration[\s\S]*?(?=\n## )/)?.[0];
+
+  expect(agentIntegrationSection).toBeDefined();
+  expectAgentReviewDocumentation(agentIntegrationSection!);
 });
 
 test('parseArguments reads base...target and base..target as a range', async () => {
