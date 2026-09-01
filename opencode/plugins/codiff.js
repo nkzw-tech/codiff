@@ -124,10 +124,18 @@ export const CodiffPlugin = async ({ client, worktree }) => {
     throw new Error('OpenCode rejected the feedback prompt after bounded retries.');
   };
 
-  const rejectAmbiguous = (state, entry) => {
+  const markAmbiguous = (state, entry, submissionGeneration) => {
     state.active = null;
+    state.ambiguityBarrierGeneration = submissionGeneration;
     retainAmbiguous(state, entry.item.deliveryId);
     writeDiagnostic(AMBIGUOUS_DIAGNOSTIC);
+    if (state.idleGeneration > submissionGeneration) {
+      void drainOne(state, state.idleGeneration).catch(() => {});
+    }
+  };
+
+  const rejectAmbiguous = (state, entry, submissionGeneration) => {
+    markAmbiguous(state, entry, submissionGeneration);
     throw new Error('OpenCode feedback delivery is ambiguous and will not be retried.');
   };
 
@@ -159,6 +167,7 @@ export const CodiffPlugin = async ({ client, worktree }) => {
       throw disposedError();
     }
 
+    const submissionGeneration = state.idleGeneration;
     let result;
     try {
       result = await client.session.promptAsync({
@@ -171,7 +180,7 @@ export const CodiffPlugin = async ({ client, worktree }) => {
         state.active = null;
         throw disposedError();
       }
-      return rejectAmbiguous(state, entry);
+      return rejectAmbiguous(state, entry, submissionGeneration);
     }
     if (disposed) {
       state.active = null;
@@ -185,9 +194,9 @@ export const CodiffPlugin = async ({ client, worktree }) => {
     }
     if (status !== 204) {
       waiter.cancel();
-      return rejectAmbiguous(state, entry);
+      return rejectAmbiguous(state, entry, submissionGeneration);
     }
-    return { entry, observed };
+    return { entry, observed, submissionGeneration };
   };
 
   const complete = async (state, decision) => {
@@ -206,8 +215,7 @@ export const CodiffPlugin = async ({ client, worktree }) => {
       };
     } catch (error) {
       if (error?.code === 'OPENCODE_MESSAGE_TIMEOUT') {
-        retainAmbiguous(state, decision.entry.item.deliveryId);
-        writeDiagnostic(AMBIGUOUS_DIAGNOSTIC);
+        markAmbiguous(state, decision.entry, decision.submissionGeneration);
       }
       throw error;
     } finally {
@@ -237,7 +245,7 @@ export const CodiffPlugin = async ({ client, worktree }) => {
           if (disposed) {
             throw disposedError();
           }
-          if (state.active || state.queue.length > 0) {
+          if (state.active || state.ambiguityBarrierGeneration !== null || state.queue.length > 0) {
             state.queue.push(entry);
             return { receipt: queueReceipt(item) };
           }
@@ -251,14 +259,22 @@ export const CodiffPlugin = async ({ client, worktree }) => {
     return operation;
   };
 
-  const drainOne = (state) =>
+  const drainOne = (state, idleGeneration) =>
     track(
       state,
       (async () => {
         const decision = await serialize(state, () => {
-          if (disposed || state.active) {
+          if (disposed || state.active || idleGeneration <= state.consumedIdleGeneration) {
             return undefined;
           }
+          if (
+            state.ambiguityBarrierGeneration !== null &&
+            idleGeneration <= state.ambiguityBarrierGeneration
+          ) {
+            return undefined;
+          }
+          state.consumedIdleGeneration = idleGeneration;
+          state.ambiguityBarrierGeneration = null;
           const entry = state.queue.shift();
           return entry ? accept(state, entry) : undefined;
         });
@@ -283,9 +299,12 @@ export const CodiffPlugin = async ({ client, worktree }) => {
 
     const state = {
       active: null,
+      ambiguityBarrierGeneration: null,
       ambiguous: new Map(),
       bridge: null,
+      consumedIdleGeneration: 0,
       dispatcher: Promise.resolve(),
+      idleGeneration: 0,
       inFlight: new Map(),
       operations: new Set(),
       queue: [],
@@ -340,7 +359,11 @@ export const CodiffPlugin = async ({ client, worktree }) => {
 
       const state = sessions.get(event.properties.sessionID);
       if (event.type === 'session.idle' && state) {
-        await drainOne(state).catch(() => {});
+        state.idleGeneration++;
+        if (state.active) {
+          return;
+        }
+        await drainOne(state, state.idleGeneration).catch(() => {});
       }
     },
   };

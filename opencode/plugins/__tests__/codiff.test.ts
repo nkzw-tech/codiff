@@ -74,11 +74,13 @@ const correlate = async (
   });
 
 const deferred = <T>() => {
+  let reject!: (reason?: unknown) => void;
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    reject = rejectPromise;
     resolve = resolvePromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 };
 
 beforeEach(() => {
@@ -432,6 +434,83 @@ test.each([
   await hooks.event({ event: { properties: { sessionID: 'ses_1' }, type: 'session.idle' } });
   await expect(bridges[0].options.deliver(delivery('delivery-1'))).rejects.toThrow('ambiguous');
   expect(client.session.promptAsync).toHaveBeenCalledOnce();
+});
+
+test('blocks a distinct delivery after transport ambiguity until a later idle boundary', async () => {
+  const firstPrompt = deferred<{ response: { status: number } }>();
+  const context: { hooks?: Awaited<ReturnType<typeof setup>>['hooks'] } = {};
+  let promptCalls = 0;
+  const configured = await setup({
+    promptAsync: async (input) => {
+      promptCalls++;
+      if (promptCalls === 1) {
+        return firstPrompt.promise;
+      }
+      queueMicrotask(() => void correlate(context.hooks!, input.body.messageID));
+      return { response: { status: 204 } };
+    },
+  });
+  const { client, hooks } = configured;
+  context.hooks = hooks;
+  await hooks['chat.message']({ sessionID: 'ses_1' }, {});
+
+  const first = bridges[0].options.deliver(delivery('delivery-1'));
+  await vi.waitFor(() => expect(client.session.promptAsync).toHaveBeenCalledOnce());
+  const second = bridges[0].options.deliver(delivery('delivery-2'));
+  firstPrompt.reject(new Error('transport outcome unknown'));
+
+  await expect(first).rejects.toThrow('ambiguous');
+  await expect(second).resolves.toMatchObject({ assurance: 'bridge-queue', status: 'queued' });
+  expect(client.session.promptAsync).toHaveBeenCalledOnce();
+
+  const idle = hooks.event({
+    event: { properties: { sessionID: 'ses_1' }, type: 'session.idle' },
+  });
+  await vi.waitFor(() => expect(client.session.promptAsync).toHaveBeenCalledTimes(2));
+  await idle;
+});
+
+test('consumes one idle boundary that arrives while an ambiguous prompt is pending', async () => {
+  const firstPrompt = deferred<{ response: { status: number } }>();
+  const context: { hooks?: Awaited<ReturnType<typeof setup>>['hooks'] } = {};
+  let promptCalls = 0;
+  const configured = await setup({
+    promptAsync: async (input) => {
+      promptCalls++;
+      if (promptCalls === 1) {
+        return firstPrompt.promise;
+      }
+      queueMicrotask(() => void correlate(context.hooks!, input.body.messageID));
+      return { response: { status: 204 } };
+    },
+  });
+  const { client, hooks } = configured;
+  context.hooks = hooks;
+  await hooks['chat.message']({ sessionID: 'ses_1' }, {});
+
+  const first = bridges[0].options.deliver(delivery('delivery-1'));
+  await vi.waitFor(() => expect(client.session.promptAsync).toHaveBeenCalledOnce());
+  const second = bridges[0].options.deliver(delivery('delivery-2'));
+  const idle = hooks.event({
+    event: { properties: { sessionID: 'ses_1' }, type: 'session.idle' },
+  });
+  const third = bridges[0].options.deliver(delivery('delivery-3'));
+  await Promise.resolve();
+  expect(client.session.promptAsync).toHaveBeenCalledOnce();
+
+  firstPrompt.reject(new Error('transport outcome unknown'));
+  await expect(first).rejects.toThrow('ambiguous');
+  await expect(second).resolves.toMatchObject({ assurance: 'bridge-queue', status: 'queued' });
+  await expect(third).resolves.toMatchObject({ assurance: 'bridge-queue', status: 'queued' });
+  await vi.waitFor(() => expect(client.session.promptAsync).toHaveBeenCalledTimes(2));
+  await idle;
+  await vi.waitFor(() => expect(client.session.promptAsync).toHaveBeenCalledTimes(2));
+
+  const nextIdle = hooks.event({
+    event: { properties: { sessionID: 'ses_1' }, type: 'session.idle' },
+  });
+  await vi.waitFor(() => expect(client.session.promptAsync).toHaveBeenCalledTimes(3));
+  await nextIdle;
 });
 
 test('marks post-acceptance correlation timeout ambiguous without retrying', async () => {
