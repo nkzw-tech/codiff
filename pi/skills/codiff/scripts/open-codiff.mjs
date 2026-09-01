@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { runAgentReviewLauncher } from '../../../../bin/agent-review-result.js';
+import { runAgentReviewLauncher } from '../../../../bin/agent-review-launch.js';
 
 const threadId = process.env.PI_SESSION_ID || '';
 const skillRoot = resolve(import.meta.dirname, '..');
@@ -384,8 +384,6 @@ try {
     runAgentReviewLauncher({
       args,
       command: codiffCommand.command,
-      forwardedArgs,
-      sessionCwd,
     }),
   );
 } catch (error) {

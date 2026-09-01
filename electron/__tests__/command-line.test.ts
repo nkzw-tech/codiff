@@ -18,11 +18,12 @@ const { getCommandLineLaunchOptions, getCommandLineRepositoryPath, getInitialRep
       commandLine: ReadonlyArray<string>,
       fallbackPath?: string,
     ) => {
+      agentReview?: { deliveryId: string; sessionId: string };
+      agentReviewOpenFile?: string;
       applyUpdate?: boolean;
       codexSessionId?: string;
       planFile?: string;
       planResultFile?: string;
-      reviewResultFile?: string;
       repositoryPathProvided: boolean;
       source?:
         | { ref: string; type: 'branch-working-tree' }
@@ -78,25 +79,13 @@ test('parses the apply-update launch flag', () => {
   expect(getCommandLineLaunchOptions(['codiff', '/repo']).applyUpdate).toBeUndefined();
 });
 
-test('rejects simultaneous plan and review handoffs', () => {
+test('rejects partial agent review delivery pairs', () => {
   expect(() =>
-    getCommandLineLaunchOptions([
-      'codiff',
-      '--plan-file',
-      '/tmp/plan.md',
-      '--review-result-file',
-      '/tmp/review.json',
-    ]),
-  ).toThrow('cannot be used together');
+    getCommandLineLaunchOptions(['codiff', '--agent-review-delivery', 'delivery-1']),
+  ).toThrow('must be used together');
   expect(() =>
-    getCommandLineLaunchOptions([
-      'codiff',
-      '--plan-result-file',
-      '/tmp/plan-result.json',
-      '--review-result-file',
-      '/tmp/review.json',
-    ]),
-  ).toThrow('cannot be used together');
+    getCommandLineLaunchOptions(['codiff', '--agent-review-open-file', '/tmp/open.json']),
+  ).toThrow('must be used together');
 });
 
 test('parses the OpenCode agent override', () => {
@@ -180,11 +169,23 @@ test('parses plan handoff command-line options', () => {
 
 test('parses agent review handoff command-line options', () => {
   expect(
-    readCommandLine(['codiff', '--review-result-file', '/tmp/review.json', '/repo']),
+    readCommandLine([
+      'codiff',
+      '--agent',
+      'codex',
+      '--codex-session',
+      'session-1',
+      '--agent-review-delivery',
+      'delivery-1',
+      '--agent-review-open-file',
+      '/tmp/open.json',
+      '/repo',
+    ]),
   ).toMatchObject({
     launchOptions: {
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
+      agentReviewOpenFile: '/tmp/open.json',
       repositoryPathProvided: true,
-      reviewResultFile: '/tmp/review.json',
       walkthrough: false,
     },
     repositoryPath: '/repo',

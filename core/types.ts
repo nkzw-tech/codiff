@@ -450,18 +450,36 @@ export type AgentReviewFeedback = AgentReviewFeedbackContent & {
   version: 1;
 };
 
-export type AgentReviewResult =
-  | (AgentReviewFeedback & { status: 'submitted' })
+export type AgentBackend = 'codex' | 'claude' | 'opencode' | 'pi';
+
+export type AgentFeedbackAssurance =
+  | 'bridge-queue'
+  | 'dispatch-started'
+  | 'message-created'
+  | 'queue-command'
+  | 'transport-write';
+
+export type AgentFeedbackDeliveryRequest = {
+  backend: AgentBackend;
+  deliveryId: string;
+  feedback: AgentReviewFeedback;
+  repositoryRoot: string;
+  sessionId: string;
+  version: 1;
+};
+
+export type AgentFeedbackDeliveryResponse =
   | {
-      comments: [];
-      markdown: '';
-      repository: { root: string; source: ReviewSource };
-      status: 'closed';
-      version: 1;
-    };
+      assurance: AgentFeedbackAssurance;
+      deliveryId: string;
+      status: 'accepted' | 'queued' | 'already-accepted';
+    }
+  | { deliveryId: string; reason: string; status: 'rejected' };
 
 export type CodiffLaunchOptions = {
-  agentBackend?: 'codex' | 'claude' | 'opencode' | 'pi';
+  agentBackend?: AgentBackend;
+  agentReview?: { deliveryId: string; sessionId: string };
+  agentReviewOpenFile?: string;
   applyUpdate?: boolean;
   claudeSessionId?: string;
   codexSessionId?: string;
@@ -472,8 +490,6 @@ export type CodiffLaunchOptions = {
   /** Result file used to resume the waiting agent process. */
   planResultFile?: string;
   repositoryPathProvided: boolean;
-  /** Result file used to resume the waiting agent review process. */
-  reviewResultFile?: string;
   source?: ReviewSource;
   walkthrough: boolean;
   walkthroughContext?: WalkthroughContext;

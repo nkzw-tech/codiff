@@ -114,6 +114,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
       'apply-update': {
         type: 'boolean',
       },
+      'agent-review-delivery': {
+        type: 'string',
+      },
+      'agent-review-open-file': {
+        type: 'string',
+      },
       commit: {
         type: 'string',
       },
@@ -143,9 +149,6 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
         type: 'string',
       },
       'plan-result-file': {
-        type: 'string',
-      },
-      'review-result-file': {
         type: 'string',
       },
       'walkthrough-context': {
@@ -257,7 +260,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
   const envPiSessionId = useEnvironment ? process.env.CODIFF_PI_SESSION_ID || '' : '';
   const envPlanFilePath = useEnvironment ? process.env.CODIFF_PLAN_FILE || '' : '';
   const envPlanResultFilePath = useEnvironment ? process.env.CODIFF_PLAN_RESULT_FILE || '' : '';
-  const envReviewResultFilePath = useEnvironment ? process.env.CODIFF_REVIEW_RESULT_FILE || '' : '';
+  const envAgentReviewDeliveryId = useEnvironment
+    ? process.env.CODIFF_AGENT_REVIEW_DELIVERY_ID || ''
+    : '';
+  const envAgentReviewOpenFilePath = useEnvironment
+    ? process.env.CODIFF_AGENT_REVIEW_OPEN_FILE || ''
+    : '';
   const envAgentBackend = useEnvironment ? process.env.CODIFF_AGENT_BACKEND || '' : '';
   const envWalkthroughContextPath = useEnvironment
     ? process.env.CODIFF_WALKTHROUGH_CONTEXT || ''
@@ -284,12 +292,15 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     (typeof values['plan-result-file'] === 'string' ? values['plan-result-file'] : '') ||
     envPlanResultFilePath ||
     undefined;
-  const reviewResultFilePath =
-    (typeof values['review-result-file'] === 'string' ? values['review-result-file'] : '') ||
-    envReviewResultFilePath ||
-    undefined;
-  if (reviewResultFilePath && (planFilePath || planResultFilePath)) {
-    throw new Error('Plan and review result handoffs cannot be used together.');
+  const agentReviewDeliveryId =
+    (typeof values['agent-review-delivery'] === 'string' ? values['agent-review-delivery'] : '') ||
+    envAgentReviewDeliveryId;
+  const agentReviewOpenFilePath =
+    (typeof values['agent-review-open-file'] === 'string'
+      ? values['agent-review-open-file']
+      : '') || envAgentReviewOpenFilePath;
+  if (Boolean(agentReviewDeliveryId) !== Boolean(agentReviewOpenFilePath)) {
+    throw new Error('Agent review delivery and open file options must be used together.');
   }
   if (planResultFilePath && !planFilePath) {
     throw new Error('A plan result handoff requires a plan file.');
@@ -303,6 +314,16 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     rawAgentBackend === 'pi'
       ? rawAgentBackend
       : undefined;
+  const agentReviewSessionId =
+    agentBackend === 'codex'
+      ? codexSessionId
+      : agentBackend === 'claude'
+        ? claudeSessionId
+        : agentBackend === 'opencode'
+          ? opencodeSessionId
+          : agentBackend === 'pi'
+            ? piSessionId
+            : undefined;
   const walkthroughContextPath =
     (typeof values['walkthrough-context'] === 'string' ? values['walkthrough-context'] : '') ||
     envWalkthroughContextPath ||
@@ -332,13 +353,18 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     launchOptions: {
       ...(values['apply-update'] === true ? { applyUpdate: true } : {}),
       ...(agentBackend ? { agentBackend } : {}),
+      ...(agentReviewDeliveryId && agentReviewOpenFilePath && agentReviewSessionId
+        ? {
+            agentReview: { deliveryId: agentReviewDeliveryId, sessionId: agentReviewSessionId },
+            agentReviewOpenFile: resolve(agentReviewOpenFilePath),
+          }
+        : {}),
       ...(claudeSessionId ? { claudeSessionId } : {}),
       ...(codexSessionId ? { codexSessionId } : {}),
       ...(opencodeSessionId ? { opencodeSessionId } : {}),
       ...(piSessionId ? { piSessionId } : {}),
       ...(planFilePath ? { planFile: resolve(planFilePath) } : {}),
       ...(planResultFilePath ? { planResultFile: resolve(planResultFilePath) } : {}),
-      ...(reviewResultFilePath ? { reviewResultFile: resolve(reviewResultFilePath) } : {}),
       repositoryPathProvided,
       source:
         sourceRange && sourcePullRequestNumber == null

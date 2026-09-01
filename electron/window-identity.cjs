@@ -201,12 +201,12 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
   const sourceKey = implicitWalkthroughHead
     ? `commit:${implicitWalkthroughHead}`
     : getSourceKey(repositoryRoot, launchOptions.source);
-  const handoffKey = launchOptions.reviewResultFile
-    ? `\0review:${getRealPath(launchOptions.reviewResultFile)}`
+  const deliveryKey = launchOptions.agentReview
+    ? `\0agent-review:${launchOptions.agentReview.deliveryId}`
     : '';
   return sourceKey
     ? {
-        key: `${repositoryRoot}\0${sourceKey}${handoffKey}`,
+        key: `${repositoryRoot}\0${sourceKey}${deliveryKey}`,
         repositoryRoot,
         sourceKey,
       }
@@ -221,12 +221,12 @@ const getWindowIdentityForSource = (repositoryPath, source) =>
 const getWindowIdentityForRepositoryState = (state, launchOptions = {}) => {
   const repositoryRoot = getRealPath(state.root);
   const sourceKey = getResolvedSourceKey(state.source);
-  const handoffKey = launchOptions.reviewResultFile
-    ? `\0review:${getRealPath(launchOptions.reviewResultFile)}`
+  const deliveryKey = launchOptions.agentReview
+    ? `\0agent-review:${launchOptions.agentReview.deliveryId}`
     : '';
   return sourceKey
     ? {
-        key: `${repositoryRoot}\0${sourceKey}${handoffKey}`,
+        key: `${repositoryRoot}\0${sourceKey}${deliveryKey}`,
         repositoryRoot,
         sourceKey,
       }

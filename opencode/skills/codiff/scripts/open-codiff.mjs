@@ -17,7 +17,7 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
-import { runAgentReviewLauncher } from '../../../../bin/agent-review-result.js';
+import { runAgentReviewLauncher } from '../../../../bin/agent-review-launch.js';
 
 const skillRoot = resolve(import.meta.dirname, '..');
 const codiffRoot = resolve(skillRoot, '../../..');
@@ -382,8 +382,6 @@ try {
     runAgentReviewLauncher({
       args,
       command: codiffCommand.command,
-      forwardedArgs,
-      sessionCwd,
     }),
   );
 } catch (error) {

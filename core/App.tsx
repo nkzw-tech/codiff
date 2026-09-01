@@ -1858,7 +1858,7 @@ export default function App() {
               reviewCommentsPrefix={preferences.reviewCommentsPrefix}
               showWhitespace={showWhitespace}
             />
-            {launchOptions.reviewResultFile &&
+            {launchOptions.agentReview &&
             typeof window.codiff.completeAgentReview === 'function' ? (
               <SendFeedbackButton
                 count={pendingReviewCommentCount}

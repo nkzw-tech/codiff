@@ -106,6 +106,7 @@ export default defineConfig({
   },
   test: {
     include: [
+      'bin/**/*.test.ts',
       'core/**/*.test.{ts,tsx}',
       'electron/**/*.test.ts',
       'service/**/*.test.ts',

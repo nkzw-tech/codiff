@@ -20,6 +20,7 @@ const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepos
     getWindowIdentity: (
       repositoryPath: string,
       launchOptions?: {
+        agentReview?: { deliveryId: string; sessionId: string };
         source?:
           | { type: 'working-tree' }
           | { ref: string; type: 'branch' }
@@ -36,7 +37,6 @@ const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepos
         walkthroughFile?: string;
         planFile?: string;
         planResultFile?: string;
-        reviewResultFile?: string;
       },
     ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
     getWindowIdentityForRepositoryState: (
@@ -47,7 +47,7 @@ const { findMatchingWindowIdentity, getWindowIdentity, getWindowIdentityForRepos
           | { ref: string; type: 'commit' }
           | { baseRef: string; headRef: string; ref: string; type: 'branch-diff' };
       },
-      launchOptions?: { reviewResultFile?: string },
+      launchOptions?: { agentReview?: { deliveryId: string; sessionId: string } },
     ) => { key: string; repositoryRoot: string; sourceKey: string } | null;
   };
 
@@ -109,8 +109,14 @@ test('window identities distinguish agent review handoffs', async () => {
   await initRepository(directory.path);
 
   expect(
-    getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-a.json' })?.key,
-  ).not.toBe(getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-b.json' })?.key);
+    getWindowIdentity(directory.path, {
+      agentReview: { deliveryId: 'delivery-a', sessionId: 'session' },
+    })?.key,
+  ).not.toBe(
+    getWindowIdentity(directory.path, {
+      agentReview: { deliveryId: 'delivery-b', sessionId: 'session' },
+    })?.key,
+  );
 });
 
 test('window identities resolve commit refs to the same commit sha', async () => {
@@ -161,11 +167,11 @@ test.sequential('resolved repository states build identities without invoking Gi
   });
   expect(
     getWindowIdentityForRepositoryState(state, {
-      reviewResultFile: '/tmp/review-a.json',
+      agentReview: { deliveryId: 'delivery-a', sessionId: 'session' },
     })?.key,
   ).not.toBe(
     getWindowIdentityForRepositoryState(state, {
-      reviewResultFile: '/tmp/review-b.json',
+      agentReview: { deliveryId: 'delivery-b', sessionId: 'session' },
     })?.key,
   );
   expect(await readFile(gitMarker, 'utf8').catch(() => null)).toBeNull();

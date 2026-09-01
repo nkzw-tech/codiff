@@ -445,8 +445,8 @@ test('desktop app only shows send feedback for an agent review handoff', async (
 
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
-      reviewResultFile: '/tmp/review-result.json',
       walkthrough: false,
     })),
   });
@@ -458,8 +458,8 @@ test('desktop app only shows send feedback for an agent review handoff', async (
 test('desktop app hides send feedback when the agent review IPC is unavailable', async () => {
   const codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
-      reviewResultFile: '/tmp/review-result.json',
       walkthrough: false,
     })),
   });
@@ -478,8 +478,8 @@ test('agent review feedback sends a focused draft with repository identity', asy
   window.codiff = createCodiffMock({
     completeAgentReview,
     getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
-      reviewResultFile: '/tmp/review-result.json',
       walkthrough: false,
     })),
     getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
@@ -537,8 +537,8 @@ test('failed agent review feedback preserves the editable focused draft', async 
       throw new Error('Result file unavailable.');
     }),
     getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
-      reviewResultFile: '/tmp/review-result.json',
       walkthrough: false,
     })),
     getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
@@ -601,8 +601,8 @@ test('agent review feedback is disabled and guarded while switching sources', as
   window.codiff = createCodiffMock({
     completeAgentReview,
     getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
-      reviewResultFile: '/tmp/review-result.json',
       walkthrough: false,
     })),
     getRepositoryState,

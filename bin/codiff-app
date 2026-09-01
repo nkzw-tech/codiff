@@ -276,7 +276,8 @@ walkthrough_context_path=""
 walkthrough_file_path=""
 plan_file_path=""
 plan_result_file_path=""
-review_result_file_path=""
+agent_review_delivery_id=""
+agent_review_open_file_path=""
 expect_codex_session=0
 expect_claude_session=0
 expect_opencode_session=0
@@ -289,7 +290,8 @@ expect_walkthrough_context=0
 expect_walkthrough_file=0
 expect_plan_file=0
 expect_plan_result_file=0
-expect_review_result_file=0
+expect_agent_review_delivery=0
+expect_agent_review_open_file=0
 walkthrough=0
 
 is_commit_ref_arg() {
@@ -408,9 +410,15 @@ for arg in "$@"; do
     continue
   fi
 
-  if [ "$expect_review_result_file" -eq 1 ]; then
-    review_result_file_path="$arg"
-    expect_review_result_file=0
+  if [ "$expect_agent_review_delivery" -eq 1 ]; then
+    agent_review_delivery_id="$arg"
+    expect_agent_review_delivery=0
+    continue
+  fi
+
+  if [ "$expect_agent_review_open_file" -eq 1 ]; then
+    agent_review_open_file_path="$arg"
+    expect_agent_review_open_file=0
     continue
   fi
 
@@ -531,11 +539,17 @@ for arg in "$@"; do
     --plan-result-file=*)
       plan_result_file_path="${arg#--plan-result-file=}"
       ;;
-    --review-result-file)
-      expect_review_result_file=1
+    --agent-review-delivery)
+      expect_agent_review_delivery=1
       ;;
-    --review-result-file=*)
-      review_result_file_path="${arg#--review-result-file=}"
+    --agent-review-delivery=*)
+      agent_review_delivery_id="${arg#--agent-review-delivery=}"
+      ;;
+    --agent-review-open-file)
+      expect_agent_review_open_file=1
+      ;;
+    --agent-review-open-file=*)
+      agent_review_open_file_path="${arg#--agent-review-open-file=}"
       ;;
     -*)
       ;;
@@ -625,15 +639,16 @@ if [ -n "$plan_result_file_path" ]; then
   esac
 fi
 
-if [ -n "$review_result_file_path" ]; then
-  case "$review_result_file_path" in
+if [ -n "$agent_review_open_file_path" ]; then
+  case "$agent_review_open_file_path" in
     /*) ;;
-    *) review_result_file_path="$PWD/$review_result_file_path" ;;
+    *) agent_review_open_file_path="$PWD/$agent_review_open_file_path" ;;
   esac
 fi
 
-if [ -n "$review_result_file_path" ] && { [ -n "$plan_file_path" ] || [ -n "$plan_result_file_path" ]; }; then
-  printf '%s\n' 'codiff: plan and review result handoffs cannot be used together.' >&2
+if { [ -n "$agent_review_delivery_id" ] && [ -z "$agent_review_open_file_path" ]; } ||
+  { [ -z "$agent_review_delivery_id" ] && [ -n "$agent_review_open_file_path" ]; }; then
+  printf '%s\n' 'codiff: agent review delivery and open file options must be used together.' >&2
   exit 1
 fi
 
@@ -661,9 +676,12 @@ open_codiff() {
   # Prepend optional flags in reverse of their final order so the resulting
   # argument list reads: --codex-session --claude-session --opencode-session
   # --agent --walkthrough-context --walkthrough-file --plan-file
-  # --plan-result-file --review-result-file <trailing>.
-  if [ -n "$review_result_file_path" ]; then
-    set -- --review-result-file "$review_result_file_path" "$@"
+  # --plan-result-file --agent-review-delivery --agent-review-open-file <trailing>.
+  if [ -n "$agent_review_open_file_path" ]; then
+    set -- --agent-review-open-file "$agent_review_open_file_path" "$@"
+  fi
+  if [ -n "$agent_review_delivery_id" ]; then
+    set -- --agent-review-delivery "$agent_review_delivery_id" "$@"
   fi
   if [ -n "$plan_result_file_path" ]; then
     set -- --plan-result-file "$plan_result_file_path" "$@"
@@ -693,17 +711,12 @@ open_codiff() {
     set -- --pi-session "$pi_session_id" "$@"
   fi
 
-  if [ -n "$review_result_file_path" ]; then
-    open -W -n "$app_path" --args "$@" &
-    review_app_pid=$!
-  else
-    open -n "$app_path" --args "$@"
-  fi
+  open -n "$app_path" --args "$@"
 }
 
 print_update_notice
 
-if [ -n "$review_result_file_path" ]; then
+if [ -n "$agent_review_open_file_path" ]; then
   resolve_runtime review
 fi
 
@@ -762,12 +775,7 @@ else
   open_codiff "$repository_path"
 fi
 
-if [ -n "$review_result_file_path" ]; then
-  if ! ELECTRON_RUN_AS_NODE=1 "$runtime" \
-    "$script_dir/agent-review-result.js" "$review_result_file_path" "$review_app_pid"; then
-    wait "$review_app_pid" 2>/dev/null || true
-    exit 1
-  fi
-  kill "$review_app_pid" 2>/dev/null || true
-  wait "$review_app_pid" 2>/dev/null || true
+if [ -n "$agent_review_open_file_path" ]; then
+  ELECTRON_RUN_AS_NODE=1 "$runtime" \
+    "$script_dir/agent-review-launch.js" "$agent_review_open_file_path" "$agent_review_delivery_id"
 fi

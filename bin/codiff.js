@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import packageJson from '../package.json' with { type: 'json' };
-import { waitForAgentReviewResult } from './agent-review-result.js';
+import { waitForAgentReviewOpen } from './agent-review-launch.js';
 import {
   formatHelpText,
   getReviewSource,
@@ -175,6 +175,8 @@ const run = async () => {
 
   const {
     agentBackend,
+    agentReview,
+    agentReviewOpenFilePath,
     branchRef,
     claudeSessionId,
     codexSessionId,
@@ -187,7 +189,6 @@ const run = async () => {
     pullRequestNumber,
     pullRequestProvider,
     range,
-    reviewResultFilePath,
     requestedPath,
     share,
     walkthrough,
@@ -302,6 +303,8 @@ const run = async () => {
   const childEnv = {
     ...process.env,
     CODIFF_AGENT_BACKEND: agentBackend ?? '',
+    CODIFF_AGENT_REVIEW_DELIVERY_ID: agentReview?.deliveryId ?? '',
+    CODIFF_AGENT_REVIEW_OPEN_FILE: agentReviewOpenFilePath ?? '',
     CODIFF_BRANCH_REF: branchRef ?? '',
     CODIFF_CLAUDE_SESSION_ID: claudeSessionId ?? '',
     CODIFF_COMMIT_REF: commitRef ?? '',
@@ -311,7 +314,6 @@ const run = async () => {
     CODIFF_PLAN_FILE: planFilePath ?? '',
     CODIFF_PLAN_RESULT_FILE: planResultPath,
     CODIFF_PULL_REQUEST_URL: pullRequestUrl ?? '',
-    CODIFF_REVIEW_RESULT_FILE: reviewResultFilePath ?? '',
     CODIFF_REVIEW_PROVIDER: pullRequestProvider ?? '',
     CODIFF_RANGE: range ? `${range.base}${range.symmetric ? '...' : '..'}${range.head}` : '',
     CODIFF_REPOSITORY_PATH: requestedPath,
@@ -358,12 +360,12 @@ const run = async () => {
     } finally {
       rmSync(planResultDirectory, { force: true, recursive: true });
     }
-  } else if (reviewResultFilePath) {
+  } else if (agentReview && agentReviewOpenFilePath) {
     try {
-      await waitForAgentReviewResult(reviewResultFilePath, child);
+      await waitForAgentReviewOpen(agentReviewOpenFilePath, agentReview.deliveryId);
     } catch (error) {
       process.stderr.write(
-        `${error instanceof Error ? error.message : 'Codiff exited without a review result.'}\n`,
+        `${error instanceof Error ? error.message : 'Codiff did not open the review.'}\n`,
       );
       process.exitCode = 1;
     }
