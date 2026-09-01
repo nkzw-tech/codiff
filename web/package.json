@@ -17,24 +17,24 @@
     "@nkzw/codiff-core": "workspace:*",
     "@nkzw/codiff-service": "workspace:*",
     "@phosphor-icons/react": "^2.1.10",
-    "@void/react": "0.10.12",
-    "better-auth": "1.7.1",
+    "@void/react": "0.10.13",
+    "better-auth": "1.7.2",
     "cf-fate": "^1.3.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-error-boundary": "^6.1.3",
+    "react-error-boundary": "^6.1.4",
     "react-fate": "^1.3.3",
-    "void": "^0.10.12"
+    "void": "^0.10.13"
   },
   "devDependencies": {
     "@rolldown/plugin-babel": "^0.2.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
-    "@vitejs/plugin-react": "^6.1.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "babel-plugin-react-compiler": "^1.0.0",
     "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",
-    "wrangler": "^4.126.0"
+    "wrangler": "^4.127.1"
   }
 }
