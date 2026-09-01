@@ -195,6 +195,8 @@ export function WalkthroughOutdatedBanner({
 }
 
 export function FirstRunPanel({
+  agentSkillActive,
+  agentSkillDetail,
   agentSkillInstalled,
   agentSkillInstalling,
   agentSkillLabel,
@@ -202,6 +204,8 @@ export function FirstRunPanel({
   onInstallAgentSkill,
   onInstallTerminalHelper,
 }: {
+  agentSkillActive: boolean;
+  agentSkillDetail?: string;
   agentSkillInstalled: boolean;
   agentSkillInstalling: boolean;
   agentSkillLabel: string;
@@ -220,6 +224,14 @@ export function FirstRunPanel({
         You can also choose <span className="empty-panel-menu-path">File → Open Folder…</span> to
         open a Git repository.
       </p>
+      {agentSkillInstalled ? (
+        <div className="agent-skill-status">
+          <p>
+            {agentSkillLabel} is installed {agentSkillActive ? 'and active.' : 'but inactive.'}
+          </p>
+          {agentSkillDetail ? <p>{agentSkillDetail}</p> : null}
+        </div>
+      ) : null}
       <div className="empty-panel-actions">
         <button disabled={installing} onClick={onInstallTerminalHelper} type="button">
           {installing ? 'Installing...' : 'Install Terminal Helper'}

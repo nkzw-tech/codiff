@@ -201,8 +201,10 @@ export default function App() {
   const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>(defaultLaunchOptions);
   const [codiffConfig, setCodiffConfig] = useState<CodiffConfig>(createDefaultConfig);
   const [agentSkillInstalling, setAgentSkillInstalling] = useState(false);
-  const [agentSkillStatus, setAgentSkillStatus] =
-    useState<AgentSkillStatus>(defaultAgentSkillStatus);
+  const [agentSkillResult, setAgentSkillResult] = useState<{
+    backend: AgentBackend;
+    status: AgentSkillStatus;
+  }>({ backend: 'codex', status: defaultAgentSkillStatus });
   const [preferences, setPreferences] = useState<CodiffPreferences>(defaultPreferences);
   const [reloadDeltaPaths, setReloadDeltaPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [scrollTarget, setScrollTarget] = useState<ReviewScrollTarget | null>(null);
@@ -223,6 +225,12 @@ export default function App() {
     defaultTerminalHelperStatus,
   );
   const [sharePlanEnabled, setSharePlanEnabled] = useState(false);
+  const activeAgentBackend = launchOptions.agentBackend ?? codiffConfig.settings.agentBackend;
+  const agentSkillStatus =
+    agentSkillResult.backend === activeAgentBackend
+      ? agentSkillResult.status
+      : defaultAgentSkillStatus;
+  const agentSkillRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const historySourceRef = useRef<ReviewSource | null>(null);
   const loadingSectionKeysRef = useRef<Set<string>>(new Set());
@@ -649,22 +657,6 @@ export default function App() {
         return;
       }
 
-      const nextAgentSkillStatus = await window.codiff
-        .getAgentSkillStatus()
-        .catch(() => defaultAgentSkillStatus);
-      if (canceled) {
-        return;
-      }
-      setAgentSkillStatus(nextAgentSkillStatus);
-
-      const nextTerminalHelperStatus = await window.codiff
-        .getTerminalHelperStatus()
-        .catch(() => defaultTerminalHelperStatus);
-      if (canceled) {
-        return;
-      }
-      setTerminalHelperStatus(nextTerminalHelperStatus);
-
       const nextState = await window.codiff.getRepositoryState(
         getReloadSourceForLaunch(reloadSelection, nextLaunchOptions),
       );
@@ -833,6 +825,42 @@ export default function App() {
       }),
     [],
   );
+
+  useEffect(() => {
+    let canceled = false;
+    const request = agentSkillRequestRef.current + 1;
+    agentSkillRequestRef.current = request;
+
+    void window.codiff
+      .getAgentSkillStatus()
+      .then((status) => {
+        if (!canceled && agentSkillRequestRef.current === request) {
+          setAgentSkillResult({ backend: activeAgentBackend, status });
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      canceled = true;
+    };
+  }, [activeAgentBackend]);
+
+  useEffect(() => {
+    let canceled = false;
+
+    void window.codiff
+      .getTerminalHelperStatus()
+      .then((status) => {
+        if (!canceled) {
+          setTerminalHelperStatus(status);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let canceled = false;
@@ -1600,19 +1628,27 @@ export default function App() {
   }, []);
 
   const installAgentSkill = useCallback(() => {
+    const backend = activeAgentBackend;
+    const request = agentSkillRequestRef.current + 1;
+    agentSkillRequestRef.current = request;
     setAgentSkillInstalling(true);
     window.codiff
       .installAgentSkill()
-      .then((status) => setAgentSkillStatus(status))
+      .then((status) => {
+        if (agentSkillRequestRef.current === request) {
+          setAgentSkillResult({ backend, status });
+        }
+      })
       .catch(() => {
-        setAgentSkillStatus(defaultAgentSkillStatus);
+        if (agentSkillRequestRef.current === request) {
+          setAgentSkillResult({ backend, status: defaultAgentSkillStatus });
+        }
       })
       .finally(() => {
         setAgentSkillInstalling(false);
       });
-  }, []);
+  }, [activeAgentBackend]);
 
-  const activeAgentBackend = launchOptions.agentBackend ?? codiffConfig.settings.agentBackend;
   const agentLabel = getAgentLabel(activeAgentBackend);
   const agentSkillLabel = `${agentLabel} ${activeAgentBackend === 'codex' ? 'Skill' : 'Integration'}`;
   const sendAgentReviewFeedback = useCallback(async () => {
@@ -1689,6 +1725,8 @@ export default function App() {
         <div className="empty-panel squircle">
           {showFirstRun ? (
             <FirstRunPanel
+              agentSkillActive={agentSkillStatus.active}
+              agentSkillDetail={agentSkillStatus.detail}
               agentSkillInstalled={agentSkillStatus.installed}
               agentSkillInstalling={agentSkillInstalling}
               agentSkillLabel={agentSkillLabel}
