@@ -22,12 +22,16 @@ const registerWindowOpenReceipt = (window, launchOptions) => {
   window.once('ready-to-show', () => {
     window.show();
     if (launchOptions.agentReview && launchOptions.agentReviewOpenFile) {
-      writeJsonAtomic(launchOptions.agentReviewOpenFile, {
-        deliveryAvailable: true,
-        deliveryId: launchOptions.agentReview.deliveryId,
-        status: 'open',
-        version: 1,
-      });
+      try {
+        writeJsonAtomic(launchOptions.agentReviewOpenFile, {
+          deliveryAvailable: true,
+          deliveryId: launchOptions.agentReview.deliveryId,
+          status: 'open',
+          version: 1,
+        });
+      } catch {
+        // The launcher may have timed out and removed its receipt directory.
+      }
     }
   });
 };

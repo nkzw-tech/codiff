@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
@@ -47,4 +47,26 @@ test('publishes the matching receipt only after the window is ready to show', as
     status: 'open',
     version: 1,
   });
+});
+
+test('ignores a late receipt after the launcher removes its directory', async () => {
+  await using directory = await createTemporaryDirectory('codiff-window-open-receipt-');
+  const openFile = join(directory.path, 'open.json');
+  let readyToShow: (() => void) | undefined;
+
+  registerWindowOpenReceipt(
+    {
+      once: (_event, listener) => {
+        readyToShow = listener;
+      },
+      show: () => {},
+    },
+    {
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
+      agentReviewOpenFile: openFile,
+    },
+  );
+  await rm(directory.path, { recursive: true });
+
+  expect(() => readyToShow?.()).not.toThrow();
 });
