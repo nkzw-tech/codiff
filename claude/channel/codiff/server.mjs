@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -21,6 +21,7 @@ export const startClaudeChannel = async (options = {}) => {
     events = process,
     execute = execFile,
     input = process.stdin,
+    setExitCode = (code) => (process.exitCode = code),
     stderr = process.stderr,
   } = options;
   const sessionId = env.CLAUDE_CODE_SESSION_ID;
@@ -42,9 +43,70 @@ export const startClaudeChannel = async (options = {}) => {
   const transport = createTransport();
   await mcp.connect(transport);
 
+  /** @type {'starting' | 'open' | 'closing' | 'closed'} */
+  let state = 'starting';
   let bridge;
+  let closePromise;
+  let cleanupFailureReported = false;
+  const reportCleanupFailure = () => {
+    if (cleanupFailureReported) {
+      return;
+    }
+    cleanupFailureReported = true;
+    try {
+      stderr.write('Codiff Channel cleanup failed.\n');
+    } catch {
+      // Diagnostics cannot make cleanup fail again.
+    }
+    try {
+      setExitCode(1);
+    } catch {
+      // The host may already be terminating.
+    }
+  };
+  const removeListeners = () => {
+    events.removeListener('SIGINT', requestClose);
+    events.removeListener('SIGTERM', requestClose);
+    input.removeListener('end', requestClose);
+    if (mcp.onclose === requestClose) {
+      mcp.onclose = undefined;
+    }
+  };
+  const close = () => {
+    if (!closePromise) {
+      state = 'closing';
+      removeListeners();
+      closePromise = (async () => {
+        let failed = false;
+        try {
+          await bridge?.close();
+        } catch {
+          failed = true;
+        }
+        try {
+          await mcp.close();
+        } catch {
+          failed = true;
+        }
+        state = 'closed';
+        if (failed) {
+          throw new Error('Codiff Channel cleanup failed.');
+        }
+      })();
+    }
+    return closePromise;
+  };
+  function requestClose() {
+    void close().catch(reportCleanupFailure);
+  }
+
+  events.once('SIGINT', requestClose);
+  events.once('SIGTERM', requestClose);
+  input.once('end', requestClose);
+  mcp.onclose = requestClose;
+
   try {
-    bridge = await createBridge({
+    const createdBridge = await createBridge({
       backend: 'claude',
       deliver: async ({ deliveryId, message }) => {
         try {
@@ -63,47 +125,23 @@ export const startClaudeChannel = async (options = {}) => {
       getIdentity: async () => ({ repositoryRoot, sessionId }),
       onDiagnostic: () => stderr.write('Codiff Channel bridge diagnostic.\n'),
     });
+    if (state !== 'starting') {
+      try {
+        await createdBridge.close();
+      } catch {
+        reportCleanupFailure();
+      }
+      await closePromise?.catch(() => {});
+      throw new Error('Codiff Channel startup was interrupted.');
+    }
+    bridge = createdBridge;
+    state = 'open';
   } catch (error) {
-    await mcp.close().catch(() => {});
+    if (state === 'starting') {
+      await close().catch(reportCleanupFailure);
+    }
     throw error;
   }
-
-  let closePromise;
-  const removeListeners = () => {
-    events.removeListener('SIGINT', close);
-    events.removeListener('SIGTERM', close);
-    input.removeListener('end', close);
-    if (mcp.onclose === close) {
-      mcp.onclose = undefined;
-    }
-  };
-  const close = () => {
-    if (!closePromise) {
-      closePromise = (async () => {
-        removeListeners();
-        let failure;
-        try {
-          await bridge.close();
-        } catch (error) {
-          failure = error;
-        }
-        try {
-          await mcp.close();
-        } catch (error) {
-          failure ||= error;
-        }
-        if (failure) {
-          throw failure;
-        }
-      })();
-    }
-    return closePromise;
-  };
-
-  events.once('SIGINT', close);
-  events.once('SIGTERM', close);
-  input.once('end', close);
-  mcp.onclose = close;
 
   return {
     capabilities,
@@ -112,10 +150,14 @@ export const startClaudeChannel = async (options = {}) => {
       return closePromise || Promise.resolve();
     },
     instructions,
+    get state() {
+      return state;
+    },
   };
 };
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain =
+  process.argv[1] && realpathSync(process.argv[1]) === realpathSync(import.meta.filename);
 if (isMain) {
   try {
     await startClaudeChannel();

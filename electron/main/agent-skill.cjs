@@ -1,5 +1,6 @@
 // @ts-check
 
+const { randomUUID } = require('node:crypto');
 const {
   accessSync,
   constants,
@@ -8,11 +9,13 @@ const {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } = require('node:fs');
-const { dirname, join } = require('node:path');
+const { basename, dirname, join } = require('node:path');
 
 /**
  * @typedef {{
@@ -36,12 +39,27 @@ const { dirname, join } = require('node:path');
  * @param {{
  *   app: import('electron').App;
  *   dialog: import('electron').Dialog;
+ *   fileOperations?: {
+ *     renameSync?: typeof renameSync;
+ *     symlinkSync?: typeof symlinkSync;
+ *     writeFileSync?: typeof writeFileSync;
+ *   };
  *   renderManagedFile?: (file: AgentSkillFile, template: string) => string;
  *   root: string;
  *   skill: AgentSkill;
  * }} options
  */
-const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) => {
+const createSkillInstaller = ({
+  app,
+  dialog,
+  fileOperations = {},
+  renderManagedFile,
+  root,
+  skill,
+}) => {
+  const movePath = fileOperations.renameSync || renameSync;
+  const createSymlink = fileOperations.symlinkSync || symlinkSync;
+  const writeFile = fileOperations.writeFileSync || writeFileSync;
   /** @param {{sourceSubdir: string}} item */
   const getSourcePath = (item) =>
     app.isPackaged
@@ -117,28 +135,6 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
     path: getTargetPath(skill.targets[0]),
   });
 
-  /** @param {AgentSkillTarget} target @returns {string} the installed path */
-  const installTarget = (target) => {
-    const sourcePath = getSourcePath(target);
-    const targetPath = getTargetPath(target);
-
-    mkdirSync(dirname(targetPath), { recursive: true });
-    accessSync(dirname(targetPath), constants.W_OK);
-
-    const stats = getTargetStats(target);
-    if (stats) {
-      if (!isInstalledTarget(target)) {
-        throw new Error(`${targetPath} already exists and is not managed by Codiff.`);
-      }
-      unlinkSync(targetPath);
-    }
-
-    const type =
-      target.type === 'file' ? 'file' : process.platform === 'win32' ? 'junction' : 'dir';
-    symlinkSync(sourcePath, targetPath, type);
-    return targetPath;
-  };
-
   /** @param {AgentSkillFile} file @returns {string} the installed path */
   const installFile = (file) => {
     const targetPath = getTargetPath(file);
@@ -154,8 +150,168 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
       }
     }
 
-    writeFileSync(targetPath, getRenderedFile(file), { encoding: 'utf8', mode: 0o644 });
+    writeFile(targetPath, getRenderedFile(file), { encoding: 'utf8', mode: 0o644 });
     return targetPath;
+  };
+
+  /** @param {import('node:fs').Stats | null} stats */
+  const metadata = (stats) =>
+    stats && { dev: stats.dev, ino: stats.ino, mode: stats.mode, mtimeMs: stats.mtimeMs };
+
+  /**
+   * @param {{definition: AgentSkillFile | AgentSkillTarget; kind: 'file' | 'target'; sourcePath: string; targetPath: string}} item
+   * @param {string} [targetPath]
+   */
+  const captureDestination = (item, targetPath = item.targetPath) => {
+    let stats;
+    try {
+      stats = lstatSync(targetPath);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+
+    if (item.kind === 'target') {
+      if (!stats.isSymbolicLink() || realpathSync(targetPath) !== realpathSync(item.sourcePath)) {
+        throw new Error(`${item.targetPath} already exists and is not managed by Codiff.`);
+      }
+      return { metadata: metadata(stats) };
+    }
+
+    const contents = stats.isFile() ? readFileSync(targetPath, 'utf8') : '';
+    if (
+      !stats.isFile() ||
+      !isManagedFile(/** @type {AgentSkillFile} */ (item.definition), contents)
+    ) {
+      throw new Error(`${item.targetPath} already exists and is not managed by Codiff.`);
+    }
+    return { contents, metadata: metadata(stats) };
+  };
+
+  /** @param {ReturnType<typeof captureDestination>} left @param {ReturnType<typeof captureDestination>} right */
+  const sameDestination = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
+  /**
+   * @param {{definition: AgentSkillFile | AgentSkillTarget; kind: 'file' | 'target'; sourcePath: string; targetPath: string; snapshot: ReturnType<typeof captureDestination>}} item
+   * @param {string} [targetPath]
+   */
+  const revalidateDestination = (item, targetPath) => {
+    const current = captureDestination(item, targetPath);
+    if (!sameDestination(current, item.snapshot)) {
+      throw new Error(`${item.targetPath} changed during installation.`);
+    }
+  };
+
+  const installTransaction = () => {
+    const items = [
+      ...skill.targets.map((definition) => ({
+        definition,
+        kind: /** @type {const} */ ('target'),
+        sourcePath: getSourcePath(definition),
+        targetPath: getTargetPath(definition),
+      })),
+      ...(skill.files || []).map((definition) => ({
+        contents: getRenderedFile(definition),
+        definition,
+        kind: /** @type {const} */ ('file'),
+        sourcePath: getSourcePath(definition),
+        targetPath: getTargetPath(definition),
+      })),
+    ];
+
+    for (const item of items) {
+      if (!existsSync(item.sourcePath)) {
+        throw new Error(`Could not find the ${skill.label} at ${item.sourcePath}.`);
+      }
+      item.snapshot = captureDestination(item);
+    }
+
+    const staged = [];
+    try {
+      for (const item of items) {
+        const parent = dirname(item.targetPath);
+        mkdirSync(parent, { recursive: true });
+        accessSync(parent, constants.W_OK);
+        const suffix = randomUUID();
+        const name = basename(item.targetPath);
+        const stagePath = join(parent, `.${name}.codiff-stage-${suffix}`);
+        const backupPath = join(parent, `.${name}.codiff-backup-${suffix}`);
+        try {
+          if (item.kind === 'target') {
+            const target = /** @type {AgentSkillTarget} */ (item.definition);
+            const type =
+              target.type === 'file' ? 'file' : process.platform === 'win32' ? 'junction' : 'dir';
+            createSymlink(item.sourcePath, stagePath, type);
+          } else {
+            writeFile(stagePath, item.contents, { encoding: 'utf8', mode: 0o644 });
+          }
+        } catch (error) {
+          try {
+            rmSync(stagePath, { force: true, recursive: true });
+          } catch {
+            // The main rollback still needs to clean earlier staged destinations.
+          }
+          throw error;
+        }
+        staged.push({
+          ...item,
+          backupMoved: false,
+          backupPath,
+          committed: false,
+          stagedSnapshot: captureDestination(item, stagePath),
+          stagePath,
+        });
+      }
+
+      for (const item of staged) {
+        revalidateDestination(item);
+        if (item.snapshot) {
+          movePath(item.targetPath, item.backupPath);
+          item.backupMoved = true;
+          revalidateDestination(item, item.backupPath);
+        }
+        movePath(item.stagePath, item.targetPath);
+        item.committed = true;
+      }
+    } catch (error) {
+      for (const item of staged.toReversed()) {
+        if (item.committed) {
+          try {
+            if (sameDestination(captureDestination(item), item.stagedSnapshot)) {
+              rmSync(item.targetPath, { force: true, recursive: true });
+            }
+          } catch {
+            // A destination changed outside this transaction must not be removed.
+          }
+        }
+        if (item.backupMoved) {
+          try {
+            if (!captureDestination(item)) {
+              movePath(item.backupPath, item.targetPath);
+            }
+          } catch {
+            // Preserve the original backup rather than overwrite a changed destination.
+          }
+        }
+        try {
+          rmSync(item.stagePath, { force: true, recursive: true });
+        } catch {
+          // Continue rolling back the remaining destinations.
+        }
+      }
+      throw error;
+    }
+
+    for (const item of staged) {
+      try {
+        rmSync(item.backupPath, { force: true, recursive: true });
+      } catch {
+        // The installation is committed; a private stale backup is safer than rollback.
+      }
+    }
+    return items.map(({ targetPath }) => targetPath);
   };
 
   const refreshManagedFiles = () => {
@@ -188,38 +344,7 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
   /** @param {import('electron').BaseWindow | undefined | null} browserWindow */
   const install = async (browserWindow) => {
     try {
-      for (const target of skill.targets) {
-        const sourcePath = getSourcePath(target);
-        const targetPath = getTargetPath(target);
-        if (!existsSync(sourcePath)) {
-          throw new Error(`Could not find the ${skill.label} at ${sourcePath}.`);
-        }
-        if (getTargetStats(target) && !isInstalledTarget(target)) {
-          throw new Error(`${targetPath} already exists and is not managed by Codiff.`);
-        }
-      }
-
-      for (const file of skill.files || []) {
-        const sourcePath = getSourcePath(file);
-        const targetPath = getTargetPath(file);
-        if (!existsSync(sourcePath)) {
-          throw new Error(`Could not find the ${skill.label} command at ${sourcePath}.`);
-        }
-
-        getRenderedFile(file);
-        if (existsSync(targetPath)) {
-          const stats = lstatSync(targetPath);
-          const contents = stats.isFile() ? readFileSync(targetPath, 'utf8') : '';
-          if (!stats.isFile() || !isManagedFile(file, contents)) {
-            throw new Error(`${targetPath} already exists and is not managed by Codiff.`);
-          }
-        }
-      }
-
-      const installedPaths = [
-        ...skill.targets.map(installTarget),
-        ...(skill.files || []).map(installFile),
-      ];
+      const installedPaths = installTransaction();
 
       /** @type {import('electron').MessageBoxOptions} */
       const successMessage = {

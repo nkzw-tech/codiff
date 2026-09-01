@@ -1,6 +1,11 @@
+import {
+  renameSync as nodeRenameSync,
+  symlinkSync as nodeSymlinkSync,
+  unlinkSync as nodeUnlinkSync,
+} from 'node:fs';
 import { lstat, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, test, vi } from 'vite-plus/test';
 import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources.ts';
 
@@ -39,6 +44,10 @@ const { createSkillInstaller } = require('../main/agent-skill.cjs') as {
     };
     dialog: {
       showMessageBox: (options: unknown) => Promise<void>;
+    };
+    fileOperations?: {
+      renameSync?: typeof nodeRenameSync;
+      symlinkSync?: typeof nodeSymlinkSync;
     };
     renderManagedFile?: (file: { sourceSubdir: string }, template: string) => string;
     root: string;
@@ -184,6 +193,158 @@ test('does not replace a user-authored Claude Code Channel target', async () => 
   await expect(lstat(join(home, '.claude/skills/codiff'))).rejects.toMatchObject({
     code: 'ENOENT',
   });
+});
+
+test('leaves both Claude targets unchanged when staging the second target fails', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-stage-failure-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skill = listAgentSkills().find(({ id }) => id === 'claude');
+  await mkdir(join(root, 'claude/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'claude/channel/codiff'), { recursive: true });
+  let stages = 0;
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    fileOperations: {
+      symlinkSync: (source, target, type) => {
+        stages += 1;
+        if (stages === 2) throw new Error('injected stage failure');
+        return nodeSymlinkSync(source, target, type);
+      },
+    },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  await expect(lstat(join(home, '.claude/skills/codiff'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+  await expect(lstat(join(home, '.claude/plugins/codiff-channel'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+});
+
+test('does not overwrite a Claude target that changes after preflight', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-revalidation-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skillTarget = join(home, '.claude/skills/codiff');
+  const channelTarget = join(home, '.claude/plugins/codiff-channel');
+  const userSource = join(directory.path, 'user-skill');
+  const skill = listAgentSkills().find(({ id }) => id === 'claude');
+  await mkdir(join(root, 'claude/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'claude/channel/codiff'), { recursive: true });
+  await mkdir(userSource, { recursive: true });
+  await mkdir(dirname(skillTarget), { recursive: true });
+  await mkdir(dirname(channelTarget), { recursive: true });
+  await symlink(join(root, 'claude/skills/codiff'), skillTarget, 'dir');
+  await symlink(join(root, 'claude/channel/codiff'), channelTarget, 'dir');
+  let stages = 0;
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    fileOperations: {
+      symlinkSync: (source, target, type) => {
+        nodeSymlinkSync(source, target, type);
+        stages += 1;
+        if (stages === 2) {
+          nodeUnlinkSync(skillTarget);
+          nodeSymlinkSync(userSource, skillTarget, 'dir');
+        }
+      },
+    },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  expect(await realpath(skillTarget)).toBe(await realpath(userSource));
+  expect(await realpath(channelTarget)).toBe(await realpath(join(root, 'claude/channel/codiff')));
+});
+
+test('rolls back both Claude targets when committing the second target fails', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-commit-failure-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skillTarget = join(home, '.claude/skills/codiff');
+  const channelTarget = join(home, '.claude/plugins/codiff-channel');
+  const skill = listAgentSkills().find(({ id }) => id === 'claude');
+  await mkdir(join(root, 'claude/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'claude/channel/codiff'), { recursive: true });
+  await mkdir(dirname(skillTarget), { recursive: true });
+  await mkdir(dirname(channelTarget), { recursive: true });
+  await symlink(join(root, 'claude/skills/codiff'), skillTarget, 'dir');
+  await symlink(join(root, 'claude/channel/codiff'), channelTarget, 'dir');
+  const skillIdentity = await lstat(skillTarget);
+  const channelIdentity = await lstat(channelTarget);
+  let failed = false;
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    fileOperations: {
+      renameSync: (source, target) => {
+        if (!failed && target === channelTarget && source.includes('.codiff-stage-')) {
+          failed = true;
+          throw new Error('injected commit failure');
+        }
+        nodeRenameSync(source, target);
+      },
+    },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  expect((await lstat(skillTarget)).ino).toBe(skillIdentity.ino);
+  expect((await lstat(channelTarget)).ino).toBe(channelIdentity.ino);
+  expect(installer.getStatus().installed).toBe(true);
+});
+
+test('rolls back OpenCode targets when the later managed file commit fails', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-commit-failure-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const commandTarget = join(home, '.config/opencode/commands/codiff.md');
+  const skill = listAgentSkills().find(({ id }) => id === 'opencode');
+  await mkdir(join(root, 'opencode/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
+  await mkdir(join(root, 'opencode/commands'), { recursive: true });
+  await writeFile(join(root, 'opencode/plugins/codiff.js'), '// managed plugin\n');
+  await writeFile(
+    join(root, 'opencode/commands/codiff.md'),
+    '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n',
+  );
+  let failed = false;
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    fileOperations: {
+      renameSync: (source, target) => {
+        if (!failed && target === commandTarget && source.includes('.codiff-stage-')) {
+          failed = true;
+          throw new Error('injected managed file failure');
+        }
+        nodeRenameSync(source, target);
+      },
+    },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  await expect(lstat(join(home, '.config/opencode/skills/codiff'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+  await expect(lstat(join(home, '.config/opencode/plugins/codiff.js'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+  await expect(lstat(commandTarget)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
 test('the managed Claude skill documents the tested Channel startup command', async () => {
