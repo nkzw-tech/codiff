@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 
 const require = createRequire(import.meta.url);
 const { validateFeedback, validateReviewSource } = require('../electron/agent-review-handoff.cjs');
@@ -17,6 +18,8 @@ export const createAgentReviewResultPath = () => {
 export const cleanupAgentReviewResultPath = (directory) => {
   rmSync(directory, { force: true, recursive: true });
 };
+
+export const getAgentReviewOwnerPath = (path) => `${path}.owner`;
 
 const invalidResult = (message) =>
   new Error(`Codiff returned an invalid review result: ${message.replace(/\.$/, '')}.`);
@@ -45,12 +48,24 @@ const normalizeReviewSource = (source) => {
     case 'range':
       return {
         base: source.base,
+        ...(source.baseSha === undefined ? {} : { baseSha: source.baseSha }),
         head: source.head,
+        ...(source.headSha === undefined ? {} : { headSha: source.headSha }),
         symmetric: source.symmetric,
         type: source.type,
       };
     case 'pull-request':
-      return { type: source.type, url: source.url };
+      return {
+        ...(source.headSha === undefined ? {} : { headSha: source.headSha }),
+        ...(source.host === undefined ? {} : { host: source.host }),
+        ...(source.number === undefined ? {} : { number: source.number }),
+        ...(source.owner === undefined ? {} : { owner: source.owner }),
+        ...(source.projectPath === undefined ? {} : { projectPath: source.projectPath }),
+        ...(source.provider === undefined ? {} : { provider: source.provider }),
+        ...(source.repo === undefined ? {} : { repo: source.repo }),
+        type: source.type,
+        url: source.url,
+      };
   }
 };
 
@@ -67,7 +82,7 @@ const normalizeComment = (comment) => ({
   ...(comment.startSide === undefined ? {} : { startSide: comment.startSide }),
 });
 
-export const readAgentReviewResult = (path, expectedRoot) => {
+export const readAgentReviewResult = (path, expectedRoot, expectedSource) => {
   let result;
   try {
     result = JSON.parse(readFileSync(path, 'utf8'));
@@ -121,14 +136,55 @@ export const readAgentReviewResult = (path, expectedRoot) => {
     throw invalidResult(error instanceof Error ? error.message : 'validation failed');
   }
 
+  const normalizedSource = normalizeReviewSource(result.repository.source);
+  if (
+    expectedSource !== undefined &&
+    !isDeepStrictEqual(normalizedSource, normalizeReviewSource(expectedSource))
+  ) {
+    throw invalidResult('repository source does not match the opened review');
+  }
+
   return {
     comments: result.comments.map(normalizeComment),
     markdown: result.markdown,
     repository: {
       root: expectedRepositoryRoot,
-      source: normalizeReviewSource(result.repository.source),
+      source: normalizedSource,
     },
     status: result.status,
+    version: 1,
+  };
+};
+
+export const readAgentReviewOwner = (resultPath, expectedRoot) => {
+  let owner;
+  try {
+    owner = JSON.parse(readFileSync(getAgentReviewOwnerPath(resultPath), 'utf8'));
+  } catch (error) {
+    throw invalidResult(error instanceof Error ? error.message : 'the owner could not be read');
+  }
+  if (
+    owner?.version !== 1 ||
+    owner.status !== 'open' ||
+    !Number.isInteger(owner.pid) ||
+    owner.pid <= 0 ||
+    typeof owner.repository?.root !== 'string'
+  ) {
+    throw invalidResult('expected a live review owner');
+  }
+  const root = getRealPath(owner.repository.root);
+  if (root !== resolveRepositoryRoot(expectedRoot)) {
+    throw invalidResult('owner repository root does not match the opened repository');
+  }
+  try {
+    validateReviewSource(owner.repository.source);
+  } catch (error) {
+    throw invalidResult(error instanceof Error ? error.message : 'owner validation failed');
+  }
+  return {
+    pid: owner.pid,
+    repository: { root, source: normalizeReviewSource(owner.repository.source) },
+    status: 'open',
     version: 1,
   };
 };
@@ -162,11 +218,10 @@ export const runAgentReviewLauncher = ({ args, command, forwardedArgs, sessionCw
     const repositoryTarget = forwardedArgs.find(
       (arg) => !arg.startsWith('-') && existsSync(resolve(sessionCwd, arg)),
     );
+    const expectedRoot = repositoryTarget ? resolve(sessionCwd, repositoryTarget) : sessionCwd;
+    const owner = readAgentReviewOwner(reviewResultPath.path, expectedRoot);
     return formatAgentReviewResult(
-      readAgentReviewResult(
-        reviewResultPath.path,
-        repositoryTarget ? resolve(sessionCwd, repositoryTarget) : sessionCwd,
-      ),
+      readAgentReviewResult(reviewResultPath.path, expectedRoot, owner.repository.source),
     );
   } finally {
     cleanupAgentReviewResultPath(reviewResultPath.directory);
@@ -185,8 +240,17 @@ const isProcessRunning = (pid) => {
 export const waitForAgentReviewResult = async (
   path,
   child,
-  { pollIntervalMs = 50, processId = null } = {},
+  {
+    forwardingExitGraceMs = 1_000,
+    isRunning = isProcessRunning,
+    openTimeoutMs = 15_000,
+    pollIntervalMs = 50,
+    processId = /** @type {number | null} */ (null),
+  } = {},
 ) => {
+  const startedAt = Date.now();
+  let lastResultError = null;
+  let ownerPid = null;
   let childError = null;
   let childExit = null;
   child?.once('error', (error) => {
@@ -204,20 +268,73 @@ export const waitForAgentReviewResult = async (
       throw childError;
     }
 
-    try {
+    const readTerminalResult = () => {
       const result = JSON.parse(readFileSync(path, 'utf8'));
       if (result?.status === 'submitted' || result?.status === 'closed') {
         return result;
       }
+      return null;
+    };
+    try {
+      const result = readTerminalResult();
+      if (result) {
+        return result;
+      }
+    } catch (error) {
+      if (existsSync(path)) {
+        lastResultError = error;
+      }
+    }
+
+    try {
+      const owner = JSON.parse(readFileSync(getAgentReviewOwnerPath(path), 'utf8'));
+      if (owner?.status === 'open' && Number.isInteger(owner.pid) && owner.pid > 0) {
+        ownerPid = owner.pid;
+      }
     } catch {}
 
-    if (childExit || (processId != null && !isProcessRunning(processId))) {
+    const ownerExited = ownerPid != null && !isRunning(ownerPid);
+    const forwardingExited = childExit || (processId != null && !isRunning(processId));
+    if (ownerExited || (ownerPid == null && childExit && childExit.code !== 0)) {
+      try {
+        const result = readTerminalResult();
+        if (result) {
+          return result;
+        }
+      } catch (error) {
+        if (existsSync(path)) {
+          lastResultError = error;
+        }
+      }
       const detail = childExit?.signal
         ? ` (${childExit.signal})`
         : childExit?.code != null
           ? ` (code ${childExit.code})`
           : '';
-      throw new Error(`Codiff exited without a review result${detail}.`);
+      const diagnostic = lastResultError instanceof Error ? `: ${lastResultError.message}` : '';
+      throw new Error(`Codiff exited without a review result${detail}${diagnostic}.`);
+    }
+    const ownerPublicationTimeoutMs = forwardingExited
+      ? Math.min(openTimeoutMs, forwardingExitGraceMs)
+      : openTimeoutMs;
+    if (ownerPid == null && Date.now() - startedAt >= ownerPublicationTimeoutMs) {
+      try {
+        const result = readTerminalResult();
+        if (result) {
+          return result;
+        }
+      } catch (error) {
+        if (existsSync(path)) {
+          lastResultError = error;
+        }
+      }
+      const diagnostic = lastResultError instanceof Error ? `: ${lastResultError.message}` : '';
+      if (forwardingExited) {
+        throw new Error(`Codiff exited without a review result${diagnostic}.`);
+      }
+      throw new Error(
+        `Codiff did not open the review within ${ownerPublicationTimeoutMs / 1000} seconds${diagnostic}.`,
+      );
     }
 
     await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));

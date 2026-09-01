@@ -7,10 +7,16 @@ import type { AgentReviewFeedback, AgentReviewResult } from '../../core/types.ts
 
 const require = createRequire(import.meta.url);
 const {
+  closeFailedAgentReviewWindow,
   createAgentReviewHandoffController,
   createAgentReviewHandoffLifecycle,
   validateAgentReviewRepository,
 } = require('../agent-review-handoff.cjs') as {
+  closeFailedAgentReviewWindow: (
+    lifecycle: { close: (webContentsId: number) => Promise<string> },
+    window: { destroy: () => void; isDestroyed: () => boolean },
+    webContentsId: number,
+  ) => Promise<void>;
   createAgentReviewHandoffController: (options?: {
     writeResult?: (path: string, result: AgentReviewResult) => void;
   }) => {
@@ -156,6 +162,30 @@ test.each([
     'order',
   ],
   [
+    'contiguous comment order values',
+    {
+      ...feedback,
+      comments: [feedback.comments[0], { ...feedback.comments[0], order: 1 }],
+    },
+    'order',
+  ],
+  [
+    'contiguous comment order values',
+    {
+      ...feedback,
+      comments: [feedback.comments[0], { ...feedback.comments[0], order: 3 }],
+    },
+    'order',
+  ],
+  [
+    'array comment order',
+    {
+      ...feedback,
+      comments: [{ ...feedback.comments[0], order: 2 }, feedback.comments[0]],
+    },
+    'order',
+  ],
+  [
     'positive finite integer line values',
     { ...feedback, comments: [{ ...feedback.comments[0]!, lineNumber: Number.POSITIVE_INFINITY }] },
     'lineNumber',
@@ -295,6 +325,28 @@ test('writes closed after a close requested before repository resolution', async
   expect(writeResult).toHaveBeenCalledOnce();
 });
 
+test('publishes the durable owner and updates it to the latest accepted source', async () => {
+  await using directory = await createTemporaryDirectory('codiff-agent-review-owner-');
+  const resultPath = join(directory.path, 'result.json');
+  const lifecycle = createAgentReviewHandoffLifecycle();
+  lifecycle.register(7, resultPath, Promise.resolve(feedback.repository));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(JSON.parse(await readFile(`${resultPath}.owner`, 'utf8'))).toMatchObject({
+    pid: process.pid,
+    repository: feedback.repository,
+    status: 'open',
+    version: 1,
+  });
+
+  const repository = {
+    root: feedback.repository.root,
+    source: { ref: 'abc123', type: 'commit' as const },
+  };
+  lifecycle.setRepository(7, repository);
+  expect(JSON.parse(await readFile(`${resultPath}.owner`, 'utf8'))).toMatchObject({ repository });
+});
+
 test('finishes a pending close after lifecycle cleanup', async () => {
   const repository = createDeferredRepository();
   const writeResult = vi.fn();
@@ -363,4 +415,40 @@ test('rejects completion from an unregistered web contents owner', async () => {
   const lifecycle = createAgentReviewHandoffLifecycle();
 
   await expect(lifecycle.complete(7, feedback)).rejects.toThrow('registered');
+});
+
+test('destroys a renderer-failed window after cancellation persists', async () => {
+  const window = { destroy: vi.fn(), isDestroyed: vi.fn(() => false) };
+  await closeFailedAgentReviewWindow({ close: vi.fn(async () => 'closed') }, window, 7);
+
+  expect(window.destroy).toHaveBeenCalledOnce();
+});
+
+test('keeps a renderer-failed window alive when cancellation persistence fails', async () => {
+  const window = { destroy: vi.fn(), isDestroyed: vi.fn(() => false) };
+
+  await expect(
+    closeFailedAgentReviewWindow(
+      {
+        close: vi.fn(async () => {
+          throw new Error('disk full');
+        }),
+      },
+      window,
+      7,
+    ),
+  ).rejects.toThrow('disk full');
+  expect(window.destroy).not.toHaveBeenCalled();
+});
+
+test('keeps a renderer-failed window alive when repository identity is unavailable', async () => {
+  const window = { destroy: vi.fn(), isDestroyed: vi.fn(() => false) };
+
+  await closeFailedAgentReviewWindow(
+    { close: vi.fn(async () => 'repository-unavailable') },
+    window,
+    7,
+  );
+
+  expect(window.destroy).not.toHaveBeenCalled();
 });

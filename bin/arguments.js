@@ -343,6 +343,9 @@ export const parseArguments = (args) => {
   const planFilePath = typeof values.plan === 'string' ? values.plan : null;
   const reviewResultFilePath =
     typeof values['review-result-file'] === 'string' ? values['review-result-file'] : null;
+  if (planFilePath && reviewResultFilePath) {
+    throw new Error('Plan and review result handoffs cannot be used together.');
+  }
   // `--completions` without a value parses as `true`; keep it as an empty shell
   // so the command can tell "no shell given" apart from "flag not used".
   const completionShell =

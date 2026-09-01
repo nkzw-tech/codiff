@@ -281,7 +281,11 @@ const resolveComparisonSource = async (repoRoot, source) => {
     return {
       newRef,
       oldRef,
-      source,
+      source: {
+        ...source,
+        baseSha: oldRef,
+        headSha: newRef,
+      },
       sourceLabel: 'range',
     };
   }

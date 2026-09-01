@@ -1608,6 +1608,9 @@ export default function App() {
   const agentLabel = getAgentLabel(activeAgentBackend);
   const agentSkillLabel = `${agentLabel} Skill`;
   const sendAgentReviewFeedback = useCallback(async () => {
+    if (pendingSource != null) {
+      return;
+    }
     const completeAgentReview = window.codiff.completeAgentReview;
     if (typeof completeAgentReview !== 'function') {
       return;
@@ -1630,7 +1633,7 @@ export default function App() {
       },
       version: 1,
     });
-  }, [flushActiveReviewCommentDraft]);
+  }, [flushActiveReviewCommentDraft, pendingSource]);
 
   if (launchOptions.planFile) {
     if (planLoadError) {
@@ -1859,6 +1862,7 @@ export default function App() {
             typeof window.codiff.completeAgentReview === 'function' ? (
               <SendFeedbackButton
                 count={pendingReviewCommentCount}
+                disabled={isSwitchingSource}
                 onSend={sendAgentReviewFeedback}
               />
             ) : null}

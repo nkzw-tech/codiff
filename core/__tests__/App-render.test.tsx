@@ -586,6 +586,76 @@ test('failed agent review feedback preserves the editable focused draft', async 
   expect(send?.disabled).toBe(false);
 });
 
+test('agent review feedback is disabled and guarded while switching sources', async () => {
+  const file = createChangedFile('src/app.ts');
+  const completeAgentReview = vi.fn(async () => {});
+  const openReviewSourceListeners: Array<Parameters<Window['codiff']['onOpenReviewSource']>[0]> =
+    [];
+  let resolveSwitch!: (state: RepositoryState) => void;
+  const switchState = new Promise<RepositoryState>((resolvePromise) => {
+    resolveSwitch = resolvePromise;
+  });
+  const getRepositoryState = vi.fn(async (source?: ReviewSource) =>
+    source ? switchState : Promise.resolve({ ...repositoryState, files: [file] }),
+  );
+  window.codiff = createCodiffMock({
+    completeAgentReview,
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      reviewResultFile: '/tmp/review-result.json',
+      walkthrough: false,
+    })),
+    getRepositoryState,
+    onOpenReviewSource: vi.fn((callback) => {
+      openReviewSourceListeners.push(callback);
+      return () => {};
+    }),
+  });
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
+
+  const line = findInOpenShadowRoots<HTMLElement>(
+    app.container,
+    '[data-line="1"][data-line-type="change-addition"]',
+  );
+  await act(async () => line?.click());
+  await waitFor(() => {
+    expect(
+      app.container.querySelector<HTMLElement>(
+        '[contenteditable="true"][aria-label^="Comment on"]',
+      ),
+    ).not.toBeNull();
+  });
+  const editor = app.container.querySelector<HTMLElement>(
+    '[contenteditable="true"][aria-label^="Comment on"]',
+  )!;
+  await setMarkdownEditorValue(editor, 'Feedback for the old source');
+  await waitFor(() =>
+    expect(app.container.querySelector<HTMLButtonElement>('.send-feedback-button')?.disabled).toBe(
+      false,
+    ),
+  );
+  const send = app.container.querySelector<HTMLButtonElement>('.send-feedback-button')!;
+
+  await act(async () => openReviewSourceListeners[0]?.('branch'));
+  const input = app.container.querySelector<HTMLInputElement>('#open-review-source-input')!;
+  const form = app.container.querySelector('form.open-review-source-dialog')!;
+  await setInputValue(input, 'next-branch');
+  await act(async () => {
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+
+  await waitFor(() => expect(send.disabled).toBe(true));
+  await act(async () => send.click());
+  expect(completeAgentReview).not.toHaveBeenCalled();
+
+  resolveSwitch({
+    ...repositoryState,
+    files: [file],
+    source: { baseRef: 'base', headRef: 'head', ref: 'next-branch', type: 'branch-working-tree' },
+  });
+});
+
 test('empty code font family removes the root CSS variable', async () => {
   document.documentElement.style.setProperty('--font-diff-mono', 'stale');
   window.codiff = createCodiffMock();

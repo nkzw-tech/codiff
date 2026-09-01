@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { writeFileSync } from 'node:fs';
 import {
   access,
   appendFile,
@@ -15,6 +17,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, expect, test } from 'vite-plus/test';
+import {
+  getAgentReviewOwnerPath,
+  readAgentReviewResult,
+  waitForAgentReviewResult,
+} from '../../bin/agent-review-result.js';
 import {
   formatHelpText,
   getReviewSource,
@@ -85,7 +92,11 @@ for arg in "$@"; do
   fi
   previous="$arg"
 done
+if [ -n "$repository_root" ]; then
+  repository_root="$(git -C "$repository_root" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$repository_root")"
+fi
 printf '%s' "$result_file" > "$CODIFF_TEST_RESULT_PATH_LOG"
+printf '{"version":1,"status":"open","pid":%s,"repository":{"root":"%s","source":{"type":"working-tree"}}}\n' "$$" "$repository_root" > "$result_file.owner"
 if [ -n "${'${CODIFF_TEST_CHILD_STDOUT:-}'}" ]; then
   printf '%s\\n' "$CODIFF_TEST_CHILD_STDOUT"
 fi
@@ -168,6 +179,12 @@ const withCwd = async <T>(cwd: string, callback: () => T | Promise<T>) => {
   using _workingDirectory = createTemporaryWorkingDirectory(cwd);
   return await callback();
 };
+
+test('source CLI rejects simultaneous plan and review handoffs', () => {
+  expect(() =>
+    parseArguments(['--plan', '/tmp/plan.md', '--review-result-file', '/tmp/review-result.json']),
+  ).toThrow('cannot be used together');
+});
 
 const withFakeGitHubCli = async <T>(
   response: Record<string, unknown>,
@@ -963,6 +980,29 @@ test('packaged terminal helper forwards a plan handoff and result file', async (
   expect(stdout).toBe('CODIFF_PLAN_RESULT {"status":"done"}\n');
 });
 
+test('packaged terminal helper rejects simultaneous plan and review handoffs before opening', async () => {
+  await using logger = await createFakeOpenLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+  const planFile = join(logger.directory, 'plan.md');
+  await mkdir(repositoryPath);
+  await writeFile(planFile, '# Plan\n');
+
+  await expect(
+    execFileAsync(
+      resolve('bin/codiff-app'),
+      [
+        '--plan-file',
+        planFile,
+        '--review-result-file',
+        join(logger.directory, 'review.json'),
+        repositoryPath,
+      ],
+      { env: logger.env },
+    ),
+  ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('cannot be used together') });
+  await expect(logger.readArgs()).rejects.toThrow();
+});
+
 test('packaged terminal helper waits for an open plan to finish', async () => {
   await using logger = await createFakeOpenLogger();
   const repositoryPath = join(logger.directory, 'repo');
@@ -1058,6 +1098,272 @@ fi
 
   expect(JSON.parse(await readFile(resultFile, 'utf8'))).toEqual(reviewResult);
   expect(stdout).toBe('');
+});
+
+test('packaged terminal helper follows the primary owner after forwarding exits', async () => {
+  await using logger = await createFakeOpenLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+  const resultFile = join(logger.directory, 'review-result.json');
+  const ownerFile = getAgentReviewOwnerPath(resultFile);
+  const openPath = join(logger.directory, 'bin', 'open');
+  const reviewResult = submittedAgentReviewResult(repositoryPath);
+  await mkdir(repositoryPath);
+  await writeFile(
+    openPath,
+    `#!/bin/sh
+(
+  sleep 0.1
+  printf '%s\n' "$CODIFF_TEST_REVIEW_RESULT" > "$CODIFF_TEST_REVIEW_RESULT_FILE"
+) </dev/null >/dev/null 2>&1 &
+owner_pid=$!
+printf '{"version":1,"status":"open","pid":%s,"repository":{"root":"%s","source":{"type":"working-tree"}}}\n' "$owner_pid" "$CODIFF_TEST_REPOSITORY" > "$CODIFF_TEST_OWNER_FILE"
+exit 0
+`,
+  );
+  await chmod(openPath, 0o755);
+
+  await execFileAsync(
+    resolve('bin/codiff-app'),
+    ['-w', '--review-result-file', resultFile, repositoryPath],
+    {
+      env: {
+        ...logger.env,
+        CODIFF_NODE_COMMAND: process.execPath,
+        CODIFF_TEST_OWNER_FILE: ownerFile,
+        CODIFF_TEST_REPOSITORY: repositoryPath,
+        CODIFF_TEST_REVIEW_RESULT: JSON.stringify(reviewResult),
+        CODIFF_TEST_REVIEW_RESULT_FILE: resultFile,
+      },
+    },
+  );
+
+  expect(JSON.parse(await readFile(resultFile, 'utf8'))).toEqual(reviewResult);
+});
+
+test('waiter performs one final result read after owner death', async () => {
+  await using directory = await createTemporaryDirectory('codiff-review-final-read-');
+  const resultFile = join(directory.path, 'result.json');
+  const result = submittedAgentReviewResult(directory.path);
+  await writeFile(
+    getAgentReviewOwnerPath(resultFile),
+    `${JSON.stringify({
+      pid: 42,
+      repository: result.repository,
+      status: 'open',
+      version: 1,
+    })}\n`,
+  );
+  let checked = false;
+
+  await expect(
+    waitForAgentReviewResult(resultFile, null, {
+      isRunning: () => {
+        if (!checked) {
+          checked = true;
+          writeFileSync(resultFile, `${JSON.stringify(result)}\n`);
+        }
+        return false;
+      },
+      pollIntervalMs: 1,
+    }),
+  ).resolves.toEqual(result);
+});
+
+test('source CLI waiter treats successful forwarding exit as nonterminal', async () => {
+  await using directory = await createTemporaryDirectory('codiff-review-forwarding-');
+  const resultFile = join(directory.path, 'result.json');
+  const result = submittedAgentReviewResult(directory.path);
+  const child = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null });
+  const waiting = waitForAgentReviewResult(resultFile, child, {
+    isRunning: () => true,
+    openTimeoutMs: 100,
+    pollIntervalMs: 1,
+  });
+
+  child.emit('exit', 0, null);
+  await writeFile(
+    getAgentReviewOwnerPath(resultFile),
+    `${JSON.stringify({
+      pid: 42,
+      repository: result.repository,
+      status: 'open',
+      version: 1,
+    })}\n`,
+  );
+  await writeFile(resultFile, `${JSON.stringify(result)}\n`);
+
+  await expect(waiting).resolves.toEqual(result);
+});
+
+test('packaged waiter treats forwarding exit before owner publication as nonterminal', async () => {
+  await using directory = await createTemporaryDirectory('codiff-review-forwarding-owner-');
+  const resultFile = join(directory.path, 'result.json');
+  const result = submittedAgentReviewResult(directory.path);
+  const waiting = waitForAgentReviewResult(resultFile, null, {
+    isRunning: (pid) => pid !== 7,
+    openTimeoutMs: 100,
+    pollIntervalMs: 1,
+    processId: 7,
+  });
+
+  await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+  await writeFile(
+    getAgentReviewOwnerPath(resultFile),
+    `${JSON.stringify({
+      pid: 42,
+      repository: result.repository,
+      status: 'open',
+      version: 1,
+    })}\n`,
+  );
+  await writeFile(resultFile, `${JSON.stringify(result)}\n`);
+
+  await expect(waiting).resolves.toEqual(result);
+});
+
+test('waiter reports a final malformed result after owner death', async () => {
+  await using directory = await createTemporaryDirectory('codiff-review-final-error-');
+  const resultFile = join(directory.path, 'result.json');
+  await writeFile(resultFile, '{');
+  await writeFile(
+    getAgentReviewOwnerPath(resultFile),
+    `${JSON.stringify({
+      pid: 42,
+      repository: { root: directory.path, source: { type: 'working-tree' } },
+      status: 'open',
+      version: 1,
+    })}\n`,
+  );
+
+  await expect(
+    waitForAgentReviewResult(resultFile, null, {
+      isRunning: () => false,
+      pollIntervalMs: 1,
+    }),
+  ).rejects.toThrow(/JSON|Unexpected|position/i);
+});
+
+test.each([
+  [
+    { ref: 'abc123', type: 'commit' },
+    { ref: 'abc123', type: 'commit' },
+  ],
+  [
+    {
+      base: 'main',
+      baseSha: 'base-sha',
+      head: 'feature',
+      headSha: 'head-sha',
+      symmetric: true,
+      type: 'range',
+    },
+    {
+      base: 'main',
+      baseSha: 'base-sha',
+      head: 'feature',
+      headSha: 'head-sha',
+      symmetric: true,
+      type: 'range',
+    },
+  ],
+  [
+    { baseRef: 'base-sha', headRef: 'head-sha', ref: 'main', type: 'branch-diff' },
+    { baseRef: 'base-sha', headRef: 'head-sha', ref: 'main', type: 'branch-diff' },
+  ],
+  [
+    {
+      headSha: 'github-head',
+      host: 'github.com',
+      number: 12,
+      owner: 'owner',
+      projectPath: 'owner/repo',
+      provider: 'github',
+      repo: 'repo',
+      type: 'pull-request',
+      url: 'https://github.com/owner/repo/pull/12',
+    },
+    {
+      headSha: 'github-head',
+      host: 'github.com',
+      number: 12,
+      owner: 'owner',
+      projectPath: 'owner/repo',
+      provider: 'github',
+      repo: 'repo',
+      type: 'pull-request',
+      url: 'https://github.com/owner/repo/pull/12',
+    },
+  ],
+  [
+    {
+      headSha: 'gitlab-head',
+      host: 'gitlab.example.com',
+      number: 23,
+      projectPath: 'group/project',
+      provider: 'gitlab',
+      type: 'pull-request',
+      url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+    },
+    {
+      headSha: 'gitlab-head',
+      host: 'gitlab.example.com',
+      number: 23,
+      projectPath: 'group/project',
+      provider: 'gitlab',
+      type: 'pull-request',
+      url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+    },
+  ],
+])(
+  'launcher preserves and validates canonical source identity %#',
+  async (source, expectedSource) => {
+    await using directory = await createTemporaryDirectory('codiff-review-source-');
+    const resultFile = join(directory.path, 'result.json');
+    const result = {
+      ...submittedAgentReviewResult(directory.path),
+      repository: { root: directory.path, source },
+    };
+    await writeFile(resultFile, `${JSON.stringify(result)}\n`);
+
+    expect(readAgentReviewResult(resultFile, directory.path, expectedSource)).toMatchObject({
+      repository: { source: expectedSource },
+    });
+    const mismatchedSource =
+      expectedSource.type === 'commit'
+        ? { ...expectedSource, ref: 'different' }
+        : expectedSource.type === 'range'
+          ? { ...expectedSource, headSha: 'different' }
+          : expectedSource.type === 'branch-diff'
+            ? { ...expectedSource, headRef: 'different' }
+            : { ...expectedSource, headSha: 'different' };
+    expect(() => readAgentReviewResult(resultFile, directory.path, mismatchedSource)).toThrow(
+      'source',
+    );
+  },
+);
+
+test.each([
+  [1, 1],
+  [1, 3],
+  [2, 1],
+])('launcher rejects noncontiguous comment orders %s,%s', async (firstOrder, secondOrder) => {
+  await using directory = await createTemporaryDirectory('codiff-review-orders-');
+  const resultFile = join(directory.path, 'result.json');
+  const result = submittedAgentReviewResult(directory.path);
+  await writeFile(
+    resultFile,
+    `${JSON.stringify({
+      ...result,
+      comments: [
+        { ...result.comments[0], order: firstOrder },
+        { ...result.comments[0], order: secondOrder },
+      ],
+    })}\n`,
+  );
+
+  expect(() => readAgentReviewResult(resultFile, directory.path, result.repository.source)).toThrow(
+    'order',
+  );
 });
 
 test('packaged terminal helper fails when Codiff exits without an agent review result', async () => {
@@ -1168,6 +1474,39 @@ test.each(agentLaunchers)(
     expect(args[resultFlagIndex + 1]).toBeTruthy();
     expect(stdout).toBe(`CODIFF_REVIEW_RESULT ${JSON.stringify(reviewResult)}\n`);
     await expect(access(dirname(await logger.readResultPath()))).rejects.toThrow();
+  },
+);
+
+test.each(agentLaunchers)(
+  '$agent skill launcher drains a result larger than the stdout pipe buffer',
+  async ({ environment, path, sessionId }) => {
+    await using logger = await createAgentReviewCommandLogger();
+    const repositoryPath = join(logger.directory, 'repo');
+    const walkthroughFile = join(logger.directory, 'walkthrough.json');
+    await mkdir(repositoryPath);
+    await writeFile(walkthroughFile, '{}');
+    const reviewResult = {
+      ...submittedAgentReviewResult(await realpath(repositoryPath)),
+      markdown: 'x'.repeat(256 * 1024),
+    };
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [resolve(path), '--file', walkthroughFile],
+      {
+        cwd: repositoryPath,
+        env: {
+          ...logger.env,
+          ...environment(repositoryPath, sessionId),
+          CODIFF_COMMAND: logger.commandPath,
+          CODIFF_TEST_SUBMITTED_RESULT: JSON.stringify(reviewResult),
+        },
+        maxBuffer: 1024 * 1024,
+      },
+    );
+
+    expect(stdout).toBe(`CODIFF_REVIEW_RESULT ${JSON.stringify(reviewResult)}\n`);
+    expect(stdout.split('\n')).toHaveLength(2);
   },
 );
 

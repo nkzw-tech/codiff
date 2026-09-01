@@ -632,6 +632,16 @@ if [ -n "$review_result_file_path" ]; then
   esac
 fi
 
+if [ -n "$review_result_file_path" ] && { [ -n "$plan_file_path" ] || [ -n "$plan_result_file_path" ]; }; then
+  printf '%s\n' 'codiff: plan and review result handoffs cannot be used together.' >&2
+  exit 1
+fi
+
+if [ -n "$plan_result_file_path" ] && [ -z "$plan_file_path" ]; then
+  printf '%s\n' 'codiff: a plan result handoff requires a plan file.' >&2
+  exit 1
+fi
+
 if [ -n "$pull_request_branch" ]; then
   if ! pull_request_source="$(
     cd "$repository_path" 2>/dev/null &&

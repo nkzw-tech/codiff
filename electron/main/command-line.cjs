@@ -288,6 +288,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
     (typeof values['review-result-file'] === 'string' ? values['review-result-file'] : '') ||
     envReviewResultFilePath ||
     undefined;
+  if (reviewResultFilePath && (planFilePath || planResultFilePath)) {
+    throw new Error('Plan and review result handoffs cannot be used together.');
+  }
+  if (planResultFilePath && !planFilePath) {
+    throw new Error('A plan result handoff requires a plan file.');
+  }
   const rawAgentBackend =
     (typeof values.agent === 'string' ? values.agent : '') || envAgentBackend || '';
   const agentBackend =

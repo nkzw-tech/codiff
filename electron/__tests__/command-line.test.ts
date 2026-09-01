@@ -78,6 +78,27 @@ test('parses the apply-update launch flag', () => {
   expect(getCommandLineLaunchOptions(['codiff', '/repo']).applyUpdate).toBeUndefined();
 });
 
+test('rejects simultaneous plan and review handoffs', () => {
+  expect(() =>
+    getCommandLineLaunchOptions([
+      'codiff',
+      '--plan-file',
+      '/tmp/plan.md',
+      '--review-result-file',
+      '/tmp/review.json',
+    ]),
+  ).toThrow('cannot be used together');
+  expect(() =>
+    getCommandLineLaunchOptions([
+      'codiff',
+      '--plan-result-file',
+      '/tmp/plan-result.json',
+      '--review-result-file',
+      '/tmp/review.json',
+    ]),
+  ).toThrow('cannot be used together');
+});
+
 test('parses the OpenCode agent override', () => {
   expect(
     readCommandLine([

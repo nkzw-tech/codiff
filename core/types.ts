@@ -148,8 +148,12 @@ export type ReviewSource =
   | {
       /** Base ref (left side). For symmetric ranges the diff starts at its merge-base with head. */
       base: string;
+      /** Immutable resolved base commit for this snapshot. */
+      baseSha?: string;
       /** Head ref (right side). */
       head: string;
+      /** Immutable resolved head commit for this snapshot. */
+      headSha?: string;
       /** `true` for `base...head` (merge-base), `false` for `base..head` (direct). */
       symmetric: boolean;
       type: 'range';

@@ -393,4 +393,4 @@ try {
   exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : 1;
 }
 
-process.exit(exitCode);
+process.exitCode = exitCode;

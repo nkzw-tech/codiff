@@ -1940,8 +1940,18 @@ test('readRepositoryState builds a diff for a base...head range', () =>
       symmetric: true,
       type: 'range',
     });
+    const baseSha = (await git(repo, ['rev-parse', 'base'])).trim();
+    const headSha = (await git(repo, ['rev-parse', 'refs/heads/head'])).trim();
 
-    expect(state.source).toEqual({ base: 'base', head: 'head', symmetric: true, type: 'range' });
+    expect(state.source).toEqual({
+      base: 'base',
+      baseSha: expect.any(String),
+      head: 'head',
+      headSha,
+      symmetric: true,
+      type: 'range',
+    });
+    expect(state.source.type === 'range' ? state.source.baseSha : null).not.toBe(baseSha);
     expect(state.files.map((file) => file.path).sort()).toEqual(['added.txt', 'keep.txt']);
     const added = state.files.find((file) => file.path === 'added.txt');
     expect(added?.status).toBe('added');

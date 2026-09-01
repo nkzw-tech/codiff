@@ -115,7 +115,11 @@ const {
 const { getPlanReviewPath, readPlanReview, writePlanReview } = require('./plan-review.cjs');
 const { createSharedPlanSnapshot } = require('./shared-plan.cjs');
 const { createWalkthroughProgressReporter } = require('./walkthrough-progress.cjs');
-const { createAgentReviewHandoffLifecycle } = require('./agent-review-handoff.cjs');
+const {
+  closeFailedAgentReviewWindow,
+  createAgentReviewHandoffLifecycle,
+} = require('./agent-review-handoff.cjs');
+const { createRepositoryStateRequestCoordinator } = require('./repository-state-requests.cjs');
 
 /**
  * @typedef {import('../core/config/types.ts').CodiffConfig} CodiffConfig
@@ -152,6 +156,7 @@ const completedPlanWindows = new Set();
 const openWindows = new Set();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
 const agentReviewHandoffLifecycle = createAgentReviewHandoffLifecycle();
+const repositoryStateRequestCoordinator = createRepositoryStateRequestCoordinator();
 /** @type {CodiffConfig} */
 let config = createDefaultConfig();
 
@@ -948,12 +953,7 @@ const createWindow = (
   const initialRepositoryStatePromise = launchOptions.planFile
     ? null
     : readInitialRepositoryStateWithConfig(repositoryPath, launchOptions);
-  const initialRepositoryState = initialRepositoryStatePromise?.then((state) => {
-    if (!window.isDestroyed()) {
-      storeResolvedRepositoryState(webContentsId, state);
-    }
-    return state;
-  });
+  const initialRepositoryState = initialRepositoryStatePromise;
   initialRepositoryState?.catch(() => {});
   if (initialRepositoryState) {
     windowInitialRepositoryStates.set(webContentsId, initialRepositoryState);
@@ -1083,9 +1083,9 @@ const createWindow = (
   window.webContents.on('render-process-gone', () => {
     definitionSearchCoordinator.cancel(webContentsId);
     if (launchOptions.reviewResultFile) {
-      void agentReviewHandoffLifecycle
-        .close(webContentsId)
-        .catch((error) => reportAgentReviewHandoffError(window, error));
+      void closeFailedAgentReviewWindow(agentReviewHandoffLifecycle, window, webContentsId).catch(
+        (error) => reportAgentReviewHandoffError(window, error),
+      );
     }
     writePlanResult(webContentsId, 'canceled');
   });
@@ -1094,9 +1094,11 @@ const createWindow = (
     (_event, errorCode, _errorDescription, _url, isMainFrame) => {
       if (isMainFrame && errorCode !== -3) {
         if (launchOptions.reviewResultFile) {
-          void agentReviewHandoffLifecycle
-            .close(webContentsId)
-            .catch((error) => reportAgentReviewHandoffError(window, error));
+          void closeFailedAgentReviewWindow(
+            agentReviewHandoffLifecycle,
+            window,
+            webContentsId,
+          ).catch((error) => reportAgentReviewHandoffError(window, error));
         }
         writePlanResult(webContentsId, 'canceled');
       }
@@ -1493,19 +1495,24 @@ ipcMain.handle('codiff:openReleasePage', () => {
 });
 
 ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
-  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const launchOptions = windowLaunchOptions.get(event.sender.id);
-  const initialState = !source ? windowInitialRepositoryStates.get(event.sender.id) : undefined;
+  const webContentsId = event.sender.id;
+  const repositoryPath = windowRepositories.get(webContentsId) || getLaunchPath();
+  const launchOptions = windowLaunchOptions.get(webContentsId);
+  const initialState = !source ? windowInitialRepositoryStates.get(webContentsId) : undefined;
   if (initialState) {
-    windowInitialRepositoryStates.delete(event.sender.id);
+    windowInitialRepositoryStates.delete(webContentsId);
   }
-  const state = initialState
-    ? await initialState
-    : await readRepositoryStateWithConfig(repositoryPath, source || launchOptions?.source);
-  storeResolvedRepositoryState(event.sender.id, state);
-  rememberLastRepositoryPath(state.root);
-  void resetRepositoryWatcher(event.sender.id, state.root);
-  return state;
+  return repositoryStateRequestCoordinator.resolve(
+    webContentsId,
+    () =>
+      initialState ||
+      readRepositoryStateWithConfig(repositoryPath, source || launchOptions?.source),
+    (state) => {
+      storeResolvedRepositoryState(webContentsId, state);
+      rememberLastRepositoryPath(state.root);
+      void resetRepositoryWatcher(webContentsId, state.root);
+    },
+  );
 });
 
 ipcMain.handle('codiff:completeAgentReview', async (event, feedback) => {

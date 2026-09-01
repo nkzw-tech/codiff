@@ -21,6 +21,23 @@ const writeAgentReviewResult = (path, result) => {
   }
 };
 
+/** @param {string} resultPath */
+const getAgentReviewOwnerPath = (resultPath) => `${resultPath}.owner`;
+
+/**
+ * @param {string} resultPath
+ * @param {{root: string; source: import('../core/types.ts').ReviewSource}} repository
+ * @param {number} [pid]
+ */
+const writeAgentReviewOwner = (resultPath, repository, pid = process.pid) => {
+  writeAgentReviewResult(getAgentReviewOwnerPath(resultPath), {
+    pid,
+    repository,
+    status: 'open',
+    version: 1,
+  });
+};
+
 /** @param {unknown} value */
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
 
@@ -128,9 +145,30 @@ const validateReviewSource = (value) => {
       if (typeof source.symmetric !== 'boolean') {
         throw new Error('Agent review feedback repository source symmetric must be boolean.');
       }
+      if (source.baseSha !== undefined) {
+        requireSourceString('baseSha');
+      }
+      if (source.headSha !== undefined) {
+        requireSourceString('headSha');
+      }
       return;
     case 'pull-request':
       requireSourceString('url');
+      for (const field of ['headSha', 'host', 'owner', 'projectPath', 'repo']) {
+        if (source[field] !== undefined) {
+          requireSourceString(field);
+        }
+      }
+      if (source.number !== undefined && !isPositiveInteger(source.number)) {
+        throw new Error('Agent review feedback repository source number must be positive.');
+      }
+      if (
+        source.provider !== undefined &&
+        source.provider !== 'github' &&
+        source.provider !== 'gitlab'
+      ) {
+        throw new Error('Agent review feedback repository source provider is invalid.');
+      }
       return;
     default:
       throw new Error('Agent review feedback repository source type is invalid.');
@@ -152,8 +190,23 @@ const validateFeedback = (feedback) => {
     throw new Error('Agent review feedback repository root must not be empty.');
   }
   validateReviewSource(feedback.repository?.source);
-  for (const comment of feedback.comments) {
+  for (const [index, comment] of feedback.comments.entries()) {
     validateComment(comment);
+    if (comment.order !== index + 1) {
+      throw new Error('Agent review feedback comment order must match array order 1 through N.');
+    }
+  }
+};
+
+/**
+ * @param {{close: (webContentsId: number) => Promise<string>}} lifecycle
+ * @param {{destroy: () => void; isDestroyed: () => boolean}} window
+ * @param {number} webContentsId
+ */
+const closeFailedAgentReviewWindow = async (lifecycle, window, webContentsId) => {
+  const outcome = await lifecycle.close(webContentsId);
+  if (outcome !== 'repository-unavailable' && !window.isDestroyed()) {
+    window.destroy();
   }
 };
 
@@ -329,7 +382,10 @@ const createAgentReviewHandoffLifecycle = ({
         activeOperations: 0,
         cleared: false,
         repositoryOutcome: repositoryPromise.then(
-          (repository) => ({ repository }),
+          (repository) => {
+            writeAgentReviewOwner(resultPath, repository);
+            return { repository };
+          },
           (error) => ({ error }),
         ),
         resultPath,
@@ -342,6 +398,7 @@ const createAgentReviewHandoffLifecycle = ({
     setRepository(webContentsId, repository) {
       const handoff = handoffs.get(webContentsId);
       if (handoff) {
+        writeAgentReviewOwner(handoff.resultPath, repository);
         handoff.repository = repository;
       }
     },
@@ -349,10 +406,12 @@ const createAgentReviewHandoffLifecycle = ({
 };
 
 module.exports = {
+  closeFailedAgentReviewWindow,
   createAgentReviewHandoffController,
   createAgentReviewHandoffLifecycle,
   validateAgentReviewRepository,
   validateFeedback,
   validateReviewSource,
+  writeAgentReviewOwner,
   writeAgentReviewResult,
 };

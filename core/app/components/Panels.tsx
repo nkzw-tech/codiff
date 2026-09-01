@@ -440,9 +440,11 @@ export function CopyCommentsButton({
 
 export function SendFeedbackButton({
   count,
+  disabled = false,
   onSend,
 }: {
   count: number;
+  disabled?: boolean;
   onSend: () => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -450,7 +452,7 @@ export function SendFeedbackButton({
   const sendingRef = useRef(false);
 
   const sendFeedback = useCallback(async () => {
-    if (count === 0 || sendingRef.current) {
+    if (count === 0 || disabled || sendingRef.current) {
       return;
     }
 
@@ -465,13 +467,13 @@ export function SendFeedbackButton({
       sendingRef.current = false;
       setSending(false);
     }
-  }, [count, onSend]);
+  }, [count, disabled, onSend]);
 
   return (
     <div className="send-feedback-action">
       <button
         className="copy-comments-button send-feedback-button"
-        disabled={count === 0 || sending}
+        disabled={count === 0 || disabled || sending}
         onClick={() => void sendFeedback()}
         title="Send feedback"
         type="button"
