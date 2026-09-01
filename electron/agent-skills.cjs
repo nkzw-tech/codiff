@@ -13,7 +13,11 @@
  *   files?: ReadonlyArray<AgentSkillFile>;
  *   id: AgentSkillId;
  *   label: string;
- *   targets: ReadonlyArray<{sourceSubdir: string; targetSubdir: string}>;
+ *   targets: ReadonlyArray<{
+ *     sourceSubdir: string;
+ *     targetSubdir: string;
+ *     type: 'directory' | 'file';
+ *   }>;
  * }} AgentSkill
  */
 
@@ -23,19 +27,37 @@ const AGENT_SKILLS = Object.freeze([
     agentLabel: 'Codex',
     id: 'codex',
     label: 'Codex Skill',
-    targets: [{ sourceSubdir: 'codex/skills/codiff', targetSubdir: '.codex/skills/codiff' }],
+    targets: [
+      {
+        sourceSubdir: 'codex/skills/codiff',
+        targetSubdir: '.codex/skills/codiff',
+        type: 'directory',
+      },
+    ],
   },
   {
     agentLabel: 'Claude Code',
     id: 'claude',
     label: 'Claude Code Skill',
-    targets: [{ sourceSubdir: 'claude/skills/codiff', targetSubdir: '.claude/skills/codiff' }],
+    targets: [
+      {
+        sourceSubdir: 'claude/skills/codiff',
+        targetSubdir: '.claude/skills/codiff',
+        type: 'directory',
+      },
+    ],
   },
   {
     agentLabel: 'Pi',
     id: 'pi',
     label: 'Pi Skill',
-    targets: [{ sourceSubdir: 'pi/skills/codiff', targetSubdir: '.pi/agent/skills/codiff' }],
+    targets: [
+      {
+        sourceSubdir: 'pi/skills/codiff',
+        targetSubdir: '.pi/agent/skills/codiff',
+        type: 'directory',
+      },
+    ],
   },
   {
     agentLabel: 'OpenCode',
@@ -50,11 +72,17 @@ const AGENT_SKILLS = Object.freeze([
       },
     ],
     id: 'opencode',
-    label: 'OpenCode Skill',
+    label: 'OpenCode Integration',
     targets: [
       {
         sourceSubdir: 'opencode/skills/codiff',
         targetSubdir: '.config/opencode/skills/codiff',
+        type: 'directory',
+      },
+      {
+        sourceSubdir: 'opencode/plugins/codiff.js',
+        targetSubdir: '.config/opencode/plugins/codiff.js',
+        type: 'file',
       },
     ],
   },

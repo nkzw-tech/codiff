@@ -21,7 +21,7 @@ const { dirname, join } = require('node:path');
  *   sourceSubdir: string;
  *   targetSubdir: string;
  * }} AgentSkillFile
- * @typedef {{sourceSubdir: string; targetSubdir: string}} AgentSkillTarget
+ * @typedef {{sourceSubdir: string; targetSubdir: string; type?: 'directory' | 'file'}} AgentSkillTarget
  * @typedef {{
  *   files?: ReadonlyArray<AgentSkillFile>;
  *   label: string;
@@ -120,7 +120,9 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
       unlinkSync(targetPath);
     }
 
-    symlinkSync(sourcePath, targetPath, process.platform === 'win32' ? 'junction' : 'dir');
+    const type =
+      target.type === 'file' ? 'file' : process.platform === 'win32' ? 'junction' : 'dir';
+    symlinkSync(sourcePath, targetPath, type);
     return targetPath;
   };
 
