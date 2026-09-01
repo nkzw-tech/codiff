@@ -477,14 +477,8 @@ test('desktop app hides send feedback when the agent review IPC is unavailable',
   expect(app.container.querySelector('.send-feedback-button')).toBeNull();
 });
 
-test('agent review feedback accepts every assurance for a focused draft', async () => {
-  const assurances = [
-    'bridge-queue',
-    'dispatch-started',
-    'message-created',
-    'queue-command',
-    'transport-write',
-  ] satisfies ReadonlyArray<AgentFeedbackAssurance>;
+test('agent review feedback accepts the bound backend assurance for a focused draft', async () => {
+  const assurances = ['queue-command'] satisfies ReadonlyArray<AgentFeedbackAssurance>;
   const file = createChangedFile('src/app.ts');
   let responseIndex = 0;
   const sendAgentReviewFeedback = vi.fn(async () => ({
@@ -494,6 +488,7 @@ test('agent review feedback accepts every assurance for a focused draft', async 
   }));
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      agentBackend: 'codex' as const,
       agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
       walkthrough: false,
@@ -560,10 +555,15 @@ test('agent review feedback preserves the same focused draft after rejection and
       status: 'rejected' as const,
     })
     .mockRejectedValueOnce(new Error('Bridge unavailable.'))
-    .mockResolvedValueOnce({});
+    .mockResolvedValueOnce({
+      assurance: 'transport-write',
+      deliveryId: 'delivery-1',
+      status: 'accepted' as const,
+    });
   const file = createChangedFile('src/app.ts');
   window.codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({
+      agentBackend: 'codex' as const,
       agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
       walkthrough: false,
@@ -603,7 +603,7 @@ test('agent review feedback preserves the same focused draft after rejection and
   for (const error of [
     'Session is busy.',
     'Bridge unavailable.',
-    'Agent feedback acknowledgement has the wrong delivery ID.',
+    'Agent feedback acknowledgement is invalid.',
   ]) {
     await act(async () => send?.click());
     await waitFor(() =>

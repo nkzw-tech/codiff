@@ -213,6 +213,7 @@ const createAgentFeedbackDeliveryController = ({
   probe = async () => ({ available: true }),
 }) => {
   const bindings = new Map();
+  const inFlight = new Map();
   const terminal = new Map();
 
   /** @param {number} webContentsId */
@@ -225,7 +226,11 @@ const createAgentFeedbackDeliveryController = ({
   };
 
   /** @param {Record<string, any>} binding */
-  const resolveRepository = async (binding) => binding.repositoryValue ?? binding.repository;
+  const resolveRepository = async (binding) => {
+    if (binding.repositoryValue) return binding.repositoryValue;
+    const repository = await binding.repository;
+    return binding.repositoryValue ?? repository;
+  };
 
   return {
     /** @param {number} webContentsId */
@@ -240,40 +245,58 @@ const createAgentFeedbackDeliveryController = ({
         return { ...previous.response, status: 'already-accepted' };
       }
       if (previous?.kind === 'ambiguous') throw previous.error;
-      validateFeedback(feedback);
-      const repository = await resolveRepository(binding);
-      validateAgentReviewRepository(feedback.repository, repository);
-      const capability = await probe({
-        backend: binding.backend,
-        repositoryRoot: repository.root,
-        sessionId: binding.sessionId,
-      });
-      if (!capability.available) {
-        throw new Error(capability.reason || 'Agent feedback delivery is unavailable.');
-      }
-      const request = {
-        backend: binding.backend,
-        deliveryId: binding.deliveryId,
-        feedback,
-        repositoryRoot: repository.root,
-        sessionId: binding.sessionId,
-        version: 1,
-      };
-      try {
-        const response = await deliver(request);
-        validateDeliveryResponse(request, response, assurances[binding.backend]);
-        if (response.status === 'rejected') return response;
-        terminal.set(binding.deliveryId, { kind: 'accepted', response });
-        return response;
-      } catch (error) {
-        if (error?.ambiguous === true) {
-          const wrapped = new Error(
-            'Delivery may have reached the agent. Verify the session or copy the comments before continuing.',
-          );
-          terminal.set(binding.deliveryId, { error: wrapped, kind: 'ambiguous' });
-          throw wrapped;
+      const pending = inFlight.get(binding.deliveryId);
+      if (pending) return pending;
+      const operation = (async () => {
+        validateFeedback(feedback);
+        const repository = await resolveRepository(binding);
+        validateAgentReviewRepository(feedback.repository, repository);
+        const capability = await probe({
+          backend: binding.backend,
+          repositoryRoot: repository.root,
+          sessionId: binding.sessionId,
+        });
+        if (!capability.available) {
+          throw new Error(capability.reason || 'Agent feedback delivery is unavailable.');
         }
-        throw error;
+        const request = {
+          backend: binding.backend,
+          deliveryId: binding.deliveryId,
+          feedback,
+          repositoryRoot: repository.root,
+          sessionId: binding.sessionId,
+          version: 1,
+        };
+        try {
+          const response = await deliver(request);
+          try {
+            validateDeliveryResponse(request, response, assurances[binding.backend]);
+          } catch (error) {
+            const wrapped = new Error(
+              `${error.message} Delivery may have reached the agent. Verify the session or copy the comments before continuing.`,
+            );
+            terminal.set(binding.deliveryId, { error: wrapped, kind: 'ambiguous' });
+            throw wrapped;
+          }
+          if (response.status === 'rejected') return response;
+          terminal.set(binding.deliveryId, { kind: 'accepted', response });
+          return response;
+        } catch (error) {
+          if (error?.ambiguous === true) {
+            const wrapped = new Error(
+              'Delivery may have reached the agent. Verify the session or copy the comments before continuing.',
+            );
+            terminal.set(binding.deliveryId, { error: wrapped, kind: 'ambiguous' });
+            throw wrapped;
+          }
+          throw error;
+        }
+      })();
+      inFlight.set(binding.deliveryId, operation);
+      try {
+        return await operation;
+      } finally {
+        if (inFlight.get(binding.deliveryId) === operation) inFlight.delete(binding.deliveryId);
       }
     },
     /** @param {number} webContentsId */

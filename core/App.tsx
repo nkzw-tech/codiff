@@ -111,6 +111,8 @@ import {
 } from './lib/source.ts';
 import { readViewed, writeViewed } from './lib/viewed.ts';
 import type {
+  AgentBackend,
+  AgentFeedbackAssurance,
   ChangedFile,
   AgentSkillStatus,
   CodiffLaunchOptions,
@@ -130,6 +132,12 @@ import type {
 const emptyReviewComments: ReadonlyArray<ReviewComment> = [];
 const emptyWalkthroughNotes = new Map<string, WalkthroughNote>();
 const disableCodeViewWorkerPool = process.env.NODE_ENV === 'test';
+const agentFeedbackAssurances: Record<AgentBackend, ReadonlySet<AgentFeedbackAssurance>> = {
+  claude: new Set(['transport-write']),
+  codex: new Set(['queue-command']),
+  opencode: new Set(['bridge-queue', 'message-created']),
+  pi: new Set(['dispatch-started']),
+};
 
 const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
   isPatchOnlyDiffSection(section)
@@ -1641,17 +1649,16 @@ export default function App() {
     }
     if (
       !['accepted', 'queued', 'already-accepted'].includes(response.status) ||
-      ![
-        'bridge-queue',
-        'dispatch-started',
-        'message-created',
-        'queue-command',
-        'transport-write',
-      ].includes(response.assurance)
+      !agentFeedbackAssurances[activeAgentBackend].has(response.assurance)
     ) {
       throw new Error('Agent feedback acknowledgement is invalid.');
     }
-  }, [flushActiveReviewCommentDraft, launchOptions.agentReview?.deliveryId, pendingSource]);
+  }, [
+    activeAgentBackend,
+    flushActiveReviewCommentDraft,
+    launchOptions.agentReview?.deliveryId,
+    pendingSource,
+  ]);
 
   if (launchOptions.planFile) {
     if (planLoadError) {

@@ -7,7 +7,11 @@ import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources
 const require = createRequire(import.meta.url);
 const { registerWindowOpenReceipt } = require('../window-open-receipt.cjs') as {
   registerWindowOpenReceipt: (
-    window: { once: (event: string, listener: () => Promise<void>) => void; show: () => void },
+    window: {
+      isDestroyed: () => boolean;
+      once: (event: string, listener: () => Promise<void>) => void;
+      show: () => void;
+    },
     launchOptions: {
       agentReview?: { deliveryId: string; sessionId: string };
       agentReviewOpenFile?: string;
@@ -28,6 +32,7 @@ test('publishes the shared delivery preflight only after the window is ready to 
 
   registerWindowOpenReceipt(
     {
+      isDestroyed: () => false,
       once: (event, listener) => {
         expect(event).toBe('ready-to-show');
         readyToShow = listener;
@@ -66,6 +71,7 @@ test('ignores a late receipt after the launcher removes its directory', async ()
 
   registerWindowOpenReceipt(
     {
+      isDestroyed: () => false,
       once: (_event, listener) => {
         readyToShow = listener;
       },
@@ -80,4 +86,37 @@ test('ignores a late receipt after the launcher removes its directory', async ()
   await rm(directory.path, { recursive: true });
 
   await expect(readyToShow?.()).resolves.toBeUndefined();
+});
+
+test('does not publish a receipt when the window closes during preflight', async () => {
+  await using directory = await createTemporaryDirectory('codiff-window-open-receipt-');
+  const openFile = join(directory.path, 'open.json');
+  let destroyed = false;
+  let readyToShow: (() => Promise<void>) | undefined;
+  let resolveCapability!: (capability: { available: boolean }) => void;
+  const capability = new Promise<{ available: boolean }>((resolve) => {
+    resolveCapability = resolve;
+  });
+
+  registerWindowOpenReceipt(
+    {
+      isDestroyed: () => destroyed,
+      once: (_event, listener) => {
+        readyToShow = listener;
+      },
+      show: () => {},
+    },
+    {
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
+      agentReviewOpenFile: openFile,
+    },
+    capability,
+  );
+
+  const publish = readyToShow?.();
+  destroyed = true;
+  resolveCapability({ available: true });
+  await publish;
+
+  await expect(readFile(openFile, 'utf8')).rejects.toThrow();
 });

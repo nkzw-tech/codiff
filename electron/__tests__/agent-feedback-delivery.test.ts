@@ -137,6 +137,20 @@ test.each([
   await expect(controller.deliver(7, feedback)).rejects.toThrow(message);
 });
 
+test('does not retry after an invalid acknowledgement leaves delivery ambiguous', async () => {
+  const deliver = vi.fn(async () => ({
+    assurance: 'transport-write' as const,
+    deliveryId: 'other',
+    status: 'accepted' as const,
+  }));
+  const controller = createAgentFeedbackDeliveryController({ deliver });
+  register(controller);
+
+  await expect(controller.deliver(7, feedback)).rejects.toThrow(/delivery ID.*verify the session/i);
+  await expect(controller.deliver(7, feedback)).rejects.toThrow(/delivery ID.*verify the session/i);
+  expect(deliver).toHaveBeenCalledOnce();
+});
+
 test('returns an accepted delivery idempotently without dispatching twice', async () => {
   const deliver = vi.fn(async () => ({
     assurance: 'queue-command' as const,
@@ -151,6 +165,33 @@ test('returns an accepted delivery idempotently without dispatching twice', asyn
     status: 'already-accepted',
   });
   expect(deliver).toHaveBeenCalledOnce();
+});
+
+test('shares one in-flight dispatch between concurrent calls for a delivery ID', async () => {
+  let resolveDelivery!: (response: AgentFeedbackDeliveryResponse) => void;
+  const deliver = vi.fn(
+    () =>
+      new Promise<AgentFeedbackDeliveryResponse>((resolve) => {
+        resolveDelivery = resolve;
+      }),
+  );
+  const controller = createAgentFeedbackDeliveryController({ deliver });
+  register(controller);
+
+  const first = controller.deliver(7, feedback);
+  const second = controller.deliver(7, feedback);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(deliver).toHaveBeenCalledOnce();
+  resolveDelivery({
+    assurance: 'transport-write',
+    deliveryId: 'delivery-1',
+    status: 'accepted',
+  });
+  await expect(Promise.all([first, second])).resolves.toEqual([
+    expect.objectContaining({ status: 'accepted' }),
+    expect.objectContaining({ status: 'accepted' }),
+  ]);
 });
 
 test('allows retry after a definite delivery failure or rejection', async () => {
@@ -231,6 +272,36 @@ test('uses the latest repository identity for preflight and feedback validation'
   expect(deliver).toHaveBeenCalledWith(
     expect.objectContaining({ repositoryRoot: repository.root }),
   );
+});
+
+test('uses a repository update that arrives while the initial repository is resolving', async () => {
+  let resolveInitial!: (repository: AgentReviewFeedback['repository']) => void;
+  const initialRepository = new Promise<AgentReviewFeedback['repository']>((resolve) => {
+    resolveInitial = resolve;
+  });
+  const latestRepository = {
+    root: '/tmp/latest-repository',
+    source: { ref: 'def456', type: 'commit' as const },
+  };
+  const probe = vi.fn(async () => ({ available: true }));
+  const controller = createAgentFeedbackDeliveryController({ deliver: vi.fn(), probe });
+  controller.register(7, {
+    backend: 'claude',
+    deliveryId: 'delivery-1',
+    repository: initialRepository,
+    sessionId: 'session-1',
+  });
+
+  const preparation = controller.prepare(7);
+  controller.setRepository(7, latestRepository);
+  resolveInitial(feedback.repository);
+  await preparation;
+
+  expect(probe).toHaveBeenCalledWith({
+    backend: 'claude',
+    repositoryRoot: latestRepository.root,
+    sessionId: 'session-1',
+  });
 });
 
 test('clear unregisters a window', async () => {
