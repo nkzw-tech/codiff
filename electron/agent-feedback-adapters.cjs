@@ -1,7 +1,10 @@
 // @ts-check
 
 const { spawn } = require('node:child_process');
-const { deliverToAgentFeedbackBridge } = require('./agent-feedback-bridge.cjs');
+const {
+  deliverToAgentFeedbackBridge,
+  probeAgentFeedbackBridge,
+} = require('./agent-feedback-bridge.cjs');
 const { formatAgentFeedbackMessage } = require('./agent-feedback-delivery.cjs');
 
 const CODEX_INPUT_BYTES = 24 * 1024;
@@ -71,8 +74,11 @@ const spawnCapture = (command, args, { maxOutputBytes, spawnProcess, timeoutMs }
     });
   });
 
-/** @param {{spawnProcess?: typeof spawn}} [options] */
-const createAgentFeedbackAdapters = ({ spawnProcess = spawn } = {}) => {
+/** @param {{bridgeProbe?: typeof probeAgentFeedbackBridge; spawnProcess?: typeof spawn}} [options] */
+const createAgentFeedbackAdapters = ({
+  bridgeProbe = probeAgentFeedbackBridge,
+  spawnProcess = spawn,
+} = {}) => {
   const capture = (args) =>
     spawnCapture('codex', args, {
       maxOutputBytes: MAX_OUTPUT_BYTES,
@@ -87,7 +93,7 @@ const createAgentFeedbackAdapters = ({ spawnProcess = spawn } = {}) => {
       }
       return deliverToAgentFeedbackBridge(request);
     },
-    probe: async () => ({ available: true }),
+    probe: bridgeProbe,
   };
 
   return {

@@ -11,7 +11,10 @@ import type {
 
 const require = createRequire(import.meta.url);
 const { createAgentFeedbackAdapters } = require('../agent-feedback-adapters.cjs') as {
-  createAgentFeedbackAdapters: (options: { spawnProcess: SpawnProcess }) => Record<
+  createAgentFeedbackAdapters: (options: {
+    bridgeProbe?: (identity: DeliveryIdentity) => Promise<{ available: boolean; reason?: string }>;
+    spawnProcess: SpawnProcess;
+  }) => Record<
     AgentBackend,
     {
       deliver: (request: AgentFeedbackDeliveryRequest) => Promise<AgentFeedbackDeliveryResponse>;
@@ -105,6 +108,19 @@ test('creates adapters for all supported backends', () => {
 
   expect(Object.keys(adapters).sort()).toEqual(['claude', 'codex', 'opencode', 'pi']);
 });
+
+test.each(['claude', 'opencode', 'pi'] as const)(
+  '%s probes the authenticated resident bridge for the exact identity',
+  async (backend) => {
+    const { spawnProcess } = createSpawn();
+    const bridgeProbe = vi.fn(async () => ({ available: true }));
+    const adapter = createAgentFeedbackAdapters({ bridgeProbe, spawnProcess })[backend];
+    const identity = { backend, repositoryRoot: '/repo', sessionId: 'session-1' };
+
+    await expect(adapter.probe(identity)).resolves.toEqual({ available: true });
+    expect(bridgeProbe).toHaveBeenCalledWith(identity);
+  },
+);
 
 test('probes Codex native queue support without a shell', async () => {
   const { spawnProcess } = createSpawn({ stdout: 'Usage: codex queue --thread ID --message TEXT' });

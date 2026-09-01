@@ -45,12 +45,12 @@ const createAgentFeedbackBridgeClient = ({
 } = {}) => {
   const uid = getuid?.();
 
-  /** @param {import('../core/types.ts').AgentFeedbackDeliveryRequest} request */
-  const findRegistrations = (request) => {
-    if (!VALID_BACKENDS.has(request.backend)) {
+  /** @param {{backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}} identity */
+  const findRegistrations = (identity) => {
+    if (!VALID_BACKENDS.has(identity.backend)) {
       throw new Error('No authenticated agent feedback bridge is available.');
     }
-    const directory = path.join(registrationRoot, request.backend);
+    const directory = path.join(registrationRoot, identity.backend);
     let rootMetadata;
     let directoryMetadata;
     try {
@@ -84,10 +84,10 @@ const createAgentFeedbackBridgeClient = ({
         const registration = JSON.parse(fs.readFileSync(registrationPath, 'utf8'));
         const updatedAt = Date.parse(registration.updatedAt);
         if (
-          registration.backend !== request.backend ||
+          registration.backend !== identity.backend ||
           registration.protocolVersion !== PROTOCOL_VERSION ||
-          registration.repositoryRoot !== request.repositoryRoot ||
-          registration.sessionId !== request.sessionId ||
+          registration.repositoryRoot !== identity.repositoryRoot ||
+          registration.sessionId !== identity.sessionId ||
           typeof registration.endpoint !== 'string' ||
           typeof registration.instanceId !== 'string' ||
           !Number.isInteger(registration.pid) ||
@@ -205,6 +205,48 @@ const createAgentFeedbackBridgeClient = ({
     Object.keys(identity).sort().join('\0') === Object.keys(expectedIdentity).sort().join('\0') &&
     Object.entries(expectedIdentity).every(([key, value]) => identity[key] === value);
 
+  /** @param {{backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}} identity */
+  const findAuthenticatedRegistration = async (identity) => {
+    for (const candidate of findRegistrations(identity)) {
+      const nonce = randomUUID();
+      try {
+        const response = await post(
+          candidate,
+          '/v1/identity',
+          { nonce, version: PROTOCOL_VERSION },
+          false,
+        );
+        if (
+          identityMatches(response, {
+            backend: identity.backend,
+            nonce,
+            repositoryRoot: identity.repositoryRoot,
+            sessionId: identity.sessionId,
+            version: PROTOCOL_VERSION,
+          })
+        ) {
+          return candidate;
+        }
+      } catch {
+        // A live PID can have an orphaned socket or belong to a reused process.
+      }
+    }
+    throw new Error('No authenticated agent feedback bridge is available.');
+  };
+
+  /** @param {{backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}} identity */
+  const probeAgentFeedbackBridge = async (identity) => {
+    try {
+      await findAuthenticatedRegistration(identity);
+      return { available: true };
+    } catch (error) {
+      return {
+        available: false,
+        reason: error instanceof Error ? error.message : 'Agent feedback bridge is unavailable.',
+      };
+    }
+  };
+
   const validateDeliveryResponse = (request, response) => {
     if (!response || typeof response !== 'object' || Array.isArray(response)) {
       throw new Error('Agent feedback bridge acknowledgement is invalid.');
@@ -233,35 +275,7 @@ const createAgentFeedbackBridgeClient = ({
 
   /** @param {import('../core/types.ts').AgentFeedbackDeliveryRequest} request */
   const deliverToAgentFeedbackBridge = async (request) => {
-    let registration;
-    for (const candidate of findRegistrations(request)) {
-      const nonce = randomUUID();
-      try {
-        const identity = await post(
-          candidate,
-          '/v1/identity',
-          { nonce, version: PROTOCOL_VERSION },
-          false,
-        );
-        if (
-          identityMatches(identity, {
-            backend: request.backend,
-            nonce,
-            repositoryRoot: request.repositoryRoot,
-            sessionId: request.sessionId,
-            version: PROTOCOL_VERSION,
-          })
-        ) {
-          registration = candidate;
-          break;
-        }
-      } catch {
-        // A live PID can have an orphaned socket or belong to a reused process.
-      }
-    }
-    if (!registration) {
-      throw new Error('No authenticated agent feedback bridge is available.');
-    }
+    const registration = await findAuthenticatedRegistration(request);
     const response = await post(
       registration,
       '/v1/deliver',
@@ -283,7 +297,7 @@ const createAgentFeedbackBridgeClient = ({
     }
   };
 
-  return { deliverToAgentFeedbackBridge };
+  return { deliverToAgentFeedbackBridge, probeAgentFeedbackBridge };
 };
 
 const defaultClient = createAgentFeedbackBridgeClient();
@@ -291,4 +305,5 @@ const defaultClient = createAgentFeedbackBridgeClient();
 module.exports = {
   createAgentFeedbackBridgeClient,
   deliverToAgentFeedbackBridge: defaultClient.deliverToAgentFeedbackBridge,
+  probeAgentFeedbackBridge: defaultClient.probeAgentFeedbackBridge,
 };

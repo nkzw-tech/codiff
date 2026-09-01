@@ -20,6 +20,9 @@ const { createAgentFeedbackBridgeClient } = require('../agent-feedback-bridge.cj
     deliverToAgentFeedbackBridge: (
       request: AgentFeedbackDeliveryRequest,
     ) => Promise<Record<string, unknown>>;
+    probeAgentFeedbackBridge: (
+      identity: Pick<AgentFeedbackDeliveryRequest, 'backend' | 'repositoryRoot' | 'sessionId'>,
+    ) => Promise<{ available: boolean; reason?: string }>;
   };
 };
 
@@ -114,6 +117,113 @@ const writeRegistration = async (
   await chmod(file, 0o600);
   return { file, registration };
 };
+
+test('probe authenticates the exact resident identity without delivering', async () => {
+  const { deliver, registrationRoot } = await setup();
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.probeAgentFeedbackBridge(request)).resolves.toEqual({ available: true });
+  expect(deliver).not.toHaveBeenCalled();
+});
+
+test('probe reports a missing resident registration as unavailable', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-missing-probe-test-'));
+  const client = createAgentFeedbackBridgeClient({ registrationRoot: path.join(root, 'registry') });
+
+  await expect(client.probeAgentFeedbackBridge(request)).resolves.toMatchObject({
+    available: false,
+    reason: expect.stringMatching(/no authenticated.*bridge/i),
+  });
+});
+
+test('probe ignores stale resident registrations', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-stale-probe-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  await writeRegistration(registrationRoot, {
+    updatedAt: new Date(Date.now() - 45_001).toISOString(),
+  });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.probeAgentFeedbackBridge(request)).resolves.toMatchObject({
+    available: false,
+    reason: expect.stringMatching(/no authenticated.*bridge/i),
+  });
+});
+
+test('probe reports an unauthenticated resident endpoint as unavailable', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-auth-probe-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const { socketPath } = await createRawServer(root, (_incoming, response) => {
+    response.writeHead(401);
+    response.end(JSON.stringify({ error: 'Invalid bearer token.' }));
+  });
+  await writeRegistration(registrationRoot, { endpoint: socketPath });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.probeAgentFeedbackBridge(request)).resolves.toMatchObject({
+    available: false,
+    reason: expect.stringMatching(/no authenticated.*bridge/i),
+  });
+});
+
+test('probe reports an unavailable resident endpoint', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-endpoint-probe-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  await writeRegistration(registrationRoot, { endpoint: path.join(root, 'missing.sock') });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.probeAgentFeedbackBridge(request)).resolves.toMatchObject({
+    available: false,
+    reason: expect.stringMatching(/no authenticated.*bridge/i),
+  });
+});
+
+test.each([
+  ['backend', { backend: 'claude' }],
+  ['session', { sessionId: 'other' }],
+  ['repository', { repositoryRoot: '/other' }],
+])('probe rejects an identity challenge with mismatched %s', async (_field, override) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-mismatch-probe-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const { socketPath } = await createRawServer(root, (incoming, response) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      response.end(
+        JSON.stringify({
+          backend: 'pi',
+          nonce: body.nonce,
+          repositoryRoot: '/repo',
+          sessionId: 'session-1',
+          version: 1,
+          ...override,
+        }),
+      );
+    });
+  });
+  await writeRegistration(registrationRoot, { endpoint: socketPath });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.probeAgentFeedbackBridge(request)).resolves.toMatchObject({
+    available: false,
+    reason: expect.stringMatching(/no authenticated.*bridge/i),
+  });
+});
+
+test('delivery independently revalidates after a successful probe', async () => {
+  const { bridge, deliver, registrationRoot } = await setup();
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+  await expect(client.probeAgentFeedbackBridge(request)).resolves.toEqual({ available: true });
+
+  await bridge.close();
+  resources.splice(resources.indexOf(bridge), 1);
+
+  await expect(client.deliverToAgentFeedbackBridge(request)).rejects.toThrow(
+    /no authenticated.*bridge/i,
+  );
+  expect(deliver).not.toHaveBeenCalled();
+});
 
 test('challenges the bridge and delivers the stable formatted message', async () => {
   const { deliver, registrationRoot } = await setup();
