@@ -1611,8 +1611,8 @@ export default function App() {
     if (pendingSource != null) {
       return;
     }
-    const completeAgentReview = window.codiff.completeAgentReview;
-    if (typeof completeAgentReview !== 'function') {
+    const deliverFeedback = window.codiff.sendAgentReviewFeedback;
+    if (typeof deliverFeedback !== 'function') {
       return;
     }
     const comments = flushActiveReviewCommentDraft();
@@ -1625,7 +1625,7 @@ export default function App() {
     if (content.comments.length === 0) {
       return;
     }
-    await completeAgentReview({
+    const response = await deliverFeedback({
       ...content,
       repository: {
         root: stateRef.current!.root,
@@ -1633,7 +1633,25 @@ export default function App() {
       },
       version: 1,
     });
-  }, [flushActiveReviewCommentDraft, pendingSource]);
+    if (response.deliveryId !== launchOptions.agentReview?.deliveryId) {
+      throw new Error('Agent feedback acknowledgement has the wrong delivery ID.');
+    }
+    if (response.status === 'rejected') {
+      throw new Error(response.reason);
+    }
+    if (
+      !['accepted', 'queued', 'already-accepted'].includes(response.status) ||
+      ![
+        'bridge-queue',
+        'dispatch-started',
+        'message-created',
+        'queue-command',
+        'transport-write',
+      ].includes(response.assurance)
+    ) {
+      throw new Error('Agent feedback acknowledgement is invalid.');
+    }
+  }, [flushActiveReviewCommentDraft, launchOptions.agentReview?.deliveryId, pendingSource]);
 
   if (launchOptions.planFile) {
     if (planLoadError) {
@@ -1859,7 +1877,7 @@ export default function App() {
               showWhitespace={showWhitespace}
             />
             {launchOptions.agentReview &&
-            typeof window.codiff.completeAgentReview === 'function' ? (
+            typeof window.codiff.sendAgentReviewFeedback === 'function' ? (
               <SendFeedbackButton
                 count={pendingReviewCommentCount}
                 disabled={isSwitchingSource}

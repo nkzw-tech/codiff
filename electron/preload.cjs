@@ -16,7 +16,6 @@ if (document.documentElement) {
 const codiff = {
   applyUpdate: () => ipcRenderer.invoke('codiff:applyUpdate'),
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
-  completeAgentReview: (feedback) => ipcRenderer.invoke('codiff:completeAgentReview', feedback),
   dismissUpdate: () => ipcRenderer.invoke('codiff:dismissUpdate'),
   createWalkthroughCommit: (request) =>
     ipcRenderer.invoke('codiff:createWalkthroughCommit', request),
@@ -148,6 +147,8 @@ const codiff = {
   resetCodeFontSize: () => ipcRenderer.invoke('codiff:resetCodeFontSize'),
   saveMarkdownDocument: (request) => ipcRenderer.invoke('codiff:saveMarkdownDocument', request),
   savePlanReview: (review) => ipcRenderer.invoke('codiff:savePlanReview', review),
+  sendAgentReviewFeedback: (feedback) =>
+    ipcRenderer.invoke('codiff:sendAgentReviewFeedback', feedback),
   showInFolder: (path) => ipcRenderer.invoke('codiff:showInFolder', path),
   submitPullRequestComment: (request) =>
     ipcRenderer.invoke('codiff:submitPullRequestComment', request),

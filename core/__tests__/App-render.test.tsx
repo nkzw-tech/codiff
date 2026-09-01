@@ -15,6 +15,7 @@ import {
   writeReloadSelection,
 } from '../lib/reload-selection.ts';
 import type {
+  AgentFeedbackAssurance,
   ChangedFile,
   CommitMetadata,
   NarrativeWalkthrough,
@@ -121,7 +122,6 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     reason: 'Unavailable in tests.',
     status: 'unavailable' as const,
   })),
-  completeAgentReview: vi.fn(async () => {}),
   completePlan: vi.fn(async () => {}),
   createWalkthroughCommit: vi.fn(async () => ({
     hash: '0000000000000000000000000000000000000000',
@@ -250,6 +250,11 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     status: 'saved' as const,
   })),
   savePlanReview: vi.fn(async (review) => review),
+  sendAgentReviewFeedback: vi.fn(async () => ({
+    assurance: 'transport-write' as const,
+    deliveryId: 'delivery-1',
+    status: 'accepted' as const,
+  })),
   setDiffStyle: vi.fn(async () => {}),
   setShowOutdated: vi.fn(async () => {}),
   setWordWrap: vi.fn(async () => {}),
@@ -463,7 +468,7 @@ test('desktop app hides send feedback when the agent review IPC is unavailable',
       walkthrough: false,
     })),
   });
-  Reflect.deleteProperty(codiff, 'completeAgentReview');
+  Reflect.deleteProperty(codiff, 'sendAgentReviewFeedback');
   window.codiff = codiff;
 
   await using app = await renderReact(<App />);
@@ -472,17 +477,29 @@ test('desktop app hides send feedback when the agent review IPC is unavailable',
   expect(app.container.querySelector('.send-feedback-button')).toBeNull();
 });
 
-test('agent review feedback sends a focused draft with repository identity', async () => {
+test('agent review feedback accepts every assurance for a focused draft', async () => {
+  const assurances = [
+    'bridge-queue',
+    'dispatch-started',
+    'message-created',
+    'queue-command',
+    'transport-write',
+  ] satisfies ReadonlyArray<AgentFeedbackAssurance>;
   const file = createChangedFile('src/app.ts');
-  const completeAgentReview = vi.fn(async () => {});
+  let responseIndex = 0;
+  const sendAgentReviewFeedback = vi.fn(async () => ({
+    assurance: assurances[responseIndex++]!,
+    deliveryId: 'delivery-1',
+    status: 'accepted' as const,
+  }));
   window.codiff = createCodiffMock({
-    completeAgentReview,
     getLaunchOptions: vi.fn(async () => ({
       agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
       walkthrough: false,
     })),
     getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
+    sendAgentReviewFeedback,
   });
   await using app = await renderReact(<App />);
   await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
@@ -515,9 +532,13 @@ test('agent review feedback sends a focused draft with repository identity', asy
     ),
   );
   const send = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
-  await act(async () => send?.click());
-  await waitFor(() => expect(completeAgentReview).toHaveBeenCalledTimes(1));
-  expect(completeAgentReview).toHaveBeenCalledWith(
+  for (const [index, assurance] of assurances.entries()) {
+    await act(async () => send?.click());
+    await waitFor(() => expect(sendAgentReviewFeedback).toHaveBeenCalledTimes(index + 1));
+    expect(await sendAgentReviewFeedback.mock.results[index]?.value).toMatchObject({ assurance });
+    await waitFor(() => expect(send?.disabled).toBe(false));
+  }
+  expect(sendAgentReviewFeedback).toHaveBeenCalledWith(
     expect.objectContaining({
       comments: [expect.objectContaining({ body: 'Focused feedback', filePath: 'src/app.ts' })],
       repository: {
@@ -530,18 +551,25 @@ test('agent review feedback sends a focused draft with repository identity', asy
   expect(editor.textContent).toBe('Focused feedback');
 });
 
-test('failed agent review feedback preserves the editable focused draft', async () => {
+test('agent review feedback preserves the same focused draft after rejection and IPC failure', async () => {
+  const sendAgentReviewFeedback = vi
+    .fn()
+    .mockResolvedValueOnce({
+      deliveryId: 'delivery-1',
+      reason: 'Session is busy.',
+      status: 'rejected' as const,
+    })
+    .mockRejectedValueOnce(new Error('Bridge unavailable.'))
+    .mockResolvedValueOnce({});
   const file = createChangedFile('src/app.ts');
   window.codiff = createCodiffMock({
-    completeAgentReview: vi.fn(async () => {
-      throw new Error('Result file unavailable.');
-    }),
     getLaunchOptions: vi.fn(async () => ({
       agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
       walkthrough: false,
     })),
     getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
+    sendAgentReviewFeedback,
   });
   await using app = await renderReact(<App />);
   await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
@@ -572,23 +600,30 @@ test('failed agent review feedback preserves the editable focused draft', async 
     ),
   );
   const send = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
-  await act(async () => send?.click());
-
-  await waitFor(() =>
-    expect(app.container.querySelector('[role="alert"]')?.textContent).toBe(
-      'Result file unavailable.',
-    ),
-  );
-  expect(app.container.querySelector('[contenteditable="true"][aria-label^="Comment on"]')).toBe(
-    editor,
-  );
-  expect(editor.textContent).toBe('Keep this feedback');
-  expect(send?.disabled).toBe(false);
+  for (const error of [
+    'Session is busy.',
+    'Bridge unavailable.',
+    'Agent feedback acknowledgement has the wrong delivery ID.',
+  ]) {
+    await act(async () => send?.click());
+    await waitFor(() =>
+      expect(app.container.querySelector('[role="alert"]')?.textContent).toBe(error),
+    );
+    expect(app.container.querySelector('[contenteditable="true"][aria-label^="Comment on"]')).toBe(
+      editor,
+    );
+    expect(editor.textContent).toBe('Keep this feedback');
+    expect(send?.disabled).toBe(false);
+  }
 });
 
 test('agent review feedback is disabled and guarded while switching sources', async () => {
   const file = createChangedFile('src/app.ts');
-  const completeAgentReview = vi.fn(async () => {});
+  const sendAgentReviewFeedback = vi.fn(async () => ({
+    assurance: 'transport-write' as const,
+    deliveryId: 'delivery-1',
+    status: 'accepted' as const,
+  }));
   const openReviewSourceListeners: Array<Parameters<Window['codiff']['onOpenReviewSource']>[0]> =
     [];
   let resolveSwitch!: (state: RepositoryState) => void;
@@ -599,7 +634,6 @@ test('agent review feedback is disabled and guarded while switching sources', as
     source ? switchState : Promise.resolve({ ...repositoryState, files: [file] }),
   );
   window.codiff = createCodiffMock({
-    completeAgentReview,
     getLaunchOptions: vi.fn(async () => ({
       agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       repositoryPathProvided: true,
@@ -610,6 +644,7 @@ test('agent review feedback is disabled and guarded while switching sources', as
       openReviewSourceListeners.push(callback);
       return () => {};
     }),
+    sendAgentReviewFeedback,
   });
   await using app = await renderReact(<App />);
   await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
@@ -647,7 +682,7 @@ test('agent review feedback is disabled and guarded while switching sources', as
 
   await waitFor(() => expect(send.disabled).toBe(true));
   await act(async () => send.click());
-  expect(completeAgentReview).not.toHaveBeenCalled();
+  expect(sendAgentReviewFeedback).not.toHaveBeenCalled();
 
   resolveSwitch({
     ...repositoryState,

@@ -15,17 +15,20 @@ const writeJsonAtomic = (path, value) => {
 };
 
 /**
- * @param {{once: (event: string, listener: () => void) => void; show: () => void}} window
+ * @param {{once: (event: string, listener: () => Promise<void>) => void; show: () => void}} window
  * @param {import('../core/types.ts').CodiffLaunchOptions} launchOptions
+ * @param {Promise<{available: boolean; reason?: string}> | null} deliveryPreflight
  */
-const registerWindowOpenReceipt = (window, launchOptions) => {
-  window.once('ready-to-show', () => {
+const registerWindowOpenReceipt = (window, launchOptions, deliveryPreflight) => {
+  window.once('ready-to-show', async () => {
     window.show();
     if (launchOptions.agentReview && launchOptions.agentReviewOpenFile) {
+      const capability = await deliveryPreflight;
       try {
         writeJsonAtomic(launchOptions.agentReviewOpenFile, {
-          deliveryAvailable: true,
+          deliveryAvailable: capability.available,
           deliveryId: launchOptions.agentReview.deliveryId,
+          ...(capability.reason ? { reason: capability.reason } : {}),
           status: 'open',
           version: 1,
         });

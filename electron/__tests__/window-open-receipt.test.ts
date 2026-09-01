@@ -7,19 +7,24 @@ import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources
 const require = createRequire(import.meta.url);
 const { registerWindowOpenReceipt } = require('../window-open-receipt.cjs') as {
   registerWindowOpenReceipt: (
-    window: { once: (event: string, listener: () => void) => void; show: () => void },
+    window: { once: (event: string, listener: () => Promise<void>) => void; show: () => void },
     launchOptions: {
       agentReview?: { deliveryId: string; sessionId: string };
       agentReviewOpenFile?: string;
     },
+    capability: Promise<{ available: boolean; reason?: string }> | null,
   ) => void;
 };
 
-test('publishes the matching receipt only after the window is ready to show', async () => {
+test('publishes the shared delivery preflight only after the window is ready to show', async () => {
   await using directory = await createTemporaryDirectory('codiff-window-open-receipt-');
   const openFile = join(directory.path, 'open.json');
-  let readyToShow: (() => void) | undefined;
+  let readyToShow: (() => Promise<void>) | undefined;
   let shown = false;
+  let resolveCapability!: (capability: { available: boolean; reason?: string }) => void;
+  const capability = new Promise<{ available: boolean; reason?: string }>((resolve) => {
+    resolveCapability = resolve;
+  });
 
   registerWindowOpenReceipt(
     {
@@ -35,15 +40,20 @@ test('publishes the matching receipt only after the window is ready to show', as
       agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       agentReviewOpenFile: openFile,
     },
+    capability,
   );
 
   await expect(readFile(openFile, 'utf8')).rejects.toThrow();
-  readyToShow?.();
+  const publish = readyToShow?.();
 
   expect(shown).toBe(true);
+  await expect(readFile(openFile, 'utf8')).rejects.toThrow();
+  resolveCapability({ available: false, reason: 'Adapter unavailable.' });
+  await publish;
   await expect(readFile(openFile, 'utf8').then(JSON.parse)).resolves.toEqual({
-    deliveryAvailable: true,
+    deliveryAvailable: false,
     deliveryId: 'delivery-1',
+    reason: 'Adapter unavailable.',
     status: 'open',
     version: 1,
   });
@@ -52,7 +62,7 @@ test('publishes the matching receipt only after the window is ready to show', as
 test('ignores a late receipt after the launcher removes its directory', async () => {
   await using directory = await createTemporaryDirectory('codiff-window-open-receipt-');
   const openFile = join(directory.path, 'open.json');
-  let readyToShow: (() => void) | undefined;
+  let readyToShow: (() => Promise<void>) | undefined;
 
   registerWindowOpenReceipt(
     {
@@ -65,8 +75,9 @@ test('ignores a late receipt after the launcher removes its directory', async ()
       agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
       agentReviewOpenFile: openFile,
     },
+    Promise.resolve({ available: false }),
   );
   await rm(directory.path, { recursive: true });
 
-  expect(() => readyToShow?.()).not.toThrow();
+  await expect(readyToShow?.()).resolves.toBeUndefined();
 });
