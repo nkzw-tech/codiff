@@ -3,7 +3,7 @@ import { ClockCounterClockwiseIcon as ClockCounterClockwise } from '@phosphor-ic
 import { PathIcon as Path } from '@phosphor-icons/react/Path';
 import { TreeStructureIcon as TreeStructure } from '@phosphor-icons/react/TreeStructure';
 import type { FileDiffLoadedFiles } from '@pierre/diffs';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { CommandBar } from './app/components/CommandBar.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import { OpenReviewSourceDialog } from './app/components/OpenReviewSourceDialog.tsx';
@@ -114,7 +114,7 @@ import type {
   AgentBackend,
   AgentFeedbackAssurance,
   ChangedFile,
-  AgentSkillStatus,
+  AgentSkillStatusResponse,
   CodiffLaunchOptions,
   CodiffMarkdownDocument,
   CodiffPreferences,
@@ -201,10 +201,7 @@ export default function App() {
   const [launchOptions, setLaunchOptions] = useState<CodiffLaunchOptions>(defaultLaunchOptions);
   const [codiffConfig, setCodiffConfig] = useState<CodiffConfig>(createDefaultConfig);
   const [agentSkillInstalling, setAgentSkillInstalling] = useState(false);
-  const [agentSkillResult, setAgentSkillResult] = useState<{
-    backend: AgentBackend;
-    status: AgentSkillStatus;
-  }>({ backend: 'codex', status: defaultAgentSkillStatus });
+  const [agentSkillResult, setAgentSkillResult] = useState<AgentSkillStatusResponse | null>(null);
   const [preferences, setPreferences] = useState<CodiffPreferences>(defaultPreferences);
   const [reloadDeltaPaths, setReloadDeltaPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [scrollTarget, setScrollTarget] = useState<ReviewScrollTarget | null>(null);
@@ -227,9 +224,8 @@ export default function App() {
   const [sharePlanEnabled, setSharePlanEnabled] = useState(false);
   const activeAgentBackend = launchOptions.agentBackend ?? codiffConfig.settings.agentBackend;
   const agentSkillStatus =
-    agentSkillResult.backend === activeAgentBackend
-      ? agentSkillResult.status
-      : defaultAgentSkillStatus;
+    agentSkillResult?.backend === activeAgentBackend ? agentSkillResult : defaultAgentSkillStatus;
+  const activeAgentBackendRef = useRef(activeAgentBackend);
   const agentSkillRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const historySourceRef = useRef<ReviewSource | null>(null);
@@ -245,6 +241,10 @@ export default function App() {
   const sourceRequestRef = useRef(0);
   const stateGenerationRef = useRef(0);
   const markdownRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  useLayoutEffect(() => {
+    activeAgentBackendRef.current = activeAgentBackend;
+  }, [activeAgentBackend]);
   const viewedRef = useRef<Record<string, string>>({});
   const persistViewed = useCallback((nextViewed: Record<string, string>) => {
     const currentState = stateRef.current;
@@ -828,14 +828,20 @@ export default function App() {
 
   useEffect(() => {
     let canceled = false;
+    const expectedBackend = activeAgentBackend;
     const request = agentSkillRequestRef.current + 1;
     agentSkillRequestRef.current = request;
 
     void window.codiff
       .getAgentSkillStatus()
       .then((status) => {
-        if (!canceled && agentSkillRequestRef.current === request) {
-          setAgentSkillResult({ backend: activeAgentBackend, status });
+        if (
+          !canceled &&
+          agentSkillRequestRef.current === request &&
+          status.backend === expectedBackend &&
+          activeAgentBackendRef.current === expectedBackend
+        ) {
+          setAgentSkillResult(status);
         }
       })
       .catch(() => {});
@@ -1635,13 +1641,17 @@ export default function App() {
     window.codiff
       .installAgentSkill()
       .then((status) => {
-        if (agentSkillRequestRef.current === request) {
-          setAgentSkillResult({ backend, status });
+        if (
+          agentSkillRequestRef.current === request &&
+          status.backend === backend &&
+          activeAgentBackendRef.current === backend
+        ) {
+          setAgentSkillResult(status);
         }
       })
       .catch(() => {
-        if (agentSkillRequestRef.current === request) {
-          setAgentSkillResult({ backend, status: defaultAgentSkillStatus });
+        if (agentSkillRequestRef.current === request && activeAgentBackendRef.current === backend) {
+          setAgentSkillResult(null);
         }
       })
       .finally(() => {

@@ -1624,19 +1624,24 @@ ipcMain.handle('codiff:getLaunchOptions', async (event) => {
 ipcMain.handle('codiff:getAgentSkillStatus', async (event) => {
   const agent = resolveWindowAgent(event.sender.id);
   const installer = skillInstallerFor(agent.id);
-  return installer
+  const status = installer
     ? installer.getStatus((backend) => getWindowAgentActiveStatus(event.sender.id, backend))
     : { active: false, installed: false, path: '' };
+  return { ...(await status), backend: agent.id };
 });
 
 ipcMain.handle('codiff:installAgentSkill', async (event) => {
-  const installer = skillInstallerFor(resolveWindowAgent(event.sender.id).id);
+  const agent = resolveWindowAgent(event.sender.id);
+  const installer = skillInstallerFor(agent.id);
   if (!installer) {
-    return { active: false, installed: false, path: '' };
+    return { active: false, backend: agent.id, installed: false, path: '' };
   }
 
   await installer.install(BrowserWindow.fromWebContents(event.sender));
-  return installer.getStatus((backend) => getWindowAgentActiveStatus(event.sender.id, backend));
+  const status = await installer.getStatus((backend) =>
+    getWindowAgentActiveStatus(event.sender.id, backend),
+  );
+  return { ...status, backend: agent.id };
 });
 
 ipcMain.handle('codiff:getTerminalHelperStatus', () => getTerminalHelperStatus());

@@ -18,6 +18,7 @@ import type {
   AgentBackend,
   AgentFeedbackAssurance,
   AgentSkillStatus,
+  AgentSkillStatusResponse,
   ChangedFile,
   CommitMetadata,
   NarrativeWalkthrough,
@@ -142,6 +143,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   })),
   getAgentSkillStatus: vi.fn(async () => ({
     active: true,
+    backend: 'codex' as const,
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
   })),
@@ -215,6 +217,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   increaseCodeFontSize: vi.fn(async () => {}),
   installAgentSkill: vi.fn(async () => ({
     active: true,
+    backend: 'codex' as const,
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
   })),
@@ -411,7 +414,7 @@ const renderFirstRunApp = async (
   const config = createDefaultConfig();
   config.settings.agentBackend = backend;
   window.codiff = createCodiffMock({
-    getAgentSkillStatus: vi.fn(async () => status),
+    getAgentSkillStatus: vi.fn(async () => ({ ...status, backend })),
     getConfig: vi.fn(async () => config),
     getLaunchOptions: vi.fn(async () => ({
       agentBackend: backend,
@@ -471,7 +474,7 @@ test('first-run guidance distinguishes active and absent integrations', async ()
 
 test('repository startup does not wait for capability probes', async () => {
   window.codiff = createCodiffMock({
-    getAgentSkillStatus: vi.fn(() => new Promise<AgentSkillStatus>(() => {})),
+    getAgentSkillStatus: vi.fn(() => new Promise<AgentSkillStatusResponse>(() => {})),
     getRepositoryState: vi.fn(async () => ({
       ...repositoryState,
       files: [createChangedFile('src/change.ts')],
@@ -484,10 +487,56 @@ test('repository startup does not wait for capability probes', async () => {
   await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
 });
 
+test('status attribution waits for config hydration before rendering the saved backend', async () => {
+  let resolveConfig!: (config: ReturnType<typeof createDefaultConfig>) => void;
+  const config = new Promise<ReturnType<typeof createDefaultConfig>>((resolvePromise) => {
+    resolveConfig = resolvePromise;
+  });
+  const getAgentSkillStatus = vi
+    .fn<Window['codiff']['getAgentSkillStatus']>()
+    .mockResolvedValueOnce({
+      active: true,
+      backend: 'opencode' as const,
+      installed: true,
+      path: '/opencode',
+    })
+    .mockResolvedValueOnce({
+      active: true,
+      backend: 'opencode',
+      installed: true,
+      path: '/opencode',
+    });
+
+  await using app = await renderFirstRunApp(
+    'codex',
+    { active: false, installed: false, path: '' },
+    {
+      getAgentSkillStatus,
+      getConfig: vi.fn(() => config),
+      getLaunchOptions: vi.fn(async () => ({
+        repositoryPathProvided: false,
+        walkthrough: false,
+      })),
+    },
+  );
+
+  await waitFor(() => expect(getAgentSkillStatus).toHaveBeenCalledTimes(1));
+  expect(app.container.textContent).not.toContain('Codex Skill is installed and active');
+
+  const hydratedConfig = createDefaultConfig();
+  hydratedConfig.settings.agentBackend = 'opencode';
+  await act(async () => resolveConfig(hydratedConfig));
+
+  await waitFor(() => expect(getAgentSkillStatus).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(app.container.textContent).toContain('OpenCode Integration is installed and active'),
+  );
+});
+
 test('a stale agent status response cannot replace the status for a new backend', async () => {
   let configListener: ((config: ReturnType<typeof createDefaultConfig>) => void) | null = null;
-  let resolveCodexStatus!: (status: AgentSkillStatus) => void;
-  const codexStatus = new Promise<AgentSkillStatus>((resolvePromise) => {
+  let resolveCodexStatus!: (status: AgentSkillStatusResponse) => void;
+  const codexStatus = new Promise<AgentSkillStatusResponse>((resolvePromise) => {
     resolveCodexStatus = resolvePromise;
   });
   const getAgentSkillStatus = vi
@@ -495,6 +544,7 @@ test('a stale agent status response cannot replace the status for a new backend'
     .mockImplementationOnce(() => codexStatus)
     .mockResolvedValueOnce({
       active: false,
+      backend: 'opencode',
       detail: 'Restart OpenCode so the Codiff plugin can register this session.',
       installed: true,
       path: '/opencode',
@@ -525,7 +575,7 @@ test('a stale agent status response cannot replace the status for a new backend'
   await waitFor(() => expect(app.container.textContent).toContain('Restart OpenCode'));
 
   await act(async () => {
-    resolveCodexStatus({ active: true, installed: true, path: '/codex' });
+    resolveCodexStatus({ active: true, backend: 'codex', installed: true, path: '/codex' });
   });
   expect(app.container.textContent).toContain('Restart OpenCode');
   expect(app.container.textContent).not.toContain('OpenCode Integration is installed and active');
@@ -533,15 +583,16 @@ test('a stale agent status response cannot replace the status for a new backend'
 
 test('an install response cannot replace the status after the backend changes', async () => {
   let configListener: ((config: ReturnType<typeof createDefaultConfig>) => void) | null = null;
-  let resolveInstall!: (status: AgentSkillStatus) => void;
-  const installResult = new Promise<AgentSkillStatus>((resolvePromise) => {
+  let resolveInstall!: (status: AgentSkillStatusResponse) => void;
+  const installResult = new Promise<AgentSkillStatusResponse>((resolvePromise) => {
     resolveInstall = resolvePromise;
   });
   const getAgentSkillStatus = vi
     .fn<Window['codiff']['getAgentSkillStatus']>()
-    .mockResolvedValueOnce({ active: false, installed: false, path: '' })
+    .mockResolvedValueOnce({ active: false, backend: 'codex', installed: false, path: '' })
     .mockResolvedValueOnce({
       active: false,
+      backend: 'opencode',
       detail: 'Restart OpenCode so the Codiff plugin can register this session.',
       installed: true,
       path: '/opencode',
@@ -574,10 +625,33 @@ test('an install response cannot replace the status after the backend changes', 
   await waitFor(() => expect(app.container.textContent).toContain('Restart OpenCode'));
 
   await act(async () => {
-    resolveInstall({ active: true, installed: true, path: '/codex' });
+    resolveInstall({ active: true, backend: 'codex', installed: true, path: '/codex' });
   });
   expect(app.container.textContent).toContain('Restart OpenCode');
   expect(app.container.textContent).not.toContain('OpenCode Integration is installed and active');
+});
+
+test('an install response for a different backend is rejected', async () => {
+  await using app = await renderFirstRunApp(
+    'codex',
+    { active: false, installed: false, path: '' },
+    {
+      installAgentSkill: vi.fn(async () => ({
+        active: true,
+        backend: 'opencode' as const,
+        installed: true,
+        path: '/opencode',
+      })),
+    },
+  );
+
+  const installButton = [...app.container.querySelectorAll('button')].find((button) =>
+    button.textContent?.includes('Install Codex Skill'),
+  );
+  await act(async () => installButton?.click());
+
+  await waitFor(() => expect(app.container.textContent).toContain('Install Codex Skill'));
+  expect(app.container.textContent).not.toContain('Codex Skill is installed and active');
 });
 
 test('code font preferences update root CSS variables', async () => {

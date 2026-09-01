@@ -504,6 +504,10 @@ export type AgentSkillStatus = {
   path: string;
 };
 
+export type AgentSkillStatusResponse = AgentSkillStatus & {
+  backend: AgentBackend;
+};
+
 /** @deprecated Use {@link AgentSkillStatus}. */
 export type CodexSkillStatus = AgentSkillStatus;
 

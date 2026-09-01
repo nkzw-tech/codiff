@@ -1,7 +1,7 @@
 import type { NativeKeyboardLayout } from './config/keyboard-layout.ts';
 import type { CodiffConfig } from './config/types.ts';
 import type {
-  AgentSkillStatus,
+  AgentSkillStatusResponse,
   AgentFeedbackDeliveryResponse,
   AgentReviewFeedback,
   CodiffFeatureFlags,
@@ -56,7 +56,7 @@ declare global {
       decreaseCodeFontSize: () => Promise<void>;
       dismissUpdate: () => Promise<CodiffUpdateStatus>;
       findDefinitions: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
-      getAgentSkillStatus: () => Promise<AgentSkillStatus>;
+      getAgentSkillStatus: () => Promise<AgentSkillStatusResponse>;
       getConfig: () => Promise<CodiffConfig>;
       getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
       getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
@@ -79,7 +79,7 @@ declare global {
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;
-      installAgentSkill: () => Promise<AgentSkillStatus>;
+      installAgentSkill: () => Promise<AgentSkillStatusResponse>;
       installTerminalHelper: () => Promise<TerminalHelperStatus>;
       isWindowFullScreen: () => Promise<boolean>;
       markPlanReady: () => Promise<void>;
