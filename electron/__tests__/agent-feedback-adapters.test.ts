@@ -254,9 +254,72 @@ test('applies an absolute ten-second timeout and treats it as ambiguous', async 
   });
 
   await vi.advanceTimersByTimeAsync(10_000);
+  child.emit('close', null, 'SIGTERM');
 
   await rejection;
   expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+});
+
+test('waits for a timed-out Codex process to close and escalates termination', async () => {
+  vi.useFakeTimers();
+  const child = new ChildProcess();
+  const spawnProcess = vi.fn<SpawnProcess>(() => child);
+  const adapter = createAgentFeedbackAdapters({ spawnProcess }).codex;
+  const delivery = adapter.deliver(request);
+  let settled = false;
+  void delivery.catch(() => {
+    settled = true;
+  });
+
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+  expect(settled).toBe(false);
+
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  expect(settled).toBe(false);
+
+  child.emit('close', null, 'SIGKILL');
+  await expect(delivery).rejects.toMatchObject({
+    ambiguous: true,
+    message: 'Codex queue timed out.',
+  });
+});
+
+test('keeps escalating when a timed-out Codex process emits a signal error', async () => {
+  vi.useFakeTimers();
+  const child = new ChildProcess();
+  const spawnProcess = vi.fn<SpawnProcess>(() => child);
+  const delivery = createAgentFeedbackAdapters({ spawnProcess }).codex.deliver(request);
+  const rejection = expect(delivery).rejects.toMatchObject({ message: 'Codex queue timed out.' });
+
+  await vi.advanceTimersByTimeAsync(10_000);
+  child.emit('error', new Error('SIGTERM failed'));
+  await vi.advanceTimersByTimeAsync(1_000);
+
+  expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  child.emit('close', null, 'SIGKILL');
+  await rejection;
+});
+
+test('settles ambiguously when a killed Codex process never emits close', async () => {
+  vi.useFakeTimers();
+  const child = new ChildProcess();
+  const spawnProcess = vi.fn<SpawnProcess>(() => child);
+  const delivery = createAgentFeedbackAdapters({ spawnProcess }).codex.deliver(request);
+  let settled = false;
+  void delivery.catch(() => {
+    settled = true;
+  });
+
+  await vi.advanceTimersByTimeAsync(12_000);
+
+  expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+  expect(settled).toBe(true);
+  await expect(delivery).rejects.toMatchObject({
+    ambiguous: true,
+    message: 'Codex queue timed out.',
+  });
 });
 
 test('treats ENOENT during delivery as a definite failure', async () => {

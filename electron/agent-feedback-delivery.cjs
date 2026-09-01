@@ -216,6 +216,12 @@ const createAgentFeedbackDeliveryController = ({
   const inFlight = new Map();
   const terminal = new Map();
 
+  const rememberTerminal = (binding, result) => {
+    binding.terminal = result;
+    terminal.set(binding.deliveryId, result);
+    if (terminal.size > 1_000) terminal.delete(terminal.keys().next().value);
+  };
+
   /** @param {number} webContentsId */
   const getBinding = (webContentsId) => {
     const binding = bindings.get(webContentsId);
@@ -240,7 +246,7 @@ const createAgentFeedbackDeliveryController = ({
     /** @param {number} webContentsId @param {import('../core/types.ts').AgentReviewFeedback} feedback */
     async deliver(webContentsId, feedback) {
       const binding = getBinding(webContentsId);
-      const previous = terminal.get(binding.deliveryId);
+      const previous = binding.terminal ?? terminal.get(binding.deliveryId);
       if (previous?.kind === 'accepted') {
         return { ...previous.response, status: 'already-accepted' };
       }
@@ -275,18 +281,18 @@ const createAgentFeedbackDeliveryController = ({
             const wrapped = new Error(
               `${error.message} Delivery may have reached the agent. Verify the session or copy the comments before continuing.`,
             );
-            terminal.set(binding.deliveryId, { error: wrapped, kind: 'ambiguous' });
+            rememberTerminal(binding, { error: wrapped, kind: 'ambiguous' });
             throw wrapped;
           }
           if (response.status === 'rejected') return response;
-          terminal.set(binding.deliveryId, { kind: 'accepted', response });
+          rememberTerminal(binding, { kind: 'accepted', response });
           return response;
         } catch (error) {
           if (error?.ambiguous === true) {
             const wrapped = new Error(
               'Delivery may have reached the agent. Verify the session or copy the comments before continuing.',
             );
-            terminal.set(binding.deliveryId, { error: wrapped, kind: 'ambiguous' });
+            rememberTerminal(binding, { error: wrapped, kind: 'ambiguous' });
             throw wrapped;
           }
           throw error;

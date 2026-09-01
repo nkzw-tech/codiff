@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { chmod, mkdtemp, mkdir, symlink, writeFile } from 'node:fs/promises';
+import fs from 'node:fs';
+import { chmod, mkdtemp, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -148,6 +149,78 @@ test('probe ignores stale resident registrations', async () => {
     available: false,
     reason: expect.stringMatching(/no authenticated.*bridge/i),
   });
+});
+
+test('probe removes an owned stale resident registration', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-stale-cleanup-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const stale = await writeRegistration(registrationRoot, {
+    updatedAt: new Date(Date.now() - 45_001).toISOString(),
+  });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await client.probeAgentFeedbackBridge(request);
+
+  await expect(stat(stale.file)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+test('probe preserves an atomic registration refresh that races stale cleanup', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-stale-race-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const stale = await writeRegistration(registrationRoot, {
+    updatedAt: new Date(Date.now() - 45_001).toISOString(),
+  });
+  const refreshed = { ...stale.registration, updatedAt: new Date().toISOString() };
+  const renameSync = fs.renameSync.bind(fs);
+  const rename = vi.spyOn(fs, 'renameSync').mockImplementation((source, destination) => {
+    if (source === stale.file && String(destination).includes('.stale-')) {
+      const temporary = `${stale.file}.refreshed`;
+      fs.writeFileSync(temporary, JSON.stringify(refreshed), { mode: 0o600 });
+      renameSync(temporary, stale.file);
+    }
+    renameSync(source, destination);
+  });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  try {
+    await client.probeAgentFeedbackBridge(request);
+  } finally {
+    rename.mockRestore();
+  }
+
+  await expect(readFile(stale.file, 'utf8')).resolves.toBe(JSON.stringify(refreshed));
+});
+
+test.each([
+  ['malformed', { backend: undefined }],
+  ['non-string timestamp', { updatedAt: 0 }],
+  ['unsupported protocol', { protocolVersion: 2 }],
+])('probe preserves a stale %s registration artifact', async (_name, override) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-invalid-cleanup-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const registration = await writeRegistration(registrationRoot, {
+    updatedAt: new Date(Date.now() - 45_001).toISOString(),
+    ...override,
+  });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await client.probeAgentFeedbackBridge(request);
+
+  await expect(stat(registration.file)).resolves.toBeDefined();
+});
+
+test('probe preserves a stale registration that is not private', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-permission-cleanup-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const registration = await writeRegistration(registrationRoot, {
+    updatedAt: new Date(Date.now() - 45_001).toISOString(),
+  });
+  await chmod(registration.file, 0o640);
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await client.probeAgentFeedbackBridge(request);
+
+  await expect(stat(registration.file)).resolves.toBeDefined();
 });
 
 test('probe reports an unauthenticated resident endpoint as unavailable', async () => {

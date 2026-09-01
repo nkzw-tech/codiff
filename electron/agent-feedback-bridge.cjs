@@ -19,6 +19,8 @@ const assurances = {
   pi: new Set(['dispatch-started']),
 };
 
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim() !== '';
+
 const defaultIsPidAlive = (pid) => {
   try {
     process.kill(pid, 0);
@@ -81,23 +83,54 @@ const createAgentFeedbackBridgeClient = ({
         ) {
           continue;
         }
-        const registration = JSON.parse(fs.readFileSync(registrationPath, 'utf8'));
-        const updatedAt = Date.parse(registration.updatedAt);
+        const registrationText = fs.readFileSync(registrationPath, 'utf8');
+        const registration = JSON.parse(registrationText);
+        const updatedAt =
+          typeof registration.updatedAt === 'string' ? Date.parse(registration.updatedAt) : NaN;
+        const validPid = Number.isInteger(registration.pid) && registration.pid > 0;
         if (
           registration.backend !== identity.backend ||
           registration.protocolVersion !== PROTOCOL_VERSION ||
+          !isNonEmptyString(registration.repositoryRoot) ||
+          !isNonEmptyString(registration.sessionId) ||
+          !isNonEmptyString(registration.endpoint) ||
+          !isNonEmptyString(registration.instanceId) ||
+          !validPid ||
+          !isNonEmptyString(registration.token) ||
+          !Number.isFinite(updatedAt)
+        ) {
+          continue;
+        }
+        const stale = now() - updatedAt > STALE_AFTER_MS || updatedAt - now() > STALE_AFTER_MS;
+        const dead = validPid && !isPidAlive(registration.pid);
+        if (stale || dead) {
+          const quarantinePath = `${registrationPath}.stale-${randomUUID()}`;
+          try {
+            fs.renameSync(registrationPath, quarantinePath);
+          } catch {
+            continue;
+          }
+          const claimedMetadata = fs.lstatSync(quarantinePath);
+          const claimedStaleFile =
+            claimedMetadata.isFile() &&
+            isPrivate(claimedMetadata, uid) &&
+            claimedMetadata.ino === metadata.ino &&
+            claimedMetadata.mtimeMs === metadata.mtimeMs &&
+            claimedMetadata.size === metadata.size &&
+            fs.readFileSync(quarantinePath, 'utf8') === registrationText;
+          if (!claimedStaleFile) {
+            try {
+              fs.linkSync(quarantinePath, registrationPath);
+            } catch (error) {
+              if (error?.code !== 'EEXIST') throw error;
+            }
+          }
+          fs.rmSync(quarantinePath, { force: true });
+          continue;
+        }
+        if (
           registration.repositoryRoot !== identity.repositoryRoot ||
-          registration.sessionId !== identity.sessionId ||
-          typeof registration.endpoint !== 'string' ||
-          typeof registration.instanceId !== 'string' ||
-          !Number.isInteger(registration.pid) ||
-          registration.pid <= 0 ||
-          typeof registration.token !== 'string' ||
-          !registration.token ||
-          !Number.isFinite(updatedAt) ||
-          now() - updatedAt > STALE_AFTER_MS ||
-          updatedAt - now() > STALE_AFTER_MS ||
-          !isPidAlive(registration.pid)
+          registration.sessionId !== identity.sessionId
         ) {
           continue;
         }

@@ -167,6 +167,60 @@ test('returns an accepted delivery idempotently without dispatching twice', asyn
   expect(deliver).toHaveBeenCalledOnce();
 });
 
+test('evicts the oldest terminal response after 1,000 delivery IDs', async () => {
+  const deliver = vi.fn(async (deliveryRequest: AgentFeedbackDeliveryRequest) => ({
+    assurance: 'transport-write' as const,
+    deliveryId: deliveryRequest.deliveryId,
+    status: 'accepted' as const,
+  }));
+  const controller = createAgentFeedbackDeliveryController({ deliver });
+  for (let index = 0; index <= 1_000; index += 1) {
+    controller.register(7, {
+      backend: 'claude',
+      deliveryId: `delivery-${index}`,
+      repository: Promise.resolve(feedback.repository),
+      sessionId: 'session-1',
+    });
+    await controller.deliver(7, feedback);
+  }
+  controller.register(7, {
+    backend: 'claude',
+    deliveryId: 'delivery-0',
+    repository: Promise.resolve(feedback.repository),
+    sessionId: 'session-1',
+  });
+
+  await expect(controller.deliver(7, feedback)).resolves.toMatchObject({ status: 'accepted' });
+  expect(deliver).toHaveBeenCalledTimes(1_002);
+});
+
+test('does not retry an active ambiguous delivery after terminal ledger eviction', async () => {
+  const ambiguous = Object.assign(new Error('connection closed'), { ambiguous: true });
+  const deliver = vi
+    .fn<(request: AgentFeedbackDeliveryRequest) => Promise<AgentFeedbackDeliveryResponse>>()
+    .mockRejectedValueOnce(ambiguous)
+    .mockImplementation(async (deliveryRequest) => ({
+      assurance: 'transport-write',
+      deliveryId: deliveryRequest.deliveryId,
+      status: 'accepted',
+    }));
+  const controller = createAgentFeedbackDeliveryController({ deliver });
+  register(controller);
+  await expect(controller.deliver(7, feedback)).rejects.toThrow(/verify the session/i);
+  for (let index = 0; index < 1_001; index += 1) {
+    controller.register(index + 100, {
+      backend: 'claude',
+      deliveryId: `new-delivery-${index}`,
+      repository: Promise.resolve(feedback.repository),
+      sessionId: 'session-1',
+    });
+    await controller.deliver(index + 100, feedback);
+  }
+
+  await expect(controller.deliver(7, feedback)).rejects.toThrow(/verify the session/i);
+  expect(deliver).toHaveBeenCalledTimes(1_002);
+});
+
 test('shares one in-flight dispatch between concurrent calls for a delivery ID', async () => {
   let resolveDelivery!: (response: AgentFeedbackDeliveryResponse) => void;
   const deliver = vi.fn(

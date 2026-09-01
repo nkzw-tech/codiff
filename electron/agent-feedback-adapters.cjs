@@ -10,6 +10,7 @@ const { formatAgentFeedbackMessage } = require('./agent-feedback-delivery.cjs');
 const CODEX_INPUT_BYTES = 24 * 1024;
 const MAX_OUTPUT_BYTES = 1_048_576;
 const PROCESS_TIMEOUT_MS = 10_000;
+const PROCESS_TERMINATION_GRACE_MS = 1_000;
 
 const ambiguousError = (message) => Object.assign(new Error(message), { ambiguous: true });
 
@@ -30,39 +31,61 @@ const spawnCapture = (command, args, { maxOutputBytes, spawnProcess, timeoutMs }
     /** @type {Array<Buffer>} */
     const stderr = [];
     let outputBytes = 0;
+    let pendingError;
     let settled = false;
     let timer;
-    const finishError = (error) => {
+    let terminationTimer;
+    const settleError = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.kill('SIGTERM');
+      clearTimeout(terminationTimer);
       reject(error);
+    };
+    const terminate = (error) => {
+      if (settled || pendingError) return;
+      pendingError = error;
+      clearTimeout(timer);
+      child.kill('SIGTERM');
+      terminationTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+        terminationTimer = setTimeout(
+          () => settleError(pendingError),
+          PROCESS_TERMINATION_GRACE_MS,
+        );
+        terminationTimer.unref?.();
+      }, PROCESS_TERMINATION_GRACE_MS);
+      terminationTimer.unref?.();
     };
     /** @param {Array<Buffer>} output @param {unknown} value */
     const append = (output, value) => {
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(String(value));
       outputBytes += chunk.length;
       if (outputBytes > maxOutputBytes) {
-        finishError(ambiguousError('Codex queue output exceeded its limit.'));
+        terminate(ambiguousError('Codex queue output exceeded its limit.'));
         return;
       }
       output.push(chunk);
     };
-    timer = setTimeout(() => finishError(ambiguousError('Codex queue timed out.')), timeoutMs);
+    timer = setTimeout(() => terminate(ambiguousError('Codex queue timed out.')), timeoutMs);
     timer.unref?.();
     child.stdout.on('data', (chunk) => {
-      if (!settled) append(stdout, chunk);
+      if (!settled && !pendingError) append(stdout, chunk);
     });
     child.stderr.on('data', (chunk) => {
-      if (!settled) append(stderr, chunk);
+      if (!settled && !pendingError) append(stderr, chunk);
     });
     child.once('error', (error) => {
+      if (pendingError) return;
       if (error?.code !== 'ENOENT') error.ambiguous = true;
-      finishError(error);
+      settleError(error);
     });
     child.once('close', (code, signal) => {
       if (settled) return;
+      if (pendingError) {
+        settleError(pendingError);
+        return;
+      }
       settled = true;
       clearTimeout(timer);
       resolve({

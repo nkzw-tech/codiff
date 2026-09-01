@@ -745,6 +745,80 @@ test('desktop app enables send feedback after a fresh exact-session preflight su
   await waitFor(() => expect(app.container.querySelector('.send-feedback-button')).not.toBeNull());
 });
 
+test('desktop app ignores an older agent review delivery refresh result', async () => {
+  let resolveFirst!: (value: { available: boolean; deliveryId: string; reason?: string }) => void;
+  let resolveSecond!: (value: { available: boolean; deliveryId: string }) => void;
+  const refreshAgentReviewDelivery = vi
+    .fn<NonNullable<Window['codiff']['refreshAgentReviewDelivery']>>()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+    );
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
+      agentReviewDelivery: { available: false, deliveryId: 'delivery-1' },
+      repositoryPathProvided: true,
+      walkthrough: false,
+    })),
+    refreshAgentReviewDelivery,
+  });
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.loading')).toBeNull());
+
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  await waitFor(() => expect(refreshAgentReviewDelivery).toHaveBeenCalledTimes(2));
+  resolveSecond({ available: true, deliveryId: 'delivery-1' });
+  await waitFor(() => expect(app.container.querySelector('.send-feedback-button')).not.toBeNull());
+  await act(async () =>
+    resolveFirst({ available: false, deliveryId: 'delivery-1', reason: 'stale result' }),
+  );
+
+  expect(app.container.querySelector('.send-feedback-button')).not.toBeNull();
+});
+
+test('desktop app preserves refreshed delivery availability while repository state loads', async () => {
+  let resolveRepositoryState!: (value: typeof repositoryState) => void;
+  const getRepositoryState = vi.fn(
+    () =>
+      new Promise<typeof repositoryState>((resolve) => {
+        resolveRepositoryState = resolve;
+      }),
+  );
+  const refreshAgentReviewDelivery = vi.fn(async () => ({
+    available: true,
+    deliveryId: 'delivery-1',
+  }));
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
+      agentReviewDelivery: { available: false, deliveryId: 'delivery-1' },
+      repositoryPathProvided: true,
+      walkthrough: false,
+    })),
+    getRepositoryState,
+    refreshAgentReviewDelivery,
+  });
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(getRepositoryState).toHaveBeenCalledOnce());
+
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  await waitFor(() => expect(refreshAgentReviewDelivery).toHaveBeenCalledOnce());
+  await act(async () => resolveRepositoryState(repositoryState));
+  await waitFor(() => expect(app.container.querySelector('.loading')).toBeNull());
+
+  expect(app.container.querySelector('.send-feedback-button')).not.toBeNull();
+});
+
 test('desktop app hides send feedback when the agent review IPC is unavailable', async () => {
   const codiff = createCodiffMock({
     getLaunchOptions: vi.fn(async () => ({

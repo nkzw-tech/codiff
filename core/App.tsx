@@ -226,6 +226,7 @@ export default function App() {
   const agentSkillStatus =
     agentSkillResult?.backend === activeAgentBackend ? agentSkillResult : defaultAgentSkillStatus;
   const activeAgentBackendRef = useRef(activeAgentBackend);
+  const agentReviewDeliveryRequestRef = useRef(0);
   const agentSkillRequestRef = useRef(0);
   const historyRequestRef = useRef(0);
   const historySourceRef = useRef<ReviewSource | null>(null);
@@ -695,7 +696,6 @@ export default function App() {
       const shouldStartInHistory =
         shouldStartInHistoryWhenEmpty(orderedState.source) && orderedState.files.length === 0;
 
-      setLaunchOptions(nextLaunchOptions);
       setSidebarMode(
         shouldLoadNarrative ? 'walkthrough' : shouldStartInHistory ? 'history' : 'tree',
       );
@@ -1670,9 +1670,14 @@ export default function App() {
 
     let canceled = false;
     const refresh = () => {
+      const request = ++agentReviewDeliveryRequestRef.current;
       void refreshDelivery()
         .then((capability) => {
-          if (canceled || capability.deliveryId !== deliveryId) {
+          if (
+            canceled ||
+            request !== agentReviewDeliveryRequestRef.current ||
+            capability.deliveryId !== deliveryId
+          ) {
             return;
           }
           setLaunchOptions((current) =>
