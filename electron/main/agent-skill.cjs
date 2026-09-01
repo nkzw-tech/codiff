@@ -25,6 +25,7 @@ const { dirname, join } = require('node:path');
  * @typedef {{
  *   files?: ReadonlyArray<AgentSkillFile>;
  *   label: string;
+ *   successDetail?: string;
  *   targets: ReadonlyArray<AgentSkillTarget>;
  * }} AgentSkill
  */
@@ -223,7 +224,7 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
       /** @type {import('electron').MessageBoxOptions} */
       const successMessage = {
         buttons: ['OK'],
-        detail: installedPaths.join('\n'),
+        detail: [skill.successDetail, ...installedPaths].filter(Boolean).join('\n\n'),
         message: `Installed the Codiff ${skill.label}.`,
         type: 'info',
       };

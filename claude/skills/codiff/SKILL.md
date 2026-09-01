@@ -133,7 +133,12 @@ approval document.
    `--open`, which only controls whether the completed walkthrough is opened.
 
    **Agent integration:** The launcher passes `CLAUDE_SESSION_ID` to Codiff in desktop mode and
-   identifies shared walkthroughs as authored by Claude.
+   identifies shared walkthroughs as authored by Claude. Start Claude Code with the managed local
+   Channel plugin enabled:
+
+   ```bash
+   claude --plugin-dir "$HOME/.claude/plugins/codiff-channel" --dangerously-load-development-channels server:codiff
+   ```
 
    Codiff validates and repairs the document against the live diff, so anchors that drift
    are pinned to a real section rather than dropped.

@@ -1,0 +1,8 @@
+{
+  "name": "codiff-channel",
+  "displayName": "Codiff Channel",
+  "version": "1.0.0",
+  "description": "Routes Codiff review feedback into the owning Claude Code session.",
+  "mcpServers": "./.mcp.json",
+  "channels": [{ "server": "codiff" }]
+}

@@ -23,6 +23,7 @@ const { buildInstallSkillMenuItem, listAgentSkills } = require('../agent-skills.
     }>;
     id: string;
     label: string;
+    successDetail?: string;
     targets: ReadonlyArray<{
       sourceSubdir: string;
       targetSubdir: string;
@@ -66,11 +67,18 @@ test('lists every bundled skill with its installation target', () => {
     {
       agentLabel: 'Claude Code',
       id: 'claude',
-      label: 'Claude Code Skill',
+      label: 'Claude Code Integration',
+      successDetail:
+        'Restart Claude Code with the installed Channel enabled. Codiff can confirm transport write only, not that Claude processed the feedback.',
       targets: [
         {
           sourceSubdir: 'claude/skills/codiff',
           targetSubdir: '.claude/skills/codiff',
+          type: 'directory',
+        },
+        {
+          sourceSubdir: 'claude/channel/codiff',
+          targetSubdir: '.claude/plugins/codiff-channel',
           type: 'directory',
         },
       ],
@@ -117,6 +125,73 @@ test('lists every bundled skill with its installation target', () => {
   ]);
 });
 
+test('installs and reports the managed Claude Code Channel without claiming it is active', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-channel-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skillSource = join(root, 'claude/skills/codiff');
+  const channelSource = join(root, 'claude/channel/codiff');
+  const channelTarget = join(home, '.claude/plugins/codiff-channel');
+  const skill = listAgentSkills().find(({ id }) => id === 'claude');
+  const showMessageBox = vi.fn(async () => {});
+  await mkdir(skillSource, { recursive: true });
+  await mkdir(channelSource, { recursive: true });
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(true);
+  expect(installer.getStatus()).toEqual({
+    installed: true,
+    path: join(home, '.claude/skills/codiff'),
+  });
+  await expect(realpath(channelTarget)).resolves.toBe(await realpath(channelSource));
+  expect(showMessageBox).toHaveBeenCalledWith(
+    expect.objectContaining({
+      detail: expect.stringContaining('Codiff can confirm transport write only'),
+      message: 'Installed the Codiff Claude Code Integration.',
+    }),
+  );
+  expect(JSON.stringify(showMessageBox.mock.calls)).not.toContain('is active');
+});
+
+test('does not replace a user-authored Claude Code Channel target', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-channel-conflict-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skillSource = join(root, 'claude/skills/codiff');
+  const channelSource = join(root, 'claude/channel/codiff');
+  const channelTarget = join(home, '.claude/plugins/codiff-channel');
+  const skill = listAgentSkills().find(({ id }) => id === 'claude');
+  await mkdir(skillSource, { recursive: true });
+  await mkdir(channelSource, { recursive: true });
+  await mkdir(channelTarget, { recursive: true });
+  await writeFile(join(channelTarget, 'user-file'), 'user-authored\n');
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  await expect(readFile(join(channelTarget, 'user-file'), 'utf8')).resolves.toBe('user-authored\n');
+  await expect(lstat(join(home, '.claude/skills/codiff'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+});
+
+test('the managed Claude skill documents the tested Channel startup command', async () => {
+  await expect(readFile('claude/skills/codiff/SKILL.md', 'utf8')).resolves.toContain(
+    'claude --plugin-dir "$HOME/.claude/plugins/codiff-channel" --dangerously-load-development-channels server:codiff',
+  );
+});
+
 test('builds an Install Skill submenu that routes each agent action', () => {
   const install = vi.fn();
   const menuItem = buildInstallSkillMenuItem(install);
@@ -150,8 +225,8 @@ test('keeps skill instructions identical outside agent integration details', asy
     expect(document).toContain('Address every returned comment');
     expect(document).toContain('Do not automatically reopen Codiff');
     return document.replace(
-      /   \*\*Agent integration:\*\*[\s\S]*?\n\n/,
-      '   **Agent integration:** <agent-specific>\n\n',
+      /   \*\*Agent integration:\*\*[\s\S]*?(?=\n\n   Codiff validates)/,
+      '   **Agent integration:** <agent-specific>',
     );
   });
 

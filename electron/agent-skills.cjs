@@ -13,6 +13,7 @@
  *   files?: ReadonlyArray<AgentSkillFile>;
  *   id: AgentSkillId;
  *   label: string;
+ *   successDetail?: string;
  *   targets: ReadonlyArray<{
  *     sourceSubdir: string;
  *     targetSubdir: string;
@@ -38,11 +39,18 @@ const AGENT_SKILLS = Object.freeze([
   {
     agentLabel: 'Claude Code',
     id: 'claude',
-    label: 'Claude Code Skill',
+    label: 'Claude Code Integration',
+    successDetail:
+      'Restart Claude Code with the installed Channel enabled. Codiff can confirm transport write only, not that Claude processed the feedback.',
     targets: [
       {
         sourceSubdir: 'claude/skills/codiff',
         targetSubdir: '.claude/skills/codiff',
+        type: 'directory',
+      },
+      {
+        sourceSubdir: 'claude/channel/codiff',
+        targetSubdir: '.claude/plugins/codiff-channel',
         type: 'directory',
       },
     ],

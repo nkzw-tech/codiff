@@ -49,6 +49,7 @@
     "test:integration": "vp run build && vp test -c vitest.cloudflare.config.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "electron-squirrel-startup": "^1.0.1",
     "native-keymap": "^3.3.9",
     "node-pty": "^1.1.0",
