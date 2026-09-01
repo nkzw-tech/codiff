@@ -652,6 +652,23 @@ if { [ -n "$agent_review_delivery_id" ] && [ -z "$agent_review_open_file_path" ]
   exit 1
 fi
 
+agent_review_session_id=""
+case "$agent_backend" in
+  codex) agent_review_session_id="$codex_session_id" ;;
+  claude) agent_review_session_id="$claude_session_id" ;;
+  opencode) agent_review_session_id="$opencode_session_id" ;;
+  pi) agent_review_session_id="$pi_session_id" ;;
+esac
+if [ -n "$agent_review_delivery_id" ] && [ -z "$agent_review_session_id" ]; then
+  printf '%s\n' 'codiff: agent review delivery requires a matching agent backend and session.' >&2
+  exit 1
+fi
+
+if [ -n "$agent_review_delivery_id" ] && [ -n "$plan_file_path" ]; then
+  printf '%s\n' 'codiff: plan and agent review handoffs cannot be used together.' >&2
+  exit 1
+fi
+
 if [ -n "$plan_result_file_path" ] && [ -z "$plan_file_path" ]; then
   printf '%s\n' 'codiff: a plan result handoff requires a plan file.' >&2
   exit 1

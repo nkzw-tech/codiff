@@ -120,6 +120,7 @@ const {
   createAgentReviewHandoffLifecycle,
 } = require('./agent-review-handoff.cjs');
 const { createRepositoryStateRequestCoordinator } = require('./repository-state-requests.cjs');
+const { registerWindowOpenReceipt } = require('./window-open-receipt.cjs');
 
 /**
  * @typedef {import('../core/config/types.ts').CodiffConfig} CodiffConfig
@@ -994,7 +995,7 @@ const createWindow = (
   window.on('minimize', () => repositoryWatcherCoordinator.visibilityChanged(webContentsId));
   window.on('restore', () => repositoryWatcherCoordinator.focus(webContentsId));
   window.on('show', () => repositoryWatcherCoordinator.focus(webContentsId));
-  window.once('ready-to-show', () => window.show());
+  registerWindowOpenReceipt(window, launchOptions);
   let allowClose = false;
   let allowAgentReviewClose = false;
   let closingAgentReview = false;

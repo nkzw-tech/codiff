@@ -16,6 +16,26 @@ export const createAgentReviewLaunch = () => {
   };
 };
 
+export const readAgentReviewOpenReceipt = (openFile, deliveryId) => {
+  if (!existsSync(openFile)) {
+    throw new Error('Codiff did not produce a window-open receipt.');
+  }
+  const receipt = JSON.parse(readFileSync(openFile, 'utf8'));
+  if (receipt?.version !== 1 || receipt.status !== 'open') {
+    throw new Error('Codiff returned an invalid window-open receipt.');
+  }
+  if (receipt.deliveryId !== deliveryId) {
+    throw new Error('Codiff window-open receipt has the wrong delivery ID.');
+  }
+  if (typeof receipt.deliveryAvailable !== 'boolean') {
+    throw new Error('Codiff window-open receipt is missing delivery capability.');
+  }
+  return {
+    deliveryAvailable: receipt.deliveryAvailable,
+    ...(typeof receipt.reason === 'string' ? { reason: receipt.reason } : {}),
+  };
+};
+
 export const waitForAgentReviewOpen = async (
   openFile,
   deliveryId,
@@ -24,20 +44,7 @@ export const waitForAgentReviewOpen = async (
   const deadline = now() + openTimeoutMs;
   for (;;) {
     if (existsSync(openFile)) {
-      const receipt = JSON.parse(readFileSync(openFile, 'utf8'));
-      if (receipt?.version !== 1 || receipt.status !== 'open') {
-        throw new Error('Codiff returned an invalid window-open receipt.');
-      }
-      if (receipt.deliveryId !== deliveryId) {
-        throw new Error('Codiff window-open receipt has the wrong delivery ID.');
-      }
-      if (typeof receipt.deliveryAvailable !== 'boolean') {
-        throw new Error('Codiff window-open receipt is missing delivery capability.');
-      }
-      return {
-        deliveryAvailable: receipt.deliveryAvailable,
-        ...(typeof receipt.reason === 'string' ? { reason: receipt.reason } : {}),
-      };
+      return readAgentReviewOpenReceipt(openFile, deliveryId);
     }
     if (now() >= deadline) {
       throw new Error('Codiff did not open the review within 15 seconds.');
@@ -68,6 +75,7 @@ export const runAgentReviewLauncher = ({ args, command }) => {
       error.exitCode = result.status ?? 1;
       throw error;
     }
+    readAgentReviewOpenReceipt(launch.openFile, launch.deliveryId);
     return 'Codiff opened. Review feedback will arrive as a separate message in this session.\n';
   } finally {
     rmSync(launch.directory, { force: true, recursive: true });

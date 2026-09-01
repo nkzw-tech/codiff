@@ -162,6 +162,52 @@ test('source CLI isolates agent review delivery identity from the matching sessi
   });
 });
 
+test.each([
+  [
+    'without a backend',
+    [
+      '--codex-session',
+      'session-1',
+      '--agent-review-delivery',
+      'delivery-1',
+      '--agent-review-open-file',
+      '/tmp/open.json',
+    ],
+  ],
+  [
+    'without the selected backend session',
+    [
+      '--agent',
+      'codex',
+      '--claude-session',
+      'session-1',
+      '--agent-review-delivery',
+      'delivery-1',
+      '--agent-review-open-file',
+      '/tmp/open.json',
+    ],
+  ],
+])('source CLI rejects an agent review delivery pair %s', (_label, args) => {
+  expect(() => parseArguments(args)).toThrow('matching agent backend and session');
+});
+
+test('source CLI rejects simultaneous plan and agent review handoffs', () => {
+  expect(() =>
+    parseArguments([
+      '--agent',
+      'codex',
+      '--codex-session',
+      'session-1',
+      '--agent-review-delivery',
+      'delivery-1',
+      '--agent-review-open-file',
+      '/tmp/open.json',
+      '--plan',
+      '/tmp/plan.md',
+    ]),
+  ).toThrow('cannot be used together');
+});
+
 const withFakeGitHubCli = async <T>(
   response: Record<string, unknown>,
   callback: (argsPath: string) => T | Promise<T>,
@@ -636,7 +682,17 @@ printf '{"deliveryAvailable":true,"deliveryId":"%s","status":"open","version":1}
 
   await execFileAsync(
     resolve('bin/codiff-app'),
-    ['--agent-review-delivery', deliveryId, '--agent-review-open-file', openFile, repositoryPath],
+    [
+      '--agent',
+      'codex',
+      '--codex-session',
+      'session-1',
+      '--agent-review-delivery',
+      deliveryId,
+      '--agent-review-open-file',
+      openFile,
+      repositoryPath,
+    ],
     {
       env: {
         ...logger.env,
@@ -649,6 +705,10 @@ printf '{"deliveryAvailable":true,"deliveryId":"%s","status":"open","version":1}
     '-n',
     resolve('bin/../../../..'),
     '--args',
+    '--codex-session',
+    'session-1',
+    '--agent',
+    'codex',
     '--agent-review-delivery',
     deliveryId,
     '--agent-review-open-file',
@@ -971,6 +1031,61 @@ test('packaged terminal helper rejects partial agent review delivery pairs befor
       { env: logger.env },
     ),
   ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('must be used together') });
+  await expect(logger.readArgs()).rejects.toThrow();
+});
+
+test('packaged terminal helper rejects agent review delivery without matching identity', async () => {
+  await using logger = await createFakeOpenLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+  await mkdir(repositoryPath);
+
+  await expect(
+    execFileAsync(
+      resolve('bin/codiff-app'),
+      [
+        '--codex-session',
+        'session-1',
+        '--agent-review-delivery',
+        'delivery-1',
+        '--agent-review-open-file',
+        join(logger.directory, 'open.json'),
+        repositoryPath,
+      ],
+      { env: logger.env },
+    ),
+  ).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining('matching agent backend and session'),
+  });
+  await expect(logger.readArgs()).rejects.toThrow();
+});
+
+test('packaged terminal helper rejects simultaneous plan and agent review handoffs', async () => {
+  await using logger = await createFakeOpenLogger();
+  const repositoryPath = join(logger.directory, 'repo');
+  const planFile = join(logger.directory, 'plan.md');
+  await mkdir(repositoryPath);
+  await writeFile(planFile, '# Plan\n');
+
+  await expect(
+    execFileAsync(
+      resolve('bin/codiff-app'),
+      [
+        '--agent',
+        'codex',
+        '--codex-session',
+        'session-1',
+        '--agent-review-delivery',
+        'delivery-1',
+        '--agent-review-open-file',
+        join(logger.directory, 'open.json'),
+        '--plan-file',
+        planFile,
+        repositoryPath,
+      ],
+      { env: logger.env },
+    ),
+  ).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('cannot be used together') });
   await expect(logger.readArgs()).rejects.toThrow();
 });
 

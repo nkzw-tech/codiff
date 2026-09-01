@@ -88,13 +88,22 @@ test.each([
   await writeFile(
     command,
     `#!/bin/sh
+delivery_id=""
+open_file=""
 previous=""
 for arg in "$@"; do
+  if [ "$previous" = "--agent-review-delivery" ]; then
+    delivery_id="$arg"
+  fi
   if [ "$previous" = "--agent-review-open-file" ]; then
+    open_file="$arg"
     printf '%s' "$arg" > "$CODIFF_TEST_OPEN_FILE_LOG"
   fi
   previous="$arg"
 done
+if [ ${exitCode} -eq 0 ]; then
+  printf '{"deliveryAvailable":true,"deliveryId":"%s","status":"open","version":1}\n' "$delivery_id" > "$open_file"
+fi
 exit ${exitCode}
 `,
   );
@@ -112,4 +121,34 @@ exit ${exitCode}
 
   const openFile = await readFile(openFileLog, 'utf8');
   await expect(access(dirname(openFile))).rejects.toThrow();
+});
+
+test.each([
+  ['no receipt', ''],
+  [
+    'a receipt for another delivery',
+    'printf \'{"deliveryAvailable":true,"deliveryId":"different","status":"open","version":1}\\n\' > "$open_file"',
+  ],
+])('launcher rejects zero exit with %s', async (_label, writeReceipt) => {
+  await using directory = await createTemporaryDirectory('codiff-agent-review-launch-test-');
+  const command = join(directory.path, 'codiff');
+  await writeFile(
+    command,
+    `#!/bin/sh
+open_file=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--agent-review-open-file" ]; then
+    open_file="$arg"
+  fi
+  previous="$arg"
+done
+${writeReceipt}
+`,
+  );
+  await chmod(command, 0o755);
+
+  expect(() => runAgentReviewLauncher({ args: ['--walkthrough'], command })).toThrow(
+    /window-open receipt|delivery ID/,
+  );
 });

@@ -192,6 +192,57 @@ test('parses agent review handoff command-line options', () => {
   });
 });
 
+test.each([
+  [
+    'without a backend',
+    [
+      'codiff',
+      '--codex-session',
+      'session-1',
+      '--agent-review-delivery',
+      'delivery-1',
+      '--agent-review-open-file',
+      '/tmp/open.json',
+    ],
+  ],
+  [
+    'without the selected backend session',
+    [
+      'codiff',
+      '--agent',
+      'codex',
+      '--claude-session',
+      'session-1',
+      '--agent-review-delivery',
+      'delivery-1',
+      '--agent-review-open-file',
+      '/tmp/open.json',
+    ],
+  ],
+])('rejects an agent review delivery pair %s', (_label, args) => {
+  expect(() => getCommandLineLaunchOptions(args)).toThrow('matching agent backend and session');
+});
+
+test('rejects simultaneous plan and agent review handoffs', () => {
+  expect(() =>
+    getCommandLineLaunchOptions([
+      'codiff',
+      '--agent',
+      'codex',
+      '--codex-session',
+      'session-1',
+      '--agent-review-delivery',
+      'delivery-1',
+      '--agent-review-open-file',
+      '/tmp/open.json',
+      '--plan-file',
+      '/tmp/plan.md',
+      '--plan-result-file',
+      '/tmp/result.json',
+    ]),
+  ).toThrow('cannot be used together');
+});
+
 test('parses positional HEAD revisions as commit sources', () => {
   expect(readCommandLine(['codiff', 'HEAD'])).toEqual({
     launchOptions: {

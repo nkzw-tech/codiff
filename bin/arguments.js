@@ -379,6 +379,12 @@ export const parseArguments = (args) => {
           : agentBackend === 'pi'
             ? piSessionId
             : null;
+  if (agentReviewDeliveryId && !agentReviewSessionId) {
+    throw new Error('Agent review delivery requires a matching agent backend and session.');
+  }
+  if (agentReviewDeliveryId && planFilePath) {
+    throw new Error('Plan and agent review handoffs cannot be used together.');
+  }
   let pullRequestBranch = null;
   let pullRequestNumber = null;
   let pullRequestProvider = null;

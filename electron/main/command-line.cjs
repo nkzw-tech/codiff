@@ -324,6 +324,12 @@ const parseCommandLineArguments = (commandLine = process.argv) => {
           : agentBackend === 'pi'
             ? piSessionId
             : undefined;
+  if (agentReviewDeliveryId && !agentReviewSessionId) {
+    throw new Error('Agent review delivery requires a matching agent backend and session.');
+  }
+  if (agentReviewDeliveryId && planFilePath) {
+    throw new Error('Plan and agent review handoffs cannot be used together.');
+  }
   const walkthroughContextPath =
     (typeof values['walkthrough-context'] === 'string' ? values['walkthrough-context'] : '') ||
     envWalkthroughContextPath ||
