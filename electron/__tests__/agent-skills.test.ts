@@ -107,11 +107,18 @@ test('lists every bundled skill with its installation target', () => {
     {
       agentLabel: 'Pi',
       id: 'pi',
-      label: 'Pi Skill',
+      label: 'Pi Integration',
+      successDetail:
+        'Restart Pi to enable the installed extension. Codiff confirms dispatch started, not that Pi processed the feedback.',
       targets: [
         {
           sourceSubdir: 'pi/skills/codiff',
           targetSubdir: '.pi/agent/skills/codiff',
+          type: 'directory',
+        },
+        {
+          sourceSubdir: 'pi/extensions/codiff',
+          targetSubdir: '.pi/agent/extensions/codiff',
           type: 'directory',
         },
       ],
@@ -203,6 +210,66 @@ test('does not replace a user-authored Claude Code Channel target', async () => 
   await expect(installer.install()).resolves.toBe(false);
   await expect(readFile(join(channelTarget, 'user-file'), 'utf8')).resolves.toBe('user-authored\n');
   await expect(lstat(join(home, '.claude/skills/codiff'))).rejects.toMatchObject({
+    code: 'ENOENT',
+  });
+});
+
+test('installs and reports the managed Pi extension with dispatch-started disclosure', async () => {
+  await using directory = await createTemporaryDirectory('codiff-pi-extension-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skillSource = join(root, 'pi/skills/codiff');
+  const extensionSource = join(root, 'pi/extensions/codiff');
+  const extensionTarget = join(home, '.pi/agent/extensions/codiff');
+  const skill = listAgentSkills().find(({ id }) => id === 'pi');
+  const showMessageBox = vi.fn(async () => {});
+  await mkdir(skillSource, { recursive: true });
+  await mkdir(extensionSource, { recursive: true });
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(true);
+  expect(installer.getStatus()).toEqual({
+    installed: true,
+    path: join(home, '.pi/agent/skills/codiff'),
+  });
+  await expect(realpath(extensionTarget)).resolves.toBe(await realpath(extensionSource));
+  expect(showMessageBox).toHaveBeenCalledWith(
+    expect.objectContaining({
+      detail: expect.stringContaining('dispatch started, not that Pi processed'),
+      message: 'Installed the Codiff Pi Integration.',
+    }),
+  );
+});
+
+test('does not replace a user-authored Pi extension target', async () => {
+  await using directory = await createTemporaryDirectory('codiff-pi-extension-conflict-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const extensionTarget = join(home, '.pi/agent/extensions/codiff');
+  const skill = listAgentSkills().find(({ id }) => id === 'pi');
+  await mkdir(join(root, 'pi/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'pi/extensions/codiff'), { recursive: true });
+  await mkdir(extensionTarget, { recursive: true });
+  await writeFile(join(extensionTarget, 'user-file'), 'user-authored\n');
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  await expect(readFile(join(extensionTarget, 'user-file'), 'utf8')).resolves.toBe(
+    'user-authored\n',
+  );
+  await expect(lstat(join(home, '.pi/agent/skills/codiff'))).rejects.toMatchObject({
     code: 'ENOENT',
   });
 });

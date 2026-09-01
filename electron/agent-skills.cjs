@@ -58,11 +58,18 @@ const AGENT_SKILLS = Object.freeze([
   {
     agentLabel: 'Pi',
     id: 'pi',
-    label: 'Pi Skill',
+    label: 'Pi Integration',
+    successDetail:
+      'Restart Pi to enable the installed extension. Codiff confirms dispatch started, not that Pi processed the feedback.',
     targets: [
       {
         sourceSubdir: 'pi/skills/codiff',
         targetSubdir: '.pi/agent/skills/codiff',
+        type: 'directory',
+      },
+      {
+        sourceSubdir: 'pi/extensions/codiff',
+        targetSubdir: '.pi/agent/extensions/codiff',
         type: 'directory',
       },
     ],

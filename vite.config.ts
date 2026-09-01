@@ -111,6 +111,7 @@ export default defineConfig({
       'core/**/*.test.{ts,tsx}',
       'electron/**/*.test.ts',
       'opencode/**/*.test.ts',
+      'pi/**/*.test.ts',
       'service/**/*.test.ts',
       'web/**/*.test.{ts,tsx}',
     ],
