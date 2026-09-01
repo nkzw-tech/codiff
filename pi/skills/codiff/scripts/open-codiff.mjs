@@ -12,11 +12,9 @@
 // (commit, HEAD, PR number, or repository path) is forwarded verbatim; when no repository
 // path is given the session's working directory is used.
 
-import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
-import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { runAgentReviewLauncher } from '../../../../bin/agent-review-launch.js';
@@ -25,8 +23,6 @@ const threadId = process.env.PI_SESSION_ID || '';
 const skillRoot = resolve(import.meta.dirname, '..');
 const codiffRoot = resolve(skillRoot, '../../..');
 const sessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const maxSessionScanFiles = 20_000;
-const maxSessionHeaderBytes = 64 * 1024;
 
 const getCodiffCommand = () => {
   if (process.env.CODIFF_COMMAND) {
@@ -59,106 +55,7 @@ const getShareCommand = () =>
     ? { args: [], command: process.env.CODIFF_SHARE_COMMAND }
     : { args: [join(codiffRoot, 'bin/share-codiff.mjs')], command: process.execPath };
 
-const getPiHome = () => process.env.PI_HOME || join(homedir(), '.pi');
-
-const readSessionHeader = (path) => {
-  let file;
-  try {
-    file = openSync(path, 'r');
-    const buffer = Buffer.allocUnsafe(maxSessionHeaderBytes);
-    const bytesRead = readSync(file, buffer, 0, buffer.length, 0);
-    const text = buffer.toString('utf8', 0, bytesRead);
-    const newline = text.indexOf('\n');
-    return newline === -1 ? text : text.slice(0, newline);
-  } catch {
-    return '';
-  } finally {
-    if (file != null) {
-      try {
-        closeSync(file);
-      } catch {
-        // Best-effort cleanup in the short-lived launcher process.
-      }
-    }
-  }
-};
-
-/**
- * Pi stores sessions at ~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl
- * Since Pi does not expose a PI_SESSION_ID env var, we scan the sessions directory
- * and match the cwd from the session header to the current working directory.
- *
- * @param {string} cwd
- * @returns {string | null}
- */
-const findPiSessionIdForCwd = (cwd) => {
-  const root = join(getPiHome(), 'agent', 'sessions');
-  if (!existsSync(root)) {
-    return null;
-  }
-
-  let scanned = 0;
-  /** @type {Array<{sessionId: string; mtime: number}>} */
-  const candidates = [];
-
-  /** @type {Array<string>} */
-  const stack = [root];
-  while (stack.length > 0 && scanned < maxSessionScanFiles) {
-    const directory = stack.pop();
-    let entries;
-    try {
-      entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
-        b.name.localeCompare(a.name),
-      );
-    } catch {
-      continue;
-    }
-
-    const directories = [];
-    for (const entry of entries) {
-      scanned += 1;
-      const path = join(directory, entry.name);
-      if (entry.isFile() && path.endsWith('.jsonl')) {
-        try {
-          const firstLine = readSessionHeader(path);
-          if (!firstLine) {
-            continue;
-          }
-          const header = JSON.parse(firstLine);
-          if (
-            header?.type === 'session' &&
-            typeof header?.id === 'string' &&
-            sessionIdPattern.test(header.id) &&
-            typeof header?.cwd === 'string' &&
-            header.cwd === cwd
-          ) {
-            const stat = statSync(path);
-            candidates.push({ mtime: stat.mtimeMs, sessionId: header.id });
-          }
-        } catch {
-          // Ignore malformed or future-format records.
-        }
-      }
-
-      if (entry.isDirectory()) {
-        directories.push(path);
-      }
-
-      if (scanned >= maxSessionScanFiles) {
-        break;
-      }
-    }
-    stack.push(...directories.reverse());
-  }
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  // Pick the most recently modified session matching this cwd.
-  candidates.sort((a, b) => b.mtime - a.mtime);
-  return candidates[0].sessionId;
-};
+const getPiSessionId = () => (sessionIdPattern.test(threadId) ? threadId : '');
 
 const getFallbackSessionCwd = () => {
   const cwd = process.cwd();
@@ -262,7 +159,7 @@ if (planFile && shareWalkthrough) {
     process.stderr.write(`open-codiff: plan file not found at ${planFilePath}.\n`);
     process.exit(1);
   }
-  const resolvedSessionId = threadId || findPiSessionIdForCwd(sessionCwd) || '';
+  const resolvedSessionId = getPiSessionId();
   const shareCommand = getShareCommand();
   const shareResult = spawnSync(
     shareCommand.command,
@@ -297,7 +194,7 @@ if (planFile) {
     process.stderr.write(`open-codiff: plan file not found at ${planFilePath}.\n`);
     process.exit(1);
   }
-  const resolvedSessionId = threadId || findPiSessionIdForCwd(sessionCwd) || '';
+  const resolvedSessionId = getPiSessionId();
   const codiffCommand = getCodiffCommand();
   const result = spawnSync(
     codiffCommand.command,
@@ -365,7 +262,13 @@ const hasRepositoryTarget = forwardedArgs.some(
   (arg) => !arg.startsWith('-') && existsSync(resolve(sessionCwd, arg)),
 );
 
-const resolvedSessionId = threadId || findPiSessionIdForCwd(sessionCwd) || '';
+const resolvedSessionId = getPiSessionId();
+if (!resolvedSessionId) {
+  process.stderr.write(
+    'open-codiff: exact Pi session identity is unavailable; restart Pi after installing the Codiff integration.\n',
+  );
+  process.exit(1);
+}
 const codiffCommand = getCodiffCommand();
 const args = [
   ...codiffCommand.args,

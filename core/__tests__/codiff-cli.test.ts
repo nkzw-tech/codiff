@@ -1624,7 +1624,7 @@ test('Claude skill launcher uses the session cwd and forwards --agent claude', a
   ]);
 });
 
-test('Pi skill launcher resolves the current session and forwards --agent pi', async () => {
+test('Pi skill launcher rejects review delivery without an exact session id', async () => {
   await using logger = await createAgentReviewCommandLogger();
   const home = join(logger.directory, 'home');
   const repositoryPath = join(logger.directory, 'repo');
@@ -1643,33 +1643,26 @@ test('Pi skill launcher resolves the current session and forwards --agent pi', a
   );
   await truncate(sessionPath, 17 * 1024 * 1024);
 
-  await execFileAsync(
-    process.execPath,
-    [resolve('pi/skills/codiff/scripts/open-codiff.mjs'), '--file', walkthroughFile, 'HEAD'],
-    {
-      cwd: repositoryPath,
-      env: {
-        ...logger.env,
-        CODIFF_COMMAND: logger.commandPath,
-        PI_HOME: join(home, '.pi'),
+  await expect(
+    execFileAsync(
+      process.execPath,
+      [resolve('pi/skills/codiff/scripts/open-codiff.mjs'), '--file', walkthroughFile, 'HEAD'],
+      {
+        cwd: repositoryPath,
+        env: {
+          ...logger.env,
+          CODIFF_COMMAND: logger.commandPath,
+          PI_HOME: join(home, '.pi'),
+        },
       },
-    },
-  );
-
-  expect(await logger.readArgs()).toEqual([
-    '-w',
-    '--agent',
-    'pi',
-    '--walkthrough-file',
-    walkthroughFile,
-    '--pi-session',
-    sessionId,
-    'HEAD',
-    realRepositoryPath,
-  ]);
+    ),
+  ).rejects.toMatchObject({
+    stderr: expect.stringContaining('exact Pi session identity is unavailable'),
+    stdout: '',
+  });
 });
 
-test('OpenCode skill launcher links the project session from a repository subdirectory', async () => {
+test('OpenCode skill launcher rejects review delivery without an exact session id', async () => {
   await using logger = await createAgentReviewCommandLogger();
   const repositoryPath = join(logger.directory, 'repo');
   const workingDirectory = join(repositoryPath, 'nested');
@@ -1681,7 +1674,6 @@ test('OpenCode skill launcher links the project session from a repository subdir
   await mkdir(workingDirectory, { recursive: true });
   await mkdir(join(homePath, '.opencode', 'bin'), { recursive: true });
   const realRepositoryPath = await realpath(repositoryPath);
-  const realWorkingDirectory = await realpath(workingDirectory);
   await writeFile(walkthroughFile, '{}');
   await writeFile(
     openCodePath,
@@ -1691,32 +1683,30 @@ printf '[{"id":"${sessionId}","directory":"%s"}]\\n' "$OPENCODE_SESSION_DIRECTOR
   );
   await chmod(openCodePath, 0o755);
 
-  await execFileAsync(
-    process.execPath,
-    [resolve('opencode/skills/codiff/scripts/open-codiff.mjs'), '--file', walkthroughFile, 'HEAD'],
-    {
-      cwd: workingDirectory,
-      env: {
-        ...logger.env,
-        CODIFF_COMMAND: logger.commandPath,
-        HOME: homePath,
-        OPENCODE_SESSION_DIRECTORY: realRepositoryPath,
-        PATH: logger.directory,
+  await expect(
+    execFileAsync(
+      process.execPath,
+      [
+        resolve('opencode/skills/codiff/scripts/open-codiff.mjs'),
+        '--file',
+        walkthroughFile,
+        'HEAD',
+      ],
+      {
+        cwd: workingDirectory,
+        env: {
+          ...logger.env,
+          CODIFF_COMMAND: logger.commandPath,
+          HOME: homePath,
+          OPENCODE_SESSION_DIRECTORY: realRepositoryPath,
+          PATH: logger.directory,
+        },
       },
-    },
-  );
-
-  expect(await logger.readArgs()).toEqual([
-    '-w',
-    '--agent',
-    'opencode',
-    '--walkthrough-file',
-    walkthroughFile,
-    '--opencode-session',
-    sessionId,
-    'HEAD',
-    realWorkingDirectory,
-  ]);
+    ),
+  ).rejects.toMatchObject({
+    stderr: expect.stringContaining('exact OpenCode session identity is unavailable'),
+    stdout: '',
+  });
 });
 
 test('packaged terminal helper forwards the agent and Claude session to Electron', async () => {

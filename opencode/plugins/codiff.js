@@ -366,5 +366,10 @@ export const CodiffPlugin = async ({ client, worktree }) => {
         await drainOne(state, state.idleGeneration).catch(() => {});
       }
     },
+    'shell.env': async ({ sessionID }, output) => {
+      if (sessionID) {
+        output.env.OPENCODE_SESSION_ID = sessionID;
+      }
+    },
   };
 };

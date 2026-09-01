@@ -107,6 +107,18 @@ test('registers each chat session with its exact OpenCode identity', async () =>
   ]);
 });
 
+test('exports the exact invoking session to shell commands', async () => {
+  const { hooks } = await setup();
+  const first = { env: {} as Record<string, string> };
+  const second = { env: {} as Record<string, string> };
+
+  await hooks['shell.env']({ sessionID: 'ses_1' }, first);
+  await hooks['shell.env']({ sessionID: 'ses_2' }, second);
+
+  expect(first.env).toEqual({ OPENCODE_SESSION_ID: 'ses_1' });
+  expect(second.env).toEqual({ OPENCODE_SESSION_ID: 'ses_2' });
+});
+
 test('queues busy deliveries FIFO and dispatches one item per idle boundary', async () => {
   const { client, hooks, statuses } = await setup();
   await hooks['chat.message']({ sessionID: 'ses_1' }, {});

@@ -12,10 +12,9 @@
 // OpenCode working directory is used.
 
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
-import { delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { runAgentReviewLauncher } from '../../../../bin/agent-review-launch.js';
 
@@ -54,99 +53,9 @@ const getShareCommand = () =>
     ? { args: [], command: process.env.CODIFF_SHARE_COMMAND }
     : { args: [join(codiffRoot, 'bin/share-codiff.mjs')], command: process.execPath };
 
-const isExecutableFile = (path) => {
-  try {
-    return statSync(path).isFile() && (accessSync(path, constants.X_OK), true);
-  } catch {
-    return false;
-  }
-};
-
-const getExecutableNames = (command) => {
-  if (process.platform !== 'win32') {
-    return [command];
-  }
-
-  const extensions = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean);
-  return [command, ...extensions.map((extension) => `${command}${extension.toLowerCase()}`)];
-};
-
-const findExecutableOnPath = (command) => {
-  for (const directory of (process.env.PATH || '').split(delimiter)) {
-    if (!directory) {
-      continue;
-    }
-
-    for (const executable of getExecutableNames(command)) {
-      const candidate = join(directory, executable);
-      if (isExecutableFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
-};
-
-const getOpenCodeCommand = () => {
-  const override = process.env.CODIFF_OPENCODE_PATH?.trim();
-  if (override) {
-    return override;
-  }
-
-  return (
-    findExecutableOnPath('opencode') ||
-    [
-      join(homedir(), '.opencode/bin/opencode'),
-      '/opt/homebrew/bin/opencode',
-      '/usr/local/bin/opencode',
-    ].find(isExecutableFile) ||
-    'opencode'
-  );
-};
-
-const findOpenCodeSessionIdForCwd = (cwd) => {
-  const result = spawnSync(
-    getOpenCodeCommand(),
-    ['session', 'list', '--format', 'json', '--max-count', '20', '--pure'],
-    {
-      cwd,
-      encoding: 'utf8',
-      timeout: 5000,
-    },
-  );
-  if (result.error || result.status !== 0) {
-    return null;
-  }
-
-  try {
-    const sessions = JSON.parse(result.stdout);
-    if (!Array.isArray(sessions)) {
-      return null;
-    }
-
-    const resolvedCwd = resolve(cwd);
-    const session = sessions.find((candidate) => {
-      if (
-        !candidate ||
-        typeof candidate !== 'object' ||
-        typeof candidate.id !== 'string' ||
-        !sessionIdPattern.test(candidate.id) ||
-        typeof candidate.directory !== 'string'
-      ) {
-        return false;
-      }
-
-      const relativeCwd = relative(resolve(candidate.directory), resolvedCwd);
-      return (
-        relativeCwd === '' ||
-        (!isAbsolute(relativeCwd) && relativeCwd !== '..' && !relativeCwd.startsWith(`..${sep}`))
-      );
-    });
-    return session?.id || null;
-  } catch {
-    return null;
-  }
+const getOpenCodeSessionId = () => {
+  const sessionId = process.env.OPENCODE_SESSION_ID || '';
+  return sessionIdPattern.test(sessionId) ? sessionId : '';
 };
 
 const getSessionCwd = () => {
@@ -248,11 +157,7 @@ if (planFile && shareWalkthrough) {
     process.stderr.write(`open-codiff: plan file not found at ${planFilePath}.\n`);
     process.exit(1);
   }
-  const environmentSessionId = process.env.OPENCODE_SESSION_ID || '';
-  const sessionId =
-    (sessionIdPattern.test(environmentSessionId) ? environmentSessionId : '') ||
-    findOpenCodeSessionIdForCwd(sessionCwd) ||
-    '';
+  const sessionId = getOpenCodeSessionId();
   const shareCommand = getShareCommand();
   const shareResult = spawnSync(
     shareCommand.command,
@@ -287,11 +192,7 @@ if (planFile) {
     process.stderr.write(`open-codiff: plan file not found at ${planFilePath}.\n`);
     process.exit(1);
   }
-  const environmentSessionId = process.env.OPENCODE_SESSION_ID || '';
-  const sessionId =
-    (sessionIdPattern.test(environmentSessionId) ? environmentSessionId : '') ||
-    findOpenCodeSessionIdForCwd(sessionCwd) ||
-    '';
+  const sessionId = getOpenCodeSessionId();
   const codiffCommand = getCodiffCommand();
   const result = spawnSync(
     codiffCommand.command,
@@ -359,11 +260,13 @@ const hasRepositoryTarget = forwardedArgs.some(
   (arg) => !arg.startsWith('-') && existsSync(resolve(sessionCwd, arg)),
 );
 
-const environmentSessionId = process.env.OPENCODE_SESSION_ID || '';
-const sessionId =
-  (sessionIdPattern.test(environmentSessionId) ? environmentSessionId : '') ||
-  findOpenCodeSessionIdForCwd(sessionCwd) ||
-  '';
+const sessionId = getOpenCodeSessionId();
+if (!sessionId) {
+  process.stderr.write(
+    'open-codiff: exact OpenCode session identity is unavailable; restart OpenCode after installing the Codiff integration.\n',
+  );
+  process.exit(1);
+}
 const codiffCommand = getCodiffCommand();
 const args = [
   ...codiffCommand.args,
