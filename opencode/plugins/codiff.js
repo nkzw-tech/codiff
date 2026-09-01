@@ -1,24 +1,72 @@
-import { clearTimeout, setTimeout } from 'node:timers';
+import { createHash } from 'node:crypto';
+import { stderr } from 'node:process';
 import { createAgentFeedbackBridge } from '../../bin/agent-feedback-bridge.mjs';
 
+const AMBIGUOUS_LIMIT = 1000;
+const MAX_PROMPT_ATTEMPTS = 3;
 const MESSAGE_TIMEOUT_MS = 10_000;
+const AMBIGUOUS_DIAGNOSTIC =
+  'Codiff OpenCode feedback delivery became ambiguous after prompt acceptance.\n';
+const EXHAUSTED_DIAGNOSTIC =
+  'Codiff OpenCode feedback delivery exhausted pre-acceptance retries.\n';
+
+const disposedError = () => new Error('OpenCode feedback plugin was disposed.');
+const messageIDFor = (sessionID, deliveryID) => {
+  const hash = createHash('sha256')
+    .update(`${sessionID.length}:${sessionID}${deliveryID.length}:${deliveryID}`)
+    .digest('hex');
+  return `msg_codiff_${hash}`;
+};
+const waiterKey = (sessionID, messageID) => `${sessionID.length}:${sessionID}${messageID}`;
+
+const writeDiagnostic = (message) => {
+  try {
+    stderr.write(message);
+  } catch {
+    // Diagnostics must not affect plugin dispatch.
+  }
+};
+
+const queueReceipt = (item) => ({
+  assurance: 'bridge-queue',
+  deliveryId: item.deliveryId,
+  status: 'queued',
+});
+
+const serialize = (state, operation) => {
+  const result = state.dispatcher.then(operation, operation);
+  state.dispatcher = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+};
+
+const track = (state, operation) => {
+  state.operations.add(operation);
+  void operation.finally(() => state.operations.delete(operation)).catch(() => {});
+  return operation;
+};
 
 const createMessageWaiter = (waiters, messageID, sessionID) => {
   let rejectWaiter;
   let resolveWaiter;
+  const key = waiterKey(sessionID, messageID);
   const promise = new Promise((resolve, reject) => {
     rejectWaiter = reject;
     resolveWaiter = resolve;
   });
-  // A waiter can be rejected while promptAsync is still pending.
+  // Disposal can reject a waiter while promptAsync is still pending.
   void promise.catch(() => {});
   const clear = () => {
-    clearTimeout(timer);
-    waiters.delete(messageID);
+    globalThis.clearTimeout(timer);
+    waiters.delete(key);
   };
-  const timer = setTimeout(() => {
+  const timer = globalThis.setTimeout(() => {
     clear();
-    rejectWaiter(new Error('Timed out waiting for OpenCode to create the feedback message.'));
+    const error = new Error('Timed out waiting for OpenCode to create the feedback message.');
+    error.code = 'OPENCODE_MESSAGE_TIMEOUT';
+    rejectWaiter(error);
   }, MESSAGE_TIMEOUT_MS);
   const waiter = {
     cancel: clear,
@@ -32,7 +80,7 @@ const createMessageWaiter = (waiters, messageID, sessionID) => {
     },
     sessionID,
   };
-  waiters.set(messageID, waiter);
+  waiters.set(key, waiter);
   return { promise, waiter };
 };
 
@@ -42,29 +90,164 @@ export const CodiffPlugin = async ({ client, worktree }) => {
   const messageWaiters = new Map();
   let disposed = false;
 
-  const send = async (item) => {
-    const messageID = `msg_codiff_${item.deliveryId.replaceAll('-', '')}`;
+  const statusIsIdle = async (sessionID) => {
+    try {
+      const result = await client.session.status();
+      return !result?.error && result?.data?.[sessionID]?.type === 'idle';
+    } catch {
+      return false;
+    }
+  };
+
+  const retainAmbiguous = (state, deliveryID) => {
+    state.ambiguous.set(deliveryID, true);
+    if (state.ambiguous.size > AMBIGUOUS_LIMIT) {
+      state.ambiguous.delete(state.ambiguous.keys().next().value);
+    }
+  };
+
+  const retainForRetry = (state, entry) => {
+    state.active = null;
+    entry.attempts++;
+    if (entry.attempts < MAX_PROMPT_ATTEMPTS) {
+      state.queue.unshift(entry);
+      return queueReceipt(entry.item);
+    }
+    writeDiagnostic(EXHAUSTED_DIAGNOSTIC);
+    throw new Error('OpenCode rejected the feedback prompt after bounded retries.');
+  };
+
+  const accept = async (state, entry) => {
+    if (disposed) {
+      throw disposedError();
+    }
+    state.active = entry;
+    const idle = await statusIsIdle(entry.item.sessionId);
+    if (disposed) {
+      state.active = null;
+      throw disposedError();
+    }
+    if (!idle) {
+      state.active = null;
+      state.queue.unshift(entry);
+      return { receipt: queueReceipt(entry.item) };
+    }
+
+    const messageID = messageIDFor(entry.item.sessionId, entry.item.deliveryId);
     const { promise: observed, waiter } = createMessageWaiter(
       messageWaiters,
       messageID,
-      item.sessionId,
+      entry.item.sessionId,
     );
+    if (disposed) {
+      state.active = null;
+      waiter.reject(disposedError());
+      throw disposedError();
+    }
+
     let result;
     try {
       result = await client.session.promptAsync({
-        body: { messageID, parts: [{ text: item.message, type: 'text' }] },
-        path: { id: item.sessionId },
+        body: { messageID, parts: [{ text: entry.item.message, type: 'text' }] },
+        path: { id: entry.item.sessionId },
       });
-    } catch (error) {
+    } catch {
       waiter.cancel();
-      throw error;
+      if (disposed) {
+        state.active = null;
+        throw disposedError();
+      }
+      return { receipt: retainForRetry(state, entry) };
     }
-    if (result.error || result.response?.status !== 204) {
+    if (disposed) {
+      state.active = null;
+      waiter.reject(disposedError());
+      throw disposedError();
+    }
+    if (result?.error || result?.response?.status !== 204) {
       waiter.cancel();
-      throw new Error('OpenCode rejected the asynchronous prompt.');
+      return { receipt: retainForRetry(state, entry) };
     }
-    await observed;
+    return { entry, observed };
   };
+
+  const complete = async (state, decision) => {
+    if (decision.receipt) {
+      return decision.receipt;
+    }
+    try {
+      await decision.observed;
+      if (disposed) {
+        throw disposedError();
+      }
+      return {
+        assurance: 'message-created',
+        deliveryId: decision.entry.item.deliveryId,
+        status: 'accepted',
+      };
+    } catch (error) {
+      if (error?.code === 'OPENCODE_MESSAGE_TIMEOUT') {
+        retainAmbiguous(state, decision.entry.item.deliveryId);
+        writeDiagnostic(AMBIGUOUS_DIAGNOSTIC);
+      }
+      throw error;
+    } finally {
+      state.active = null;
+    }
+  };
+
+  const dispatchDelivery = (state, item) => {
+    if (disposed) {
+      return Promise.reject(disposedError());
+    }
+    if (state.ambiguous.has(item.deliveryId)) {
+      return Promise.reject(
+        new Error('OpenCode feedback delivery is ambiguous and will not be retried.'),
+      );
+    }
+    const pending = state.inFlight.get(item.deliveryId);
+    if (pending) {
+      return pending;
+    }
+
+    const entry = { attempts: 0, item };
+    const operation = track(
+      state,
+      (async () => {
+        const decision = await serialize(state, () => {
+          if (disposed) {
+            throw disposedError();
+          }
+          if (state.active || state.queue.length > 0) {
+            state.queue.push(entry);
+            return { receipt: queueReceipt(item) };
+          }
+          return accept(state, entry);
+        });
+        return complete(state, decision);
+      })(),
+    );
+    state.inFlight.set(item.deliveryId, operation);
+    void operation.finally(() => state.inFlight.delete(item.deliveryId)).catch(() => {});
+    return operation;
+  };
+
+  const drainOne = (state) =>
+    track(
+      state,
+      (async () => {
+        const decision = await serialize(state, () => {
+          if (disposed || state.active) {
+            return undefined;
+          }
+          const entry = state.queue.shift();
+          return entry ? accept(state, entry) : undefined;
+        });
+        if (decision) {
+          await complete(state, decision);
+        }
+      })(),
+    );
 
   const ensureSession = (sessionID) => {
     if (disposed) {
@@ -80,52 +263,18 @@ export const CodiffPlugin = async ({ client, worktree }) => {
     }
 
     const state = {
+      active: null,
+      ambiguous: new Map(),
       bridge: null,
-      busy: false,
-      deliveries: new Map(),
-      draining: false,
+      dispatcher: Promise.resolve(),
       inFlight: new Map(),
+      operations: new Set(),
       queue: [],
     };
     const creation = (async () => {
       state.bridge = await createAgentFeedbackBridge({
         backend: 'opencode',
-        deliver: (item) => {
-          const previous = state.deliveries.get(item.deliveryId);
-          if (previous) {
-            return Promise.resolve({ ...previous, status: 'already-accepted' });
-          }
-          const pending = state.inFlight.get(item.deliveryId);
-          if (pending) {
-            return pending;
-          }
-
-          const operation = (async () => {
-            const statuses = await client.session.status();
-            state.busy = statuses.data?.[sessionID]?.type === 'busy';
-            if (state.busy || state.draining || state.queue.length > 0) {
-              const receipt = {
-                assurance: 'bridge-queue',
-                deliveryId: item.deliveryId,
-                status: 'queued',
-              };
-              state.queue.push(item);
-              state.deliveries.set(item.deliveryId, receipt);
-              return receipt;
-            }
-
-            await send(item);
-            const receipt = {
-              assurance: 'message-created',
-              deliveryId: item.deliveryId,
-              status: 'accepted',
-            };
-            state.deliveries.set(item.deliveryId, receipt);
-            return receipt;
-          })().finally(() => state.inFlight.delete(item.deliveryId));
-          state.inFlight.set(item.deliveryId, operation);
-          return operation;
-        },
+        deliver: (item) => dispatchDelivery(state, item),
         getIdentity: () => ({ repositoryRoot: worktree, sessionId: sessionID }),
       });
       if (disposed) {
@@ -139,25 +288,6 @@ export const CodiffPlugin = async ({ client, worktree }) => {
     return creation;
   };
 
-  const drainOne = async (sessionID) => {
-    const state = sessions.get(sessionID);
-    if (!state || state.draining) {
-      return;
-    }
-    const item = state.queue.shift();
-    if (!item) {
-      return;
-    }
-    state.draining = true;
-    try {
-      await send(item);
-    } catch {
-      // The bridge already acknowledged queued insertion; event hooks must not reject.
-    } finally {
-      state.draining = false;
-    }
-  };
-
   return {
     'chat.message': async ({ sessionID }, _output) => {
       await ensureSession(sessionID);
@@ -167,11 +297,12 @@ export const CodiffPlugin = async ({ client, worktree }) => {
         return;
       }
       disposed = true;
-      const error = new Error('OpenCode feedback plugin was disposed.');
+      const error = disposedError();
       for (const waiter of messageWaiters.values()) {
         waiter.reject(error);
       }
       await Promise.allSettled(sessionCreations.values());
+      await Promise.allSettled([...sessions.values()].flatMap(({ operations }) => [...operations]));
       await Promise.all([...sessions.values()].map(({ bridge }) => bridge.close()));
       sessions.clear();
     },
@@ -181,24 +312,16 @@ export const CodiffPlugin = async ({ client, worktree }) => {
       }
       if (event.type === 'message.updated') {
         const info = event.properties.info;
-        const waiter = messageWaiters.get(info.id);
+        const waiter = messageWaiters.get(waiterKey(info.sessionID, info.id));
         if (info.role === 'user' && waiter?.sessionID === info.sessionID) {
           waiter.resolve();
         }
         return;
       }
 
-      const { sessionID } = event.properties;
-      const state = sessions.get(sessionID);
-      if (!state) {
-        return;
-      }
-      if (event.type === 'session.status') {
-        state.busy = event.properties.status.type !== 'idle';
-      }
-      if (event.type === 'session.idle') {
-        state.busy = false;
-        await drainOne(sessionID);
+      const state = sessions.get(event.properties.sessionID);
+      if (event.type === 'session.idle' && state) {
+        await drainOne(state).catch(() => {});
       }
     },
   };

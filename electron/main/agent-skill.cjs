@@ -84,6 +84,18 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
     }
   };
 
+  /** @param {AgentSkillTarget} target */
+  const getTargetStats = (target) => {
+    try {
+      return lstatSync(getTargetPath(target));
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+  };
+
   /** @param {AgentSkillFile} file */
   const isInstalledFile = (file) => {
     try {
@@ -112,10 +124,10 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
     mkdirSync(dirname(targetPath), { recursive: true });
     accessSync(dirname(targetPath), constants.W_OK);
 
-    if (existsSync(targetPath)) {
-      const stats = lstatSync(targetPath);
-      if (!stats.isSymbolicLink()) {
-        throw new Error(`${targetPath} already exists and is not a symlink.`);
+    const stats = getTargetStats(target);
+    if (stats) {
+      if (!isInstalledTarget(target)) {
+        throw new Error(`${targetPath} already exists and is not managed by Codiff.`);
       }
       unlinkSync(targetPath);
     }
@@ -181,8 +193,8 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
         if (!existsSync(sourcePath)) {
           throw new Error(`Could not find the ${skill.label} at ${sourcePath}.`);
         }
-        if (existsSync(targetPath) && !lstatSync(targetPath).isSymbolicLink()) {
-          throw new Error(`${targetPath} already exists and is not a symlink.`);
+        if (getTargetStats(target) && !isInstalledTarget(target)) {
+          throw new Error(`${targetPath} already exists and is not managed by Codiff.`);
         }
       }
 

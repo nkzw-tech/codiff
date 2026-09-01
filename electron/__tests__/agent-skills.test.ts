@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vite-plus/test';
@@ -200,6 +200,9 @@ test('installs the OpenCode skill into its global skills directory', async () =>
   await expect(readFile(commandTarget, 'utf8')).resolves.toContain(
     'model: anthropic/claude-sonnet-4-6',
   );
+  await expect(installer.install()).resolves.toBe(true);
+  await expect(realpath(target)).resolves.toBe(await realpath(source));
+  await expect(realpath(pluginTarget)).resolves.toBe(await realpath(pluginSource));
 
   await rm(pluginTarget);
   expect(installer.getStatus()).toEqual({ installed: false, path: target });
@@ -286,4 +289,36 @@ test('does not replace a user-authored OpenCode plugin', async () => {
   await expect(installer.install()).resolves.toBe(false);
   await expect(readFile(pluginTarget, 'utf8')).resolves.toBe('// My custom plugin.\n');
   expect(installer.getStatus().installed).toBe(false);
+});
+
+test('does not replace an unrelated user-authored OpenCode plugin symlink', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-plugin-link-conflict-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const source = join(root, 'opencode/skills/codiff');
+  const commandSource = join(root, 'opencode/commands/codiff.md');
+  const pluginSource = join(root, 'opencode/plugins/codiff.js');
+  const userPlugin = join(directory.path, 'user-plugin.js');
+  const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
+  const skill = listAgentSkills().find(({ id }) => id === 'opencode');
+
+  await mkdir(source, { recursive: true });
+  await mkdir(join(root, 'opencode/commands'), { recursive: true });
+  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
+  await mkdir(join(home, '.config/opencode/plugins'), { recursive: true });
+  await writeFile(commandSource, '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n');
+  await writeFile(pluginSource, 'export const CodiffPlugin = async () => ({});\n');
+  await writeFile(userPlugin, '// User plugin.\n');
+  await symlink(userPlugin, pluginTarget, 'file');
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  await expect(realpath(pluginTarget)).resolves.toBe(await realpath(userPlugin));
+  await expect(readFile(pluginTarget, 'utf8')).resolves.toBe('// User plugin.\n');
 });
