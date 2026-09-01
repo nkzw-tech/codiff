@@ -11,6 +11,13 @@ const MAX_REGISTRATION_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const PROTOCOL_VERSION = 1;
 const STALE_AFTER_MS = 45_000;
+const VALID_BACKENDS = new Set(['claude', 'codex', 'opencode', 'pi']);
+const assurances = {
+  claude: new Set(['transport-write']),
+  codex: new Set(['queue-command']),
+  opencode: new Set(['bridge-queue', 'message-created']),
+  pi: new Set(['dispatch-started']),
+};
 
 const defaultIsPidAlive = (pid) => {
   try {
@@ -39,15 +46,25 @@ const createAgentFeedbackBridgeClient = ({
   const uid = getuid?.();
 
   /** @param {import('../core/types.ts').AgentFeedbackDeliveryRequest} request */
-  const findRegistration = (request) => {
+  const findRegistrations = (request) => {
+    if (!VALID_BACKENDS.has(request.backend)) {
+      throw new Error('No authenticated agent feedback bridge is available.');
+    }
     const directory = path.join(registrationRoot, request.backend);
+    let rootMetadata;
     let directoryMetadata;
     try {
+      rootMetadata = fs.lstatSync(registrationRoot);
       directoryMetadata = fs.lstatSync(directory);
     } catch {
       throw new Error('No authenticated agent feedback bridge is available.');
     }
-    if (!directoryMetadata.isDirectory() || !isPrivate(directoryMetadata, uid)) {
+    if (
+      !rootMetadata.isDirectory() ||
+      !isPrivate(rootMetadata, uid) ||
+      !directoryMetadata.isDirectory() ||
+      !isPrivate(directoryMetadata, uid)
+    ) {
       throw new Error('No authenticated agent feedback bridge is available.');
     }
 
@@ -79,6 +96,7 @@ const createAgentFeedbackBridgeClient = ({
           !registration.token ||
           !Number.isFinite(updatedAt) ||
           now() - updatedAt > STALE_AFTER_MS ||
+          updatedAt - now() > STALE_AFTER_MS ||
           !isPidAlive(registration.pid)
         ) {
           continue;
@@ -89,10 +107,10 @@ const createAgentFeedbackBridgeClient = ({
       }
     }
     registrations.sort((left, right) => right.updatedAtMs - left.updatedAtMs);
-    if (!registrations[0]) {
+    if (registrations.length === 0) {
       throw new Error('No authenticated agent feedback bridge is available.');
     }
-    return registrations[0];
+    return registrations;
   };
 
   /**
@@ -106,10 +124,14 @@ const createAgentFeedbackBridgeClient = ({
       let bodyFinished = false;
       let dispatched = false;
       let settled = false;
-      let timedOut = false;
+      let deadline;
+      const finish = () => {
+        if (deadline) clearTimeout(deadline);
+        settled = true;
+      };
       const fail = (error, ambiguous = false) => {
         if (settled) return;
-        settled = true;
+        finish();
         const failure = error instanceof Error ? error : new Error(String(error));
         if (ambiguous) failure.ambiguous = true;
         reject(failure);
@@ -123,7 +145,6 @@ const createAgentFeedbackBridgeClient = ({
           method: 'POST',
           path: requestPath,
           socketPath: registration.endpoint,
-          timeout: timeoutMs,
         },
         (incoming) => {
           const chunks = [];
@@ -152,7 +173,7 @@ const createAgentFeedbackBridgeClient = ({
             }
             try {
               const value = JSON.parse(text);
-              settled = true;
+              finish();
               resolve(value);
             } catch {
               fail(
@@ -166,43 +187,82 @@ const createAgentFeedbackBridgeClient = ({
       outgoing.on('finish', () => {
         bodyFinished = true;
       });
-      outgoing.on('timeout', () => {
-        timedOut = true;
-        outgoing.destroy(new Error('Agent feedback bridge request timed out.'));
-      });
       outgoing.on('error', (error) => {
-        fail(error, delivery && (timedOut || bodyFinished));
+        fail(error, delivery && bodyFinished);
       });
+      deadline = setTimeout(() => {
+        const error = new Error('Agent feedback bridge request timed out.');
+        fail(error, delivery && dispatched);
+        outgoing.destroy(error);
+      }, timeoutMs);
       dispatched = true;
       outgoing.end(JSON.stringify(body));
     });
 
+  const identityMatches = (identity, expectedIdentity) =>
+    identity &&
+    typeof identity === 'object' &&
+    Object.keys(identity).sort().join('\0') === Object.keys(expectedIdentity).sort().join('\0') &&
+    Object.entries(expectedIdentity).every(([key, value]) => identity[key] === value);
+
+  const validateDeliveryResponse = (request, response) => {
+    if (!response || typeof response !== 'object' || Array.isArray(response)) {
+      throw new Error('Agent feedback bridge acknowledgement is invalid.');
+    }
+    if (response.deliveryId !== request.deliveryId) {
+      throw new Error('Agent feedback bridge acknowledgement has the wrong delivery ID.');
+    }
+    if (response.status === 'rejected') {
+      if (
+        Object.keys(response).sort().join('\0') !== 'deliveryId\0reason\0status' ||
+        typeof response.reason !== 'string' ||
+        response.reason.trim() === ''
+      ) {
+        throw new Error('Agent feedback bridge rejection is invalid.');
+      }
+      return;
+    }
+    if (
+      Object.keys(response).sort().join('\0') !== 'assurance\0deliveryId\0status' ||
+      !['accepted', 'queued', 'already-accepted'].includes(response.status) ||
+      !assurances[request.backend].has(response.assurance)
+    ) {
+      throw new Error('Agent feedback bridge acknowledgement is invalid for this backend.');
+    }
+  };
+
   /** @param {import('../core/types.ts').AgentFeedbackDeliveryRequest} request */
   const deliverToAgentFeedbackBridge = async (request) => {
-    const registration = findRegistration(request);
-    const nonce = randomUUID();
-    const identity = await post(
-      registration,
-      '/v1/identity',
-      { nonce, version: PROTOCOL_VERSION },
-      false,
-    );
-    const expectedIdentity = {
-      backend: request.backend,
-      nonce,
-      repositoryRoot: request.repositoryRoot,
-      sessionId: request.sessionId,
-      version: PROTOCOL_VERSION,
-    };
-    if (
-      !identity ||
-      typeof identity !== 'object' ||
-      Object.keys(identity).sort().join('\0') !== Object.keys(expectedIdentity).sort().join('\0') ||
-      Object.entries(expectedIdentity).some(([key, value]) => identity[key] !== value)
-    ) {
-      throw new Error('Agent feedback bridge identity challenge failed.');
+    let registration;
+    for (const candidate of findRegistrations(request)) {
+      const nonce = randomUUID();
+      try {
+        const identity = await post(
+          candidate,
+          '/v1/identity',
+          { nonce, version: PROTOCOL_VERSION },
+          false,
+        );
+        if (
+          identityMatches(identity, {
+            backend: request.backend,
+            nonce,
+            repositoryRoot: request.repositoryRoot,
+            sessionId: request.sessionId,
+            version: PROTOCOL_VERSION,
+          })
+        ) {
+          registration = candidate;
+          break;
+        }
+      } catch {
+        // A live PID can have an orphaned socket or belong to a reused process.
+      }
     }
-    return post(
+    if (!registration) {
+      throw new Error('No authenticated agent feedback bridge is available.');
+    }
+    const response = await post(
       registration,
       '/v1/deliver',
       {
@@ -214,6 +274,13 @@ const createAgentFeedbackBridgeClient = ({
       },
       true,
     );
+    try {
+      validateDeliveryResponse(request, response);
+      return response;
+    } catch (error) {
+      error.ambiguous = true;
+      throw error;
+    }
   };
 
   return { deliverToAgentFeedbackBridge };

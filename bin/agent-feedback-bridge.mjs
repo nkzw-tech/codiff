@@ -1,11 +1,12 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const PROTOCOL_VERSION = 1;
+const VALID_BACKENDS = new Set(['claude', 'codex', 'opencode', 'pi']);
 
 const sendJson = (response, statusCode, body) => {
   if (response.writableEnded) return;
@@ -60,18 +61,42 @@ const writeRegistration = async (registrationPath, registration) => {
   }
 };
 
+const ensurePrivateDirectory = async (directory, label, uid) => {
+  let metadata;
+  try {
+    metadata = await lstat(directory);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    await mkdir(directory, { mode: 0o700, recursive: true });
+    metadata = await lstat(directory);
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(`Agent feedback ${label} must be a directory, not a symlink.`);
+  }
+  if (uid !== undefined && metadata.uid !== uid) {
+    throw new Error(`Agent feedback ${label} has the wrong owner.`);
+  }
+  await chmod(directory, 0o700);
+};
+
 /**
- * @param {{backend: string; deliver: (request: {deliveryId: string; message: string; repositoryRoot: string; sessionId: string; version: number}) => Promise<Record<string, unknown>>; getIdentity: () => {repositoryRoot: string; sessionId: string} | Promise<{repositoryRoot: string; sessionId: string}>; now?: () => Date; registrationRoot?: string; socketDirectory?: string; refreshIntervalMs?: number}} options
+ * @param {{backend: string; deliver: (request: {deliveryId: string; message: string; repositoryRoot: string; sessionId: string; version: number}) => Promise<Record<string, unknown>>; getIdentity: () => {repositoryRoot: string; sessionId: string} | Promise<{repositoryRoot: string; sessionId: string}>; getuid?: () => number; now?: () => Date; onDiagnostic?: (message: string) => void; registrationRoot?: string; socketDirectory?: string; refreshIntervalMs?: number; writeRegistrationFile?: (registrationPath: string, registration: Record<string, unknown>) => Promise<void>}} options
  */
 export const createAgentFeedbackBridge = async ({
   backend,
   deliver,
   getIdentity,
+  getuid = process.getuid?.bind(process),
   now = () => new Date(),
+  onDiagnostic = (message) => console.error(message),
   refreshIntervalMs = 15_000,
   registrationRoot = path.join(os.homedir(), '.codiff', 'agent-feedback', 'v1'),
   socketDirectory = os.tmpdir(),
+  writeRegistrationFile = writeRegistration,
 }) => {
+  if (!VALID_BACKENDS.has(backend)) {
+    throw new Error('Agent feedback backend is invalid.');
+  }
   const { repositoryRoot, sessionId } = await getIdentity();
   const instanceId = randomUUID();
   const registrationDirectory = path.join(registrationRoot, backend);
@@ -97,6 +122,7 @@ export const createAgentFeedbackBridge = async ({
   const connections = new Set();
   let registrationWrite = Promise.resolve();
   let closed = false;
+  let closePromise;
 
   const remember = (deliveryId, response) => {
     terminal.set(deliveryId, response);
@@ -104,9 +130,9 @@ export const createAgentFeedbackBridge = async ({
   };
 
   const queueRegistrationWrite = () => {
-    registrationWrite = registrationWrite.then(() =>
-      writeRegistration(registrationPath, registration),
-    );
+    registrationWrite = registrationWrite
+      .catch(() => {})
+      .then(() => writeRegistrationFile(registrationPath, registration));
     return registrationWrite;
   };
 
@@ -202,33 +228,59 @@ export const createAgentFeedbackBridge = async ({
     socket.on('close', () => connections.delete(socket));
   });
 
-  await mkdir(registrationRoot, { mode: 0o700, recursive: true });
-  await chmod(registrationRoot, 0o700);
-  await mkdir(registrationDirectory, { mode: 0o700, recursive: true });
-  await chmod(registrationDirectory, 0o700);
-  await rm(endpoint, { force: true });
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(endpoint, resolve);
-  });
-  await chmod(endpoint, 0o600);
-  await queueRegistrationWrite();
+  const closeServer = () =>
+    new Promise((resolve) => {
+      if (!server.listening) {
+        resolve();
+        return;
+      }
+      server.close(() => resolve());
+    });
+  const removeInstanceFiles = () =>
+    Promise.all([rm(registrationPath, { force: true }), rm(endpoint, { force: true })]);
+
+  await ensurePrivateDirectory(registrationRoot, 'registry root', getuid?.());
+  await ensurePrivateDirectory(registrationDirectory, 'backend directory', getuid?.());
+  try {
+    await rm(endpoint, { force: true });
+    await new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(endpoint, resolve);
+    });
+    await chmod(endpoint, 0o600);
+    await queueRegistrationWrite();
+  } catch (error) {
+    for (const connection of connections) connection.destroy();
+    await closeServer();
+    await removeInstanceFiles();
+    throw error;
+  }
 
   const refresh = setInterval(() => {
     if (closed) return;
     registration.updatedAt = now().toISOString();
-    void queueRegistrationWrite().catch(() => {});
+    void queueRegistrationWrite().catch(() => {
+      try {
+        onDiagnostic('Agent feedback bridge registration refresh failed.');
+      } catch {
+        // Diagnostics must not stop future registration refreshes.
+      }
+    });
   }, refreshIntervalMs);
   refresh.unref?.();
 
-  const close = async () => {
-    if (closed) return;
-    closed = true;
-    clearInterval(refresh);
-    for (const connection of connections) connection.destroy();
-    await new Promise((resolve) => server.close(resolve));
-    await registrationWrite.catch(() => {});
-    await Promise.all([rm(registrationPath, { force: true }), rm(endpoint, { force: true })]);
+  const close = () => {
+    if (!closePromise) {
+      closePromise = (async () => {
+        closed = true;
+        clearInterval(refresh);
+        for (const connection of connections) connection.destroy();
+        await closeServer();
+        await registrationWrite.catch(() => {});
+        await removeInstanceFiles();
+      })();
+    }
+    return closePromise;
   };
 
   return { close, registration, registrationDirectory, registrationPath };

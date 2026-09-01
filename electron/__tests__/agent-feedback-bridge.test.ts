@@ -178,6 +178,21 @@ test('rejects registrations not owned by the current user', async () => {
   );
 });
 
+test('rejects a symlinked registration root', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-client-symlink-test-'));
+  const target = path.join(root, 'target');
+  const registrationRoot = path.join(root, 'registry');
+  await mkdir(path.join(target, 'pi'), { mode: 0o700, recursive: true });
+  await chmod(target, 0o700);
+  await chmod(path.join(target, 'pi'), 0o700);
+  await symlink(target, registrationRoot, 'dir');
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.deliverToAgentFeedbackBridge(request)).rejects.toThrow(
+    /no authenticated.*bridge/i,
+  );
+});
+
 test('challenges only the freshest live registration for the exact session', async () => {
   const { registrationRoot } = await setup();
   await writeRegistration(registrationRoot, {
@@ -194,6 +209,56 @@ test('challenges only the freshest live registration for the exact session', asy
   await expect(client.deliverToAgentFeedbackBridge(request)).resolves.toMatchObject({
     status: 'accepted',
   });
+});
+
+test('ignores unreasonable future timestamps and falls back past an orphaned reused PID', async () => {
+  const { registrationRoot } = await setup();
+  await writeRegistration(registrationRoot, {
+    endpoint: '/future.sock',
+    updatedAt: new Date(Date.now() + 45_001).toISOString(),
+  });
+  await writeRegistration(registrationRoot, {
+    endpoint: '/orphaned.sock',
+    pid: process.pid,
+    updatedAt: new Date(Date.now() + 1_000).toISOString(),
+  });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.deliverToAgentFeedbackBridge(request)).resolves.toMatchObject({
+    status: 'accepted',
+  });
+});
+
+test('falls back after a fresher identity mismatch without delivering to it', async () => {
+  const { registrationRoot, root } = await setup();
+  let incorrectDeliveries = 0;
+  const { socketPath } = await createRawServer(root, (incoming, response) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      if (incoming.url === '/v1/deliver') incorrectDeliveries += 1;
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      response.end(
+        JSON.stringify({
+          backend: 'pi',
+          nonce: body.nonce,
+          repositoryRoot: '/wrong',
+          sessionId: 'session-1',
+          version: 1,
+        }),
+      );
+    });
+  });
+  await writeRegistration(registrationRoot, {
+    endpoint: socketPath,
+    updatedAt: new Date(Date.now() + 1_000).toISOString(),
+  });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.deliverToAgentFeedbackBridge(request)).resolves.toMatchObject({
+    status: 'accepted',
+  });
+  expect(incorrectDeliveries).toBe(0);
 });
 
 test.each([
@@ -286,6 +351,84 @@ test('classifies a delivery timeout after dispatch as ambiguous', async () => {
   });
   await writeRegistration(registrationRoot, { endpoint: socketPath });
   const client = createAgentFeedbackBridgeClient({ registrationRoot, timeoutMs: 20 });
+
+  await expect(client.deliverToAgentFeedbackBridge(request)).rejects.toMatchObject({
+    ambiguous: true,
+  });
+});
+
+test('uses an absolute deadline despite trickled response bytes', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-deadline-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const { socketPath } = await createRawServer(root, (incoming, response) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      if (incoming.url === '/v1/identity') {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        response.end(
+          JSON.stringify({
+            backend: 'pi',
+            nonce: body.nonce,
+            repositoryRoot: '/repo',
+            sessionId: 'session-1',
+            version: 1,
+          }),
+        );
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      const interval = setInterval(() => response.write(' '), 5);
+      response.on('close', () => clearInterval(interval));
+    });
+  });
+  await writeRegistration(registrationRoot, { endpoint: socketPath });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot, timeoutMs: 30 });
+  const startedAt = Date.now();
+
+  await expect(client.deliverToAgentFeedbackBridge(request)).rejects.toMatchObject({
+    ambiguous: true,
+  });
+  expect(Date.now() - startedAt).toBeLessThan(200);
+});
+
+test.each([
+  ['wrong delivery ID', { assurance: 'dispatch-started', deliveryId: 'wrong', status: 'accepted' }],
+  [
+    'wrong assurance',
+    { assurance: 'transport-write', deliveryId: 'delivery-1', status: 'accepted' },
+  ],
+  ['unknown status', { deliveryId: 'delivery-1', status: 'unknown' }],
+  ['empty rejection', { deliveryId: 'delivery-1', reason: ' ', status: 'rejected' }],
+  [
+    'unexpected field',
+    { assurance: 'dispatch-started', deliveryId: 'delivery-1', extra: true, status: 'accepted' },
+  ],
+])('rejects malformed delivery acknowledgement: %s', async (_name, acknowledgement) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-ack-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const { socketPath } = await createRawServer(root, (incoming, response) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      if (incoming.url === '/v1/identity') {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        response.end(
+          JSON.stringify({
+            backend: 'pi',
+            nonce: body.nonce,
+            repositoryRoot: '/repo',
+            sessionId: 'session-1',
+            version: 1,
+          }),
+        );
+      } else {
+        response.end(JSON.stringify(acknowledgement));
+      }
+    });
+  });
+  await writeRegistration(registrationRoot, { endpoint: socketPath });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
 
   await expect(client.deliverToAgentFeedbackBridge(request)).rejects.toMatchObject({
     ambiguous: true,
