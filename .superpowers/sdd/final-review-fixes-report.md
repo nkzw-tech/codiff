@@ -39,3 +39,48 @@ The final diff review found an additional race in the packaged process-ID waiter
 ## Concerns
 
 - The GUI-only manual Send feedback exercise cannot be performed in this non-interactive environment. Automated launcher, lifecycle, repository-state, renderer, validation, and build coverage is used instead.
+
+## Arbitrated Follow-up
+
+### Status
+
+DONE_WITH_CONCERNS
+
+### Commit
+
+- `a78edd6 Close agent review lifecycle races`
+
+### Mapped Evidence
+
+1. **Forwarding grace origin:** `waitForAgentReviewResult` now records when forwarding death is first observed and computes the owner deadline as the earlier of exit plus grace or the overall open deadline. Its clock and polling wait are injectable; the deterministic test advances forwarding death to 900 ms and owner/result publication to 1,500 ms.
+2. **Stale owner publication:** delayed initial repository publication verifies that its handoff is still registered and has no newer accepted repository before writing the owner. The regression sets a new commit source before resolving the initial working-tree source, then verifies both owner and submitted result retain the new source.
+3. **Repository TOCTOU:** `resolveRepository` re-checks the accepted repository immediately after awaiting the initial outcome and before using its value or error. The regression starts close, publishes a new source, resolves the stale source, and verifies the closed result uses the new source.
+4. **Coordinator leak and ID reuse:** coordinator state is now an object token per window and `clear` removes it. A reused numeric web contents ID receives a new token, so the old request cannot become current when it resolves last.
+5. **Post-destroy resurrection:** window close clears the coordinator before deleting window state. Repository acceptance also requires both the IPC sender and owning window to remain active; focused coordinator-boundary coverage verifies inactive requests return their local result without invoking shared-state acceptance.
+
+### TDD Evidence
+
+- `vp test core/__tests__/codiff-cli.test.ts -t "measures owner publication grace"` -> RED: startup-based timeout rejected before virtual owner publication; GREEN after exit-origin deadline tracking.
+- `vp test electron/__tests__/agent-review-handoff.test.ts -t "delayed initial resolution"` -> RED: owner contained stale working-tree identity; GREEN after guarded initial publication.
+- `vp test electron/__tests__/agent-review-handoff.test.ts -t "close prefers"` -> RED: closed result used stale working-tree identity; GREEN after the post-await repository re-check.
+- `vp test electron/__tests__/repository-state-requests.test.ts -t "ID reuse"` -> RED: `clear` was absent; GREEN with per-window token invalidation.
+- `vp test electron/__tests__/repository-state-requests.test.ts -t "sender becomes inactive"` -> RED: inactive request invoked acceptance; GREEN with the liveness predicate.
+
+### Verification
+
+- Focused suites: 3 files, 159 tests passed.
+- Full `vp test`: 104 files, 1,134 passed, 4 skipped.
+- `vp check --fix`: no warnings, lint errors, or type errors in 201 files.
+- `vpr build`: all seven tasks passed with the existing chunk-size and ineffective dynamic-import warnings.
+
+### Self-Review
+
+- Confirmed owner grace starts exactly once at observed forwarding death and remains bounded by the original open timeout.
+- Confirmed a live owner removes the open deadline, so launcher cleanup cannot remove an active primary handoff path.
+- Confirmed initial handoff settlement cannot overwrite a newer owner and close/complete prefer a repository set across the await boundary.
+- Confirmed clear plus token identity handles both memory cleanup and web contents ID reuse.
+- Confirmed late repository reads can still resolve to their caller but cannot repopulate shared state after close or destruction.
+
+### Concerns
+
+- The GUI-only manual Send feedback exercise remains unavailable in this non-interactive environment; focused and full automated coverage passed.
