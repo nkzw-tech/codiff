@@ -1,9 +1,20 @@
 import {
+  linkSync as nodeLinkSync,
   renameSync as nodeRenameSync,
   symlinkSync as nodeSymlinkSync,
   unlinkSync as nodeUnlinkSync,
+  writeFileSync as nodeWriteFileSync,
 } from 'node:fs';
-import { lstat, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { expect, test, vi } from 'vite-plus/test';
@@ -46,6 +57,7 @@ const { createSkillInstaller } = require('../main/agent-skill.cjs') as {
       showMessageBox: (options: unknown) => Promise<void>;
     };
     fileOperations?: {
+      linkSync?: typeof nodeLinkSync;
       renameSync?: typeof nodeRenameSync;
       symlinkSync?: typeof nodeSymlinkSync;
     };
@@ -287,12 +299,12 @@ test('rolls back both Claude targets when committing the second target fails', a
     app: { getPath: () => home, isPackaged: false },
     dialog: { showMessageBox: async () => {} },
     fileOperations: {
-      renameSync: (source, target) => {
-        if (!failed && target === channelTarget && source.includes('.codiff-stage-')) {
+      symlinkSync: (source, target, type) => {
+        if (!failed && target === channelTarget) {
           failed = true;
           throw new Error('injected commit failure');
         }
-        nodeRenameSync(source, target);
+        nodeSymlinkSync(source, target, type);
       },
     },
     root,
@@ -303,6 +315,48 @@ test('rolls back both Claude targets when committing the second target fails', a
   expect((await lstat(skillTarget)).ino).toBe(skillIdentity.ino);
   expect((await lstat(channelTarget)).ino).toBe(channelIdentity.ino);
   expect(installer.getStatus().installed).toBe(true);
+});
+
+test('preserves a user symlink created after backing up a Claude target', async () => {
+  await using directory = await createTemporaryDirectory('codiff-claude-backup-race-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skillTarget = join(home, '.claude/skills/codiff');
+  const channelTarget = join(home, '.claude/plugins/codiff-channel');
+  const userSource = join(directory.path, 'user-channel');
+  const skill = listAgentSkills().find(({ id }) => id === 'claude');
+  const showMessageBox = vi.fn(async () => {});
+  await mkdir(join(root, 'claude/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'claude/channel/codiff'), { recursive: true });
+  await mkdir(userSource, { recursive: true });
+  await mkdir(dirname(skillTarget), { recursive: true });
+  await mkdir(dirname(channelTarget), { recursive: true });
+  await symlink(join(root, 'claude/skills/codiff'), skillTarget, 'dir');
+  await symlink(join(root, 'claude/channel/codiff'), channelTarget, 'dir');
+  const skillIdentity = await lstat(skillTarget);
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox },
+    fileOperations: {
+      renameSync: (source, target) => {
+        nodeRenameSync(source, target);
+        if (source === channelTarget && target.includes('.codiff-backup-')) {
+          nodeSymlinkSync(userSource, channelTarget, 'dir');
+        }
+      },
+    },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  expect(await readlink(channelTarget)).toBe(userSource);
+  expect((await lstat(channelTarget)).isSymbolicLink()).toBe(true);
+  expect((await lstat(skillTarget)).ino).toBe(skillIdentity.ino);
+  expect(showMessageBox).toHaveBeenCalledWith(
+    expect.objectContaining({ detail: expect.stringContaining('EEXIST') }),
+  );
 });
 
 test('rolls back OpenCode targets when the later managed file commit fails', async () => {
@@ -325,12 +379,12 @@ test('rolls back OpenCode targets when the later managed file commit fails', asy
     app: { getPath: () => home, isPackaged: false },
     dialog: { showMessageBox: async () => {} },
     fileOperations: {
-      renameSync: (source, target) => {
-        if (!failed && target === commandTarget && source.includes('.codiff-stage-')) {
+      linkSync: (source, target) => {
+        if (!failed && target === commandTarget) {
           failed = true;
           throw new Error('injected managed file failure');
         }
-        nodeRenameSync(source, target);
+        nodeLinkSync(source, target);
       },
     },
     root,
@@ -345,6 +399,58 @@ test('rolls back OpenCode targets when the later managed file commit fails', asy
     code: 'ENOENT',
   });
   await expect(lstat(commandTarget)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+test('preserves a user file created after backing up an OpenCode managed file', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-backup-race-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const skillTarget = join(home, '.config/opencode/skills/codiff');
+  const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
+  const commandTarget = join(home, '.config/opencode/commands/codiff.md');
+  const userContents = Buffer.from('user-authored command\nwith exact bytes\0\xff', 'latin1');
+  const skill = listAgentSkills().find(({ id }) => id === 'opencode');
+  const showMessageBox = vi.fn(async () => {});
+  await mkdir(join(root, 'opencode/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
+  await mkdir(join(root, 'opencode/commands'), { recursive: true });
+  await writeFile(join(root, 'opencode/plugins/codiff.js'), '// managed plugin\n');
+  await writeFile(
+    join(root, 'opencode/commands/codiff.md'),
+    '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n',
+  );
+  expect(skill).toBeDefined();
+  const initialInstaller = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    root,
+    skill: skill!,
+  });
+  await expect(initialInstaller.install()).resolves.toBe(true);
+  const skillIdentity = await lstat(skillTarget);
+  const pluginIdentity = await lstat(pluginTarget);
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox },
+    fileOperations: {
+      renameSync: (source, target) => {
+        nodeRenameSync(source, target);
+        if (source === commandTarget && target.includes('.codiff-backup-')) {
+          nodeWriteFileSync(commandTarget, userContents, { flag: 'wx' });
+        }
+      },
+    },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(false);
+  expect(await readFile(commandTarget)).toEqual(userContents);
+  expect((await lstat(skillTarget)).ino).toBe(skillIdentity.ino);
+  expect((await lstat(pluginTarget)).ino).toBe(pluginIdentity.ino);
+  expect(showMessageBox).toHaveBeenCalledWith(
+    expect.objectContaining({ detail: expect.stringContaining('EEXIST') }),
+  );
 });
 
 test('the managed Claude skill documents the tested Channel startup command', async () => {

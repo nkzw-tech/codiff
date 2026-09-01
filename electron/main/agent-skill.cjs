@@ -5,9 +5,11 @@ const {
   accessSync,
   constants,
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -40,6 +42,7 @@ const { basename, dirname, join } = require('node:path');
  *   app: import('electron').App;
  *   dialog: import('electron').Dialog;
  *   fileOperations?: {
+ *     linkSync?: typeof linkSync;
  *     renameSync?: typeof renameSync;
  *     symlinkSync?: typeof symlinkSync;
  *     writeFileSync?: typeof writeFileSync;
@@ -57,6 +60,7 @@ const createSkillInstaller = ({
   root,
   skill,
 }) => {
+  const createHardLink = fileOperations.linkSync || linkSync;
   const movePath = fileOperations.renameSync || renameSync;
   const createSymlink = fileOperations.symlinkSync || symlinkSync;
   const writeFile = fileOperations.writeFileSync || writeFileSync;
@@ -260,6 +264,7 @@ const createSkillInstaller = ({
           backupMoved: false,
           backupPath,
           committed: false,
+          committedSnapshot: null,
           stagedSnapshot: captureDestination(item, stagePath),
           stagePath,
         });
@@ -267,19 +272,33 @@ const createSkillInstaller = ({
 
       for (const item of staged) {
         revalidateDestination(item);
+        if (!sameDestination(captureDestination(item, item.stagePath), item.stagedSnapshot)) {
+          throw new Error(`${item.stagePath} changed during installation.`);
+        }
         if (item.snapshot) {
           movePath(item.targetPath, item.backupPath);
           item.backupMoved = true;
           revalidateDestination(item, item.backupPath);
         }
-        movePath(item.stagePath, item.targetPath);
+        if (item.kind === 'target') {
+          const target = /** @type {AgentSkillTarget} */ (item.definition);
+          const type =
+            target.type === 'file' ? 'file' : process.platform === 'win32' ? 'junction' : 'dir';
+          createSymlink(readlinkSync(item.stagePath), item.targetPath, type);
+        } else {
+          createHardLink(item.stagePath, item.targetPath);
+        }
         item.committed = true;
+        item.committedSnapshot = captureDestination(item);
       }
     } catch (error) {
       for (const item of staged.toReversed()) {
         if (item.committed) {
           try {
-            if (sameDestination(captureDestination(item), item.stagedSnapshot)) {
+            if (
+              item.committedSnapshot &&
+              sameDestination(captureDestination(item), item.committedSnapshot)
+            ) {
               rmSync(item.targetPath, { force: true, recursive: true });
             }
           } catch {
@@ -307,8 +326,9 @@ const createSkillInstaller = ({
     for (const item of staged) {
       try {
         rmSync(item.backupPath, { force: true, recursive: true });
+        rmSync(item.stagePath, { force: true, recursive: true });
       } catch {
-        // The installation is committed; a private stale backup is safer than rollback.
+        // The installation is committed; private stale artifacts are safer than rollback.
       }
     }
     return items.map(({ targetPath }) => targetPath);
