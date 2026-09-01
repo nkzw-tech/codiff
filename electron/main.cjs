@@ -1,5 +1,6 @@
 // @ts-check
 
+const { spawn } = require('node:child_process');
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { basename, dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -115,7 +116,10 @@ const {
 const { getPlanReviewPath, readPlanReview, writePlanReview } = require('./plan-review.cjs');
 const { createSharedPlanSnapshot } = require('./shared-plan.cjs');
 const { createWalkthroughProgressReporter } = require('./walkthrough-progress.cjs');
-const { createAgentFeedbackAdapterRegistry } = require('./agent-feedback-adapters.cjs');
+const {
+  createAgentFeedbackAdapterRegistry,
+  createAgentFeedbackAdapters,
+} = require('./agent-feedback-adapters.cjs');
 const { createAgentFeedbackDeliveryController } = require('./agent-feedback-delivery.cjs');
 const { createRepositoryStateRequestCoordinator } = require('./repository-state-requests.cjs');
 const { registerWindowOpenReceipt } = require('./window-open-receipt.cjs');
@@ -157,6 +161,11 @@ const completedPlanWindows = new Set();
 const openWindows = new Set();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
 const agentFeedbackAdapters = createAgentFeedbackAdapterRegistry();
+for (const [backend, adapter] of Object.entries(
+  createAgentFeedbackAdapters({ spawnProcess: spawn }),
+)) {
+  agentFeedbackAdapters.register(backend, adapter);
+}
 const agentFeedbackDelivery = createAgentFeedbackDeliveryController({
   deliver: (request) => agentFeedbackAdapters.deliver(request),
   probe: (identity) => agentFeedbackAdapters.probe(identity),
