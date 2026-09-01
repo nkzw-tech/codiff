@@ -243,12 +243,15 @@ export const waitForAgentReviewResult = async (
   {
     forwardingExitGraceMs = 1_000,
     isRunning = isProcessRunning,
+    now = Date.now,
     openTimeoutMs = 15_000,
     pollIntervalMs = 50,
     processId = /** @type {number | null} */ (null),
+    wait = (milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)),
   } = {},
 ) => {
-  const startedAt = Date.now();
+  const startedAt = now();
+  let forwardingExitObservedAt = null;
   let lastResultError = null;
   let ownerPid = null;
   let childError = null;
@@ -258,9 +261,11 @@ export const waitForAgentReviewResult = async (
   });
   child?.once('exit', (code, signal) => {
     childExit = { code, signal };
+    forwardingExitObservedAt ??= now();
   });
   if (child && (child.exitCode != null || child.signalCode != null)) {
     childExit = { code: child.exitCode, signal: child.signalCode };
+    forwardingExitObservedAt = now();
   }
 
   for (;;) {
@@ -295,6 +300,9 @@ export const waitForAgentReviewResult = async (
 
     const ownerExited = ownerPid != null && !isRunning(ownerPid);
     const forwardingExited = childExit || (processId != null && !isRunning(processId));
+    if (forwardingExited && forwardingExitObservedAt == null) {
+      forwardingExitObservedAt = now();
+    }
     if (ownerExited || (ownerPid == null && childExit && childExit.code !== 0)) {
       try {
         const result = readTerminalResult();
@@ -314,10 +322,13 @@ export const waitForAgentReviewResult = async (
       const diagnostic = lastResultError instanceof Error ? `: ${lastResultError.message}` : '';
       throw new Error(`Codiff exited without a review result${detail}${diagnostic}.`);
     }
-    const ownerPublicationTimeoutMs = forwardingExited
-      ? Math.min(openTimeoutMs, forwardingExitGraceMs)
-      : openTimeoutMs;
-    if (ownerPid == null && Date.now() - startedAt >= ownerPublicationTimeoutMs) {
+    const ownerPublicationDeadline = Math.min(
+      startedAt + openTimeoutMs,
+      forwardingExitObservedAt == null
+        ? Number.POSITIVE_INFINITY
+        : forwardingExitObservedAt + forwardingExitGraceMs,
+    );
+    if (ownerPid == null && now() >= ownerPublicationDeadline) {
       try {
         const result = readTerminalResult();
         if (result) {
@@ -333,11 +344,11 @@ export const waitForAgentReviewResult = async (
         throw new Error(`Codiff exited without a review result${diagnostic}.`);
       }
       throw new Error(
-        `Codiff did not open the review within ${ownerPublicationTimeoutMs / 1000} seconds${diagnostic}.`,
+        `Codiff did not open the review within ${openTimeoutMs / 1000} seconds${diagnostic}.`,
       );
     }
 
-    await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
+    await wait(pollIntervalMs);
   }
 };
 

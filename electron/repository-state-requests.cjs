@@ -1,21 +1,28 @@
 // @ts-check
 
 const createRepositoryStateRequestCoordinator = () => {
-  /** @type {Map<number, number>} */
-  const generations = new Map();
+  /** @type {Map<number, {generation: number}>} */
+  const windows = new Map();
 
   return {
+    /** @param {number} webContentsId */
+    clear(webContentsId) {
+      windows.delete(webContentsId);
+    },
     /**
      * @template T
      * @param {number} webContentsId
      * @param {() => Promise<T>} read
      * @param {(state: T) => void} accept
+     * @param {() => boolean} [isActive]
      */
-    async resolve(webContentsId, read, accept) {
-      const generation = (generations.get(webContentsId) ?? 0) + 1;
-      generations.set(webContentsId, generation);
+    async resolve(webContentsId, read, accept, isActive = () => true) {
+      const window = windows.get(webContentsId) ?? { generation: 0 };
+      window.generation += 1;
+      windows.set(webContentsId, window);
+      const generation = window.generation;
       const state = await read();
-      if (generations.get(webContentsId) === generation) {
+      if (windows.get(webContentsId) === window && window.generation === generation && isActive()) {
         accept(state);
       }
       return state;

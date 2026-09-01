@@ -1195,28 +1195,33 @@ test('source CLI waiter treats successful forwarding exit as nonterminal', async
   await expect(waiting).resolves.toEqual(result);
 });
 
-test('packaged waiter treats forwarding exit before owner publication as nonterminal', async () => {
+test('packaged waiter measures owner publication grace from forwarding exit', async () => {
   await using directory = await createTemporaryDirectory('codiff-review-forwarding-owner-');
   const resultFile = join(directory.path, 'result.json');
   const result = submittedAgentReviewResult(directory.path);
+  let currentTime = 0;
   const waiting = waitForAgentReviewResult(resultFile, null, {
-    isRunning: (pid) => pid !== 7,
-    openTimeoutMs: 100,
-    pollIntervalMs: 1,
+    isRunning: (pid) => pid !== 7 || currentTime < 900,
+    now: () => currentTime,
+    openTimeoutMs: 2000,
+    pollIntervalMs: 100,
     processId: 7,
+    wait: async () => {
+      currentTime += 100;
+      if (currentTime === 1500) {
+        writeFileSync(
+          getAgentReviewOwnerPath(resultFile),
+          `${JSON.stringify({
+            pid: 42,
+            repository: result.repository,
+            status: 'open',
+            version: 1,
+          })}\n`,
+        );
+        writeFileSync(resultFile, `${JSON.stringify(result)}\n`);
+      }
+    },
   });
-
-  await new Promise((resolveWait) => setTimeout(resolveWait, 5));
-  await writeFile(
-    getAgentReviewOwnerPath(resultFile),
-    `${JSON.stringify({
-      pid: 42,
-      repository: result.repository,
-      status: 'open',
-      version: 1,
-    })}\n`,
-  );
-  await writeFile(resultFile, `${JSON.stringify(result)}\n`);
 
   await expect(waiting).resolves.toEqual(result);
 });

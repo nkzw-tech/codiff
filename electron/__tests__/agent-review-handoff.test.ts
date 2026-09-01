@@ -325,6 +325,29 @@ test('writes closed after a close requested before repository resolution', async
   expect(writeResult).toHaveBeenCalledOnce();
 });
 
+test('close prefers a newer repository set while initial resolution is pending', async () => {
+  const initialRepository = createDeferredRepository();
+  const writeResult = vi.fn();
+  const lifecycle = createAgentReviewHandoffLifecycle({
+    controller: createAgentReviewHandoffController({ writeResult }),
+  });
+  const repository = {
+    root: feedback.repository.root,
+    source: { ref: 'new-source', type: 'commit' as const },
+  };
+  lifecycle.register(7, '/tmp/result.json', initialRepository.promise);
+
+  const close = lifecycle.close(7);
+  lifecycle.setRepository(7, repository);
+  initialRepository.resolve(feedback.repository);
+
+  await expect(close).resolves.toBe('closed');
+  expect(writeResult).toHaveBeenCalledWith(
+    '/tmp/result.json',
+    expect.objectContaining({ repository }),
+  );
+});
+
 test('publishes the durable owner and updates it to the latest accepted source', async () => {
   await using directory = await createTemporaryDirectory('codiff-agent-review-owner-');
   const resultPath = join(directory.path, 'result.json');
@@ -345,6 +368,27 @@ test('publishes the durable owner and updates it to the latest accepted source',
   };
   lifecycle.setRepository(7, repository);
   expect(JSON.parse(await readFile(`${resultPath}.owner`, 'utf8'))).toMatchObject({ repository });
+});
+
+test('does not let delayed initial resolution overwrite a newer repository', async () => {
+  await using directory = await createTemporaryDirectory('codiff-agent-review-owner-generation-');
+  const resultPath = join(directory.path, 'result.json');
+  const initialRepository = createDeferredRepository();
+  const lifecycle = createAgentReviewHandoffLifecycle();
+  const repository = {
+    root: feedback.repository.root,
+    source: { ref: 'new-source', type: 'commit' as const },
+  };
+  const updatedFeedback = { ...feedback, repository };
+  lifecycle.register(7, resultPath, initialRepository.promise);
+  lifecycle.setRepository(7, repository);
+
+  initialRepository.resolve(feedback.repository);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(JSON.parse(await readFile(`${resultPath}.owner`, 'utf8'))).toMatchObject({ repository });
+  await expect(lifecycle.complete(7, updatedFeedback)).resolves.toBe(true);
+  expect(JSON.parse(await readFile(resultPath, 'utf8'))).toMatchObject({ repository });
 });
 
 test('finishes a pending close after lifecycle cleanup', async () => {

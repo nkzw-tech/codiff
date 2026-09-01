@@ -318,6 +318,9 @@ const createAgentReviewHandoffLifecycle = ({
       return handoff.repository;
     }
     const outcome = await handoff.repositoryOutcome;
+    if (handoff.repository) {
+      return handoff.repository;
+    }
     if ('error' in outcome) {
       throw outcome.error;
     }
@@ -378,18 +381,24 @@ const createAgentReviewHandoffLifecycle = ({
      * @param {Promise<{root: string; source: import('../core/types.ts').ReviewSource}>} repositoryPromise
      */
     register(webContentsId, resultPath, repositoryPromise) {
-      handoffs.set(webContentsId, {
+      /** @type {Handoff} */
+      let handoff;
+      const repositoryOutcome = repositoryPromise.then(
+        (repository) => {
+          if (handoffs.get(webContentsId) === handoff && !handoff.repository) {
+            writeAgentReviewOwner(resultPath, repository);
+          }
+          return { repository };
+        },
+        (error) => ({ error }),
+      );
+      handoff = {
         activeOperations: 0,
         cleared: false,
-        repositoryOutcome: repositoryPromise.then(
-          (repository) => {
-            writeAgentReviewOwner(resultPath, repository);
-            return { repository };
-          },
-          (error) => ({ error }),
-        ),
+        repositoryOutcome,
         resultPath,
-      });
+      };
+      handoffs.set(webContentsId, handoff);
     },
     /**
      * @param {number} webContentsId

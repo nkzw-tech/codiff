@@ -1068,6 +1068,7 @@ const createWindow = (
   window.on('closed', () => {
     openWindows.delete(window);
     definitionSearchCoordinator.cancel(webContentsId);
+    repositoryStateRequestCoordinator.clear(webContentsId);
     repositoryWatcherCoordinator.detach(webContentsId);
     clearMarkdownDocumentWatchers(webContentsId);
     agentReviewHandoffLifecycle.clear(webContentsId);
@@ -1511,6 +1512,13 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
       storeResolvedRepositoryState(webContentsId, state);
       rememberLastRepositoryPath(state.root);
       void resetRepositoryWatcher(webContentsId, state.root);
+    },
+    () => {
+      if (event.sender.isDestroyed()) {
+        return false;
+      }
+      const window = BrowserWindow.fromWebContents(event.sender);
+      return window != null && !window.isDestroyed();
     },
   );
 });
