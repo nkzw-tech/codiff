@@ -15,6 +15,7 @@ import {
   writeReloadSelection,
 } from '../lib/reload-selection.ts';
 import type {
+  AgentBackend,
   AgentFeedbackAssurance,
   ChangedFile,
   CommitMetadata,
@@ -477,74 +478,80 @@ test('desktop app hides send feedback when the agent review IPC is unavailable',
   expect(app.container.querySelector('.send-feedback-button')).toBeNull();
 });
 
-test('agent review feedback accepts the bound backend assurance for a focused draft', async () => {
-  const assurances = ['queue-command'] satisfies ReadonlyArray<AgentFeedbackAssurance>;
-  const file = createChangedFile('src/app.ts');
-  let responseIndex = 0;
-  const sendAgentReviewFeedback = vi.fn(async () => ({
-    assurance: assurances[responseIndex++]!,
-    deliveryId: 'delivery-1',
-    status: 'accepted' as const,
-  }));
-  window.codiff = createCodiffMock({
-    getLaunchOptions: vi.fn(async () => ({
-      agentBackend: 'codex' as const,
-      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
-      repositoryPathProvided: true,
-      walkthrough: false,
-    })),
-    getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
-    sendAgentReviewFeedback,
-  });
-  await using app = await renderReact(<App />);
-  await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
+test.each([
+  ['claude', 'transport-write'],
+  ['codex', 'queue-command'],
+  ['opencode', 'bridge-queue'],
+  ['opencode', 'message-created'],
+  ['pi', 'dispatch-started'],
+] as const satisfies ReadonlyArray<readonly [AgentBackend, AgentFeedbackAssurance]>)(
+  'agent review feedback accepts %s assurance %s for a focused draft',
+  async (agentBackend, assurance) => {
+    const file = createChangedFile('src/app.ts');
+    const sendAgentReviewFeedback = vi.fn(async () => ({
+      assurance,
+      deliveryId: 'delivery-1',
+      status: 'accepted' as const,
+    }));
+    window.codiff = createCodiffMock({
+      getLaunchOptions: vi.fn(async () => ({
+        agentBackend,
+        agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
+        repositoryPathProvided: true,
+        walkthrough: false,
+      })),
+      getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file] })),
+      sendAgentReviewFeedback,
+    });
+    await using app = await renderReact(<App />);
+    await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
 
-  const line = findInOpenShadowRoots<HTMLElement>(
-    app.container,
-    '[data-line="1"][data-line-type="change-addition"]',
-  );
-  expect(line).not.toBeNull();
-  await act(async () => line?.click());
-  await waitFor(() =>
-    expect(
-      app.container.querySelector<HTMLElement>(
-        '[contenteditable="true"][aria-label^="Comment on"]',
-      ),
-    ).not.toBeNull(),
-  );
-  const editor = app.container.querySelector<HTMLElement>(
-    '[contenteditable="true"][aria-label^="Comment on"]',
-  );
-  if (!editor) {
-    throw new Error('Expected review comment editor.');
-  }
-  await act(async () => editor.focus());
-  await setMarkdownEditorValue(editor, 'Focused feedback');
+    const getLine = () =>
+      findInOpenShadowRoots<HTMLElement>(
+        app.container,
+        '[data-line="1"][data-line-type="change-addition"]',
+      );
+    await waitFor(() => expect(getLine()).not.toBeNull());
+    await act(async () => getLine()?.click());
+    await waitFor(() =>
+      expect(
+        app.container.querySelector<HTMLElement>(
+          '[contenteditable="true"][aria-label^="Comment on"]',
+        ),
+      ).not.toBeNull(),
+    );
+    const editor = app.container.querySelector<HTMLElement>(
+      '[contenteditable="true"][aria-label^="Comment on"]',
+    );
+    if (!editor) {
+      throw new Error('Expected review comment editor.');
+    }
+    await act(async () => editor.focus());
+    await setMarkdownEditorValue(editor, 'Focused feedback');
 
-  await waitFor(() =>
-    expect(app.container.querySelector<HTMLButtonElement>('.send-feedback-button')?.disabled).toBe(
-      false,
-    ),
-  );
-  const send = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
-  for (const [index, assurance] of assurances.entries()) {
+    await waitFor(() =>
+      expect(
+        app.container.querySelector<HTMLButtonElement>('.send-feedback-button')?.disabled,
+      ).toBe(false),
+    );
+    const send = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
     await act(async () => send?.click());
-    await waitFor(() => expect(sendAgentReviewFeedback).toHaveBeenCalledTimes(index + 1));
-    expect(await sendAgentReviewFeedback.mock.results[index]?.value).toMatchObject({ assurance });
+    await waitFor(() => expect(sendAgentReviewFeedback).toHaveBeenCalledOnce());
+    expect(await sendAgentReviewFeedback.mock.results[0]?.value).toMatchObject({ assurance });
     await waitFor(() => expect(send?.disabled).toBe(false));
-  }
-  expect(sendAgentReviewFeedback).toHaveBeenCalledWith(
-    expect.objectContaining({
-      comments: [expect.objectContaining({ body: 'Focused feedback', filePath: 'src/app.ts' })],
-      repository: {
-        root: '/repo',
-        source: { type: 'working-tree' },
-      },
-      version: 1,
-    }),
-  );
-  expect(editor.textContent).toBe('Focused feedback');
-});
+    expect(sendAgentReviewFeedback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        comments: [expect.objectContaining({ body: 'Focused feedback', filePath: 'src/app.ts' })],
+        repository: {
+          root: '/repo',
+          source: { type: 'working-tree' },
+        },
+        version: 1,
+      }),
+    );
+    expect(editor.textContent).toBe('Focused feedback');
+  },
+);
 
 test('agent review feedback preserves the same focused draft after rejection and IPC failure', async () => {
   const sendAgentReviewFeedback = vi
