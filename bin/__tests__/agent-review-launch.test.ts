@@ -1,4 +1,4 @@
-import { access, chmod, readFile, writeFile } from 'node:fs/promises';
+import { access, chmod, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, test } from 'vite-plus/test';
 import {
@@ -16,8 +16,9 @@ test('returns after the matching window-open receipt', async () => {
   const waiting = waitForAgentReviewOpen(launch.openFile, launch.deliveryId, {
     pollIntervalMs: 1,
   });
+  const temporaryOpenFile = `${launch.openFile}.tmp`;
   await writeFile(
-    launch.openFile,
+    temporaryOpenFile,
     JSON.stringify({
       deliveryAvailable: true,
       deliveryId: launch.deliveryId,
@@ -25,6 +26,7 @@ test('returns after the matching window-open receipt', async () => {
       version: 1,
     }),
   );
+  await rename(temporaryOpenFile, launch.openFile);
   await expect(waiting).resolves.toMatchObject({ deliveryAvailable: true });
 });
 
