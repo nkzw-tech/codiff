@@ -252,10 +252,37 @@ test('serializes distinct concurrent delivery decisions and queues later work', 
 test.each([
   ['retry', { data: { ses_1: { type: 'retry' } } }],
   ['another non-idle state', { data: { ses_1: { type: 'cooldown' } } }],
-  ['missing session status', { data: {} }],
   ['status API error', { error: new Error('unavailable') }],
 ] as const)('queues when status is %s', async (_label, statusResult) => {
   const { client, hooks } = await setup({ status: async () => statusResult });
+  await hooks['chat.message']({ sessionID: 'ses_1' }, {});
+
+  await expect(bridges[0].options.deliver(delivery('delivery-1'))).resolves.toMatchObject({
+    assurance: 'bridge-queue',
+    status: 'queued',
+  });
+  expect(client.session.promptAsync).not.toHaveBeenCalled();
+});
+
+test('treats a successful status response without the exact session as idle', async () => {
+  const { client, hooks } = await setup({
+    status: async () => ({ data: { ses_other: { type: 'busy' } } }),
+  });
+  await hooks['chat.message']({ sessionID: 'ses_1' }, {});
+
+  const pending = bridges[0].options.deliver(delivery('delivery-1'));
+  await vi.waitFor(() => expect(client.session.promptAsync).toHaveBeenCalledOnce());
+  await correlate(hooks, promptMessageID(client));
+
+  await expect(pending).resolves.toMatchObject({ assurance: 'message-created' });
+});
+
+test('queues when the status request throws', async () => {
+  const { client, hooks } = await setup({
+    status: async () => {
+      throw new Error('status transport unavailable');
+    },
+  });
   await hooks['chat.message']({ sessionID: 'ses_1' }, {});
 
   await expect(bridges[0].options.deliver(delivery('delivery-1'))).resolves.toMatchObject({
@@ -334,13 +361,13 @@ test('does not submit after disposal wins a paused status check', async () => {
   expect(client.session.promptAsync).not.toHaveBeenCalled();
 });
 
-test('requeues a definite pre-acceptance failure for the next idle boundary', async () => {
+test('requeues an explicit non-204 rejection for the next idle boundary', async () => {
   let promptCalls = 0;
   const { client, hooks, statuses } = await setup({
     promptAsync: async () => {
       promptCalls++;
       if (promptCalls === 1) {
-        throw new Error('rejected before acceptance');
+        return { response: { status: 409 } };
       }
       return { response: { status: 204 } };
     },
@@ -362,12 +389,10 @@ test('requeues a definite pre-acceptance failure for the next idle boundary', as
   await idle;
 });
 
-test('bounds pre-acceptance retries and emits a static exhaustion diagnostic', async () => {
+test('bounds explicit non-204 retries and emits a static exhaustion diagnostic', async () => {
   const diagnostic = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   const { client, hooks, statuses } = await setup({
-    promptAsync: async () => {
-      throw new Error('rejected before acceptance with token secret');
-    },
+    promptAsync: async () => ({ response: { status: 503 } }),
   });
   await hooks['chat.message']({ sessionID: 'ses_1' }, {});
   statuses.set('ses_1', { type: 'idle' });
@@ -382,6 +407,31 @@ test('bounds pre-acceptance retries and emits a static exhaustion diagnostic', a
   expect(diagnostic).toHaveBeenCalledWith(
     'Codiff OpenCode feedback delivery exhausted pre-acceptance retries.\n',
   );
+});
+
+test.each([
+  [
+    'transport exception',
+    async () => {
+      throw new Error('transport failed with token secret');
+    },
+  ],
+  ['SDK error without response', async () => ({ error: new Error('SDK token secret') })],
+  ['response loss', async () => ({})],
+] as const)('marks %s ambiguous and never retries it on idle', async (_label, promptAsync) => {
+  const diagnostic = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  const { client, hooks, statuses } = await setup({ promptAsync });
+  await hooks['chat.message']({ sessionID: 'ses_1' }, {});
+  statuses.set('ses_1', { type: 'idle' });
+
+  await expect(bridges[0].options.deliver(delivery('delivery-1'))).rejects.toThrow('ambiguous');
+  expect(diagnostic).toHaveBeenCalledWith(
+    'Codiff OpenCode feedback delivery became ambiguous after prompt acceptance.\n',
+  );
+
+  await hooks.event({ event: { properties: { sessionID: 'ses_1' }, type: 'session.idle' } });
+  await expect(bridges[0].options.deliver(delivery('delivery-1'))).rejects.toThrow('ambiguous');
+  expect(client.session.promptAsync).toHaveBeenCalledOnce();
 });
 
 test('marks post-acceptance correlation timeout ambiguous without retrying', async () => {

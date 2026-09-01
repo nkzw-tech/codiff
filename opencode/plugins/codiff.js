@@ -93,7 +93,14 @@ export const CodiffPlugin = async ({ client, worktree }) => {
   const statusIsIdle = async (sessionID) => {
     try {
       const result = await client.session.status();
-      return !result?.error && result?.data?.[sessionID]?.type === 'idle';
+      if (!result || result.error) {
+        return false;
+      }
+      const statuses = result.data;
+      if (!statuses || typeof statuses !== 'object' || !Object.hasOwn(statuses, sessionID)) {
+        return true;
+      }
+      return statuses[sessionID]?.type === 'idle';
     } catch {
       return false;
     }
@@ -115,6 +122,13 @@ export const CodiffPlugin = async ({ client, worktree }) => {
     }
     writeDiagnostic(EXHAUSTED_DIAGNOSTIC);
     throw new Error('OpenCode rejected the feedback prompt after bounded retries.');
+  };
+
+  const rejectAmbiguous = (state, entry) => {
+    state.active = null;
+    retainAmbiguous(state, entry.item.deliveryId);
+    writeDiagnostic(AMBIGUOUS_DIAGNOSTIC);
+    throw new Error('OpenCode feedback delivery is ambiguous and will not be retried.');
   };
 
   const accept = async (state, entry) => {
@@ -157,16 +171,21 @@ export const CodiffPlugin = async ({ client, worktree }) => {
         state.active = null;
         throw disposedError();
       }
-      return { receipt: retainForRetry(state, entry) };
+      return rejectAmbiguous(state, entry);
     }
     if (disposed) {
       state.active = null;
       waiter.reject(disposedError());
       throw disposedError();
     }
-    if (result?.error || result?.response?.status !== 204) {
+    const status = result?.response?.status;
+    if (typeof status === 'number' && status !== 204) {
       waiter.cancel();
       return { receipt: retainForRetry(state, entry) };
+    }
+    if (status !== 204) {
+      waiter.cancel();
+      return rejectAmbiguous(state, entry);
     }
     return { entry, observed };
   };
