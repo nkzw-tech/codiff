@@ -1614,7 +1614,7 @@ export default function App() {
 
   const activeAgentBackend = launchOptions.agentBackend ?? codiffConfig.settings.agentBackend;
   const agentLabel = getAgentLabel(activeAgentBackend);
-  const agentSkillLabel = `${agentLabel} Skill`;
+  const agentSkillLabel = `${agentLabel} ${activeAgentBackend === 'codex' ? 'Skill' : 'Integration'}`;
   const sendAgentReviewFeedback = useCallback(async () => {
     if (pendingSource != null) {
       return;

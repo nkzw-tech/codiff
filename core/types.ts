@@ -498,6 +498,8 @@ export type CodiffLaunchOptions = {
 };
 
 export type AgentSkillStatus = {
+  active: boolean;
+  detail?: string;
   installed: boolean;
   path: string;
 };

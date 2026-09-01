@@ -100,13 +100,15 @@ approval document.
    node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json /path/to/repository
    ```
 
-   The desktop launcher blocks until Codiff closes, then prints one `CODIFF_REVIEW_RESULT` record.
-   For `status: "closed"`, stop without making feedback-driven edits. For
-   `status: "submitted"`, validate that the repository root and source identify the change you
-   opened. Address every returned comment in order, using its file, line or range anchor, and diff
-   context. If feedback is materially ambiguous, ask one focused question instead of guessing.
-   Do not automatically reopen Codiff. Summarize the feedback you handled and decide whether
-   another review would be useful.
+   Run the desktop launcher normally. It returns after printing `Codiff opened. Review feedback will
+arrive as a separate message in this session.` Stop waiting once it prints the open confirmation;
+   do not wait for Codiff to close or parse terminal output for review comments. A normal close sends
+   no feedback and requires no feedback-driven edits.
+
+   When Codiff later sends review feedback, treat it as a new user request in this same session. Address every comment in order. Do not automatically reopen Codiff after handling the feedback.
+   Use each comment's file, line or range anchor, and diff context. If feedback is materially
+   ambiguous, ask one focused question instead of guessing. Summarize the feedback you handled and
+   decide whether another review would be useful.
 
    Share mode:
 
@@ -133,7 +135,8 @@ approval document.
    `--open`, which only controls whether the completed walkthrough is opened.
 
    **Agent integration:** The launcher passes the Pi session id to Codiff in desktop mode when
-   it can resolve one and identifies shared walkthroughs as authored by Pi.
+   it can resolve one and identifies shared walkthroughs as authored by Pi. Codiff closes after Pi
+   confirms dispatch started; this does not confirm that Pi processed the feedback.
 
    Codiff validates and repairs the document against the live diff, so anchors that drift
    are pinned to a real section rather than dropped.

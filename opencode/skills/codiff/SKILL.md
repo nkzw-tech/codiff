@@ -100,13 +100,15 @@ approval document.
    node scripts/open-codiff.mjs --file /tmp/codiff-walkthrough-<id>.json /path/to/repository
    ```
 
-   The desktop launcher blocks until Codiff closes, then prints one `CODIFF_REVIEW_RESULT` record.
-   For `status: "closed"`, stop without making feedback-driven edits. For
-   `status: "submitted"`, validate that the repository root and source identify the change you
-   opened. Address every returned comment in order, using its file, line or range anchor, and diff
-   context. If feedback is materially ambiguous, ask one focused question instead of guessing.
-   Do not automatically reopen Codiff. Summarize the feedback you handled and decide whether
-   another review would be useful.
+   Run the desktop launcher normally. It returns after printing `Codiff opened. Review feedback will
+arrive as a separate message in this session.` Stop waiting once it prints the open confirmation;
+   do not wait for Codiff to close or parse terminal output for review comments. A normal close sends
+   no feedback and requires no feedback-driven edits.
+
+   When Codiff later sends review feedback, treat it as a new user request in this same session. Address every comment in order. Do not automatically reopen Codiff after handling the feedback.
+   Use each comment's file, line or range anchor, and diff context. If feedback is materially
+   ambiguous, ask one focused question instead of guessing. Summarize the feedback you handled and
+   decide whether another review would be useful.
 
    Share mode:
 
@@ -136,7 +138,9 @@ approval document.
    project and run Codiff with the OpenCode backend. The launcher's `--share` path retains OpenCode
    as the authoring agent without attaching the conversation transcript. Codiff's managed
    `/codiff` command can use the OpenCode model selected in Codiff; direct `$codiff` skill mentions
-   continue with the current session model.
+   continue with the current session model. Codiff closes after OpenCode confirms either insertion
+   into its session-local in-memory FIFO or creation of the user message. The FIFO is not durable and
+   is lost if OpenCode restarts; neither assurance confirms that OpenCode processed the feedback.
 
    Codiff validates and repairs the document against the live diff, so anchors that drift
    are pinned to a real section rather than dropped.

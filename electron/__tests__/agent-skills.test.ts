@@ -61,14 +61,27 @@ const { createSkillInstaller } = require('../main/agent-skill.cjs') as {
       renameSync?: typeof nodeRenameSync;
       symlinkSync?: typeof nodeSymlinkSync;
     };
+    getActiveStatus?: (skillId: string) => Promise<boolean>;
     renderManagedFile?: (file: { sourceSubdir: string }, template: string) => string;
     root: string;
     skill: ReturnType<typeof listAgentSkills>[number];
   }) => {
-    getStatus: () => { installed: boolean; path: string };
+    getStatus: () => Promise<{
+      active: boolean;
+      detail?: string;
+      installed: boolean;
+      path: string;
+    }>;
     install: () => Promise<boolean>;
     refreshManagedFiles: () => void;
   };
+};
+
+const inactiveDetails = {
+  claude: 'Restart Claude Code with the Codiff Channel enabled.',
+  codex: 'Codex CLI 0.149.0 or newer with `codex queue` is required.',
+  opencode: 'Restart OpenCode so the Codiff plugin can register this session.',
+  pi: 'Restart Pi so the Codiff extension can register this session.',
 };
 
 test('lists every bundled skill with its installation target', () => {
@@ -153,6 +166,48 @@ test('lists every bundled skill with its installation target', () => {
   ]);
 });
 
+test.each(listAgentSkills())(
+  '$id status separates installed files from active delivery',
+  async (skill) => {
+    await using directory = await createTemporaryDirectory(`codiff-${skill.id}-status-`);
+    const getActiveStatus = vi.fn(async () => false);
+    const home = join(directory.path, 'home');
+    const installer = createSkillInstaller({
+      app: { getPath: () => home, isPackaged: false },
+      dialog: { showMessageBox: async () => {} },
+      getActiveStatus,
+      root: join(directory.path, 'app'),
+      skill,
+    });
+
+    await expect(installer.getStatus()).resolves.toEqual({
+      active: false,
+      detail: inactiveDetails[skill.id as keyof typeof inactiveDetails],
+      installed: false,
+      path: join(home, skill.targets[0].targetSubdir),
+    });
+    expect(getActiveStatus).toHaveBeenCalledWith(skill.id);
+  },
+);
+
+test('active delivery omits restart guidance independently of installed files', async () => {
+  await using directory = await createTemporaryDirectory('codiff-active-status-');
+  const skill = listAgentSkills()[0];
+  const installer = createSkillInstaller({
+    app: { getPath: () => directory.path, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    getActiveStatus: async () => true,
+    root: join(directory.path, 'app'),
+    skill,
+  });
+
+  await expect(installer.getStatus()).resolves.toEqual({
+    active: true,
+    installed: false,
+    path: join(directory.path, skill.targets[0].targetSubdir),
+  });
+});
+
 test('installs and reports the managed Claude Code Channel without claiming it is active', async () => {
   await using directory = await createTemporaryDirectory('codiff-claude-channel-');
   const home = join(directory.path, 'home');
@@ -173,7 +228,8 @@ test('installs and reports the managed Claude Code Channel without claiming it i
   });
 
   await expect(installer.install()).resolves.toBe(true);
-  expect(installer.getStatus()).toEqual({
+  await expect(installer.getStatus()).resolves.toMatchObject({
+    active: false,
     installed: true,
     path: join(home, '.claude/skills/codiff'),
   });
@@ -234,7 +290,8 @@ test('installs and reports the managed Pi extension with dispatch-started disclo
   });
 
   await expect(installer.install()).resolves.toBe(true);
-  expect(installer.getStatus()).toEqual({
+  await expect(installer.getStatus()).resolves.toMatchObject({
+    active: false,
     installed: true,
     path: join(home, '.pi/agent/skills/codiff'),
   });
@@ -381,7 +438,7 @@ test('rolls back both Claude targets when committing the second target fails', a
   await expect(installer.install()).resolves.toBe(false);
   expect((await lstat(skillTarget)).ino).toBe(skillIdentity.ino);
   expect((await lstat(channelTarget)).ino).toBe(channelIdentity.ino);
-  expect(installer.getStatus().installed).toBe(true);
+  expect((await installer.getStatus()).installed).toBe(true);
 });
 
 test('preserves a user symlink created after backing up a Claude target', async () => {
@@ -543,7 +600,7 @@ test('builds an Install Skill submenu that routes each agent action', () => {
   expect(install).toHaveBeenCalledWith(expect.objectContaining({ id: 'opencode' }), browserWindow);
 });
 
-test('keeps skill instructions identical outside agent integration details', async () => {
+test('keeps asynchronous review instructions identical outside agent integration details', async () => {
   const paths = [
     'codex/skills/codiff/SKILL.md',
     'claude/skills/codiff/SKILL.md',
@@ -552,12 +609,19 @@ test('keeps skill instructions identical outside agent integration details', asy
   ];
   const documents = await Promise.all(paths.map((path) => readFile(path, 'utf8')));
   const normalized = documents.map((document) => {
+    const normalizedDocument = document.replaceAll(/\s+/g, ' ');
+    const desktopInstructions = document.match(/   Desktop mode:[\s\S]*?(?=\n   Share mode:)/)?.[0];
+    expect(desktopInstructions).toBeDefined();
     expect(document).toContain('   **Agent integration:**');
-    expect(document).toContain('CODIFF_REVIEW_RESULT');
-    expect(document).toContain('status: "submitted"');
-    expect(document).toContain('status: "closed"');
-    expect(document).toContain('Address every returned comment');
-    expect(document).toContain('Do not automatically reopen Codiff');
+    expect(normalizedDocument).toContain(
+      'Codiff opened. Review feedback will arrive as a separate message',
+    );
+    expect(normalizedDocument).toContain('Stop waiting once it prints the open confirmation');
+    expect(normalizedDocument).toContain(
+      'When Codiff later sends review feedback, treat it as a new user request in this same session. Address every comment in order. Do not automatically reopen Codiff after handling the feedback.',
+    );
+    expect(desktopInstructions).not.toContain('status: "submitted"');
+    expect(desktopInstructions).not.toContain('status: "closed"');
     return document.replace(
       /   \*\*Agent integration:\*\*[\s\S]*?(?=\n\n   Codiff validates)/,
       '   **Agent integration:** <agent-specific>',
@@ -603,7 +667,7 @@ test('installs the OpenCode skill into its global skills directory', async () =>
   });
 
   await expect(installer.install()).resolves.toBe(true);
-  expect(installer.getStatus()).toEqual({ installed: true, path: target });
+  await expect(installer.getStatus()).resolves.toMatchObject({ installed: true, path: target });
   await expect(realpath(target)).resolves.toBe(await realpath(source));
   await expect(realpath(pluginTarget)).resolves.toBe(await realpath(pluginSource));
   await expect(readFile(commandTarget, 'utf8')).resolves.toContain(
@@ -614,15 +678,15 @@ test('installs the OpenCode skill into its global skills directory', async () =>
   await expect(realpath(pluginTarget)).resolves.toBe(await realpath(pluginSource));
 
   await rm(pluginTarget);
-  expect(installer.getStatus()).toEqual({ installed: false, path: target });
+  await expect(installer.getStatus()).resolves.toMatchObject({ installed: false, path: target });
   await expect(installer.install()).resolves.toBe(true);
 
   await rm(commandTarget);
-  expect(installer.getStatus()).toEqual({ installed: false, path: target });
+  await expect(installer.getStatus()).resolves.toMatchObject({ installed: false, path: target });
   model = 'openai/gpt-5.5';
   installer.refreshManagedFiles();
   await expect(readFile(commandTarget, 'utf8')).resolves.toContain('model: openai/gpt-5.5');
-  expect(installer.getStatus()).toEqual({ installed: true, path: target });
+  await expect(installer.getStatus()).resolves.toMatchObject({ installed: true, path: target });
 });
 
 test('does not replace a user-authored OpenCode command', async () => {
@@ -697,7 +761,7 @@ test('does not replace a user-authored OpenCode plugin', async () => {
 
   await expect(installer.install()).resolves.toBe(false);
   await expect(readFile(pluginTarget, 'utf8')).resolves.toBe('// My custom plugin.\n');
-  expect(installer.getStatus().installed).toBe(false);
+  expect((await installer.getStatus()).installed).toBe(false);
 });
 
 test('does not replace an unrelated user-authored OpenCode plugin symlink', async () => {

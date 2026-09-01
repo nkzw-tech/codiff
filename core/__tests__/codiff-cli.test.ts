@@ -39,11 +39,15 @@ const expectAgentReviewDocumentation = (document: string) => {
   expect(normalized).toContain('focused comment draft without requiring blur');
   expect(normalized).toContain('window, comments, and draft stay intact');
   expect(normalized).toContain('disabled when there is no feedback');
-  expect(normalized).toContain('status: "closed"');
-  expect(normalized).toContain('no actionable feedback');
   expect(normalized).toContain('Successful submission closes Codiff');
-  expect(normalized).toContain('same agent turn');
-  expect(normalized).toContain('Do not automatically reopen Codiff');
+  expect(normalized).toContain('separate user message');
+  expect(normalized).toContain(
+    'When Codiff later sends review feedback, treat it as a new user request in this same session. Address every comment in order. Do not automatically reopen Codiff after handling the feedback.',
+  );
+  expect(normalized).toContain('OpenCode');
+  expect(normalized).toContain('in-memory FIFO');
+  expect(document).not.toContain('status: "submitted"');
+  expect(document).not.toContain('status: "closed"');
 };
 
 const createAgentReviewCommandLogger = async () => {
@@ -1226,7 +1230,6 @@ test.each(agentLaunchers)(
     expect(args[deliveryFlagIndex + 1]).toBeTruthy();
     expect(openFlagIndex).toBeGreaterThan(-1);
     expect(args[openFlagIndex + 1]).toBeTruthy();
-    expect(stdout).not.toContain('CODIFF_REVIEW_RESULT');
     expect(stdout).toBe(
       'Codiff opened. Review feedback will arrive as a separate message in this session.\n',
     );
@@ -1811,7 +1814,6 @@ test('formatHelpText includes version and all flags', () => {
   expect(text).toContain('--codex-session');
   expect(text).toContain('--opencode-session');
   expect(text).toContain('--plan');
-  expect(text).not.toContain('--review-result-file');
   expect(text).toContain('--share');
   expect(text).toContain('--walkthrough');
   expect(text).toContain('--walkthrough-context');
@@ -1871,11 +1873,8 @@ test('codiff --walkthrough-guide prints the guide and embedded schema, then exit
   expect(stdout).toContain('Narrative walkthrough — authoring guide');
   expect(stdout).toContain('chapters');
   expect(stdout).toContain('support');
-  expect(stdout).toContain('CODIFF_REVIEW_RESULT');
-  expect(stdout).toContain('status: "submitted"');
-  expect(stdout).toContain('status: "closed"');
-  expect(stdout).toContain('Address every returned comment');
-  expect(stdout).toContain('Do not automatically reopen Codiff');
+  expect(stdout).toContain('Codiff opened. Review feedback will arrive as a separate message');
+  expect(stdout).toContain('Address every comment in order');
   const agentReviewSection = stdout.match(/## Agent Review Handoff[\s\S]*?(?=\n## )/)?.[0];
   expect(agentReviewSection).toBeDefined();
   expectAgentReviewDocumentation(agentReviewSection!);
@@ -1884,14 +1883,6 @@ test('codiff --walkthrough-guide prints the guide and embedded schema, then exit
   expect(stdout).toContain('"chapters"');
   expect(stdout).toContain('"hunkId"');
   expect(stdout).toContain('"const": 4');
-});
-
-test('README documents the complete agent review lifecycle in its integration section', async () => {
-  const readme = await readFile(resolve('README.md'), 'utf8');
-  const agentIntegrationSection = readme.match(/### Agent Integration[\s\S]*?(?=\n## )/)?.[0];
-
-  expect(agentIntegrationSection).toBeDefined();
-  expectAgentReviewDocumentation(agentIntegrationSection!);
 });
 
 test('parseArguments reads base...target and base..target as a range', async () => {

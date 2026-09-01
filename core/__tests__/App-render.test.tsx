@@ -139,6 +139,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     status: 'ready' as const,
   })),
   getAgentSkillStatus: vi.fn(async () => ({
+    active: true,
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
   })),
@@ -211,6 +212,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   })),
   increaseCodeFontSize: vi.fn(async () => {}),
   installAgentSkill: vi.fn(async () => ({
+    active: true,
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
   })),

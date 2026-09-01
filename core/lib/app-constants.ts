@@ -9,6 +9,7 @@ export const defaultLaunchOptions: CodiffLaunchOptions = {
 };
 
 export const defaultAgentSkillStatus: AgentSkillStatus = {
+  active: false,
   installed: false,
   path: '',
 };

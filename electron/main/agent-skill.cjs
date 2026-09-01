@@ -29,6 +29,7 @@ const { basename, dirname, join } = require('node:path');
  * @typedef {{sourceSubdir: string; targetSubdir: string; type?: 'directory' | 'file'}} AgentSkillTarget
  * @typedef {{
  *   files?: ReadonlyArray<AgentSkillFile>;
+ *   id: 'codex' | 'claude' | 'opencode' | 'pi';
  *   label: string;
  *   successDetail?: string;
  *   targets: ReadonlyArray<AgentSkillTarget>;
@@ -47,6 +48,7 @@ const { basename, dirname, join } = require('node:path');
  *     symlinkSync?: typeof symlinkSync;
  *     writeFileSync?: typeof writeFileSync;
  *   };
+ *   getActiveStatus?: (skillId: 'codex' | 'claude' | 'opencode' | 'pi') => Promise<boolean>;
  *   renderManagedFile?: (file: AgentSkillFile, template: string) => string;
  *   root: string;
  *   skill: AgentSkill;
@@ -56,6 +58,7 @@ const createSkillInstaller = ({
   app,
   dialog,
   fileOperations = {},
+  getActiveStatus = async () => false,
   renderManagedFile,
   root,
   skill,
@@ -133,11 +136,25 @@ const createSkillInstaller = ({
     }
   };
 
-  const getStatus = () => ({
-    installed: skill.targets.every(isInstalledTarget) && (skill.files || []).every(isInstalledFile),
-    // Representative path (the first skill); the install dialog lists them all.
-    path: getTargetPath(skill.targets[0]),
-  });
+  const inactiveDetails = {
+    claude: 'Restart Claude Code with the Codiff Channel enabled.',
+    codex: 'Codex CLI 0.149.0 or newer with `codex queue` is required.',
+    opencode: 'Restart OpenCode so the Codiff plugin can register this session.',
+    pi: 'Restart Pi so the Codiff extension can register this session.',
+  };
+
+  /** @param {typeof getActiveStatus} [resolveActiveStatus] */
+  const getStatus = async (resolveActiveStatus = getActiveStatus) => {
+    const active = await resolveActiveStatus(skill.id).catch(() => false);
+    return {
+      active,
+      ...(!active && { detail: inactiveDetails[skill.id] }),
+      installed:
+        skill.targets.every(isInstalledTarget) && (skill.files || []).every(isInstalledFile),
+      // Representative path (the first skill); the install dialog lists them all.
+      path: getTargetPath(skill.targets[0]),
+    };
+  };
 
   /** @param {AgentSkillFile} file @returns {string} the installed path */
   const installFile = (file) => {

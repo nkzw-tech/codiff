@@ -229,6 +229,26 @@ const resolveWindowAgent = (webContentsId) => {
   );
 };
 
+/**
+ * @param {number} webContentsId
+ * @param {import('../core/types.ts').AgentBackend} backend
+ */
+const getWindowAgentActiveStatus = async (webContentsId, backend) => {
+  const agent = getAgent(backend);
+  const launchOptions = windowLaunchOptions.get(webContentsId);
+  const sessionId = launchOptions?.[agent.sessionLaunchOptionKey];
+  const repositoryRoot = windowIdentities.get(webContentsId)?.repositoryRoot;
+  if (backend !== 'codex' && (!repositoryRoot || !sessionId)) {
+    return false;
+  }
+  const result = await agentFeedbackAdapters.probe({
+    backend,
+    repositoryRoot: repositoryRoot || '',
+    sessionId: sessionId || '',
+  });
+  return result.available;
+};
+
 /** @param {'codex' | 'claude' | 'opencode' | 'pi'} agentId */
 const skillInstallerFor = (agentId) => skillInstallers.get(agentId);
 const { getTerminalHelperStatus, installTerminalHelper } = createTerminalHelper({
@@ -1601,19 +1621,22 @@ ipcMain.handle('codiff:getLaunchOptions', async (event) => {
   return { ...launchOptions, agentReview: undefined };
 });
 
-ipcMain.handle('codiff:getAgentSkillStatus', (event) => {
-  const installer = skillInstallerFor(resolveWindowAgent(event.sender.id).id);
-  return installer ? installer.getStatus() : { installed: false, path: '' };
+ipcMain.handle('codiff:getAgentSkillStatus', async (event) => {
+  const agent = resolveWindowAgent(event.sender.id);
+  const installer = skillInstallerFor(agent.id);
+  return installer
+    ? installer.getStatus((backend) => getWindowAgentActiveStatus(event.sender.id, backend))
+    : { active: false, installed: false, path: '' };
 });
 
 ipcMain.handle('codiff:installAgentSkill', async (event) => {
   const installer = skillInstallerFor(resolveWindowAgent(event.sender.id).id);
   if (!installer) {
-    return { installed: false, path: '' };
+    return { active: false, installed: false, path: '' };
   }
 
   await installer.install(BrowserWindow.fromWebContents(event.sender));
-  return installer.getStatus();
+  return installer.getStatus((backend) => getWindowAgentActiveStatus(event.sender.id, backend));
 });
 
 ipcMain.handle('codiff:getTerminalHelperStatus', () => getTerminalHelperStatus());
