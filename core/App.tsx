@@ -1661,6 +1661,34 @@ export default function App() {
 
   const agentLabel = getAgentLabel(activeAgentBackend);
   const agentSkillLabel = `${agentLabel} ${activeAgentBackend === 'codex' ? 'Skill' : 'Integration'}`;
+  useEffect(() => {
+    const deliveryId = launchOptions.agentReview?.deliveryId;
+    const refreshDelivery = window.codiff.refreshAgentReviewDelivery;
+    if (!deliveryId || typeof refreshDelivery !== 'function') {
+      return;
+    }
+
+    let canceled = false;
+    const refresh = () => {
+      void refreshDelivery()
+        .then((capability) => {
+          if (canceled || capability.deliveryId !== deliveryId) {
+            return;
+          }
+          setLaunchOptions((current) =>
+            current.agentReview?.deliveryId === deliveryId
+              ? { ...current, agentReviewDelivery: capability }
+              : current,
+          );
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('focus', refresh);
+    return () => {
+      canceled = true;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [launchOptions.agentReview?.deliveryId]);
   const sendAgentReviewFeedback = useCallback(async () => {
     if (pendingSource != null) {
       return;
@@ -1932,6 +1960,7 @@ export default function App() {
               showWhitespace={showWhitespace}
             />
             {launchOptions.agentReview &&
+            launchOptions.agentReviewDelivery?.available !== false &&
             typeof window.codiff.sendAgentReviewFeedback === 'function' ? (
               <SendFeedbackButton
                 count={pendingReviewCommentCount}

@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const { registerWindowOpenReceipt } = require('../window-open-receipt.cjs') as {
   registerWindowOpenReceipt: (
     window: {
+      destroy: () => void;
       isDestroyed: () => boolean;
       once: (event: string, listener: () => Promise<void>) => void;
       show: () => void;
@@ -32,6 +33,7 @@ test('publishes the shared delivery preflight only after the window is ready to 
 
   registerWindowOpenReceipt(
     {
+      destroy: () => {},
       isDestroyed: () => false,
       once: (event, listener) => {
         expect(event).toBe('ready-to-show');
@@ -64,14 +66,18 @@ test('publishes the shared delivery preflight only after the window is ready to 
   });
 });
 
-test('ignores a late receipt after the launcher removes its directory', async () => {
+test('destroys an unacknowledged window after the launcher removes its directory', async () => {
   await using directory = await createTemporaryDirectory('codiff-window-open-receipt-');
   const openFile = join(directory.path, 'open.json');
   let readyToShow: (() => Promise<void>) | undefined;
+  let destroyed = false;
 
   registerWindowOpenReceipt(
     {
-      isDestroyed: () => false,
+      destroy: () => {
+        destroyed = true;
+      },
+      isDestroyed: () => destroyed,
       once: (_event, listener) => {
         readyToShow = listener;
       },
@@ -86,6 +92,7 @@ test('ignores a late receipt after the launcher removes its directory', async ()
   await rm(directory.path, { recursive: true });
 
   await expect(readyToShow?.()).resolves.toBeUndefined();
+  expect(destroyed).toBe(true);
 });
 
 test('does not publish a receipt when the window closes during preflight', async () => {
@@ -100,6 +107,9 @@ test('does not publish a receipt when the window closes during preflight', async
 
   registerWindowOpenReceipt(
     {
+      destroy: () => {
+        destroyed = true;
+      },
       isDestroyed: () => destroyed,
       once: (_event, listener) => {
         readyToShow = listener;

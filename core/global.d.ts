@@ -3,6 +3,7 @@ import type { CodiffConfig } from './config/types.ts';
 import type {
   AgentSkillStatusResponse,
   AgentFeedbackDeliveryResponse,
+  AgentFeedbackDeliveryCapability,
   AgentReviewFeedback,
   CodiffFeatureFlags,
   CodiffLaunchOptions,
@@ -106,6 +107,7 @@ declare global {
       openFile: (path: string, lineNumber?: number) => Promise<void>;
       openReleasePage: () => Promise<void>;
       openRepositoryFolder: () => Promise<void>;
+      refreshAgentReviewDelivery?: () => Promise<AgentFeedbackDeliveryCapability>;
       resetCodeFontSize: () => Promise<void>;
       resolvePullRequestUrl: (value: string) => Promise<string>;
       saveMarkdownDocument: (

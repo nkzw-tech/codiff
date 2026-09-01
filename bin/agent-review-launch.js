@@ -75,8 +75,10 @@ export const runAgentReviewLauncher = ({ args, command }) => {
       error.exitCode = result.status ?? 1;
       throw error;
     }
-    readAgentReviewOpenReceipt(launch.openFile, launch.deliveryId);
-    return 'Codiff opened. Review feedback will arrive as a separate message in this session.\n';
+    const receipt = readAgentReviewOpenReceipt(launch.openFile, launch.deliveryId);
+    return receipt.deliveryAvailable
+      ? 'Codiff opened. Review feedback will arrive as a separate message in this session.\n'
+      : 'Codiff opened, but review feedback delivery is unavailable. Restore the integration and refocus Codiff to retry; copy comments manually if needed.\n';
   } finally {
     rmSync(launch.directory, { force: true, recursive: true });
   }

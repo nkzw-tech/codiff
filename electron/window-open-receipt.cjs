@@ -15,7 +15,7 @@ const writeJsonAtomic = (path, value) => {
 };
 
 /**
- * @param {{isDestroyed: () => boolean; once: (event: string, listener: () => Promise<void>) => void; show: () => void}} window
+ * @param {{destroy: () => void; isDestroyed: () => boolean; once: (event: string, listener: () => Promise<void>) => void; show: () => void}} window
  * @param {import('../core/types.ts').CodiffLaunchOptions} launchOptions
  * @param {Promise<{available: boolean; reason?: string}> | null} deliveryPreflight
  */
@@ -34,7 +34,7 @@ const registerWindowOpenReceipt = (window, launchOptions, deliveryPreflight) => 
           version: 1,
         });
       } catch {
-        // The launcher may have timed out and removed its receipt directory.
+        if (!window.isDestroyed()) window.destroy();
       }
     }
   });

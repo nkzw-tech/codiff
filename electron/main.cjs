@@ -1615,10 +1615,28 @@ ipcMain.handle('codiff:getLaunchOptions', async (event) => {
     walkthrough: false,
   };
   const preflight = windowAgentFeedbackPreflights.get(event.sender.id);
-  if (!preflight || (await preflight).available) {
+  if (!launchOptions.agentReview || !preflight) {
     return launchOptions;
   }
-  return { ...launchOptions, agentReview: undefined };
+  return {
+    ...launchOptions,
+    agentReviewDelivery: {
+      ...(await preflight),
+      deliveryId: launchOptions.agentReview.deliveryId,
+    },
+  };
+});
+
+ipcMain.handle('codiff:refreshAgentReviewDelivery', async (event) => {
+  const launchOptions = windowLaunchOptions.get(event.sender.id);
+  if (!launchOptions?.agentReview) {
+    return { available: false, deliveryId: '', reason: 'No agent review delivery is registered.' };
+  }
+  const capability = await agentFeedbackDelivery.prepare(event.sender.id).catch((error) => ({
+    available: false,
+    reason: error instanceof Error ? error.message : String(error),
+  }));
+  return { ...capability, deliveryId: launchOptions.agentReview.deliveryId };
 });
 
 ipcMain.handle('codiff:getAgentSkillStatus', async (event) => {

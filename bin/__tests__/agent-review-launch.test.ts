@@ -61,6 +61,33 @@ test.each([
   await expect(waitForAgentReviewOpen(launch.openFile, launch.deliveryId)).rejects.toThrow();
 });
 
+test('launcher reports unavailable delivery without claiming feedback will arrive', async () => {
+  await using directory = await createTemporaryDirectory('codiff-agent-review-launch-test-');
+  const command = join(directory.path, 'codiff');
+  await writeFile(
+    command,
+    `#!/bin/sh
+delivery_id=""
+open_file=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--agent-review-delivery" ]; then delivery_id="$arg"; fi
+  if [ "$previous" = "--agent-review-open-file" ]; then open_file="$arg"; fi
+  previous="$arg"
+done
+printf '{"deliveryAvailable":false,"deliveryId":"%s","reason":"secret-session-value","status":"open","version":1}\n' "$delivery_id" > "$open_file"
+`,
+  );
+  await chmod(command, 0o755);
+
+  const output = runAgentReviewLauncher({ args: ['--walkthrough'], command });
+
+  expect(output).toContain('review feedback delivery is unavailable');
+  expect(output).toContain('refocus Codiff to retry');
+  expect(output).not.toContain('will arrive');
+  expect(output).not.toContain('secret-session-value');
+});
+
 test('times out after the bounded 15-second open window', async () => {
   await using launch = createAgentReviewLaunch();
   let currentTime = 0;

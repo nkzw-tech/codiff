@@ -245,6 +245,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   openFile: vi.fn(async () => {}),
   openReleasePage: vi.fn(async () => {}),
   openRepositoryFolder: vi.fn(async () => {}),
+  refreshAgentReviewDelivery: vi.fn(async () => ({ available: true, deliveryId: 'delivery-1' })),
   resetCodeFontSize: vi.fn(async () => {}),
   resolvePullRequestUrl: vi.fn(async () => 'https://github.com/owner/repo/pull/1'),
   saveMarkdownDocument: vi.fn(async (request) => ({
@@ -714,6 +715,34 @@ test('desktop app only shows send feedback for an agent review handoff', async (
   await using handoffApp = await renderReact(<App />);
   await waitFor(() => expect(handoffApp.container.querySelector('.loading')).toBeNull());
   expect(handoffApp.container.querySelector('.send-feedback-button')).not.toBeNull();
+});
+
+test('desktop app enables send feedback after a fresh exact-session preflight succeeds', async () => {
+  const refreshAgentReviewDelivery = vi.fn(async () => ({
+    available: true,
+    deliveryId: 'delivery-1',
+  }));
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      agentReview: { deliveryId: 'delivery-1', sessionId: 'session-1' },
+      agentReviewDelivery: {
+        available: false,
+        deliveryId: 'delivery-1',
+        reason: 'Integration unavailable.',
+      },
+      repositoryPathProvided: true,
+      walkthrough: false,
+    })),
+    refreshAgentReviewDelivery,
+  });
+  await using app = await renderReact(<App />);
+  await waitFor(() => expect(app.container.querySelector('.loading')).toBeNull());
+  expect(app.container.querySelector('.send-feedback-button')).toBeNull();
+
+  await act(async () => window.dispatchEvent(new Event('focus')));
+
+  await waitFor(() => expect(refreshAgentReviewDelivery).toHaveBeenCalledOnce());
+  await waitFor(() => expect(app.container.querySelector('.send-feedback-button')).not.toBeNull());
 });
 
 test('desktop app hides send feedback when the agent review IPC is unavailable', async () => {

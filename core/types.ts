@@ -476,9 +476,16 @@ export type AgentFeedbackDeliveryResponse =
     }
   | { deliveryId: string; reason: string; status: 'rejected' };
 
+export type AgentFeedbackDeliveryCapability = {
+  available: boolean;
+  deliveryId: string;
+  reason?: string;
+};
+
 export type CodiffLaunchOptions = {
   agentBackend?: AgentBackend;
   agentReview?: { deliveryId: string; sessionId: string };
+  agentReviewDelivery?: AgentFeedbackDeliveryCapability;
   agentReviewOpenFile?: string;
   applyUpdate?: boolean;
   claudeSessionId?: string;
