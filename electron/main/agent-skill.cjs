@@ -22,6 +22,7 @@ const { basename, dirname, join } = require('node:path');
 /**
  * @typedef {{
  *   legacyManagedMarkers?: ReadonlyArray<string>;
+ *   legacyManagedSourceSubdirs?: ReadonlyArray<string>;
  *   managedMarker: string;
  *   sourceSubdir: string;
  *   targetSubdir: string;
@@ -49,7 +50,7 @@ const { basename, dirname, join } = require('node:path');
  *     writeFileSync?: typeof writeFileSync;
  *   };
  *   getActiveStatus?: (skillId: 'codex' | 'claude' | 'opencode' | 'pi') => Promise<boolean>;
- *   renderManagedFile?: (file: AgentSkillFile, template: string) => string;
+ *   renderManagedFile?: (file: AgentSkillFile, template: string, sourcePath: string) => string;
  *   root: string;
  *   skill: AgentSkill;
  * }} options
@@ -78,8 +79,9 @@ const createSkillInstaller = ({
 
   /** @param {AgentSkillFile} file */
   const getRenderedFile = (file) => {
-    const template = readFileSync(getSourcePath(file), 'utf8');
-    return renderManagedFile ? renderManagedFile(file, template) : template;
+    const sourcePath = getSourcePath(file);
+    const template = readFileSync(sourcePath, 'utf8');
+    return renderManagedFile ? renderManagedFile(file, template, sourcePath) : template;
   };
 
   /** @param {AgentSkillFile} file @param {string} contents */
@@ -90,6 +92,17 @@ const createSkillInstaller = ({
       .slice(0, 20)
       .some((line) => markers.has(line));
   };
+
+  /** @param {AgentSkillFile} file @param {string} targetPath @param {import('node:fs').Stats} stats */
+  const isLegacyManagedSourceSymlink = (file, targetPath, stats) =>
+    stats.isSymbolicLink() &&
+    (file.legacyManagedSourceSubdirs || []).some((sourceSubdir) => {
+      try {
+        return realpathSync(targetPath) === realpathSync(getSourcePath({ sourceSubdir }));
+      } catch {
+        return false;
+      }
+    });
 
   /** @param {AgentSkillTarget} target */
   const isInstalledTarget = (target) => {
@@ -201,11 +214,13 @@ const createSkillInstaller = ({
       return { metadata: metadata(stats) };
     }
 
+    const file = /** @type {AgentSkillFile} */ (item.definition);
+    if (isLegacyManagedSourceSymlink(file, targetPath, stats)) {
+      return { metadata: metadata(stats) };
+    }
+
     const contents = stats.isFile() ? readFileSync(targetPath, 'utf8') : '';
-    if (
-      !stats.isFile() ||
-      !isManagedFile(/** @type {AgentSkillFile} */ (item.definition), contents)
-    ) {
+    if (!stats.isFile() || !isManagedFile(file, contents)) {
       throw new Error(`${item.targetPath} already exists and is not managed by Codiff.`);
     }
     return { contents, metadata: metadata(stats) };

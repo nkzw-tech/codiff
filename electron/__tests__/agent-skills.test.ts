@@ -17,6 +17,7 @@ import {
 } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, test, vi } from 'vite-plus/test';
 import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources.ts';
 
@@ -33,6 +34,7 @@ const { buildInstallSkillMenuItem, listAgentSkills } = require('../agent-skills.
     agentLabel: string;
     files?: ReadonlyArray<{
       legacyManagedMarkers?: ReadonlyArray<string>;
+      legacyManagedSourceSubdirs?: ReadonlyArray<string>;
       managedMarker: string;
       sourceSubdir: string;
       targetSubdir: string;
@@ -62,7 +64,11 @@ const { createSkillInstaller } = require('../main/agent-skill.cjs') as {
       symlinkSync?: typeof nodeSymlinkSync;
     };
     getActiveStatus?: (skillId: string) => Promise<boolean>;
-    renderManagedFile?: (file: { sourceSubdir: string }, template: string) => string;
+    renderManagedFile?: (
+      file: { sourceSubdir: string },
+      template: string,
+      sourcePath: string,
+    ) => string;
     root: string;
     skill: ReturnType<typeof listAgentSkills>[number];
   }) => {
@@ -83,6 +89,30 @@ const inactiveDetails = {
   opencode: 'Restart OpenCode so the Codiff plugin can register this session.',
   pi: 'Restart Pi so the Codiff extension can register this session.',
 };
+
+const openCodeCommand = '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n';
+const openCodePlugin = 'export const CodiffPlugin = async (input) => input;\n';
+const openCodeWrapper =
+  "// codiff-managed-opencode-plugin:v1\nimport { CodiffPlugin as PackagedCodiffPlugin } from '{{CODIFF_OPENCODE_PLUGIN_URL}}';\nexport const CodiffPlugin = (input) => PackagedCodiffPlugin({ ...input, worktree: input.directory });\n";
+const createOpenCodeSources = async (root: string, command = openCodeCommand) => {
+  await mkdir(join(root, 'opencode/skills/codiff'), { recursive: true });
+  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
+  await mkdir(join(root, 'opencode/commands'), { recursive: true });
+  await writeFile(join(root, 'opencode/plugins/codiff.js'), openCodePlugin);
+  await writeFile(join(root, 'opencode/plugins/codiff-wrapper.js'), openCodeWrapper);
+  await writeFile(join(root, 'opencode/commands/codiff.md'), command);
+};
+const renderOpenCodeManagedFile = (
+  file: { sourceSubdir: string },
+  template: string,
+  sourcePath: string,
+) =>
+  file.sourceSubdir === 'opencode/plugins/codiff-wrapper.js'
+    ? template.replace(
+        '{{CODIFF_OPENCODE_PLUGIN_URL}}',
+        pathToFileURL(join(dirname(sourcePath), 'codiff.js')).href,
+      )
+    : template;
 
 test('lists every bundled skill with its installation target', () => {
   expect(listAgentSkills()).toEqual([
@@ -140,6 +170,12 @@ test('lists every bundled skill with its installation target', () => {
       agentLabel: 'OpenCode',
       files: [
         {
+          legacyManagedSourceSubdirs: ['opencode/plugins/codiff.js'],
+          managedMarker: '// codiff-managed-opencode-plugin:v1',
+          sourceSubdir: 'opencode/plugins/codiff-wrapper.js',
+          targetSubdir: '.config/opencode/plugins/codiff.js',
+        },
+        {
           legacyManagedMarkers: [
             '<!-- Managed by Codiff. Reinstall the OpenCode integration instead of editing this file. -->',
           ],
@@ -155,11 +191,6 @@ test('lists every bundled skill with its installation target', () => {
           sourceSubdir: 'opencode/skills/codiff',
           targetSubdir: '.config/opencode/skills/codiff',
           type: 'directory',
-        },
-        {
-          sourceSubdir: 'opencode/plugins/codiff.js',
-          targetSubdir: '.config/opencode/plugins/codiff.js',
-          type: 'file',
         },
       ],
     },
@@ -488,15 +519,12 @@ test('rolls back OpenCode targets when the later managed file commit fails', asy
   const home = join(directory.path, 'home');
   const root = join(directory.path, 'app');
   const commandTarget = join(home, '.config/opencode/commands/codiff.md');
+  const pluginSource = join(root, 'opencode/plugins/codiff.js');
+  const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
-  await mkdir(join(root, 'opencode/skills/codiff'), { recursive: true });
-  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
-  await mkdir(join(root, 'opencode/commands'), { recursive: true });
-  await writeFile(join(root, 'opencode/plugins/codiff.js'), '// managed plugin\n');
-  await writeFile(
-    join(root, 'opencode/commands/codiff.md'),
-    '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n',
-  );
+  await createOpenCodeSources(root);
+  await mkdir(dirname(pluginTarget), { recursive: true });
+  await symlink(pluginSource, pluginTarget, 'file');
   let failed = false;
   expect(skill).toBeDefined();
   const installer = createSkillInstaller({
@@ -511,6 +539,7 @@ test('rolls back OpenCode targets when the later managed file commit fails', asy
         nodeLinkSync(source, target);
       },
     },
+    renderManagedFile: renderOpenCodeManagedFile,
     root,
     skill: skill!,
   });
@@ -519,9 +548,8 @@ test('rolls back OpenCode targets when the later managed file commit fails', asy
   await expect(lstat(join(home, '.config/opencode/skills/codiff'))).rejects.toMatchObject({
     code: 'ENOENT',
   });
-  await expect(lstat(join(home, '.config/opencode/plugins/codiff.js'))).rejects.toMatchObject({
-    code: 'ENOENT',
-  });
+  expect((await lstat(pluginTarget)).isSymbolicLink()).toBe(true);
+  await expect(realpath(pluginTarget)).resolves.toBe(await realpath(pluginSource));
   await expect(lstat(commandTarget)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
@@ -535,18 +563,12 @@ test('preserves a user file created after backing up an OpenCode managed file', 
   const userContents = Buffer.from('user-authored command\nwith exact bytes\0\xff', 'latin1');
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
   const showMessageBox = vi.fn(async () => {});
-  await mkdir(join(root, 'opencode/skills/codiff'), { recursive: true });
-  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
-  await mkdir(join(root, 'opencode/commands'), { recursive: true });
-  await writeFile(join(root, 'opencode/plugins/codiff.js'), '// managed plugin\n');
-  await writeFile(
-    join(root, 'opencode/commands/codiff.md'),
-    '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n',
-  );
+  await createOpenCodeSources(root);
   expect(skill).toBeDefined();
   const initialInstaller = createSkillInstaller({
     app: { getPath: () => home, isPackaged: false },
     dialog: { showMessageBox: async () => {} },
+    renderManagedFile: renderOpenCodeManagedFile,
     root,
     skill: skill!,
   });
@@ -564,6 +586,7 @@ test('preserves a user file created after backing up an OpenCode managed file', 
         }
       },
     },
+    renderManagedFile: renderOpenCodeManagedFile,
     root,
     skill: skill!,
   });
@@ -637,19 +660,15 @@ test('installs the OpenCode skill into its global skills directory', async () =>
   const root = join(directory.path, 'app');
   const source = join(root, 'opencode/skills/codiff');
   const target = join(home, '.config/opencode/skills/codiff');
-  const commandSource = join(root, 'opencode/commands/codiff.md');
   const commandTarget = join(home, '.config/opencode/commands/codiff.md');
   const pluginSource = join(root, 'opencode/plugins/codiff.js');
+  const wrapperSource = join(root, 'opencode/plugins/codiff-wrapper.js');
   const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
   let model = 'anthropic/claude-sonnet-4-6';
 
-  await mkdir(source, { recursive: true });
-  await mkdir(join(root, 'opencode/commands'), { recursive: true });
-  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
-  await writeFile(pluginSource, 'export const CodiffPlugin = async () => ({});\n');
-  await writeFile(
-    commandSource,
+  await createOpenCodeSources(
+    root,
     '---\n{{MODEL}}\n---\n<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n',
   );
   expect(skill).toBeDefined();
@@ -661,7 +680,10 @@ test('installs the OpenCode skill into its global skills directory', async () =>
     dialog: {
       showMessageBox: async () => {},
     },
-    renderManagedFile: (_file, template) => template.replace('{{MODEL}}', `model: ${model}`),
+    renderManagedFile: (file, template, sourcePath) =>
+      file.sourceSubdir === 'opencode/plugins/codiff-wrapper.js'
+        ? renderOpenCodeManagedFile(file, template, sourcePath)
+        : template.replace('{{MODEL}}', `model: ${model}`),
     root,
     skill: skill!,
   });
@@ -669,13 +691,18 @@ test('installs the OpenCode skill into its global skills directory', async () =>
   await expect(installer.install()).resolves.toBe(true);
   await expect(installer.getStatus()).resolves.toMatchObject({ installed: true, path: target });
   await expect(realpath(target)).resolves.toBe(await realpath(source));
-  await expect(realpath(pluginTarget)).resolves.toBe(await realpath(pluginSource));
+  expect((await lstat(pluginTarget)).isFile()).toBe(true);
+  expect((await lstat(pluginTarget)).isSymbolicLink()).toBe(false);
+  await expect(readFile(pluginTarget, 'utf8')).resolves.toContain(
+    '// codiff-managed-opencode-plugin:v1',
+  );
+  await expect(readFile(pluginTarget, 'utf8')).resolves.toContain(pathToFileURL(pluginSource).href);
   await expect(readFile(commandTarget, 'utf8')).resolves.toContain(
     'model: anthropic/claude-sonnet-4-6',
   );
   await expect(installer.install()).resolves.toBe(true);
   await expect(realpath(target)).resolves.toBe(await realpath(source));
-  await expect(realpath(pluginTarget)).resolves.toBe(await realpath(pluginSource));
+  expect((await lstat(pluginTarget)).isFile()).toBe(true);
 
   await rm(pluginTarget);
   await expect(installer.getStatus()).resolves.toMatchObject({ installed: false, path: target });
@@ -686,25 +713,46 @@ test('installs the OpenCode skill into its global skills directory', async () =>
   model = 'openai/gpt-5.5';
   installer.refreshManagedFiles();
   await expect(readFile(commandTarget, 'utf8')).resolves.toContain('model: openai/gpt-5.5');
+  await writeFile(wrapperSource, `${openCodeWrapper}// refreshed wrapper\n`);
+  installer.refreshManagedFiles();
+  await expect(readFile(pluginTarget, 'utf8')).resolves.toContain('// refreshed wrapper');
   await expect(installer.getStatus()).resolves.toMatchObject({ installed: true, path: target });
+});
+
+test('migrates the exact legacy Codiff OpenCode plugin symlink', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-plugin-migration-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const pluginSource = join(root, 'opencode/plugins/codiff.js');
+  const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
+  const skill = listAgentSkills().find(({ id }) => id === 'opencode')!;
+
+  await createOpenCodeSources(root);
+  await mkdir(dirname(pluginTarget), { recursive: true });
+  await symlink(pluginSource, pluginTarget, 'file');
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    renderManagedFile: renderOpenCodeManagedFile,
+    root,
+    skill,
+  });
+
+  await expect(installer.install()).resolves.toBe(true);
+  expect((await lstat(pluginTarget)).isFile()).toBe(true);
+  expect((await lstat(pluginTarget)).isSymbolicLink()).toBe(false);
+  await expect(readFile(pluginTarget, 'utf8')).resolves.toContain(pathToFileURL(pluginSource).href);
 });
 
 test('does not replace a user-authored OpenCode command', async () => {
   await using directory = await createTemporaryDirectory('codiff-opencode-command-conflict-');
   const home = join(directory.path, 'home');
   const root = join(directory.path, 'app');
-  const source = join(root, 'opencode/skills/codiff');
-  const commandSource = join(root, 'opencode/commands/codiff.md');
   const commandTarget = join(home, '.config/opencode/commands/codiff.md');
-  const pluginSource = join(root, 'opencode/plugins/codiff.js');
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
 
-  await mkdir(source, { recursive: true });
-  await mkdir(join(root, 'opencode/commands'), { recursive: true });
-  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
+  await createOpenCodeSources(root);
   await mkdir(join(home, '.config/opencode/commands'), { recursive: true });
-  await writeFile(commandSource, '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n');
-  await writeFile(pluginSource, 'export const CodiffPlugin = async () => ({});\n');
   await writeFile(
     commandTarget,
     '<!-- This user-authored file mentions Managed by Codiff. -->\nMy custom Codiff command.\n',
@@ -718,6 +766,7 @@ test('does not replace a user-authored OpenCode command', async () => {
     dialog: {
       showMessageBox: async () => {},
     },
+    renderManagedFile: renderOpenCodeManagedFile,
     root,
     skill: skill!,
   });
@@ -733,18 +782,11 @@ test('does not replace a user-authored OpenCode plugin', async () => {
   await using directory = await createTemporaryDirectory('codiff-opencode-plugin-conflict-');
   const home = join(directory.path, 'home');
   const root = join(directory.path, 'app');
-  const source = join(root, 'opencode/skills/codiff');
-  const commandSource = join(root, 'opencode/commands/codiff.md');
-  const pluginSource = join(root, 'opencode/plugins/codiff.js');
   const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
 
-  await mkdir(source, { recursive: true });
-  await mkdir(join(root, 'opencode/commands'), { recursive: true });
-  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
+  await createOpenCodeSources(root);
   await mkdir(join(home, '.config/opencode/plugins'), { recursive: true });
-  await writeFile(commandSource, '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n');
-  await writeFile(pluginSource, 'export const CodiffPlugin = async () => ({});\n');
   await writeFile(pluginTarget, '// My custom plugin.\n');
   expect(skill).toBeDefined();
   const installer = createSkillInstaller({
@@ -755,6 +797,7 @@ test('does not replace a user-authored OpenCode plugin', async () => {
     dialog: {
       showMessageBox: async () => {},
     },
+    renderManagedFile: renderOpenCodeManagedFile,
     root,
     skill: skill!,
   });
@@ -768,25 +811,19 @@ test('does not replace an unrelated user-authored OpenCode plugin symlink', asyn
   await using directory = await createTemporaryDirectory('codiff-opencode-plugin-link-conflict-');
   const home = join(directory.path, 'home');
   const root = join(directory.path, 'app');
-  const source = join(root, 'opencode/skills/codiff');
-  const commandSource = join(root, 'opencode/commands/codiff.md');
-  const pluginSource = join(root, 'opencode/plugins/codiff.js');
   const userPlugin = join(directory.path, 'user-plugin.js');
   const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
   const skill = listAgentSkills().find(({ id }) => id === 'opencode');
 
-  await mkdir(source, { recursive: true });
-  await mkdir(join(root, 'opencode/commands'), { recursive: true });
-  await mkdir(join(root, 'opencode/plugins'), { recursive: true });
+  await createOpenCodeSources(root);
   await mkdir(join(home, '.config/opencode/plugins'), { recursive: true });
-  await writeFile(commandSource, '<!-- codiff-managed-opencode-command:v1 -->\nRun Codiff.\n');
-  await writeFile(pluginSource, 'export const CodiffPlugin = async () => ({});\n');
   await writeFile(userPlugin, '// User plugin.\n');
   await symlink(userPlugin, pluginTarget, 'file');
   expect(skill).toBeDefined();
   const installer = createSkillInstaller({
     app: { getPath: () => home, isPackaged: false },
     dialog: { showMessageBox: async () => {} },
+    renderManagedFile: renderOpenCodeManagedFile,
     root,
     skill: skill!,
   });

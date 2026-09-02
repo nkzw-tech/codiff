@@ -31,7 +31,11 @@ const {
 const { attachExternalLinkHandling } = require('./external-links.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
-const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
+const {
+  normalizeOpenCodeModel,
+  renderOpenCodeCommand,
+  renderOpenCodePlugin,
+} = require('./opencode.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
 const { readKeyboardLayout, watchKeyboardLayout } = require('./keyboard-layout.cjs');
 const { diagnoseWalkthroughMismatch } = require('./walkthrough-diagnosis.cjs');
@@ -185,7 +189,10 @@ const skillInstallers = new Map(
       dialog,
       renderManagedFile:
         skill.id === 'opencode'
-          ? (_file, template) => renderOpenCodeCommand(template, config.settings.opencodeModel)
+          ? (file, template, sourcePath) =>
+              file.sourceSubdir === 'opencode/plugins/codiff-wrapper.js'
+                ? renderOpenCodePlugin(template, join(dirname(sourcePath), 'codiff.js'))
+                : renderOpenCodeCommand(template, config.settings.opencodeModel)
           : undefined,
       root,
       skill,
