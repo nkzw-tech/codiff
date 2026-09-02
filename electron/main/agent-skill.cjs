@@ -169,25 +169,6 @@ const createSkillInstaller = ({
     };
   };
 
-  /** @param {AgentSkillFile} file @returns {string} the installed path */
-  const installFile = (file) => {
-    const targetPath = getTargetPath(file);
-
-    mkdirSync(dirname(targetPath), { recursive: true });
-    accessSync(dirname(targetPath), constants.W_OK);
-
-    if (existsSync(targetPath)) {
-      const stats = lstatSync(targetPath);
-      const contents = stats.isFile() ? readFileSync(targetPath, 'utf8') : '';
-      if (!stats.isFile() || !isManagedFile(file, contents)) {
-        throw new Error(`${targetPath} already exists and is not managed by Codiff.`);
-      }
-    }
-
-    writeFile(targetPath, getRenderedFile(file), { encoding: 'utf8', mode: 0o644 });
-    return targetPath;
-  };
-
   /** @param {import('node:fs').Stats | null} stats */
   const metadata = (stats) =>
     stats && { dev: stats.dev, ino: stats.ino, mode: stats.mode, mtimeMs: stats.mtimeMs };
@@ -371,6 +352,7 @@ const createSkillInstaller = ({
       return;
     }
 
+    let needsRefresh = false;
     for (const file of skill.files || []) {
       const targetPath = getTargetPath(file);
       let stats;
@@ -380,21 +362,28 @@ const createSkillInstaller = ({
         if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') {
           throw error;
         }
-        installFile(file);
+        needsRefresh = true;
         continue;
       }
       if (!stats.isFile()) {
-        continue;
+        return;
       }
 
       const contents = readFileSync(targetPath, 'utf8');
       if (!isManagedFile(file, contents)) {
-        continue;
+        return;
       }
 
-      const rendered = getRenderedFile(file);
-      if (contents !== rendered) {
-        writeFileSync(targetPath, rendered, { encoding: 'utf8', mode: 0o644 });
+      if (contents !== getRenderedFile(file)) {
+        needsRefresh = true;
+      }
+    }
+
+    if (needsRefresh) {
+      try {
+        installTransaction();
+      } catch {
+        // Startup refreshes are best effort and must leave conflicting user files untouched.
       }
     }
   };

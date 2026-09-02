@@ -859,3 +859,95 @@ test('does not write through a dangling OpenCode plugin symlink during refresh',
   await expect(readlink(pluginTarget)).resolves.toBe(danglingTarget);
   await expect(lstat(danglingTarget)).rejects.toMatchObject({ code: 'ENOENT' });
 });
+
+test('preserves a file created while refreshing a missing OpenCode managed file', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-refresh-create-race-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const commandTarget = join(home, '.config/opencode/commands/codiff.md');
+  const userTarget = join(directory.path, 'user-command.md');
+  const userContents = 'user command\n';
+  const skill = listAgentSkills().find(({ id }) => id === 'opencode')!;
+
+  await createOpenCodeSources(root);
+  await writeFile(userTarget, userContents);
+  const initialInstaller = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    renderManagedFile: renderOpenCodeManagedFile,
+    root,
+    skill,
+  });
+  await expect(initialInstaller.install()).resolves.toBe(true);
+  await rm(commandTarget);
+  let raced = false;
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    fileOperations: {
+      linkSync: (source, target) => {
+        if (!raced && target === commandTarget) {
+          raced = true;
+          nodeSymlinkSync(userTarget, commandTarget, 'file');
+        }
+        nodeLinkSync(source, target);
+      },
+    },
+    renderManagedFile: renderOpenCodeManagedFile,
+    root,
+    skill,
+  });
+
+  installer.refreshManagedFiles();
+
+  expect(raced).toBe(true);
+  expect((await lstat(commandTarget)).isSymbolicLink()).toBe(true);
+  await expect(readFile(userTarget, 'utf8')).resolves.toBe(userContents);
+});
+
+test('preserves a file replacing an OpenCode managed file during refresh', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-refresh-replace-race-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const commandSource = join(root, 'opencode/commands/codiff.md');
+  const commandTarget = join(home, '.config/opencode/commands/codiff.md');
+  const userTarget = join(directory.path, 'user-command.md');
+  const userContents = 'user command\n';
+  const skill = listAgentSkills().find(({ id }) => id === 'opencode')!;
+
+  await createOpenCodeSources(root);
+  await writeFile(userTarget, userContents);
+  const initialInstaller = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    renderManagedFile: renderOpenCodeManagedFile,
+    root,
+    skill,
+  });
+  await expect(initialInstaller.install()).resolves.toBe(true);
+  await writeFile(commandSource, `${openCodeCommand}updated\n`);
+  let raced = false;
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    fileOperations: {
+      renameSync: (source, target) => {
+        if (!raced && source === commandTarget && target.includes('.codiff-backup-')) {
+          raced = true;
+          nodeUnlinkSync(commandTarget);
+          nodeSymlinkSync(userTarget, commandTarget, 'file');
+        }
+        nodeRenameSync(source, target);
+      },
+    },
+    renderManagedFile: renderOpenCodeManagedFile,
+    root,
+    skill,
+  });
+
+  installer.refreshManagedFiles();
+
+  expect(raced).toBe(true);
+  expect((await lstat(commandTarget)).isSymbolicLink()).toBe(true);
+  await expect(readFile(userTarget, 'utf8')).resolves.toBe(userContents);
+});
