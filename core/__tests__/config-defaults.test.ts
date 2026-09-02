@@ -88,6 +88,16 @@ test('electron config normalizes sidebar position', () => {
   ).toBe('left');
 });
 
+test('electron config keeps commentOnLineClick only when it is a boolean', () => {
+  expect(readElectronConfig({}).settings.commentOnLineClick).toBe(true);
+  expect(
+    readElectronConfig({ settings: { commentOnLineClick: false } }).settings.commentOnLineClick,
+  ).toBe(false);
+  expect(
+    readElectronConfig({ settings: { commentOnLineClick: 'no' } }).settings.commentOnLineClick,
+  ).toBe(true);
+});
+
 test('electron config keeps custom walkthrough prompt text only when it is a string', () => {
   expect(
     readElectronConfig({

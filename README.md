@@ -133,6 +133,9 @@ is running so changes apply to open windows.
 Set `settings.showWhitespace` to `true` to show whitespace-only changes in diffs and file line
 counts; when it is `false`, Codiff hides those changes from the working-tree review state.
 
+Set `settings.commentOnLineClick` to `false` to stop clicks and drags on diff lines from opening a
+review comment draft. The comment button in the gutter still opens one.
+
 ```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/nkzw-tech/codiff/main/core/config/codiff-config.schema.json",
@@ -141,6 +144,7 @@ counts; when it is `false`, Codiff hides those changes from the working-tree rev
     "claudeModel": "claude-sonnet-4-6",
     "codeFontFamily": "",
     "codeFontSize": 13,
+    "commentOnLineClick": true,
     "copyCommentsOnClose": false,
     "diffStyle": "split",
     "editorCommand": "",

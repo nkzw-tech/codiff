@@ -1714,6 +1714,7 @@ export default function App() {
     agentLabel,
     codeQualityFindings: state.codeQualityFindings,
     collapsed,
+    commentOnLineClick: preferences.commentOnLineClick,
     comments: visibleReviewComments,
     commitMetadata,
     diffLineHeight,

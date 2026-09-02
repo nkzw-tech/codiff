@@ -42,6 +42,11 @@
           "default": 13,
           "description": "Font size in pixels used for diff and code rendering."
         },
+        "commentOnLineClick": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open a review comment draft when clicking or dragging across diff lines. The gutter comment button keeps working when this is false."
+        },
         "copyCommentsOnClose": {
           "type": "boolean",
           "default": false,

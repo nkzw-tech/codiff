@@ -2510,3 +2510,46 @@ test('line content clicks create review comments unless text is selected', async
   });
   expect(onCreateComment).toHaveBeenCalledTimes(3);
 });
+
+test('commentOnLineClick=false leaves comment creation to the gutter button', async () => {
+  const onCreateComment = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/click.ts',
+    'diff --git a/src/click.ts b/src/click.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness
+      commentOnLineClick={false}
+      files={[file]}
+      onCreateComment={onCreateComment}
+    />,
+  );
+  const { item, onGutterUtilityClick, onLineClick, onLineSelectionEnd } =
+    getReviewCodeViewHandlers();
+  const range = { end: 1, side: 'additions' as const, start: 1 };
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: nonInteractivePointerEvent,
+        lineNumber: 1,
+      },
+      { item },
+    );
+    onLineSelectionEnd(range, { item });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(onCreateComment).not.toHaveBeenCalled();
+  expect(codeViewMock.lastOptions?.enableLineSelection).toBe(false);
+  await act(async () => {
+    onGutterUtilityClick(range, { item });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(onCreateComment).toHaveBeenCalledTimes(1);
+  expect(onCreateComment).toHaveBeenLastCalledWith({
+    filePath: 'src/click.ts',
+    lineNumber: 1,
+    sectionId: 'src/click.ts:unstaged',
+    side: 'additions',
+  });
+});

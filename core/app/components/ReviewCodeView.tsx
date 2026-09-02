@@ -2499,6 +2499,7 @@ export function ReviewCodeView({
   bottomInset = codeViewLayout.paddingBottom,
   codeQualityFindings = [],
   collapsed,
+  commentOnLineClick = true,
   comments,
   commitMetadata,
   diffLineHeight = DIFF_LINE_HEIGHT,
@@ -2561,6 +2562,7 @@ export function ReviewCodeView({
   bottomInset?: number;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
   collapsed: ReadonlySet<string>;
+  commentOnLineClick?: boolean;
   comments: ReadonlyArray<ReviewComment>;
   commitMetadata: CommitMetadata | null;
   diffLineHeight?: number;
@@ -3286,7 +3288,7 @@ export function ReviewCodeView({
         diffIndicators: 'bars',
         diffStyle,
         enableGutterUtility: !isReadOnly,
-        enableLineSelection: !isReadOnly,
+        enableLineSelection: !isReadOnly && commentOnLineClick,
         expandUnchanged: false,
         expansionLineCount: diffContextExpansionLineCount,
         hunkSeparators: 'line-info-basic',
@@ -3377,7 +3379,7 @@ export function ReviewCodeView({
             return;
           }
 
-          if (hasActiveTextSelection()) {
+          if (!commentOnLineClick || hasActiveTextSelection()) {
             return;
           }
 
@@ -3403,7 +3405,7 @@ export function ReviewCodeView({
             return;
           }
 
-          if (!range) {
+          if (!range || !commentOnLineClick) {
             return;
           }
 
@@ -3455,6 +3457,7 @@ export function ReviewCodeView({
     [
       bottomInset,
       cancelPendingEmptyCommentDeletes,
+      commentOnLineClick,
       createCommentForRange,
       diffStyle,
       isReadOnly,
