@@ -81,7 +81,8 @@ test('send feedback stays disabled until feedback exists', async () => {
 
   const button = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
   expect(button?.disabled).toBe(true);
-  expect(button?.textContent).toContain('Send feedback');
+  expect(button?.textContent).toContain('Send Comments to Agent');
+  expect(button?.getAttribute('title')).toBe('Send Comments to Agent');
   expect(button?.textContent).toContain('0');
 });
 
@@ -90,7 +91,7 @@ test('send feedback shows the pending comment count', async () => {
 
   const button = app.container.querySelector<HTMLButtonElement>('.send-feedback-button');
   expect(button?.disabled).toBe(false);
-  expect(button?.textContent).toContain('Send feedback');
+  expect(button?.textContent).toContain('Send Comments to Agent');
   expect(button?.textContent).toContain('2');
 });
 
@@ -130,5 +131,5 @@ test('send feedback reports failures and can be retried', async () => {
     'Could not send feedback.',
   );
   expect(button?.disabled).toBe(false);
-  expect(button?.textContent).toContain('Send feedback');
+  expect(button?.textContent).toContain('Send Comments to Agent');
 });

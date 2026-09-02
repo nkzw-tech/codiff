@@ -487,11 +487,11 @@ export function SendFeedbackButton({
         className="copy-comments-button send-feedback-button"
         disabled={count === 0 || disabled || sending}
         onClick={() => void sendFeedback()}
-        title="Send feedback"
+        title="Send Comments to Agent"
         type="button"
       >
         <PaperPlaneTilt aria-hidden className="send-feedback-icon" size={14} weight="bold" />
-        <span>{sending ? 'Sending...' : 'Send feedback'}</span>
+        <span>{sending ? 'Sending...' : 'Send Comments to Agent'}</span>
         <span className="copy-comments-count">{count}</span>
       </button>
       {error ? (
