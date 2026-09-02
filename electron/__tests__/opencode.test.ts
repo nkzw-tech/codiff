@@ -111,7 +111,10 @@ test('renders an absolute packaged plugin URL into the OpenCode wrapper', () => 
   const template = "import '{{CODIFF_OPENCODE_PLUGIN_URL}}';\n";
 
   expect(renderOpenCodePlugin(template, '/tmp/Codiff App/opencode/plugins/codiff.js')).toBe(
-    "import 'file:///tmp/Codiff%20App/opencode/plugins/codiff.js';\n",
+    'import "file:///tmp/Codiff%20App/opencode/plugins/codiff.js";\n',
+  );
+  expect(renderOpenCodePlugin(template, "/tmp/Codiff's App/opencode/plugins/codiff.js")).toBe(
+    'import "file:///tmp/Codiff\'s%20App/opencode/plugins/codiff.js";\n',
   );
   expect(() => renderOpenCodePlugin('export {};\n', '/tmp/codiff.js')).toThrow('exactly one');
   expect(() =>

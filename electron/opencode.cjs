@@ -18,7 +18,7 @@ const OPENCODE_TIMEOUT_MS = 300_000;
 const DEFAULT_OPENCODE_MODEL = 'opencode-default';
 const FALLBACK_OPENCODE_MODEL = DEFAULT_OPENCODE_MODEL;
 const OPENCODE_COMMAND_MODEL_PLACEHOLDER = '{{CODIFF_OPENCODE_MODEL}}';
-const OPENCODE_PLUGIN_URL_PLACEHOLDER = '{{CODIFF_OPENCODE_PLUGIN_URL}}';
+const OPENCODE_PLUGIN_URL_PLACEHOLDER = "'{{CODIFF_OPENCODE_PLUGIN_URL}}'";
 const OPENCODE_NOT_FOUND_CODE = 'OPENCODE_NOT_FOUND';
 const OPENCODE_STREAMING_UNAVAILABLE_CODE = 'OPENCODE_STREAMING_UNAVAILABLE';
 const OPENCODE_NOT_FOUND_MESSAGE =
@@ -138,7 +138,10 @@ const renderOpenCodePlugin = (template, pluginPath) => {
     );
   }
 
-  return template.replace(OPENCODE_PLUGIN_URL_PLACEHOLDER, pathToFileURL(pluginPath).href);
+  return template.replace(
+    OPENCODE_PLUGIN_URL_PLACEHOLDER,
+    JSON.stringify(pathToFileURL(pluginPath).href),
+  );
 };
 
 /** @param {string} output @returns {string} */

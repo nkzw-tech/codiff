@@ -373,11 +373,17 @@ const createSkillInstaller = ({
 
     for (const file of skill.files || []) {
       const targetPath = getTargetPath(file);
-      if (!existsSync(targetPath)) {
+      let stats;
+      try {
+        stats = lstatSync(targetPath);
+      } catch (error) {
+        if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ENOENT') {
+          throw error;
+        }
         installFile(file);
         continue;
       }
-      if (!lstatSync(targetPath).isFile()) {
+      if (!stats.isFile()) {
         continue;
       }
 

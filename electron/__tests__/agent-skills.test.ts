@@ -109,8 +109,8 @@ const renderOpenCodeManagedFile = (
 ) =>
   file.sourceSubdir === 'opencode/plugins/codiff-wrapper.js'
     ? template.replace(
-        '{{CODIFF_OPENCODE_PLUGIN_URL}}',
-        pathToFileURL(join(dirname(sourcePath), 'codiff.js')).href,
+        "'{{CODIFF_OPENCODE_PLUGIN_URL}}'",
+        JSON.stringify(pathToFileURL(join(dirname(sourcePath), 'codiff.js')).href),
       )
     : template;
 
@@ -831,4 +831,31 @@ test('does not replace an unrelated user-authored OpenCode plugin symlink', asyn
   await expect(installer.install()).resolves.toBe(false);
   await expect(realpath(pluginTarget)).resolves.toBe(await realpath(userPlugin));
   await expect(readFile(pluginTarget, 'utf8')).resolves.toBe('// User plugin.\n');
+});
+
+test('does not write through a dangling OpenCode plugin symlink during refresh', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-dangling-plugin-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const pluginTarget = join(home, '.config/opencode/plugins/codiff.js');
+  const danglingTarget = join(directory.path, 'missing/user-plugin.js');
+  const skill = listAgentSkills().find(({ id }) => id === 'opencode')!;
+
+  await createOpenCodeSources(root);
+  const installer = createSkillInstaller({
+    app: { getPath: () => home, isPackaged: false },
+    dialog: { showMessageBox: async () => {} },
+    renderManagedFile: renderOpenCodeManagedFile,
+    root,
+    skill,
+  });
+  await expect(installer.install()).resolves.toBe(true);
+  await rm(pluginTarget);
+  await symlink(danglingTarget, pluginTarget, 'file');
+
+  installer.refreshManagedFiles();
+
+  expect((await lstat(pluginTarget)).isSymbolicLink()).toBe(true);
+  await expect(readlink(pluginTarget)).resolves.toBe(danglingTarget);
+  await expect(lstat(danglingTarget)).rejects.toMatchObject({ code: 'ENOENT' });
 });
