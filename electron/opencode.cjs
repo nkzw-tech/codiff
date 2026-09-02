@@ -3,6 +3,7 @@
 const { createServer } = require('node:net');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { resolveAgentCommandTransport } = require('./agent-command.cjs');
 const { getCommandEnvironment } = require('./login-shell-environment.cjs');
 const {
@@ -17,6 +18,7 @@ const OPENCODE_TIMEOUT_MS = 300_000;
 const DEFAULT_OPENCODE_MODEL = 'opencode-default';
 const FALLBACK_OPENCODE_MODEL = DEFAULT_OPENCODE_MODEL;
 const OPENCODE_COMMAND_MODEL_PLACEHOLDER = '{{CODIFF_OPENCODE_MODEL}}';
+const OPENCODE_PLUGIN_URL_PLACEHOLDER = '{{CODIFF_OPENCODE_PLUGIN_URL}}';
 const OPENCODE_NOT_FOUND_CODE = 'OPENCODE_NOT_FOUND';
 const OPENCODE_STREAMING_UNAVAILABLE_CODE = 'OPENCODE_STREAMING_UNAVAILABLE';
 const OPENCODE_NOT_FOUND_MESSAGE =
@@ -125,6 +127,18 @@ const renderOpenCodeCommand = (template, model) => {
   const normalizedModel = normalizeOpenCodeModel(model);
   const modelLine = normalizedModel === DEFAULT_OPENCODE_MODEL ? '' : `model: ${normalizedModel}`;
   return template.replace(OPENCODE_COMMAND_MODEL_PLACEHOLDER, modelLine);
+};
+
+/** @param {string} template @param {string} pluginPath */
+const renderOpenCodePlugin = (template, pluginPath) => {
+  const placeholderCount = template.split(OPENCODE_PLUGIN_URL_PLACEHOLDER).length - 1;
+  if (placeholderCount !== 1) {
+    throw new Error(
+      `The OpenCode plugin template must contain exactly one ${OPENCODE_PLUGIN_URL_PLACEHOLDER} placeholder.`,
+    );
+  }
+
+  return template.replace(OPENCODE_PLUGIN_URL_PLACEHOLDER, pathToFileURL(pluginPath).href);
 };
 
 /** @param {string} output @returns {string} */
@@ -663,5 +677,6 @@ module.exports = {
   isOpenCodeNotFoundError,
   normalizeOpenCodeModel,
   renderOpenCodeCommand,
+  renderOpenCodePlugin,
   runOpenCode,
 };

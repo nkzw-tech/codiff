@@ -1,6 +1,7 @@
 import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { beforeEach, expect, test } from 'vite-plus/test';
 import {
   createTemporaryDirectory,
@@ -21,6 +22,7 @@ const {
   isOpenCodeNotFoundError,
   normalizeOpenCodeModel,
   renderOpenCodeCommand,
+  renderOpenCodePlugin,
   runOpenCode,
 } = require('../opencode.cjs') as {
   DEFAULT_OPENCODE_MODEL: string;
@@ -32,6 +34,7 @@ const {
   isOpenCodeNotFoundError: (error: unknown) => boolean;
   normalizeOpenCodeModel: (value: unknown) => string;
   renderOpenCodeCommand: (template: string, model: unknown) => string;
+  renderOpenCodePlugin: (template: string, pluginPath: string) => string;
   runOpenCode: (
     repoRoot: string,
     prompt: string,
@@ -102,6 +105,42 @@ test('renders the selected model into the managed OpenCode command', () => {
       DEFAULT_OPENCODE_MODEL,
     ),
   ).toThrow('exactly one');
+});
+
+test('renders an absolute packaged plugin URL into the OpenCode wrapper', () => {
+  const template = "import '{{CODIFF_OPENCODE_PLUGIN_URL}}';\n";
+
+  expect(renderOpenCodePlugin(template, '/tmp/Codiff App/opencode/plugins/codiff.js')).toBe(
+    "import 'file:///tmp/Codiff%20App/opencode/plugins/codiff.js';\n",
+  );
+  expect(() => renderOpenCodePlugin('export {};\n', '/tmp/codiff.js')).toThrow('exactly one');
+  expect(() =>
+    renderOpenCodePlugin(
+      '{{CODIFF_OPENCODE_PLUGIN_URL}}\n{{CODIFF_OPENCODE_PLUGIN_URL}}\n',
+      '/tmp/codiff.js',
+    ),
+  ).toThrow('exactly one');
+});
+
+test('OpenCode wrapper delegates with the active directory as worktree', async () => {
+  await using directory = await createTemporaryDirectory('codiff-opencode-wrapper-');
+  const implementationPath = join(directory.path, 'codiff-plugin.mjs');
+  const wrapperPath = join(directory.path, 'codiff-wrapper.mjs');
+  const template = await readFile('opencode/plugins/codiff-wrapper.js', 'utf8');
+  await writeFile(implementationPath, 'export const CodiffPlugin = async (input) => input;\n');
+  await writeFile(wrapperPath, renderOpenCodePlugin(template, implementationPath));
+
+  const { CodiffPlugin } = await import(`${pathToFileURL(wrapperPath).href}?test=directory`);
+  await expect(
+    CodiffPlugin({
+      client: { session: {} },
+      directory: '/Users/nsmith/Git/flamingo',
+      worktree: '/Users/nsmith/Git',
+    }),
+  ).resolves.toMatchObject({
+    directory: '/Users/nsmith/Git/flamingo',
+    worktree: '/Users/nsmith/Git/flamingo',
+  });
 });
 
 test('detects OpenCode-not-found errors and invalid overrides', async () => {
