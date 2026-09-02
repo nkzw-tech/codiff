@@ -939,11 +939,13 @@ test('agent review feedback preserves the same focused draft after rejection and
   await using app = await renderReact(<App />);
   await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
 
-  const line = findInOpenShadowRoots<HTMLElement>(
-    app.container,
-    '[data-line="1"][data-line-type="change-addition"]',
-  );
-  await act(async () => line?.click());
+  const getLine = () =>
+    findInOpenShadowRoots<HTMLElement>(
+      app.container,
+      '[data-line="1"][data-line-type="change-addition"]',
+    );
+  await waitFor(() => expect(getLine()).not.toBeNull());
+  await act(async () => getLine()?.click());
   await waitFor(() =>
     expect(
       app.container.querySelector<HTMLElement>(
@@ -1014,11 +1016,13 @@ test('agent review feedback is disabled and guarded while switching sources', as
   await using app = await renderReact(<App />);
   await waitFor(() => expect(app.container.querySelector('.codiff-file-header')).not.toBeNull());
 
-  const line = findInOpenShadowRoots<HTMLElement>(
-    app.container,
-    '[data-line="1"][data-line-type="change-addition"]',
-  );
-  await act(async () => line?.click());
+  const getLine = () =>
+    findInOpenShadowRoots<HTMLElement>(
+      app.container,
+      '[data-line="1"][data-line-type="change-addition"]',
+    );
+  await waitFor(() => expect(getLine()).not.toBeNull());
+  await act(async () => getLine()?.click());
   await waitFor(() => {
     expect(
       app.container.querySelector<HTMLElement>(

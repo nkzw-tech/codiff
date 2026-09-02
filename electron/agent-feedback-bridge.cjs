@@ -194,14 +194,18 @@ const createAgentFeedbackBridgeClient = ({
           incoming.on('end', () => {
             if (settled) return;
             const text = Buffer.concat(chunks).toString('utf8');
-            if ((incoming.statusCode ?? 500) < 200 || (incoming.statusCode ?? 500) >= 300) {
+            const statusCode = incoming.statusCode ?? 500;
+            if (statusCode < 200 || statusCode >= 300) {
               let reason;
               try {
                 reason = JSON.parse(text).error;
               } catch {
                 reason = undefined;
               }
-              fail(new Error(reason || `Agent feedback bridge returned ${incoming.statusCode}.`));
+              fail(
+                new Error(reason || `Agent feedback bridge returned ${incoming.statusCode}.`),
+                delivery && dispatched && statusCode >= 500,
+              );
               return;
             }
             try {

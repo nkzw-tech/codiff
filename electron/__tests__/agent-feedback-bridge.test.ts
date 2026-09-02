@@ -511,6 +511,75 @@ test('rejects a response body larger than 64 KiB after dispatch as ambiguous', a
   });
 });
 
+test('classifies a delivery HTTP 500 response after dispatch as ambiguous', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-server-error-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const { socketPath } = await createRawServer(root, (incoming, response) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      if (incoming.url === '/v1/identity') {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        response.end(
+          JSON.stringify({
+            backend: 'pi',
+            nonce: body.nonce,
+            repositoryRoot: '/repo',
+            sessionId: 'session-1',
+            version: 1,
+          }),
+        );
+      } else {
+        response.writeHead(500);
+        response.end(JSON.stringify({ error: 'Delivery failed.' }));
+      }
+    });
+  });
+  await writeRegistration(registrationRoot, { endpoint: socketPath });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  await expect(client.deliverToAgentFeedbackBridge(request)).rejects.toMatchObject({
+    ambiguous: true,
+    message: 'Delivery failed.',
+  });
+});
+
+test('classifies a delivery HTTP 400 validation response as definite', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-validation-error-test-'));
+  const registrationRoot = path.join(root, 'registry');
+  const { socketPath } = await createRawServer(root, (incoming, response) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk) => chunks.push(chunk));
+    incoming.on('end', () => {
+      if (incoming.url === '/v1/identity') {
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        response.end(
+          JSON.stringify({
+            backend: 'pi',
+            nonce: body.nonce,
+            repositoryRoot: '/repo',
+            sessionId: 'session-1',
+            version: 1,
+          }),
+        );
+      } else {
+        response.writeHead(400);
+        response.end(JSON.stringify({ error: 'Invalid delivery request.' }));
+      }
+    });
+  });
+  await writeRegistration(registrationRoot, { endpoint: socketPath });
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+
+  try {
+    await client.deliverToAgentFeedbackBridge(request);
+    expect.unreachable('validation failure should reject');
+  } catch (error) {
+    expect(error).toMatchObject({ message: 'Invalid delivery request.' });
+    expect(error).not.toHaveProperty('ambiguous');
+  }
+});
+
 test('classifies a delivery timeout after dispatch as ambiguous', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-timeout-test-'));
   const registrationRoot = path.join(root, 'registry');

@@ -1699,6 +1699,7 @@ printf '[{"id":"${sessionId}","directory":"%s"}]\\n' "$OPENCODE_SESSION_DIRECTOR
           CODIFF_COMMAND: logger.commandPath,
           HOME: homePath,
           OPENCODE_SESSION_DIRECTORY: realRepositoryPath,
+          OPENCODE_SESSION_ID: '',
           PATH: logger.directory,
         },
       },
