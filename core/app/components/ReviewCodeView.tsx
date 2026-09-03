@@ -1299,7 +1299,7 @@ function ReviewCommentEditor({
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
   onAskCodex?: (commentId: string) => void;
-  onCommentBlur: (comment: ReviewComment, body: string) => void;
+  onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
   onDeleteComment: (commentId: string) => void;
@@ -1528,8 +1528,8 @@ function ReviewCommentEditor({
   ]);
 
   const handleBlur = useCallback(() => {
-    onCommentBlur(flushDraft(), draft);
-  }, [draft, flushDraft, onCommentBlur]);
+    onCommentBlur(comment, draft, flushDraft);
+  }, [comment, draft, flushDraft, onCommentBlur]);
 
   // Local reviews have nothing to submit a comment to, so adding one means
   // finishing it the way clicking away does. `MarkdownEditorHandle` exposes no
@@ -1902,7 +1902,7 @@ function ReviewCommentThreadGroup({
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
   onAskCodex?: (commentId: string) => void;
-  onCommentBlur: (comment: ReviewComment, body: string) => void;
+  onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
   onDeleteComment: (commentId: string) => void;
@@ -2074,7 +2074,7 @@ function ReviewAnnotation({
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
   onAskCodex?: (commentId: string) => void;
-  onCommentBlur: (comment: ReviewComment, body: string) => void;
+  onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
   onDeleteComment: (commentId: string) => void;
@@ -2622,6 +2622,10 @@ export function ReviewCodeView({
   const handledScrollRequestRef = useRef<number | null>(null);
   const handledHunkNavRef = useRef<number | null>(hunkNavigation?.request ?? null);
   const emptyCommentDeleteTimersRef = useRef<Map<string, number>>(new Map());
+  const activePointerIdsRef = useRef(new Set<number>());
+  const pendingCommentBlursRef = useRef(new Map<string, () => void>());
+  const pendingCommentBlurTimerRef = useRef<number | null>(null);
+  const focusedCommentEditorIdRef = useRef<string | null>(null);
   const definitionHighlightFrameRef = useRef<number | null>(null);
   const highlightFrameRef = useRef<number | null>(null);
   const ignoreNextLineSelectionEndRef = useRef(false);
@@ -3161,6 +3165,86 @@ export function ReviewCodeView({
     emptyCommentDeleteTimersRef.current.clear();
   }, []);
 
+  const flushPendingCommentBlurs = useCallback(() => {
+    if (activePointerIdsRef.current.size > 0) {
+      return;
+    }
+
+    const callbacks = [...pendingCommentBlursRef.current.values()];
+    pendingCommentBlursRef.current.clear();
+    for (const callback of callbacks) {
+      callback();
+    }
+  }, []);
+
+  const schedulePendingCommentBlurFlush = useCallback(() => {
+    if (
+      activePointerIdsRef.current.size > 0 ||
+      pendingCommentBlursRef.current.size === 0 ||
+      pendingCommentBlurTimerRef.current != null
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      deferredTimersRef.current.delete(timer);
+      pendingCommentBlurTimerRef.current = null;
+      flushPendingCommentBlurs();
+    }, 0);
+    pendingCommentBlurTimerRef.current = timer;
+    deferredTimersRef.current.add(timer);
+  }, [flushPendingCommentBlurs]);
+
+  useEffect(() => {
+    const activePointerIds = activePointerIdsRef.current;
+    const deferredTimers = deferredTimersRef.current;
+    const pendingCommentBlurs = pendingCommentBlursRef.current;
+    const handlePointerDown = (event: PointerEvent) => {
+      const timer = pendingCommentBlurTimerRef.current;
+      if (timer != null) {
+        window.clearTimeout(timer);
+        deferredTimers.delete(timer);
+        pendingCommentBlurTimerRef.current = null;
+      }
+      activePointerIds.add(event.pointerId);
+    };
+    const handlePointerEnd = (event: PointerEvent) => {
+      activePointerIds.delete(event.pointerId);
+      schedulePendingCommentBlurFlush();
+    };
+    const handleWindowBlur = () => {
+      activePointerIds.clear();
+      schedulePendingCommentBlurFlush();
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('pointercancel', handlePointerEnd, true);
+    window.addEventListener('pointerup', handlePointerEnd, true);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('pointercancel', handlePointerEnd, true);
+      window.removeEventListener('pointerup', handlePointerEnd, true);
+      window.removeEventListener('blur', handleWindowBlur);
+      activePointerIds.clear();
+      pendingCommentBlurs.clear();
+      const timer = pendingCommentBlurTimerRef.current;
+      if (timer != null) {
+        window.clearTimeout(timer);
+        deferredTimers.delete(timer);
+        pendingCommentBlurTimerRef.current = null;
+      }
+    };
+  }, [schedulePendingCommentBlurFlush]);
+
+  const deferCommentBlurUntilPointerEnd = useCallback((commentId: string, callback: () => void) => {
+    if (activePointerIdsRef.current.size > 0 || pendingCommentBlurTimerRef.current != null) {
+      pendingCommentBlursRef.current.set(commentId, callback);
+    } else {
+      callback();
+    }
+  }, []);
+
   const scrollFileItemToTop = useCallback((itemId: string) => {
     const handle = codeViewRef.current;
     const viewer = handle?.getInstance();
@@ -3305,11 +3389,11 @@ export function ReviewCodeView({
           createCommentForRange(range, context);
         },
         onLineClick: (line, context) => {
+          const lineElement = 'lineElement' in line ? line.lineElement : null;
           const isDefinitionNavigation = isPrimaryModifier(line.event);
           if (isDefinitionNavigation && onFindDefinitions) {
             line.event.preventDefault();
             line.event.stopPropagation();
-            const lineElement = 'lineElement' in line ? line.lineElement : null;
             const identifier = lineElement
               ? getIdentifierFromPointerEvent(line.event, lineElement)
               : null;
@@ -3377,7 +3461,7 @@ export function ReviewCodeView({
             return;
           }
 
-          if (hasActiveTextSelection()) {
+          if (hasActiveTextSelection(lineElement)) {
             return;
           }
 
@@ -3474,6 +3558,8 @@ export function ReviewCodeView({
 
   const focusComment = useCallback(
     (comment: ReviewComment) => {
+      focusedCommentEditorIdRef.current = comment.id;
+      pendingCommentBlursRef.current.delete(comment.id);
       onCommentDraftChange?.({ body: comment.body, id: comment.id });
       const timer = emptyCommentDeleteTimersRef.current.get(comment.id);
       if (timer == null) {
@@ -3488,26 +3574,37 @@ export function ReviewCodeView({
   );
 
   const blurComment = useCallback(
-    (comment: ReviewComment, body: string) => {
-      onCommentDraftChange?.(null);
-      clearCommentLineHighlight();
-      if (!comment.isReadOnly && body.trim().length === 0) {
-        const existingTimer = emptyCommentDeleteTimersRef.current.get(comment.id);
-        if (existingTimer != null) {
-          window.clearTimeout(existingTimer);
-          deferredTimersRef.current.delete(existingTimer);
+    (comment: ReviewComment, body: string, flushDraft: () => void) => {
+      deferCommentBlurUntilPointerEnd(comment.id, () => {
+        if (focusedCommentEditorIdRef.current === comment.id) {
+          focusedCommentEditorIdRef.current = null;
+          onCommentDraftChange?.(null);
         }
+        flushDraft();
+        clearCommentLineHighlight();
+        if (!comment.isReadOnly && body.trim().length === 0) {
+          const existingTimer = emptyCommentDeleteTimersRef.current.get(comment.id);
+          if (existingTimer != null) {
+            window.clearTimeout(existingTimer);
+            deferredTimersRef.current.delete(existingTimer);
+          }
 
-        const timer = window.setTimeout(() => {
-          deferredTimersRef.current.delete(timer);
-          emptyCommentDeleteTimersRef.current.delete(comment.id);
-          onDeleteComment(comment.id);
-        }, 120);
-        deferredTimersRef.current.add(timer);
-        emptyCommentDeleteTimersRef.current.set(comment.id, timer);
-      }
+          const timer = window.setTimeout(() => {
+            deferredTimersRef.current.delete(timer);
+            emptyCommentDeleteTimersRef.current.delete(comment.id);
+            onDeleteComment(comment.id);
+          }, 120);
+          deferredTimersRef.current.add(timer);
+          emptyCommentDeleteTimersRef.current.set(comment.id, timer);
+        }
+      });
     },
-    [clearCommentLineHighlight, onCommentDraftChange, onDeleteComment],
+    [
+      clearCommentLineHighlight,
+      deferCommentBlurUntilPointerEnd,
+      onCommentDraftChange,
+      onDeleteComment,
+    ],
   );
 
   const replyToThread = useCallback(
