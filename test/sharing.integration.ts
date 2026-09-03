@@ -566,7 +566,7 @@ test('stores immutable plan and walkthrough shares through D1, R2, Fate, and pol
       `${origin}/api/${kind === 'plan' ? 'plans' : 'walkthroughs'}/${upload.slug}/manifest`,
     );
     expect(manifestResponse.status).toBe(200);
-    expect(manifestResponse.headers.get('cache-control')).toBe('private, no-store');
+    expect(manifestResponse.headers.get('cache-control')).toBe('no-store');
     expect(manifestResponse.headers.get('x-robots-tag')).toBe('noindex');
     expect(await manifestResponse.json()).toEqual(canonicalSnapshot);
     expect(await readJson(await SELF.fetch(intent.pollUrl))).toEqual({
