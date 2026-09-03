@@ -137,6 +137,7 @@ const extractPatchHunks = (patch) => {
       continue;
     }
 
+    const hunkStart = index;
     let additions = 0;
     let deletions = 0;
     index += 1;
@@ -155,6 +156,7 @@ const extractPatchHunks = (patch) => {
       added: additions,
       deleted: deletions,
       header,
+      patch: lines.slice(hunkStart, index).join('\n'),
     });
   }
 

@@ -11,6 +11,17 @@
     ]
   },
   {
+    "id": "focused-small",
+    "size": "small",
+    "commit": "88a977c370235d179c72bbb27bd3fb4a9bd54322",
+    "rubric": [
+      "Explains how collapsible Markdown sections identify and copy their own fenced code without including nested sections.",
+      "Connects the copy button interaction to its clipboard behavior, copied feedback, and prevention of summary toggling.",
+      "Uses tests and styling as support for the behavior rather than fragmenting one component implementation into separate review stops.",
+      "Keeps this three-file change to at most three main-path stops without omitting the core behavior."
+    ]
+  },
+  {
     "id": "medium",
     "size": "medium",
     "commit": "7e71d5f498f8db1252bb5c1152abf29bb78b1f0a",
