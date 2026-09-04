@@ -199,7 +199,7 @@ const createAgentFeedbackAdapterRegistry = () => {
       }
       return adapter.deliver(request);
     },
-    /** @param {{backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}} identity */
+    /** @param {import('../core/types.ts').AgentFeedbackSessionIdentity} identity */
     probe(identity) {
       const adapter = adapters.get(identity.backend);
       return adapter
@@ -211,7 +211,7 @@ const createAgentFeedbackAdapterRegistry = () => {
     },
     /**
      * @param {import('../core/types.ts').AgentBackend} backend
-     * @param {{deliver: (request: import('../core/types.ts').AgentFeedbackDeliveryRequest) => Promise<import('../core/types.ts').AgentFeedbackDeliveryResponse>; probe: (identity: {backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}) => Promise<{available: boolean; reason?: string}>}} adapter
+     * @param {{deliver: (request: import('../core/types.ts').AgentFeedbackDeliveryRequest) => Promise<import('../core/types.ts').AgentFeedbackDeliveryResponse>; probe: (identity: import('../core/types.ts').AgentFeedbackSessionIdentity) => Promise<{available: boolean; reason?: string}>}} adapter
      */
     register(backend, adapter) {
       adapters.set(backend, adapter);

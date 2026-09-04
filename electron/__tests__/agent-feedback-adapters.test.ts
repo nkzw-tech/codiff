@@ -6,6 +6,7 @@ import type {
   AgentBackend,
   AgentFeedbackDeliveryRequest,
   AgentFeedbackDeliveryResponse,
+  AgentFeedbackSessionIdentity,
   AgentReviewFeedback,
 } from '../../core/types.ts';
 
@@ -26,10 +27,7 @@ const { formatAgentFeedbackMessage } = require('../agent-feedback-delivery.cjs')
   formatAgentFeedbackMessage: (request: AgentFeedbackDeliveryRequest) => string;
 };
 
-type DeliveryIdentity = Pick<
-  AgentFeedbackDeliveryRequest,
-  'backend' | 'repositoryRoot' | 'sessionId'
->;
+type DeliveryIdentity = AgentFeedbackSessionIdentity;
 type SpawnProcess = (
   command: string,
   args: ReadonlyArray<string>,
@@ -115,7 +113,7 @@ test.each(['claude', 'opencode', 'pi'] as const)(
     const { spawnProcess } = createSpawn();
     const bridgeProbe = vi.fn(async () => ({ available: true }));
     const adapter = createAgentFeedbackAdapters({ bridgeProbe, spawnProcess })[backend];
-    const identity = { backend, repositoryRoot: '/repo', sessionId: 'session-1' };
+    const identity = { backend, sessionId: 'session-1' };
 
     await expect(adapter.probe(identity)).resolves.toEqual({ available: true });
     expect(bridgeProbe).toHaveBeenCalledWith(identity);

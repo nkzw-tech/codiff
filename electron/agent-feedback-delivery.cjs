@@ -206,7 +206,7 @@ const formatAgentFeedbackMessage = ({ deliveryId, feedback }) =>
   ].join('\n');
 
 /**
- * @param {{deliver: (request: import('../core/types.ts').AgentFeedbackDeliveryRequest) => Promise<import('../core/types.ts').AgentFeedbackDeliveryResponse>; probe?: (identity: {backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}) => Promise<{available: boolean; reason?: string}>}} options
+ * @param {{deliver: (request: import('../core/types.ts').AgentFeedbackDeliveryRequest) => Promise<import('../core/types.ts').AgentFeedbackDeliveryResponse>; probe?: (identity: import('../core/types.ts').AgentFeedbackSessionIdentity) => Promise<{available: boolean; reason?: string}>}} options
  */
 const createAgentFeedbackDeliveryController = ({
   deliver,
@@ -259,7 +259,6 @@ const createAgentFeedbackDeliveryController = ({
         validateAgentReviewRepository(feedback.repository, repository);
         const capability = await probe({
           backend: binding.backend,
-          repositoryRoot: repository.root,
           sessionId: binding.sessionId,
         });
         if (!capability.available) {
@@ -308,10 +307,8 @@ const createAgentFeedbackDeliveryController = ({
     /** @param {number} webContentsId */
     async prepare(webContentsId) {
       const binding = getBinding(webContentsId);
-      const repository = await resolveRepository(binding);
       const result = await probe({
         backend: binding.backend,
-        repositoryRoot: repository.root,
         sessionId: binding.sessionId,
       });
       binding.available = result.available;

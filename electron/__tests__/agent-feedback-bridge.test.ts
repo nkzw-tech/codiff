@@ -7,7 +7,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, test, vi } from 'vite-plus/test';
 import { createAgentFeedbackBridge } from '../../bin/agent-feedback-bridge.mjs';
-import type { AgentFeedbackDeliveryRequest, AgentReviewFeedback } from '../../core/types.ts';
+import type {
+  AgentFeedbackDeliveryRequest,
+  AgentFeedbackSessionIdentity,
+  AgentReviewFeedback,
+} from '../../core/types.ts';
 
 const require = createRequire(import.meta.url);
 const { createAgentFeedbackBridgeClient } = require('../agent-feedback-bridge.cjs') as {
@@ -22,7 +26,7 @@ const { createAgentFeedbackBridgeClient } = require('../agent-feedback-bridge.cj
       request: AgentFeedbackDeliveryRequest,
     ) => Promise<Record<string, unknown>>;
     probeAgentFeedbackBridge: (
-      identity: Pick<AgentFeedbackDeliveryRequest, 'backend' | 'repositoryRoot' | 'sessionId'>,
+      identity: AgentFeedbackSessionIdentity,
     ) => Promise<{ available: boolean; reason?: string }>;
   };
 };

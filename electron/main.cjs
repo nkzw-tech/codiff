@@ -244,15 +244,10 @@ const getWindowAgentActiveStatus = async (webContentsId, backend) => {
   const agent = getAgent(backend);
   const launchOptions = windowLaunchOptions.get(webContentsId);
   const sessionId = launchOptions?.[agent.sessionLaunchOptionKey];
-  const repositoryRoot = windowIdentities.get(webContentsId)?.repositoryRoot;
-  if (backend !== 'codex' && (!repositoryRoot || !sessionId)) {
+  if (!sessionId) {
     return false;
   }
-  const result = await agentFeedbackAdapters.probe({
-    backend,
-    repositoryRoot: repositoryRoot || '',
-    sessionId: sessionId || '',
-  });
+  const result = await agentFeedbackAdapters.probe({ backend, sessionId });
   return result.available;
 };
 

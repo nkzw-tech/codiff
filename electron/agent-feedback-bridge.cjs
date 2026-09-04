@@ -47,7 +47,7 @@ const createAgentFeedbackBridgeClient = ({
 } = {}) => {
   const uid = getuid?.();
 
-  /** @param {{backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}} identity */
+  /** @param {import('../core/types.ts').AgentFeedbackSessionIdentity} identity */
   const findRegistrations = (identity) => {
     if (!VALID_BACKENDS.has(identity.backend)) {
       throw new Error('No authenticated agent feedback bridge is available.');
@@ -239,7 +239,7 @@ const createAgentFeedbackBridgeClient = ({
     Object.keys(identity).sort().join('\0') === Object.keys(expectedIdentity).sort().join('\0') &&
     Object.entries(expectedIdentity).every(([key, value]) => identity[key] === value);
 
-  /** @param {{backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}} identity */
+  /** @param {import('../core/types.ts').AgentFeedbackSessionIdentity} identity */
   const findAuthenticatedRegistration = async (identity) => {
     for (const candidate of findRegistrations(identity)) {
       const nonce = randomUUID();
@@ -268,7 +268,7 @@ const createAgentFeedbackBridgeClient = ({
     throw new Error('No authenticated agent feedback bridge is available.');
   };
 
-  /** @param {{backend: import('../core/types.ts').AgentBackend; repositoryRoot: string; sessionId: string}} identity */
+  /** @param {import('../core/types.ts').AgentFeedbackSessionIdentity} identity */
   const probeAgentFeedbackBridge = async (identity) => {
     try {
       await findAuthenticatedRegistration(identity);

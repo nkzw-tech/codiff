@@ -5,6 +5,7 @@ import type {
   AgentFeedbackAssurance,
   AgentFeedbackDeliveryRequest,
   AgentFeedbackDeliveryResponse,
+  AgentFeedbackSessionIdentity,
   AgentReviewFeedback,
 } from '../../core/types.ts';
 
@@ -41,11 +42,7 @@ const { createAgentFeedbackAdapterRegistry } = require('../agent-feedback-adapte
 };
 
 type DeliveryCapability = { available: boolean; reason?: string };
-type DeliveryIdentity = {
-  backend: AgentBackend;
-  repositoryRoot: string;
-  sessionId: string;
-};
+type DeliveryIdentity = AgentFeedbackSessionIdentity;
 type DeliveryController = {
   clear: (webContentsId: number) => void;
   deliver: (
@@ -300,7 +297,7 @@ test('preflights before delivery and does not dispatch while unavailable', async
   expect(deliver).not.toHaveBeenCalled();
 });
 
-test('uses the latest repository identity for preflight and feedback validation', async () => {
+test('uses recipient identity for preflight and the latest repository for feedback validation', async () => {
   const repository = {
     root: '/tmp/repository',
     source: { ref: 'abc123', type: 'commit' as const },
@@ -320,7 +317,6 @@ test('uses the latest repository identity for preflight and feedback validation'
 
   expect(probe).toHaveBeenLastCalledWith({
     backend: 'pi',
-    repositoryRoot: repository.root,
     sessionId: 'session-1',
   });
   expect(deliver).toHaveBeenCalledWith(
@@ -328,7 +324,7 @@ test('uses the latest repository identity for preflight and feedback validation'
   );
 });
 
-test('uses a repository update that arrives while the initial repository is resolving', async () => {
+test('preflights with recipient identity while the initial repository is resolving', async () => {
   let resolveInitial!: (repository: AgentReviewFeedback['repository']) => void;
   const initialRepository = new Promise<AgentReviewFeedback['repository']>((resolve) => {
     resolveInitial = resolve;
@@ -353,7 +349,6 @@ test('uses a repository update that arrives while the initial repository is reso
 
   expect(probe).toHaveBeenCalledWith({
     backend: 'claude',
-    repositoryRoot: latestRepository.root,
     sessionId: 'session-1',
   });
 });
@@ -517,7 +512,6 @@ test('unregistered adapters preflight as unavailable and do not dispatch', async
   const registry = createAgentFeedbackAdapterRegistry();
   const identity = {
     backend: 'claude' as const,
-    repositoryRoot: '/tmp/repository',
     sessionId: 'session-1',
   };
 
@@ -526,7 +520,13 @@ test('unregistered adapters preflight as unavailable and do not dispatch', async
     reason: 'The claude feedback adapter is unavailable.',
   });
   expect(() =>
-    registry.deliver({ ...identity, deliveryId: 'delivery-1', feedback, version: 1 }),
+    registry.deliver({
+      ...identity,
+      deliveryId: 'delivery-1',
+      feedback,
+      repositoryRoot: '/tmp/repository',
+      version: 1,
+    }),
   ).toThrow('unavailable');
 });
 
@@ -550,7 +550,9 @@ test('registered adapters receive probes and deliveries', async () => {
     version: 1,
   };
 
-  await expect(registry.probe(request)).resolves.toEqual({ available: true });
+  await expect(
+    registry.probe({ backend: request.backend, sessionId: request.sessionId }),
+  ).resolves.toEqual({ available: true });
   await expect(registry.deliver(request)).resolves.toMatchObject({ status: 'accepted' });
   expect(adapter.probe).toHaveBeenCalledOnce();
   expect(adapter.deliver).toHaveBeenCalledOnce();

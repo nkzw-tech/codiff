@@ -452,6 +452,11 @@ export type AgentReviewFeedback = AgentReviewFeedbackContent & {
 
 export type AgentBackend = 'codex' | 'claude' | 'opencode' | 'pi';
 
+export type AgentFeedbackSessionIdentity = {
+  backend: AgentBackend;
+  sessionId: string;
+};
+
 export type AgentFeedbackAssurance =
   | 'bridge-queue'
   | 'dispatch-started'
