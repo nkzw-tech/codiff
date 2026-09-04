@@ -643,6 +643,9 @@ test('keeps asynchronous review instructions identical outside agent integration
     expect(normalizedDocument).toContain(
       'When Codiff later sends review feedback, treat it as a new user request in this same session. Address every comment in order. Do not automatically reopen Codiff after handling the feedback.',
     );
+    expect(normalizedDocument).toContain(
+      'The reviewed repository may differ from the agent session directory; the exact launching session remains the feedback recipient.',
+    );
     expect(desktopInstructions).not.toContain('status: "submitted"');
     expect(desktopInstructions).not.toContain('status: "closed"');
     return document.replace(

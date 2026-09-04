@@ -134,13 +134,15 @@ arrive as a separate message in this session.` Stop waiting once it prints the o
    authentication and resumes after sign-in. This authentication browser is independent of
    `--open`, which only controls whether the completed walkthrough is opened.
 
-   **Agent integration:** Desktop launches link the most recent OpenCode session for the current
-   project and run Codiff with the OpenCode backend. The launcher's `--share` path retains OpenCode
-   as the authoring agent without attaching the conversation transcript. Codiff's managed
-   `/codiff` command can use the OpenCode model selected in Codiff; direct `$codiff` skill mentions
-   continue with the current session model. Codiff closes after OpenCode confirms either insertion
-   into its session-local in-memory FIFO or creation of the user message. The FIFO is not durable and
-   is lost if OpenCode restarts; neither assurance confirms that OpenCode processed the feedback.
+   **Agent integration:** The launcher passes the current `OPENCODE_SESSION_ID` to Codiff in desktop
+   mode and routes feedback to that exact session. The launcher's `--share` path retains OpenCode as
+   the authoring agent without attaching the conversation transcript. Codiff's managed `/codiff`
+   command can use the OpenCode model selected in Codiff; direct `$codiff` skill mentions continue
+   with the current session model. Codiff closes after OpenCode confirms either insertion into its
+   session-local in-memory FIFO or creation of the user message. The FIFO is not durable and is lost
+   if OpenCode restarts; neither assurance confirms that OpenCode processed the feedback. The reviewed
+   repository may differ from the agent session directory; the exact launching session remains the
+   feedback recipient.
 
    Codiff validates and repairs the document against the live diff, so anchors that drift
    are pinned to a real section rather than dropped.

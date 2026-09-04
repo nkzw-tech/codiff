@@ -135,8 +135,9 @@ arrive as a separate message in this session.` Stop waiting once it prints the o
    `--open`, which only controls whether the completed walkthrough is opened.
 
    **Agent integration:** The launcher passes `CLAUDE_SESSION_ID` to Codiff in desktop mode and
-   identifies shared walkthroughs as authored by Claude. Start Claude Code with the managed local
-   Channel plugin enabled:
+   identifies shared walkthroughs as authored by Claude. The reviewed repository may differ from the
+   agent session directory; the exact launching session remains the feedback recipient. Start Claude
+   Code with the managed local Channel plugin enabled:
 
    ```bash
    claude --plugin-dir "$HOME/.claude/plugins/codiff-channel" --dangerously-load-development-channels server:codiff

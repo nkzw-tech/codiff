@@ -136,7 +136,8 @@ arrive as a separate message in this session.` Stop waiting once it prints the o
 
    **Agent integration:** The launcher passes `CODEX_THREAD_ID` to Codiff in desktop mode and
    identifies shared walkthroughs as authored by Codex. Codiff closes after the Codex queue command
-   accepts the feedback; this does not confirm that Codex processed it.
+   accepts the feedback; this does not confirm that Codex processed it. The reviewed repository may
+   differ from the agent session directory; the exact launching session remains the feedback recipient.
 
    Codiff validates and repairs the document against the live diff, so anchors that drift
    are pinned to a real section rather than dropped.
