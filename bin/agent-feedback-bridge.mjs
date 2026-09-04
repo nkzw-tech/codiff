@@ -177,7 +177,8 @@ export const createAgentFeedbackBridge = async ({
     }
 
     if (
-      body.repositoryRoot !== repositoryRoot ||
+      typeof body.repositoryRoot !== 'string' ||
+      !body.repositoryRoot.trim() ||
       body.sessionId !== sessionId ||
       body.version !== PROTOCOL_VERSION
     ) {
@@ -203,7 +204,7 @@ export const createAgentFeedbackBridge = async ({
       operation = deliver({
         deliveryId: body.deliveryId,
         message: body.message,
-        repositoryRoot,
+        repositoryRoot: body.repositoryRoot,
         sessionId,
         version: PROTOCOL_VERSION,
       });

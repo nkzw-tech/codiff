@@ -132,10 +132,10 @@ test('rejects missing and incorrect bearer tokens', async () => {
 });
 
 test.each([
-  ['repository', { repositoryRoot: '/other', sessionId: 'session-1', version: 1 }],
+  ['repository root', { repositoryRoot: ' ', sessionId: 'session-1', version: 1 }],
   ['session', { repositoryRoot: '/repo', sessionId: 'other', version: 1 }],
   ['version', { repositoryRoot: '/repo', sessionId: 'session-1', version: 2 }],
-])('rejects delivery with a mismatched %s', async (_field, identity) => {
+])('rejects delivery with an invalid %s', async (_field, identity) => {
   const { bridge, deliver } = await createBridge();
   const result = await post(
     bridge.registration.endpoint,

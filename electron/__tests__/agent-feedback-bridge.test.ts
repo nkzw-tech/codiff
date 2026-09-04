@@ -127,6 +127,33 @@ test('probe authenticates the exact resident identity without delivering', async
   expect(deliver).not.toHaveBeenCalled();
 });
 
+test('routes an authenticated delivery to the exact session across repository roots', async () => {
+  const { deliver, registrationRoot } = await setup();
+  const client = createAgentFeedbackBridgeClient({ registrationRoot });
+  const crossRepositoryRequest = {
+    ...request,
+    feedback: {
+      ...feedback,
+      repository: { ...feedback.repository, root: '/review-repo' },
+    },
+    repositoryRoot: '/review-repo',
+  };
+
+  await expect(client.probeAgentFeedbackBridge(crossRepositoryRequest)).resolves.toEqual({
+    available: true,
+  });
+  await expect(client.deliverToAgentFeedbackBridge(crossRepositoryRequest)).resolves.toMatchObject({
+    deliveryId: 'delivery-1',
+    status: 'accepted',
+  });
+  expect(deliver).toHaveBeenCalledWith(
+    expect.objectContaining({
+      repositoryRoot: '/review-repo',
+      sessionId: 'session-1',
+    }),
+  );
+});
+
 test('probe reports a missing resident registration as unavailable', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'codiff-missing-probe-test-'));
   const client = createAgentFeedbackBridgeClient({ registrationRoot: path.join(root, 'registry') });

@@ -128,10 +128,7 @@ const createAgentFeedbackBridgeClient = ({
           fs.rmSync(quarantinePath, { force: true });
           continue;
         }
-        if (
-          registration.repositoryRoot !== identity.repositoryRoot ||
-          registration.sessionId !== identity.sessionId
-        ) {
+        if (registration.sessionId !== identity.sessionId) {
           continue;
         }
         registrations.push({ ...registration, updatedAtMs: updatedAt });
@@ -257,7 +254,7 @@ const createAgentFeedbackBridgeClient = ({
           identityMatches(response, {
             backend: identity.backend,
             nonce,
-            repositoryRoot: identity.repositoryRoot,
+            repositoryRoot: candidate.repositoryRoot,
             sessionId: identity.sessionId,
             version: PROTOCOL_VERSION,
           })
