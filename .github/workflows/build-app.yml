@@ -73,8 +73,11 @@ jobs:
       - name: Install Node Dependencies
         run: pnpm install
 
-      - name: Build Renderer
-        run: pnpm exec vp build
+      - name: Build Renderer and Runtime Bridges
+        run: |
+          pnpm run build:runtime
+          pnpm exec vp build
+          node ./scripts/verify-package-runtime.mjs
 
       - name: Build Linux App
         timeout-minutes: 45
@@ -139,8 +142,11 @@ jobs:
       - name: Install Node Dependencies
         run: pnpm install
 
-      - name: Build Renderer
-        run: pnpm exec vp build
+      - name: Build Renderer and Runtime Bridges
+        run: |
+          pnpm run build:runtime
+          pnpm exec vp build
+          node ./scripts/verify-package-runtime.mjs
 
       - name: Build Windows App
         shell: bash

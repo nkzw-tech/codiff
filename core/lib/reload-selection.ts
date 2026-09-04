@@ -1,4 +1,10 @@
-import type { GitFileStatus, RepositoryState, ReviewSource } from '../types.ts';
+import type {
+  GitFileStatus,
+  RepositoryState,
+  ResolvedReviewSource,
+  ReviewSource,
+} from '../types.ts';
+import { decodeResolvedReviewSource, decodeReviewSource } from './review-source-codec.ts';
 import { getSourceKey } from './source.ts';
 
 const reloadSelectionStorageKey = 'codiff.reloadSelection.v3';
@@ -11,13 +17,13 @@ type ReloadSelectionFile = {
 
 export type ReloadMainMode = 'commit' | 'review';
 
-type ReloadSelection = {
+export type ReloadSelection = {
   files: ReadonlyArray<ReloadSelectionFile>;
   historySource?: ReviewSource | null;
   mainMode?: ReloadMainMode;
   root: string;
   selectedPath: string | null;
-  source: ReviewSource;
+  source: ResolvedReviewSource;
 };
 
 const getStorage = () => {
@@ -31,51 +37,10 @@ const getStorage = () => {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value != null;
 
-const isOptionalString = (value: unknown) => value == null || typeof value === 'string';
+const isReviewSource = (value: unknown): value is ReviewSource => decodeReviewSource(value) != null;
 
-const isReviewSource = (value: unknown): value is ReviewSource => {
-  if (!isObject(value) || typeof value.type !== 'string') {
-    return false;
-  }
-
-  if (value.type === 'working-tree') {
-    return true;
-  }
-
-  if (value.type === 'commit') {
-    return typeof value.ref === 'string';
-  }
-
-  if (value.type === 'range') {
-    return (
-      typeof value.base === 'string' &&
-      typeof value.head === 'string' &&
-      typeof value.symmetric === 'boolean'
-    );
-  }
-
-  if (value.type === 'branch') {
-    return typeof value.ref === 'string';
-  }
-
-  if (value.type === 'branch-diff' || value.type === 'branch-working-tree') {
-    return (
-      typeof value.ref === 'string' &&
-      typeof value.baseRef === 'string' &&
-      typeof value.headRef === 'string'
-    );
-  }
-
-  return (
-    value.type === 'pull-request' &&
-    typeof value.url === 'string' &&
-    (value.number == null || typeof value.number === 'number') &&
-    isOptionalString(value.headSha) &&
-    isOptionalString(value.owner) &&
-    isOptionalString(value.repo) &&
-    isOptionalString(value.title)
-  );
-};
+const isResolvedReviewSource = (value: unknown): value is ResolvedReviewSource =>
+  decodeResolvedReviewSource(value) != null;
 
 const isGitFileStatus = (value: unknown): value is GitFileStatus =>
   value === 'added' ||
@@ -99,7 +64,7 @@ const isReloadSelection = (value: unknown): value is ReloadSelection =>
   (value.mainMode == null || value.mainMode === 'commit' || value.mainMode === 'review') &&
   typeof value.root === 'string' &&
   (value.selectedPath == null || typeof value.selectedPath === 'string') &&
-  isReviewSource(value.source);
+  isResolvedReviewSource(value.source);
 
 const getMatchingSelection = (selection: ReloadSelection | null, state: RepositoryState) =>
   selection?.root === state.root && getSourceKey(selection.source) === getSourceKey(state.source)

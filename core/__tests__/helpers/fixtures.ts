@@ -1,4 +1,4 @@
-import type { ChangedFile } from '../../types.ts';
+import type { ChangedFile, DiffRange, GitSha } from '../../types.ts';
 
 type ChangedFileOptions = {
   fingerprint?: string;
@@ -6,6 +6,27 @@ type ChangedFileOptions = {
   patch?: string;
   status?: ChangedFile['status'];
 };
+
+const commitRevision = (character: string) => ({
+  label: { kind: 'commit' as const, text: character.repeat(7) },
+  sha: character.repeat(40) as GitSha,
+});
+
+const rangeForKind = (kind: ChangedFile['sections'][number]['kind']): DiffRange =>
+  kind === 'unstaged'
+    ? {
+        base: { kind: 'index', label: { kind: 'review-marker', text: 'Index' } },
+        head: {
+          kind: 'working-copy',
+          label: { kind: 'review-marker', text: 'Working copy' },
+        },
+      }
+    : kind === 'staged'
+      ? {
+          base: commitRevision('a'),
+          head: { kind: 'index', label: { kind: 'review-marker', text: 'Index' } },
+        }
+      : { base: commitRevision('a'), head: commitRevision('b') };
 
 export const createChangedFile = (
   path: string,
@@ -25,6 +46,7 @@ export const createChangedFile = (
         id: `${path}:${kind}`,
         kind,
         patch: patch ?? `diff --git a/${path} b/${path}\n@@ -1 +1 @@\n-old\n+new\n`,
+        range: rangeForKind(kind),
       },
     ],
     status,

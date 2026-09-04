@@ -5,8 +5,8 @@ const require = createRequire(import.meta.url);
 const { createWalkthroughProgressReporter } = require('../walkthrough-progress.cjs') as {
   createWalkthroughProgressReporter: (webContents: {
     isDestroyed: () => boolean;
-    send: (channel: string, progress: { phase: string }) => void;
-  }) => (phase: string) => void;
+    send: (channel: string, progress: unknown) => void;
+  }) => (update: { phase: string; summary: string } | string) => void;
 };
 
 test('forwards repeated real progress events while the request is current', () => {
@@ -37,4 +37,20 @@ test('forwards repeated real progress events while the request is current', () =
   current = false;
   reportProgress('agent-generation');
   expect(send).toHaveBeenCalledTimes(2);
+});
+
+test('forwards structured generation progress without provider fields', () => {
+  const send = vi.fn();
+  const reportProgress = createWalkthroughProgressReporter({
+    isDestroyed: () => false,
+    send,
+  });
+  const generation = {
+    phase: 'generating-units',
+    summary: 'Generating the second task.',
+  };
+
+  reportProgress(generation);
+
+  expect(send).toHaveBeenCalledWith('codiff:walkthroughProgress', { generation });
 });

@@ -1,73 +1,66 @@
 // @ts-check
 
-const { git, gitOrEmpty, parseStatus, validateRepositoryPath } = require('./git-state/common.cjs');
+const {
+  git,
+  gitOrEmpty,
+  parseStatus,
+  runWithCommandSignal,
+  validateRepositoryPath,
+} = require('./git-state/common.cjs');
 const {
   listRepositoryHistory,
-  readBranchImageContent,
-  readBranchSectionContent,
   readBranchState,
-  readBranchWorkingTreeImageContent,
-  readBranchWorkingTreeSectionContent,
   readBranchWorkingTreeState,
-  readCommitImageContent,
-  readCommitSectionContent,
   readCommitState,
   readResolvedCommitState,
-  readRangeImageContent,
-  readRangeSectionContent,
   readRangeState,
 } = require('./git-state/commit.cjs');
-const { parseRepositoryWatcherStatus } = require('./repository-watcher.cjs');
+const {
+  createRepositoryWatcherSnapshot,
+  parseRepositoryWatcherStatus,
+  setRepositoryWatcherInitialSnapshot,
+  transferRepositoryWatcherInitialSnapshot,
+} = require('./repository-watcher.cjs');
 const {
   PENDING_REVIEW_COMMENT_ERROR,
   collectResolvedReviewCommentIds,
   createPullRequestHistoryFetchRefspecs,
-  createPullRequestSection,
   createPullRequestSource,
-  getPullRequestHeadImageSource,
   listPullRequestHistory,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,
-  readPullRequestImageContent,
+  readPullRequestReviewComments,
   readPullRequestState,
-  resolvePullRequestContentRefs,
   selectUnresolvedReviewComments,
   submitPullRequestComment,
   submitPullRequestReview,
 } = require('./git-state/pull-request.cjs');
+const { createPullRequestSection } = require('./git-state/review-range-sections.cjs');
 const {
   createGitLabPosition,
   createMergeRequestFetchRefspecs,
   listMergeRequestHistory,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
-  readMergeRequestImageContent,
+  readMergeRequestReviewComments,
   readMergeRequestState,
   submitMergeRequestComment,
   submitMergeRequestReview,
 } = require('./git-state/merge-request.cjs');
 const { parseReviewUrl } = require('./review-source.cjs');
-const {
-  readDiffSectionContent: readWorkingTreeDiffSectionContent,
-  readDiffImageContent: readWorkingTreeDiffImageContent,
-  readGitIdentity,
-  readRepositoryChangeSignature,
-  readWorkingTreeState,
-} = require('./git-state/working-tree.cjs');
+const { readGitIdentity, readWorkingTreeState } = require('./git-state/working-tree.cjs');
 const { annotateGeneratedFiles } = require('./generated-files.cjs');
+const { readRevisionContent } = require('./review-content.cjs');
 
 /**
- * @typedef {import('../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
- * @typedef {import('../core/types.ts').DiffImageContentRequest} DiffImageContentRequest
- * @typedef {import('../core/types.ts').DiffImageContentResult} DiffImageContentResult
  * @typedef {import('../core/types.ts').RepositoryHistory} RepositoryHistory
  * @typedef {import('../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../core/types.ts').ReviewSource} ReviewSource
  */
 
-/** @param {string} launchPath @param {ReviewSource} [source] @param {{showWhitespace?: boolean}} [options] @returns {Promise<RepositoryState>} */
+/** @param {string} launchPath @param {ReviewSource} [source] @param {{repositoryRoot?: string; showWhitespace?: boolean}} [options] @returns {Promise<RepositoryState>} */
 const readRepositoryState = async (launchPath, source = { type: 'working-tree' }, options = {}) => {
   const state =
     source.type === 'pull-request'
@@ -87,6 +80,7 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
                 })
               : await readWorkingTreeState(launchPath, {
                   eagerContents: false,
+                  repositoryRoot: options.repositoryRoot,
                   showWhitespace: options.showWhitespace,
                 });
   const comparisonState =
@@ -94,11 +88,26 @@ const readRepositoryState = async (launchPath, source = { type: 'working-tree' }
     source.type === 'range' ||
     source.type === 'branch' ||
     source.type === 'branch-diff';
+  const generatedRevision =
+    state.source.type === 'pull-request' && state.source.headSha
+      ? {
+          label: { kind: 'commit', text: state.source.headSha.slice(0, 7) },
+          sha: state.source.headSha,
+        }
+      : {
+          kind: /** @type {const} */ ('working-copy'),
+          label: { kind: /** @type {const} */ ('review-marker'), text: 'Working Copy' },
+        };
   const [branch, annotatedState] = await Promise.all([
-    gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD']),
-    comparisonState ? state : annotateGeneratedFiles(state),
+    source.type === 'pull-request'
+      ? Promise.resolve('')
+      : gitOrEmpty(state.root, ['symbolic-ref', '--short', 'HEAD']),
+    comparisonState ? state : annotateGeneratedFiles(state, generatedRevision),
   ]);
-  return { ...annotatedState, branch: branch.trim() || null };
+  return transferRepositoryWatcherInitialSnapshot(state, {
+    ...annotatedState,
+    branch: branch.trim() || null,
+  });
 };
 
 /**
@@ -137,16 +146,19 @@ const readWalkthroughRepositoryState = async (launchPath, source, options = {}) 
     return { ...state, branch };
   }
 
-  return {
-    branch,
-    files: [],
-    generatedAt: Date.now(),
-    launchPath,
-    root: repoRoot,
-    source: {
-      type: 'working-tree',
+  return setRepositoryWatcherInitialSnapshot(
+    {
+      branch,
+      files: [],
+      generatedAt: Date.now(),
+      launchPath,
+      root: repoRoot,
+      source: {
+        type: 'working-tree',
+      },
     },
-  };
+    createRepositoryWatcherSnapshot(repoRoot, status),
+  );
 };
 
 /** @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
@@ -155,8 +167,8 @@ const isGitLabReviewSource = (source) =>
 
 /** @param {Extract<ReviewSource, {type: 'branch' | 'branch-diff' | 'branch-working-tree'}>} source */
 const getBranchHistoryRef = (source) =>
-  source.type !== 'branch' && source.baseRef && source.headRef
-    ? `${source.baseRef}..${source.headRef}`
+  source.type !== 'branch' && source.baseSha && source.headSha
+    ? `${source.baseSha}..${source.headSha}`
     : `${source.ref}..HEAD`;
 
 /** @param {string} launchPath @param {number} [limit] @param {ReviewSource} [source] @returns {Promise<RepositoryHistory>} */
@@ -177,50 +189,12 @@ const readRepositoryHistory = (launchPath, limit, source) =>
           : undefined,
       );
 
-/** @param {string} launchPath @param {DiffSectionContentRequest} request */
-const readDiffSectionContent = async (launchPath, request) =>
-  request.source?.type === 'range'
-    ? readRangeSectionContent(
-        launchPath,
-        request.source.base,
-        request.source.head,
-        request.source.symmetric,
-        request.path,
-        { force: request.force },
-      )
-    : request.source?.type === 'branch' || request.source?.type === 'branch-diff'
-      ? readBranchSectionContent(launchPath, request.source, request.path, {
-          force: request.force,
-        })
-      : request.source?.type === 'branch-working-tree'
-        ? readBranchWorkingTreeSectionContent(launchPath, request)
-        : request.kind === 'commit' || request.source?.type === 'commit'
-          ? readCommitSectionContent(launchPath, request.source?.ref || 'HEAD', request.path, {
-              force: request.force,
-            })
-          : readWorkingTreeDiffSectionContent(launchPath, request);
-
-/** @param {string} launchPath @param {DiffImageContentRequest} request @returns {Promise<DiffImageContentResult>} */
-const readDiffImageContent = (launchPath, request) =>
-  request.source?.type === 'pull-request'
-    ? (isGitLabReviewSource(request.source)
-        ? readMergeRequestImageContent
-        : readPullRequestImageContent)(launchPath, request.source, request.path)
-    : request.source?.type === 'range'
-      ? readRangeImageContent(
-          launchPath,
-          request.source.base,
-          request.source.head,
-          request.source.symmetric,
-          request.path,
-        )
-      : request.source?.type === 'branch' || request.source?.type === 'branch-diff'
-        ? readBranchImageContent(launchPath, request.source, request.path)
-        : request.source?.type === 'branch-working-tree'
-          ? readBranchWorkingTreeImageContent(launchPath, request)
-          : request.kind === 'commit' || request.source?.type === 'commit'
-            ? readCommitImageContent(launchPath, request.source?.ref || 'HEAD', request.path)
-            : readWorkingTreeDiffImageContent(launchPath, request);
+/** @param {string} launchPath @param {Extract<ReviewSource, {type: 'pull-request'}>} source */
+const readReviewComments = (launchPath, source) =>
+  (isGitLabReviewSource(source) ? readMergeRequestReviewComments : readPullRequestReviewComments)(
+    launchPath,
+    source,
+  );
 
 module.exports = {
   PENDING_REVIEW_COMMENT_ERROR,
@@ -230,7 +204,6 @@ module.exports = {
   createMergeRequestFetchRefspecs,
   createPullRequestSection,
   createPullRequestSource,
-  getPullRequestHeadImageSource,
   listRepositoryHistory: readRepositoryHistory,
   normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
@@ -241,16 +214,15 @@ module.exports = {
   parseGitLabMergeRequestUrl,
   selectUnresolvedReviewComments,
   readBranchState,
-  readDiffSectionContent,
-  readDiffImageContent,
   readGitIdentity,
-  readRepositoryChangeSignature,
+  readReviewComments,
   readCommitState,
   readPullRequestState,
+  readRevisionContent,
   readRepositoryState,
   readWalkthroughRepositoryState,
   readWorkingTreeState,
-  resolvePullRequestContentRefs,
+  runWithCommandSignal,
   submitPullRequestComment: (launchPath, request) =>
     (isGitLabReviewSource(request.source) ? submitMergeRequestComment : submitPullRequestComment)(
       launchPath,

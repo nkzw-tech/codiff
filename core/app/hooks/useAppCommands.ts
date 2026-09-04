@@ -1,20 +1,16 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import type { ReviewComment, ReviewIdentity, SidebarMode } from '../../lib/app-types.ts';
+import type { ReviewIdentity, SidebarMode } from '../../lib/app-types.ts';
 import { createCommandRegistry, type Command } from '../../lib/command-registry.ts';
 import type { ReviewCommandTarget } from '../../lib/review-command-target.ts';
-import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
 import { isReviewIdentityViewed } from '../../lib/review-identity.ts';
-import type {
-  ChangedFile,
-  CodiffPreferences,
-  OpenReviewSourceKind,
-  RepositoryState,
-} from '../../types.ts';
+import type { ChangedFile, CodiffPreferences, OpenReviewSourceKind } from '../../types.ts';
 
 type UseAppCommandsOptions = {
   changeSidebarMode: (mode: SidebarMode) => void;
+  copyPendingCommentsLabel: string;
   focusFileFilter: () => void;
   getReviewCommandTarget: () => ReviewCommandTarget | null;
+  onCopyPendingComments: () => string;
   onOpenDiffSearch: () => void;
   onOpenReviewSource: (kind: OpenReviewSourceKind) => void;
   onOpenSelectedFile: () => void;
@@ -23,15 +19,15 @@ type UseAppCommandsOptions = {
   onToggleViewed: (file: ChangedFile, isViewed: boolean, reviewIdentity: ReviewIdentity) => void;
   onToggleWordWrap: () => void;
   preferencesRef: RefObject<CodiffPreferences>;
-  reviewCommentsRef: RefObject<ReadonlyArray<ReviewComment>>;
-  stateRef: RefObject<RepositoryState | null>;
   viewedRef: RefObject<Record<string, string>>;
 };
 
 export function useAppCommands({
   changeSidebarMode,
+  copyPendingCommentsLabel,
   focusFileFilter,
   getReviewCommandTarget,
+  onCopyPendingComments,
   onOpenDiffSearch,
   onOpenReviewSource,
   onOpenSelectedFile,
@@ -40,8 +36,6 @@ export function useAppCommands({
   onToggleViewed,
   onToggleWordWrap,
   preferencesRef,
-  reviewCommentsRef,
-  stateRef,
   viewedRef,
 }: UseAppCommandsOptions) {
   const registryRef = useRef(createCommandRegistry());
@@ -101,37 +95,17 @@ export function useAppCommands({
       }),
       registry.register({
         execute: () => {
-          const currentState = stateRef.current;
-          if (!currentState) {
-            return;
-          }
-
-          const markdown = buildReviewCommentsMarkdown(
-            currentState.files,
-            reviewCommentsRef.current,
-            preferencesRef.current.showWhitespace,
-            preferencesRef.current.reviewCommentsPrefix,
-          );
+          const markdown = onCopyPendingComments();
           if (markdown) {
             void navigator.clipboard.writeText(markdown);
           }
         },
         id: 'copy-comments',
-        title: 'Copy Review Comments',
+        title: copyPendingCommentsLabel,
       }),
       registry.register({
         execute: () => {
-          const currentState = stateRef.current;
-          if (!currentState) {
-            return;
-          }
-
-          const markdown = buildReviewCommentsMarkdown(
-            currentState.files,
-            reviewCommentsRef.current,
-            preferencesRef.current.showWhitespace,
-            preferencesRef.current.reviewCommentsPrefix,
-          );
+          const markdown = onCopyPendingComments();
           if (markdown) {
             void navigator.clipboard.writeText(markdown).then(() => {
               window.close();
@@ -141,7 +115,7 @@ export function useAppCommands({
           }
         },
         id: 'copy-comments-and-close',
-        title: 'Copy Review Comments and Close',
+        title: `${copyPendingCommentsLabel} and Close`,
       }),
       registry.register({
         description: () => getReviewCommandTarget()?.file.path ?? null,
@@ -238,8 +212,10 @@ export function useAppCommands({
     };
   }, [
     changeSidebarMode,
+    copyPendingCommentsLabel,
     focusFileFilter,
     getReviewCommandTarget,
+    onCopyPendingComments,
     onOpenDiffSearch,
     onOpenReviewSource,
     onOpenSelectedFile,
@@ -248,8 +224,6 @@ export function useAppCommands({
     onToggleViewed,
     onToggleWordWrap,
     preferencesRef,
-    reviewCommentsRef,
-    stateRef,
     viewedRef,
   ]);
 

@@ -4,11 +4,12 @@ import type { CodiffKeymap } from '../../config/types.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 
 type UseAppKeyboardShortcutsOptions = {
+  enabled?: boolean;
   keymap: CodiffKeymap;
   navigateHunks: (direction: 1 | -1) => void;
   onFocusFileFilter: () => void;
   onOpenDiffSearch: () => void;
-  onOpenSelectedFile: () => void;
+  onOpenSelectedFile?: () => void;
   onToggleSidebar: () => void;
   onToggleWordWrap: () => void;
   shouldDeferHunkNavigation: () => boolean;
@@ -16,6 +17,7 @@ type UseAppKeyboardShortcutsOptions = {
 };
 
 export function useAppKeyboardShortcuts({
+  enabled = true,
   keymap,
   navigateHunks,
   onFocusFileFilter,
@@ -31,6 +33,9 @@ export function useAppKeyboardShortcuts({
   const closeCommandBar = useCallback(() => setCommandBarVisible(false), []);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (matchesShortcut(event, keymap, 'commandBar')) {
         event.preventDefault();
@@ -52,7 +57,11 @@ export function useAppKeyboardShortcuts({
         onOpenDiffSearch();
         return;
       }
-      if (!isNativeInputTarget(event.target) && matchesShortcut(event, keymap, 'openFile')) {
+      if (
+        onOpenSelectedFile &&
+        !isNativeInputTarget(event.target) &&
+        matchesShortcut(event, keymap, 'openFile')
+      ) {
         event.preventDefault();
         onOpenSelectedFile();
         return;
@@ -85,6 +94,7 @@ export function useAppKeyboardShortcuts({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
+    enabled,
     keymap,
     navigateHunks,
     onFocusFileFilter,
@@ -97,6 +107,9 @@ export function useAppKeyboardShortcuts({
   ]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || isNativeInputTarget(event.target)) {
         return;
@@ -123,7 +136,7 @@ export function useAppKeyboardShortcuts({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
     };
-  }, [keymap]);
+  }, [enabled, keymap]);
 
   return {
     closeCommandBar,

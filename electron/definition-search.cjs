@@ -301,21 +301,18 @@ const resolveSearchRevision = async (request, repoPath) => {
   let base = null;
   let mergeBase = false;
   if (source.type === 'commit') {
-    head = source.ref;
-    base = `${source.ref}^`;
+    head = source.sha;
+    base = `${source.sha}^`;
   } else if (source.type === 'range') {
     head = source.head;
     base = source.base;
     mergeBase = source.symmetric;
   } else if (source.type === 'branch-diff') {
-    head = source.headRef;
-    base = source.baseRef;
-  } else if (source.type === 'branch-working-tree' && source.headRef) {
-    head = source.headRef;
-    base = source.baseRef || `${source.headRef}^`;
-  } else if (source.type === 'branch') {
-    head = source.ref;
-    base = `${source.ref}^`;
+    head = source.headSha;
+    base = source.baseSha;
+  } else if (source.type === 'branch-working-tree' && source.headSha) {
+    head = source.headSha;
+    base = source.baseSha || `${source.headSha}^`;
   } else if (source.type === 'pull-request' && source.number != null) {
     const namespace = source.provider === 'gitlab' ? 'merge-requests' : 'pull-requests';
     head = `refs/codiff/${namespace}/${source.number}/head`;

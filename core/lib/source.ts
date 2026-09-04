@@ -1,6 +1,7 @@
-import type { ReviewSource } from '../types.ts';
+import type { ResolvedReviewSource, ReviewSource } from '../types.ts';
 import type { RepositoryLoadError } from './app-types.ts';
 import { abbreviateHomePath } from './files.ts';
+import { formatResolvedSourceIdentity, formatReviewSourceIdentity } from './review-source-codec.ts';
 
 const rangeLabel = (source: Extract<ReviewSource, { type: 'range' }>) =>
   `${source.base}${source.symmetric ? '...' : '..'}${source.head}`;
@@ -9,7 +10,6 @@ type SourceCapabilities = {
   emptyTitle: string;
   historySource: boolean;
   lazyDiffContent: boolean;
-  preloadDiffSearchContent: boolean;
   startInHistoryWhenEmpty: boolean;
   viewedFileState: boolean;
 };
@@ -19,7 +19,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No branch changes',
     historySource: true,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: false,
   },
@@ -27,7 +26,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No branch changes',
     historySource: true,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: false,
   },
@@ -35,7 +33,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No changes',
     historySource: true,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: true,
   },
@@ -43,15 +40,13 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No changes in commit',
     historySource: false,
     lazyDiffContent: true,
-    preloadDiffSearchContent: false,
     startInHistoryWhenEmpty: false,
     viewedFileState: false,
   },
   'pull-request': {
     emptyTitle: 'No review changes',
     historySource: true,
-    lazyDiffContent: false,
-    preloadDiffSearchContent: false,
+    lazyDiffContent: true,
     startInHistoryWhenEmpty: false,
     viewedFileState: false,
   },
@@ -59,7 +54,6 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No changes in range',
     historySource: false,
     lazyDiffContent: true,
-    preloadDiffSearchContent: false,
     startInHistoryWhenEmpty: false,
     viewedFileState: false,
   },
@@ -67,28 +61,27 @@ const sourceCapabilitiesByType = {
     emptyTitle: 'No local changes',
     historySource: false,
     lazyDiffContent: true,
-    preloadDiffSearchContent: true,
     startInHistoryWhenEmpty: true,
     viewedFileState: true,
   },
 } satisfies Record<ReviewSource['type'], SourceCapabilities>;
 
-const getSourceCapabilities = (source: ReviewSource) => sourceCapabilitiesByType[source.type];
+type DisplayReviewSource = ResolvedReviewSource | ReviewSource;
 
-export const getSourceKey = (source: ReviewSource) =>
-  source.type === 'commit'
-    ? `commit:${source.ref}`
-    : source.type === 'branch-diff'
-      ? `branch-diff:${source.ref}:${source.baseRef}:${source.headRef}`
-      : source.type === 'branch-working-tree'
-        ? `branch-working-tree:${source.ref}:${source.baseRef}:${source.headRef}`
-        : source.type === 'branch'
-          ? `branch:${source.ref}`
-          : source.type === 'range'
-            ? `range:${rangeLabel(source)}`
-            : source.type === 'pull-request'
-              ? `pull-request:${source.provider ?? ''}:${source.host ?? ''}:${source.projectPath ?? `${source.owner ?? ''}/${source.repo ?? ''}`}#${source.number ?? source.url}`
-              : 'working-tree';
+const getSourceCapabilities = (source: DisplayReviewSource) =>
+  sourceCapabilitiesByType[source.type];
+
+export const getSourceKey = (source: DisplayReviewSource) => formatReviewSourceIdentity(source);
+
+/**
+ * Identifies the exact revision currently rendered for asynchronous work.
+ * A pull request's logical source key stays stable as its head moves, while
+ * deferred results must never cross that immutable head boundary.
+ */
+export const getSourceRevisionKey = (source: DisplayReviewSource) =>
+  'sha' in source || source.type !== 'commit'
+    ? formatResolvedSourceIdentity(source as ResolvedReviewSource)
+    : formatReviewSourceIdentity(source);
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -109,9 +102,9 @@ export const getRepositoryLoadError = (error: unknown): RepositoryLoadError => {
 
 export const getShortRef = (ref: string) => ref.slice(0, 7);
 
-export const getSourceLabel = (source: ReviewSource) =>
+export const getSourceLabel = (source: DisplayReviewSource) =>
   source.type === 'commit'
-    ? getShortRef(source.ref)
+    ? getShortRef('sha' in source ? source.sha : source.ref)
     : source.type === 'branch' || source.type === 'branch-diff'
       ? `Branch vs ${source.ref}`
       : source.type === 'branch-working-tree'
@@ -126,38 +119,37 @@ export const getSourceLabel = (source: ReviewSource) =>
                 : 'Pull request'
             : 'Uncommitted';
 
-export const getHistorySource = (source: ReviewSource): ReviewSource | undefined =>
-  getSourceCapabilities(source).historySource ? source : undefined;
+export const getHistorySource = (source: DisplayReviewSource): ReviewSource | undefined =>
+  getSourceCapabilities(source).historySource ? (source as ReviewSource) : undefined;
 
-export const getRefreshSource = (source: ReviewSource): ReviewSource =>
-  source.type === 'branch-working-tree'
-    ? {
-        ref: source.ref,
-        type: 'branch-working-tree',
-      }
-    : source;
+export const getRefreshSource = (source: DisplayReviewSource): ReviewSource =>
+  source.type === 'commit' && 'sha' in source
+    ? { ref: source.sha, type: 'commit' }
+    : source.type === 'branch-working-tree'
+      ? {
+          ref: source.ref,
+          type: 'branch-working-tree',
+        }
+      : (source as ReviewSource);
 
-export const supportsLazyDiffContent = (source: ReviewSource) =>
+export const supportsLazyDiffContent = (source: DisplayReviewSource) =>
   getSourceCapabilities(source).lazyDiffContent;
 
-export const supportsDiffSearchContentPreload = (source: ReviewSource) =>
-  getSourceCapabilities(source).preloadDiffSearchContent;
-
-export const shouldStartInHistoryWhenEmpty = (source: ReviewSource) =>
+export const shouldStartInHistoryWhenEmpty = (source: DisplayReviewSource) =>
   getSourceCapabilities(source).startInHistoryWhenEmpty;
 
-export const usesViewedFileState = (source: ReviewSource) =>
+export const usesViewedFileState = (source: DisplayReviewSource) =>
   getSourceCapabilities(source).viewedFileState;
 
-export const getEmptySourceTitle = (source: ReviewSource) =>
+export const getEmptySourceTitle = (source: DisplayReviewSource) =>
   getSourceCapabilities(source).emptyTitle;
 
 export const getEmptySourceDetail = (
-  source: ReviewSource,
+  source: DisplayReviewSource,
   root: string,
 ): { kind: 'code' | 'text'; text: string; title?: string } =>
   source.type === 'commit'
-    ? { kind: 'text', text: getShortRef(source.ref) }
+    ? { kind: 'text', text: getShortRef('sha' in source ? source.sha : source.ref) }
     : source.type === 'branch' ||
         source.type === 'branch-diff' ||
         source.type === 'branch-working-tree'

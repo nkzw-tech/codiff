@@ -1,18 +1,22 @@
 // @ts-check
 
-const { execFile, spawn } = require('node:child_process');
+const { AsyncLocalStorage } = require('node:async_hooks');
+const { execFile, execFileSync, spawn } = require('node:child_process');
 const { promises: fs } = require('node:fs');
 const { createHash } = require('node:crypto');
 const { isAbsolute, join, normalize, sep } = require('node:path');
 const { promisify } = require('node:util');
+const { getCommandActionSignal, startCommandTiming } = require('../command-log.cjs');
 
 const execFileAsync = promisify(execFile);
+const commandSignalStorage = new AsyncLocalStorage();
+const getCurrentCommandSignal = () => commandSignalStorage.getStore();
+/** @template Value @param {AbortSignal} signal @param {() => Value} callback */
+const runWithCommandSignal = (signal, callback) => commandSignalStorage.run(signal, callback);
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
- * @typedef {import('../../core/types.ts').DiffImageRevision} DiffImageRevision
  * @typedef {import('../../core/types.ts').DiffSection} DiffSection
- * @typedef {import('../../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
  * @typedef {import('../../core/types.ts').GitFileStatus} GitFileStatus
  * @typedef {import('../../core/types.ts').PullRequestReviewComment} PullRequestReviewComment
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
@@ -34,7 +38,7 @@ const execFileAsync = promisify(execFile);
  *   unstaged: boolean;
  *   untracked: boolean;
  * }} StatusItem
- * @typedef {{force?: boolean; patch?: {binary: boolean; patch: string}; patchOnly?: boolean; showWhitespace?: boolean}} ReadFileOptions
+ * @typedef {{force?: boolean; head?: string; patch?: {binary: boolean; patch: string}; patchOnly?: boolean; showWhitespace?: boolean}} ReadFileOptions
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
@@ -52,81 +56,165 @@ const getGravatarHash = (email) =>
 /**
  * @param {string} repoPath
  * @param {ReadonlyArray<string>} args
- * @param {{encoding?: BufferEncoding}} [options]
+ * @param {{encoding?: BufferEncoding, signal?: AbortSignal}} [options]
  * @returns {Promise<string>}
  */
 const git = async (repoPath, args, options = {}) => {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
-    encoding: options.encoding || 'utf8',
-    maxBuffer: 1024 * 1024 * 64,
-  });
-  return stdout;
+  const commandArgs = ['-C', repoPath, ...args];
+  const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
+  const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
+  try {
+    const { stdout } = await execFileAsync('git', commandArgs, {
+      encoding: options.encoding || 'utf8',
+      maxBuffer: 1024 * 1024 * 64,
+      signal,
+    });
+    timing.finish();
+    return stdout;
+  } catch (error) {
+    timing.finish({ canceled: error instanceof Error && error.name === 'AbortError', error });
+    throw error;
+  }
 };
 
-/** @param {string} repoPath @param {ReadonlyArray<string>} args @returns {Promise<Buffer>} */
-const gitBuffer = async (repoPath, args) => {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
-    encoding: 'buffer',
-    maxBuffer: 1024 * 1024 * 64,
-  });
-  return stdout;
+/** @param {string} repoPath @param {ReadonlyArray<string>} args @param {{signal?: AbortSignal}} [options] @returns {Promise<Buffer>} */
+const gitBuffer = async (repoPath, args, options = {}) => {
+  const commandArgs = ['-C', repoPath, ...args];
+  const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
+  const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
+  try {
+    const { stdout } = await execFileAsync('git', commandArgs, {
+      encoding: 'buffer',
+      maxBuffer: 1024 * 1024 * 64,
+      signal,
+    });
+    timing.finish();
+    return stdout;
+  } catch (error) {
+    timing.finish({ canceled: error instanceof Error && error.name === 'AbortError', error });
+    throw error;
+  }
+};
+
+/**
+ * Canonical synchronous Git boundary for startup paths that must resolve
+ * before a window exists.
+ * @param {string} repoPath
+ * @param {ReadonlyArray<string>} args
+ * @param {{encoding?: BufferEncoding}} [options]
+ */
+const gitSync = (repoPath, args, options = {}) => {
+  (getCurrentCommandSignal() || getCommandActionSignal())?.throwIfAborted();
+  const commandArgs = ['-C', repoPath, ...args];
+  const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
+  try {
+    const output = execFileSync('git', commandArgs, {
+      encoding: options.encoding || 'utf8',
+      maxBuffer: 1024 * 1024 * 64,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    timing.finish({ exitCode: 0 });
+    return output;
+  } catch (error) {
+    timing.finish({
+      error,
+      exitCode:
+        error && typeof error === 'object' && 'status' in error && typeof error.status === 'number'
+          ? error.status
+          : null,
+    });
+    throw error;
+  }
 };
 
 /**
  * @param {string} repoPath
  * @param {ReadonlyArray<string>} args
  * @param {string | Buffer} input
- * @param {{env?: NodeJS.ProcessEnv}} [options]
+ * @param {{env?: NodeJS.ProcessEnv, signal?: AbortSignal}} [options]
  * @returns {Promise<Buffer>}
  */
 const gitBufferWithInput = (repoPath, args, input, options = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn('git', ['-C', repoPath, ...args], {
-      env: options.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const commandArgs = ['-C', repoPath, ...args];
+    const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
+    const timing = startCommandTiming({ args: commandArgs, command: 'git', cwd: repoPath });
     /** @type {Array<Buffer>} */
     const stdout = [];
     /** @type {Array<Buffer>} */
     const stderr = [];
+    let settled = false;
+
+    /** @param {unknown} reason @param {{canceled?: boolean, exitCode?: number | null, signal?: string | null}} [result] */
+    const fail = (reason, result = {}) => {
+      if (settled) return;
+      settled = true;
+      const error = reason instanceof Error ? reason : new Error(String(reason));
+      timing.finish({ ...result, error });
+      reject(error);
+    };
+
+    const abortError = () => {
+      const reason = signal?.reason;
+      if (reason instanceof Error) return reason;
+      const error = new Error('Git command was aborted.');
+      error.name = 'AbortError';
+      return error;
+    };
+
+    let child;
+    try {
+      signal?.throwIfAborted();
+      child = spawn('git', commandArgs, {
+        env: options.env,
+        signal,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      fail(error, { canceled: signal?.aborted });
+      return;
+    }
 
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
     child.stdin.on('error', (error) => {
-      if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE') {
-        reject(error);
+      if (!settled && /** @type {NodeJS.ErrnoException} */ (error).code !== 'EPIPE') {
+        fail(error, { canceled: signal?.aborted });
+        child.kill();
       }
     });
-    child.on('error', reject);
-    child.on('close', (code) => {
+    child.on('error', (error) =>
+      fail(error, { canceled: error.name === 'AbortError' || signal?.aborted }),
+    );
+    child.on('close', (code, childSignal) => {
+      if (settled) return;
+      if (signal?.aborted) {
+        fail(abortError(), { canceled: true, exitCode: code, signal: childSignal });
+        return;
+      }
       if (code === 0) {
+        settled = true;
+        timing.finish({ exitCode: code });
         resolve(Buffer.concat(stdout));
       } else {
         const error = new Error(
           Buffer.concat(stderr).toString('utf8') || `git exited with status ${code}`,
         );
-        reject(error);
+        fail(error, { exitCode: code, signal: childSignal });
       }
     });
 
-    child.stdin.end(input);
+    try {
+      child.stdin.end(input);
+    } catch (error) {
+      fail(error, { canceled: signal?.aborted });
+      child.kill();
+    }
   });
 
 const EAGER_TEXT_FILE_LIMIT = 1024 * 1024;
 const MANUAL_TEXT_FILE_LIMIT = 2 * 1024 * 1024;
-const IMAGE_FILE_LIMIT = 32 * 1024 * 1024;
 const MAX_UNTRACKED_INITIAL_ITEMS = 1000;
-const imageMimeTypes = new Map([
-  ['.apng', 'image/apng'],
-  ['.avif', 'image/avif'],
-  ['.bmp', 'image/bmp'],
-  ['.gif', 'image/gif'],
-  ['.ico', 'image/x-icon'],
-  ['.jpeg', 'image/jpeg'],
-  ['.jpg', 'image/jpeg'],
-  ['.png', 'image/png'],
-  ['.webp', 'image/webp'],
-]);
 const GENERATED_DIRECTORY_NAMES = new Set([
   '.cache',
   '.next',
@@ -260,35 +348,6 @@ const formatBytes = (size) => {
   return `${size} B`;
 };
 
-/** @param {string} path */
-const getImageMimeType = (path) => {
-  const dotIndex = path.lastIndexOf('.');
-  return dotIndex === -1 ? undefined : imageMimeTypes.get(path.slice(dotIndex).toLowerCase());
-};
-
-/**
- * @param {string} path
- * @param {Buffer} buffer
- * @returns {DiffImageRevision}
- */
-const bufferToImageRevision = (path, buffer) => {
-  const mimeType = getImageMimeType(path);
-  if (!mimeType) {
-    throw new Error('Unsupported image file type.');
-  }
-
-  if (buffer.length > IMAGE_FILE_LIMIT) {
-    throw new Error(`Image is ${formatBytes(buffer.length)}, so Codiff skipped rendering it.`);
-  }
-
-  return {
-    dataUrl: `data:${mimeType};base64,${buffer.toString('base64')}`,
-    mimeType,
-    name: path,
-    size: buffer.length,
-  };
-};
-
 /** @param {string} reason @param {Partial<DiffSummary>} [details] @returns {DiffSummary} */
 const createSummary = (reason, details = {}) => ({
   reason,
@@ -356,60 +415,6 @@ const bufferToTextFile = (name, buffer, cacheKey) => {
       name,
     },
   };
-};
-
-/**
- * @param {string} repoRoot
- * @param {string} spec
- * @param {string} path
- * @returns {Promise<DiffImageRevision | undefined>}
- */
-const readImageSpec = async (repoRoot, spec, path) => {
-  const mimeType = getImageMimeType(path);
-  if (!mimeType) {
-    throw new Error('Unsupported image file type.');
-  }
-
-  const size = await getBlobSize(repoRoot, spec);
-  if (size == null) {
-    return undefined;
-  }
-
-  if (size > IMAGE_FILE_LIMIT) {
-    throw new Error(`Image is ${formatBytes(size)}, so Codiff skipped rendering it.`);
-  }
-
-  try {
-    return bufferToImageRevision(path, await gitBuffer(repoRoot, ['show', spec]));
-  } catch {
-    return undefined;
-  }
-};
-
-/** @param {string} repoRoot @param {string} ref @param {string} path */
-const readGitImageFile = (repoRoot, ref, path) => readImageSpec(repoRoot, `${ref}:${path}`, path);
-
-/** @param {string} repoRoot @param {string} path @param {1 | 2 | 3} [stage] */
-const readIndexImageFile = (repoRoot, path, stage) =>
-  readImageSpec(repoRoot, stage ? `:${stage}:${path}` : `:${path}`, path);
-
-/** @param {string} repoRoot @param {string} path */
-const readWorkingTreeImageFile = async (repoRoot, path) => {
-  const mimeType = getImageMimeType(path);
-  if (!mimeType) {
-    throw new Error('Unsupported image file type.');
-  }
-
-  const stat = await readFileStat(repoRoot, path);
-  if (!stat || !stat.isFile()) {
-    return undefined;
-  }
-
-  if (stat.size > IMAGE_FILE_LIMIT) {
-    throw new Error(`Image is ${formatBytes(stat.size)}, so Codiff skipped rendering it.`);
-  }
-
-  return bufferToImageRevision(path, await fs.readFile(join(repoRoot, path)));
 };
 
 /**
@@ -623,7 +628,7 @@ const createPatchForNewFile = (path, contents) => {
 const getWhitespaceDiffArgs = (options = {}) =>
   options.showWhitespace === false ? ['--ignore-all-space'] : [];
 
-/** @param {string} repoRoot @param {StatusItem} item @param {WorkingTreeSectionKind} kind @param {{showWhitespace?: boolean}} [options] */
+/** @param {string} repoRoot @param {StatusItem} item @param {WorkingTreeSectionKind} kind @param {{head?: string; showWhitespace?: boolean}} [options] */
 const getPatch = async (repoRoot, item, kind, options = {}) => {
   const whitespaceArgs = getWhitespaceDiffArgs(options);
   if (item.status === 'conflicted' && !item.conflictStage) {
@@ -651,6 +656,7 @@ const getPatch = async (repoRoot, item, kind, options = {}) => {
             '--patch',
             '--no-ext-diff',
             ...whitespaceArgs,
+            ...(options.head ? [options.head] : []),
             '--',
             ...(item.oldPath ? [item.oldPath] : []),
             item.path,
@@ -710,7 +716,12 @@ const summarizeContent = (...results) => {
  */
 const getWorkingTreeContents = async (repoRoot, item, kind, options = {}) => {
   if (kind === 'staged') {
-    const oldFile = await readGitFile(repoRoot, 'HEAD', item.oldPath || item.path, options);
+    const oldFile = await readGitFile(
+      repoRoot,
+      options.head || 'HEAD',
+      item.oldPath || item.path,
+      options,
+    );
     const newFile = await readIndexFile(repoRoot, item.path, options);
     const summary = summarizeContent(oldFile, newFile);
 
@@ -772,6 +783,32 @@ const getWorkingTreeContents = async (repoRoot, item, kind, options = {}) => {
 const createSection = async (repoRoot, item, kind, options = {}) => {
   const id = `${item.path}:${kind}`;
   const needsWorkingTreeBaseline = item.status === 'conflicted' && !item.conflictStage;
+  const head =
+    options.head ??
+    (kind === 'staged'
+      ? (await gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'])).trim()
+      : '');
+  const index = {
+    kind: 'index',
+    label: { kind: 'review-marker', text: 'Index' },
+    ...(kind === 'unstaged' && item.conflictStage ? { stage: item.conflictStage } : {}),
+  };
+  const workingCopy = {
+    kind: 'working-copy',
+    label: { kind: 'review-marker', text: 'Working copy' },
+  };
+  const range =
+    kind === 'staged'
+      ? {
+          base: head
+            ? {
+                label: { kind: 'commit', text: head.slice(0, 7) },
+                sha: head,
+              }
+            : null,
+          head: index,
+        }
+      : { base: index, head: workingCopy };
 
   if (options.patchOnly && !item.untracked && !needsWorkingTreeBaseline) {
     const patch = options.patch ?? (await getPatch(repoRoot, item, kind, options));
@@ -783,6 +820,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
         kind,
         loadState: 'binary',
         patch: '',
+        range,
         summary: createSummary('Binary file changed.', {
           canLoad: false,
         }),
@@ -795,6 +833,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
       kind,
       loadState: 'ready',
       patch: patch.patch,
+      range,
     };
   }
 
@@ -807,6 +846,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
       kind,
       loadState: contents.loadState,
       patch: '',
+      range,
       summary: contents.summary,
     };
   }
@@ -820,6 +860,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
       newFile: contents.newFile,
       oldFile: contents.oldFile,
       patch: createPatchForNewFile(item.path, contents.newFile?.contents || ''),
+      range,
     };
   }
 
@@ -833,6 +874,7 @@ const createSection = async (repoRoot, item, kind, options = {}) => {
     newFile: contents.newFile,
     oldFile: contents.oldFile,
     patch: patch.patch,
+    range,
   };
 };
 
@@ -846,42 +888,41 @@ const normalizeStatus = (statusCode) =>
         ? 'renamed'
         : 'modified';
 
-/** @param {string} repoRoot @param {ReadonlyArray<string>} args */
-const gitOrEmpty = async (repoRoot, args) => {
+/** @param {string} repoRoot @param {ReadonlyArray<string>} args @param {{signal?: AbortSignal}} [options] */
+const gitOrEmpty = async (repoRoot, args, options = {}) => {
+  const signal = options.signal || getCurrentCommandSignal() || getCommandActionSignal();
   try {
-    return await git(repoRoot, args);
+    return await git(repoRoot, args, { ...options, signal });
   } catch {
+    signal?.throwIfAborted();
     return '';
   }
 };
 
 module.exports = {
   EAGER_TEXT_FILE_LIMIT,
-  IMAGE_FILE_LIMIT,
   MANUAL_TEXT_FILE_LIMIT,
   MAX_UNTRACKED_INITIAL_ITEMS,
   bufferToTextFile,
-  bufferToImageRevision,
   createSection,
   createSummary,
   fileSort,
   formatBytes,
   generatedDirectoryPathspecExcludes,
   generatedDirectoryPathspecs,
+  getCurrentCommandSignal,
   getFingerprint,
   getGravatarHash,
-  getImageMimeType,
   getWhitespaceDiffArgs,
   git,
   gitBufferWithInput,
   gitOrEmpty,
+  gitSync,
   normalizeStatus,
   parseStatus,
   readFileStat,
   readGitFile,
-  readGitImageFile,
-  readIndexImageFile,
-  readWorkingTreeImageFile,
+  runWithCommandSignal,
   summarizeContent,
   validateRepositoryPath,
 };

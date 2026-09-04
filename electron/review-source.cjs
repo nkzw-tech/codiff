@@ -1,6 +1,6 @@
 // @ts-check
 
-const { execFileSync } = require('node:child_process');
+const { gitSync } = require('./git-state/common.cjs');
 
 /** @typedef {'github' | 'gitlab'} ReviewProvider */
 
@@ -123,10 +123,8 @@ const parseRemoteUrl = (value) => {
 
 /** @param {string} repositoryPath */
 const readReviewRemotes = (repositoryPath) => {
-  const root = execFileSync('git', ['-C', repositoryPath, 'rev-parse', '--show-toplevel'], {
-    encoding: 'utf8',
-  }).trim();
-  const raw = execFileSync('git', ['-C', root, 'remote', '-v'], { encoding: 'utf8' });
+  const root = gitSync(repositoryPath, ['rev-parse', '--show-toplevel']).trim();
+  const raw = gitSync(root, ['remote', '-v']);
   const remotes = [];
   for (const line of raw.split('\n')) {
     const match = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);

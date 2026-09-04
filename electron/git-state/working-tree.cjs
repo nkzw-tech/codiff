@@ -1,6 +1,10 @@
 // @ts-check
 
-const { readRepositoryChangeSignature } = require('../repository-watcher.cjs');
+const {
+  createRepositoryWatcherSnapshot,
+  parseRepositoryWatcherStatus,
+  setRepositoryWatcherInitialSnapshot,
+} = require('../repository-watcher.cjs');
 const {
   createSection,
   createSummary,
@@ -12,26 +16,107 @@ const {
   getWhitespaceDiffArgs,
   git,
   MAX_UNTRACKED_INITIAL_ITEMS,
-  parseStatus,
-  readFileStat,
-  readGitImageFile,
-  readIndexImageFile,
-  readWorkingTreeImageFile,
-  validateRepositoryPath,
+  normalizeStatus,
 } = require('./common.cjs');
+const { getCommandActionSignal } = require('../command-log.cjs');
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
- * @typedef {import('../../core/types.ts').DiffImageContentRequest} DiffImageContentRequest
- * @typedef {import('../../core/types.ts').DiffImageContentResult} DiffImageContentResult
  * @typedef {import('../../core/types.ts').DiffSection} DiffSection
- * @typedef {import('../../core/types.ts').DiffSectionContentRequest} DiffSectionContentRequest
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('./common.cjs').StatusItem} StatusItem
  * @typedef {'staged' | 'unstaged'} WorkingTreeSectionKind
  */
 
 const diffGitHeaderPattern = /^diff --git (.+)$/;
+
+/** @param {string} record @param {number} count */
+const readPorcelainV2StatusPath = (record, count) => {
+  let index = 0;
+  for (let field = 0; field < count; field += 1) {
+    index = record.indexOf(' ', index);
+    if (index === -1) {
+      return '';
+    }
+    index += 1;
+  }
+  return record.slice(index);
+};
+
+/** @param {string} x @param {string} y @param {string} path @param {string} [oldPath] */
+const createPorcelainV2StatusItem = (x, y, path, oldPath) => {
+  const conflictCode = `${x}${y}`;
+  const conflicted = ['AA', 'AU', 'DD', 'DU', 'UA', 'UD', 'UU'].includes(conflictCode);
+  if (conflicted) {
+    return {
+      ...(oldPath ? { oldPath } : {}),
+      ...(conflictCode === 'DD'
+        ? { conflictStage: 1 }
+        : conflictCode === 'DU' || conflictCode === 'UA'
+          ? {}
+          : { conflictStage: 2 }),
+      path,
+      staged: false,
+      status: 'conflicted',
+      unstaged: true,
+      untracked: false,
+    };
+  }
+  const staged = x !== '.' && x !== ' ';
+  const unstaged = y !== '.' && y !== ' ';
+  return {
+    ...(oldPath ? { oldPath } : {}),
+    path,
+    staged,
+    status: normalizeStatus(staged ? x : y),
+    unstaged,
+    untracked: false,
+  };
+};
+
+/** @param {string} raw @returns {Array<StatusItem>} */
+const parsePorcelainV2Status = (raw) => {
+  const files = [];
+  const records = raw.split('\0').filter(Boolean);
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.startsWith('? ')) {
+      files.push({
+        path: record.slice(2),
+        staged: false,
+        status: 'untracked',
+        unstaged: true,
+        untracked: true,
+      });
+      continue;
+    }
+    if (record.startsWith('1 ')) {
+      files.push(
+        createPorcelainV2StatusItem(record[2], record[3], readPorcelainV2StatusPath(record, 8)),
+      );
+      continue;
+    }
+    if (record.startsWith('2 ')) {
+      files.push(
+        createPorcelainV2StatusItem(
+          record[2],
+          record[3],
+          readPorcelainV2StatusPath(record, 9),
+          records[++index],
+        ),
+      );
+      continue;
+    }
+    if (record.startsWith('u ')) {
+      files.push(
+        createPorcelainV2StatusItem(record[2], record[3], readPorcelainV2StatusPath(record, 10)),
+      );
+    }
+  }
+
+  return files;
+};
 
 /** @param {string} value */
 const unquoteGitPath = (value) => {
@@ -133,14 +218,21 @@ const splitPatchByPath = (rawPatch) => {
 /**
  * @param {string} repoRoot
  * @param {WorkingTreeSectionKind} kind
- * @param {{showWhitespace?: boolean}} [options]
+ * @param {{head?: string; showWhitespace?: boolean}} [options]
  * @returns {Promise<Map<string, {binary: boolean; patch: string}>>}
  */
 const readPatchMap = async (repoRoot, kind, options = {}) => {
   const whitespaceArgs = getWhitespaceDiffArgs(options);
   const args =
     kind === 'staged'
-      ? ['diff', '--cached', '--patch', '--no-ext-diff', ...whitespaceArgs]
+      ? [
+          'diff',
+          '--cached',
+          '--patch',
+          '--no-ext-diff',
+          ...whitespaceArgs,
+          ...(options.head ? [options.head] : []),
+        ]
       : ['diff', '--patch', '--no-ext-diff', ...whitespaceArgs];
   return splitPatchByPath(await git(repoRoot, args));
 };
@@ -214,20 +306,30 @@ const listUntrackedItems = async (repoRoot) => {
 
 /**
  * @param {string} launchPath
- * @param {{eagerContents?: boolean; showWhitespace?: boolean}} [options]
+ * @param {{eagerContents?: boolean; repositoryRoot?: string; showWhitespace?: boolean}} [options]
  * @returns {Promise<RepositoryState>}
  */
 const readWorkingTreeState = async (launchPath, options = {}) => {
-  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-  const [trackedStatus, untrackedItems] = await Promise.all([
-    git(repoRoot, ['status', '--porcelain=v1', '-z', '-uno']),
+  const repoRoot =
+    options.repositoryRoot || (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const [watcherStatus, untrackedItems, rawHead] = await Promise.all([
+    git(repoRoot, ['status', '--porcelain=v2', '--branch', '-z', '-uall']),
     listUntrackedItems(repoRoot),
+    gitOrEmpty(repoRoot, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']),
   ]);
-  const status = [...parseStatus(trackedStatus), ...untrackedItems].sort(fileSort);
+  const head = rawHead.trim();
+  const initialWatcherSnapshot = createRepositoryWatcherSnapshot(
+    repoRoot,
+    parseRepositoryWatcherStatus(watcherStatus),
+  );
+  const status = [
+    ...parsePorcelainV2Status(watcherStatus).filter(({ untracked }) => !untracked),
+    ...untrackedItems,
+  ].sort(fileSort);
   const shouldUsePatchOnly = options.eagerContents === false;
   const [stagedPatches, unstagedPatches] = shouldUsePatchOnly
     ? await Promise.all([
-        readPatchMap(repoRoot, 'staged', options),
+        readPatchMap(repoRoot, 'staged', { ...options, head }),
         readPatchMap(repoRoot, 'unstaged', options),
       ])
     : [new Map(), new Map()];
@@ -242,6 +344,7 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
     if (item.staged) {
       sections.push(
         await createSection(repoRoot, item, 'staged', {
+          head,
           patch: stagedPatches.get(item.path),
           patchOnly,
           showWhitespace: options.showWhitespace,
@@ -252,6 +355,7 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
     if (item.unstaged) {
       sections.push(
         await createSection(repoRoot, item, 'unstaged', {
+          head,
           patch: item.status === 'conflicted' ? undefined : unstagedPatches.get(item.path),
           patchOnly,
           showWhitespace: options.showWhitespace,
@@ -281,132 +385,87 @@ const readWorkingTreeState = async (launchPath, options = {}) => {
     });
   }
 
-  return {
-    files,
-    generatedAt: Date.now(),
-    launchPath,
-    root: repoRoot,
-    source: {
-      type: 'working-tree',
+  return setRepositoryWatcherInitialSnapshot(
+    {
+      files,
+      generatedAt: Date.now(),
+      launchPath,
+      root: repoRoot,
+      source: {
+        type: 'working-tree',
+      },
     },
-  };
-};
-
-/** @param {string} repoRoot @param {string} path @returns {Promise<StatusItem>} */
-const getStatusItemForPath = async (repoRoot, path) => {
-  const trackedStatus = parseStatus(
-    await git(repoRoot, ['status', '--porcelain=v1', '-z', '-uno']),
+    initialWatcherSnapshot,
   );
-  const trackedItem = trackedStatus.find((item) => item.path === path);
-  if (trackedItem) {
-    return trackedItem;
-  }
-
-  const stat = await readFileStat(repoRoot, path);
-  return {
-    directory: Boolean(stat?.isDirectory()),
-    path,
-    staged: false,
-    status: 'untracked',
-    unstaged: true,
-    untracked: true,
-  };
-};
-
-/** @param {string} launchPath @param {DiffSectionContentRequest} request */
-const readDiffSectionContent = async (launchPath, request) => {
-  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-  const path = validateRepositoryPath(request.path);
-  if (request.kind === 'commit' || request.source?.type === 'commit') {
-    throw new Error('Lazy loading commit diffs is not supported.');
-  }
-
-  const item = await getStatusItemForPath(repoRoot, path);
-  return createSection(repoRoot, item, /** @type {WorkingTreeSectionKind} */ (request.kind), {
-    force: request.force,
-    showWhitespace: request.showWhitespace,
-  });
-};
-
-/**
- * @param {string} launchPath
- * @param {DiffImageContentRequest} request
- * @returns {Promise<DiffImageContentResult>}
- */
-const readDiffImageContent = async (launchPath, request) => {
-  try {
-    const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
-    const path = validateRepositoryPath(request.path);
-    if (request.kind === 'commit' || request.source?.type === 'commit') {
-      throw new Error('Commit image diffs are loaded through the commit reader.');
-    }
-
-    const item = await getStatusItemForPath(repoRoot, path);
-    const oldPath = item.oldPath || item.path;
-    const [oldImage, newImage] =
-      request.kind === 'staged'
-        ? await Promise.all([
-            readGitImageFile(repoRoot, 'HEAD', oldPath),
-            readIndexImageFile(repoRoot, item.path),
-          ])
-        : await Promise.all([
-            item.untracked
-              ? undefined
-              : readIndexImageFile(repoRoot, item.path, item.conflictStage),
-            readWorkingTreeImageFile(repoRoot, item.path),
-          ]);
-
-    if (!oldImage && !newImage) {
-      return {
-        reason: 'Codiff could not load either side of this image.',
-        status: 'unavailable',
-      };
-    }
-
-    return {
-      ...(newImage ? { newImage } : {}),
-      ...(oldImage ? { oldImage } : {}),
-      status: 'ready',
-    };
-  } catch (error) {
-    return {
-      reason: error instanceof Error ? error.message : 'Codiff could not load this image.',
-      status: 'unavailable',
-    };
-  }
 };
 
 /** @param {string} repoRoot @param {ReadonlyArray<string>} args */
 const gitOrEmpty = async (repoRoot, args) => {
+  const signal = getCommandActionSignal();
   try {
-    return await git(repoRoot, args);
+    return await git(repoRoot, args, { signal });
   } catch {
+    signal?.throwIfAborted();
     return '';
   }
 };
 
+/** @type {Map<string, Map<AbortSignal | null, Promise<{email: string, gravatarUrl?: string, name: string}>>>} */
+const gitIdentityReads = new Map();
+
 /** @param {string} launchPath */
-const readGitIdentity = async (launchPath) => {
-  const [configuredName, configuredEmail] = await Promise.all([
+const readGitIdentity = (launchPath) => {
+  const signal = getCommandActionSignal();
+  let readsBySignal = gitIdentityReads.get(launchPath);
+  if (!readsBySignal) {
+    readsBySignal = new Map();
+    gitIdentityReads.set(launchPath, readsBySignal);
+  }
+  const signalKey = signal || null;
+  const existing = readsBySignal.get(signalKey);
+  if (existing) {
+    return existing;
+  }
+  const read = Promise.all([
     gitOrEmpty(launchPath, ['config', '--get', 'user.name']),
     gitOrEmpty(launchPath, ['config', '--get', 'user.email']),
-  ]);
-  const email = configuredEmail.trim();
-  const name = configuredName.trim();
-
-  return {
-    email,
-    gravatarUrl: email
-      ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
-      : undefined,
-    name,
+  ]).then(([configuredName, configuredEmail]) => {
+    const email = configuredEmail.trim();
+    const name = configuredName.trim();
+    return {
+      email,
+      gravatarUrl: email
+        ? `https://www.gravatar.com/avatar/${getGravatarHash(email)}?s=80&d=identicon`
+        : undefined,
+      name,
+    };
+  });
+  let pending;
+  const clear = () => {
+    if (readsBySignal.get(signalKey) !== pending) {
+      return;
+    }
+    readsBySignal.delete(signalKey);
+    if (readsBySignal.size === 0 && gitIdentityReads.get(launchPath) === readsBySignal) {
+      gitIdentityReads.delete(launchPath);
+    }
   };
+  pending = read.then(
+    (identity) => {
+      clear();
+      return identity;
+    },
+    (error) => {
+      clear();
+      throw error;
+    },
+  );
+  readsBySignal.set(signalKey, pending);
+  return pending;
 };
 
 module.exports = {
-  readDiffSectionContent,
-  readDiffImageContent,
+  parsePorcelainV2Status,
   readGitIdentity,
-  readRepositoryChangeSignature,
   readWorkingTreeState,
 };

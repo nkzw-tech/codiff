@@ -28,12 +28,6 @@ export const isPatchOnlyDiffSection = (section: DiffSection) =>
 export const shouldLoadDiffSectionContents = (section: DiffSection) =>
   section.summary?.canLoad !== false && section.loadState === 'deferred';
 
-// Diff search needs full context lines in app state, so it also preloads
-// patch-only sections through the eager (state-replacing) flow.
-export const shouldPreloadSectionContentsForSearch = (section: DiffSection) =>
-  shouldLoadDiffSectionContents(section) ||
-  (section.summary?.canLoad !== false && isPatchOnlyDiffSection(section));
-
 // Full file contents fetched lazily for patch-only sections via the CodeView
 // `loadDiffFiles` option. Kept outside React state so the library's in-place
 // hydration of the rendered diff is not reset by re-renders. Keyed without the
@@ -192,6 +186,14 @@ export const getDiffLineCountFromVisibleSections = (
 export const getDiffLineCount = (file: ChangedFile, showWhitespace: boolean): DiffLineCount =>
   getDiffLineCountFromVisibleSections(getVisibleDiffSections(file, showWhitespace));
 
+export const getDiffSectionLineCount = (file: ChangedFile, section: DiffSection): DiffLineCount =>
+  getDiffLineCountFromVisibleSections([
+    {
+      fileDiff: parseSectionDiffWithOptions(file, section, true),
+      section,
+    },
+  ]);
+
 export const getTotalDiffLineCount = (lineCounts: Iterable<DiffLineCount>): DiffLineCount => {
   let additions = 0;
   let countable = false;
@@ -325,13 +327,21 @@ export const parseSectionDiffWithOptions = (
     return cached;
   }
 
+  const oldFile =
+    section.oldFile ??
+    ((file.status === 'added' || file.status === 'untracked') && section.newFile
+      ? { contents: '', name: file.oldPath ?? file.path }
+      : undefined);
+  const newFile =
+    section.newFile ??
+    (file.status === 'deleted' && section.oldFile ? { contents: '', name: file.path } : undefined);
   let fileDiff: FileDiffMetadata;
   if (section.binary || (section.loadState != null && section.loadState !== 'ready')) {
     fileDiff = createBinaryFileDiff(file, section);
-  } else if (section.oldFile && section.newFile) {
+  } else if (oldFile && newFile) {
     try {
       fileDiff = {
-        ...parseDiffFromFile(section.oldFile, section.newFile, {
+        ...parseDiffFromFile(oldFile, newFile, {
           ignoreWhitespace: !showWhitespace,
         }),
         cacheKey,

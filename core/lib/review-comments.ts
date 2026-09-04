@@ -1,12 +1,29 @@
 import type {
   ChangedFile,
   DiffSection,
+  ProviderCommentSubmission,
+  ProviderReviewCommentPosition,
   PullRequestExistingReviewComment,
-  PullRequestReviewComment,
   RepositoryState,
+  ReviewCommentPosition,
+  ShareCommentSubmission,
+  SubmittedReviewComment,
 } from '../types.ts';
-import type { CodeViewInstance, ReviewComment } from './app-types.ts';
+import type {
+  CodeViewInstance,
+  LocalReviewNote,
+  ProviderCommentDraft,
+  ProviderInlineComment,
+  RenderedSubmittedReviewComment,
+  ReviewComment,
+  ReviewCommentCreation,
+  ReviewDraft,
+  ShareCommentDraft,
+  ShareInlineComment,
+} from './app-types.ts';
 import { parseSectionDiffWithOptions } from './diff.ts';
+import { diffRangesMatch } from './review-comment-target.ts';
+import { isCommitRevision } from './review-history.ts';
 
 export const isInteractiveReviewEvent = (event: PointerEvent) =>
   event.composedPath().some(
@@ -71,9 +88,44 @@ export const hasActiveTextSelection = (target?: Node | null) => {
   return isExpandedSelection(selection, target);
 };
 
+export const isLocalReviewNote = (comment: ReviewComment): comment is LocalReviewNote =>
+  comment.kind === 'local-note';
+
+export const isProviderCommentDraft = (comment: ReviewComment): comment is ProviderCommentDraft =>
+  comment.kind === 'provider-draft';
+
+export const isShareCommentDraft = (comment: ReviewComment): comment is ShareCommentDraft =>
+  comment.kind === 'share-draft';
+
+export const isSubmittedReviewComment = (
+  comment: ReviewComment,
+): comment is RenderedSubmittedReviewComment => comment.kind === 'submitted-comment';
+
+export const isProviderInlineComment = (comment: ReviewComment): comment is ProviderInlineComment =>
+  isSubmittedReviewComment(comment) && comment.destination === 'provider';
+
+export const isShareInlineComment = (comment: ReviewComment): comment is ShareInlineComment =>
+  isSubmittedReviewComment(comment) && comment.destination === 'share';
+
+export const isReviewDraft = (comment: ReviewComment): comment is ReviewDraft =>
+  isLocalReviewNote(comment) || isProviderCommentDraft(comment) || isShareCommentDraft(comment);
+
+export const isProviderReviewCommentPosition = (
+  position: ReviewCommentPosition,
+): position is ProviderReviewCommentPosition =>
+  isCommitRevision(position.range.base) && isCommitRevision(position.range.head);
+
+export const getReviewCommentRendererSectionId = (comment: ReviewComment) =>
+  isReviewDraft(comment) ? comment.sectionId : comment.resolvedSectionId;
+
+export const reviewCommentRegionSectionPrefix = 'review-comment-region:';
+
+export const isReviewCommentRegionSection = (section: Pick<DiffSection, 'id'>) =>
+  section.id.startsWith(reviewCommentRegionSectionPrefix);
+
 export const isFileReviewComment = (
   comment: Pick<ReviewComment, 'anchor' | 'lineNumber' | 'side'>,
-) => comment.anchor === 'file' || comment.lineNumber == null || comment.side == null;
+) => comment.anchor === 'file';
 
 export const isLineReviewComment = (
   comment: ReviewComment,
@@ -127,6 +179,9 @@ export const getReviewCommentLineLabel = (
   if (isFileReviewComment(comment)) {
     return 'File';
   }
+  if (comment.lineNumber == null || comment.side == null) {
+    return 'Location unavailable';
+  }
   const startLineNumber = comment.startLineNumber;
   const startSide = getReviewCommentStartSide(comment);
   if (
@@ -165,23 +220,98 @@ export const getReviewCommentRangeProps = (
     : {};
 };
 
-export const toPullRequestReviewComment = (
-  comment: ReviewComment,
-  { includeSectionId = false }: { includeSectionId?: boolean } = {},
-): PullRequestReviewComment => ({
+const getCommentSubmissionFields = (comment: ReviewDraft) => ({
+  ...(comment.anchor ? { anchor: comment.anchor } : {}),
   body: comment.body,
   filePath: comment.filePath,
   ...(comment.lineNumber != null ? { lineNumber: comment.lineNumber } : {}),
-  ...(includeSectionId ? { sectionId: comment.sectionId } : {}),
   ...(comment.side ? { side: comment.side } : {}),
   ...getReviewCommentRangeProps(comment),
   ...(comment.threadId ? { threadId: comment.threadId } : {}),
 });
 
-export const toSubmittedReviewComment = (
+export const toProviderCommentSubmission = (
+  comment: ProviderCommentDraft,
+): ProviderCommentSubmission => {
+  if (comment.threadId) {
+    return {
+      ...getCommentSubmissionFields(comment),
+      localDraftId: comment.id,
+      threadId: comment.threadId,
+    };
+  }
+
+  const position = comment.position;
+  if (!position || !isProviderReviewCommentPosition(position)) {
+    throw new Error('Provider comments require an exact immutable commit position.');
+  }
+
+  return {
+    ...getCommentSubmissionFields(comment),
+    localDraftId: comment.id,
+    position: {
+      range: {
+        base: position.range.base,
+        head: position.range.head,
+      },
+    },
+  };
+};
+
+export const toShareCommentSubmission = (comment: ShareCommentDraft): ShareCommentSubmission =>
+  comment.position
+    ? {
+        ...getCommentSubmissionFields(comment),
+        position: comment.position,
+      }
+    : {
+        ...getCommentSubmissionFields(comment),
+        sectionId: comment.sectionId,
+      };
+
+export const toProviderSubmittedReviewComment = (
   comment: PullRequestExistingReviewComment,
-  draft: ReviewComment,
-): ReviewComment => ({
+  submission: ProviderCommentSubmission,
+): SubmittedReviewComment => ({
+  ...(comment.anchor ? { anchor: comment.anchor } : {}),
+  author: comment.author,
+  body: comment.body,
+  ...(comment.canDelete ? { canDelete: true } : {}),
+  ...(comment.canEdit ? { canEdit: true } : {}),
+  ...(comment.canReplyThread === false ? { canReplyThread: false } : {}),
+  ...(comment.canResolveThread ? { canResolveThread: true } : {}),
+  destination: 'provider',
+  filePath: comment.filePath,
+  id: comment.id,
+  ...(comment.isOutdated ? { isOutdated: true } : {}),
+  isReadOnly: true,
+  ...(comment.isThreadResolved ? { isThreadResolved: true } : {}),
+  ...(comment.lineNumber != null ? { lineNumber: comment.lineNumber } : {}),
+  ...(submission.position ? { position: submission.position } : {}),
+  ...(comment.side ? { side: comment.side } : {}),
+  ...(comment.startLineNumber != null ? { startLineNumber: comment.startLineNumber } : {}),
+  ...(comment.startSide ? { startSide: comment.startSide } : {}),
+  ...(comment.submittedAt ? { submittedAt: comment.submittedAt } : {}),
+  ...(comment.threadId ? { threadId: comment.threadId } : {}),
+  ...(comment.url ? { url: comment.url } : {}),
+});
+
+export const toRenderedSubmittedReviewComment = (
+  comment: SubmittedReviewComment,
+  draft?: ProviderCommentDraft | ShareCommentDraft,
+): RenderedSubmittedReviewComment => ({
+  ...comment,
+  kind: 'submitted-comment',
+  ...(comment.resolvedSectionId
+    ? { resolvedSectionId: comment.resolvedSectionId }
+    : draft
+      ? { resolvedSectionId: draft.sectionId }
+      : {}),
+});
+
+export const toPullRequestExistingReviewComment = (
+  comment: RenderedSubmittedReviewComment,
+): PullRequestExistingReviewComment => ({
   ...(comment.anchor ? { anchor: comment.anchor } : {}),
   author: comment.author,
   body: comment.body,
@@ -192,35 +322,34 @@ export const toSubmittedReviewComment = (
   filePath: comment.filePath,
   id: comment.id,
   ...(comment.isOutdated ? { isOutdated: true } : {}),
-  isReadOnly: true,
   ...(comment.isThreadResolved ? { isThreadResolved: true } : {}),
   ...(comment.lineNumber != null ? { lineNumber: comment.lineNumber } : {}),
-  sectionId: comment.sectionId ?? draft.sectionId,
+  ...(comment.position ? { position: comment.position } : {}),
+  ...(comment.sectionId ? { sectionId: comment.sectionId } : {}),
   ...(comment.side ? { side: comment.side } : {}),
-  ...(comment.startLineNumber != null ? { startLineNumber: comment.startLineNumber } : {}),
-  ...(comment.startSide ? { startSide: comment.startSide } : {}),
+  ...getReviewCommentRangeProps(comment),
   ...(comment.submittedAt ? { submittedAt: comment.submittedAt } : {}),
   ...(comment.threadId ? { threadId: comment.threadId } : {}),
   ...(comment.url ? { url: comment.url } : {}),
 });
 
 export const mergeReviewComments = (
-  snapshotComments: ReadonlyArray<ReviewComment>,
-  localComments: ReadonlyArray<ReviewComment>,
+  snapshotComments: ReadonlyArray<RenderedSubmittedReviewComment>,
+  localComments: ReadonlyArray<ReviewDraft>,
 ): ReadonlyArray<ReviewComment> => {
   const snapshotIds = new Set(snapshotComments.map((comment) => comment.id));
   return [...snapshotComments, ...localComments.filter((comment) => !snapshotIds.has(comment.id))];
 };
 
-const isPendingPullRequestReviewComment = (comment: ReviewComment) =>
-  !comment.isReadOnly &&
+const isPendingPullRequestReviewComment = (comment: ProviderCommentDraft) =>
   !comment.threadId &&
   comment.remoteSubmit?.status !== 'submitting' &&
+  comment.remoteSubmit?.status !== 'outcome-unknown' &&
   comment.body.trim().length > 0;
 
 export const getPendingPullRequestReviewComments = (
-  comments: ReadonlyArray<ReviewComment>,
-  activeDraft: Pick<ReviewComment, 'body' | 'id'> | null = null,
+  comments: ReadonlyArray<ProviderCommentDraft>,
+  activeDraft: Pick<ProviderCommentDraft, 'body' | 'id'> | null = null,
 ) => {
   return comments.flatMap((comment) => {
     const candidate =
@@ -230,47 +359,46 @@ export const getPendingPullRequestReviewComments = (
 };
 
 export const findReusableReviewCommentDraft = (
-  comments: ReadonlyArray<ReviewComment>,
-  activeDraft: Pick<ReviewComment, 'body' | 'id'> | null = null,
+  comments: ReadonlyArray<ReviewDraft>,
+  activeDraft: Pick<ReviewDraft, 'body' | 'id'> | null = null,
 ) =>
   comments.find(
     (comment) =>
-      !comment.isReadOnly &&
       comment.body.length === 0 &&
       !(activeDraft?.id === comment.id && activeDraft.body.trim().length > 0),
   );
 
-export const getCommentKey = (
-  comment: Pick<
-    ReviewComment,
-    'anchor' | 'lineNumber' | 'sectionId' | 'side' | 'startLineNumber' | 'startSide'
-  >,
-) =>
-  isFileReviewComment(comment)
-    ? `${comment.sectionId}:file`
-    : `${comment.sectionId}:${comment.side}:${comment.lineNumber}:${
+export const getCommentKey = (comment: ReviewComment | ReviewCommentCreation) => {
+  const sectionId =
+    'kind' in comment
+      ? (getReviewCommentRendererSectionId(comment) ?? 'unresolved')
+      : comment.sectionId;
+  return isFileReviewComment(comment)
+    ? `${sectionId}:file`
+    : `${sectionId}:${comment.side}:${comment.lineNumber}:${
         comment.startLineNumber ?? comment.lineNumber
       }:${comment.startSide ?? comment.side}`;
+};
 
 const getCommentTextDigest = (value: string | null | undefined) =>
   value ? `${value.length},${value.split('\n').length}` : '0,0';
 
 export const getReviewCommentsDigest = (comments: ReadonlyArray<ReviewComment>) =>
   comments
-    .map(
-      (comment) =>
-        `${comment.id}:${comment.sectionId}:${comment.side}:${comment.lineNumber}:${
-          comment.startLineNumber ?? ''
-        }:${comment.startSide ?? ''}:${comment.anchor ?? ''}:${getCommentTextDigest(
-          comment.body,
-        )}:${comment.codexReply?.status ?? ''}:${getCommentTextDigest(
-          comment.codexReply?.body,
-        )}:${getCommentTextDigest(comment.codexReply?.error)}:${
-          comment.remoteSubmit?.status ?? ''
-        }:${comment.remoteSubmit?.error ?? ''}:${comment.threadId ?? ''}:${
-          comment.canResolveThread === true ? '1' : '0'
-        }:${comment.isThreadResolved === true ? '1' : '0'}`,
-    )
+    .map((comment) => {
+      const sectionId = getReviewCommentRendererSectionId(comment) ?? comment.sectionId ?? '';
+      return `${comment.id}:${sectionId}:${comment.side}:${comment.lineNumber}:${
+        comment.startLineNumber ?? ''
+      }:${comment.startSide ?? ''}:${comment.anchor ?? ''}:${getCommentTextDigest(
+        comment.body,
+      )}:${comment.codexReply?.status ?? ''}:${getCommentTextDigest(
+        comment.codexReply?.body,
+      )}:${getCommentTextDigest(comment.codexReply?.error)}:${
+        comment.remoteSubmit?.status ?? ''
+      }:${comment.remoteSubmit?.error ?? ''}:${comment.threadId ?? ''}:${
+        comment.canResolveThread === true ? '1' : '0'
+      }:${comment.isThreadResolved === true ? '1' : '0'}`;
+    })
     .join('\0');
 
 const getMarkdownFence = (content: string) => {
@@ -295,7 +423,7 @@ const trimReviewPatchLineTerminator = (line: string) =>
 const getReviewPatchText = (lines: ReadonlyArray<string>, index: number) =>
   trimReviewPatchLineTerminator(lines[index] ?? '');
 
-const getReviewCommentPatchContext = (
+export const getReviewCommentPatchContext = (
   file: ChangedFile,
   section: DiffSection,
   comment: ReviewComment,
@@ -386,13 +514,160 @@ const getReviewCommentPatchContext = (
   return section.summary?.reason || section.patch.trim() || 'No patch context available.';
 };
 
+export type ReviewCommentSectionResolutionStrategy =
+  | 'coordinates'
+  | 'file'
+  | 'position'
+  | 'section-id';
+
+export type ReviewCommentSectionResolution =
+  | { kind: 'resolved'; section: DiffSection }
+  | {
+      candidateSectionIds: ReadonlyArray<string>;
+      kind: 'ambiguous' | 'unmapped';
+      strategy: ReviewCommentSectionResolutionStrategy;
+    };
+
+const resolveReviewCommentSectionCandidates = (
+  sections: ReadonlyArray<DiffSection>,
+  strategy: ReviewCommentSectionResolutionStrategy,
+): ReviewCommentSectionResolution =>
+  sections.length === 1
+    ? { kind: 'resolved', section: sections[0]! }
+    : {
+        candidateSectionIds: sections.map((section) => section.id),
+        kind: sections.length === 0 ? 'unmapped' : 'ambiguous',
+        strategy,
+      };
+
+const sectionContainsReviewCommentAnchor = (
+  file: ChangedFile,
+  section: DiffSection,
+  comment: Pick<ReviewComment, 'anchor' | 'lineNumber' | 'side' | 'startLineNumber' | 'startSide'>,
+  showWhitespace: boolean,
+) => {
+  if (isFileReviewComment(comment)) {
+    return true;
+  }
+  if (comment.lineNumber == null || comment.side == null) {
+    return false;
+  }
+
+  const line = comment.lineNumber;
+  const side = comment.side;
+  const startLine = comment.startLineNumber ?? line;
+  const startSide = comment.startSide ?? side;
+  const parsed = parseSectionDiffWithOptions(file, section, showWhitespace);
+  return parsed.hunks.some((hunk) => {
+    let oldLine = hunk.deletionStart;
+    let newLine = hunk.additionStart;
+    let hasStart = false;
+    let hasEnd = false;
+    for (const content of hunk.hunkContent) {
+      if (content.type === 'context') {
+        if (
+          (startSide === 'additions' &&
+            startLine >= newLine &&
+            startLine < newLine + content.lines) ||
+          (startSide === 'deletions' && startLine >= oldLine && startLine < oldLine + content.lines)
+        ) {
+          hasStart = true;
+        }
+        if (
+          (side === 'additions' && line >= newLine && line < newLine + content.lines) ||
+          (side === 'deletions' && line >= oldLine && line < oldLine + content.lines)
+        ) {
+          hasEnd = true;
+        }
+        oldLine += content.lines;
+        newLine += content.lines;
+        continue;
+      }
+      if (side === 'deletions' && line >= oldLine && line < oldLine + content.deletions) {
+        hasEnd = true;
+      }
+      if (
+        startSide === 'deletions' &&
+        startLine >= oldLine &&
+        startLine < oldLine + content.deletions
+      ) {
+        hasStart = true;
+      }
+      if (side === 'additions' && line >= newLine && line < newLine + content.additions) {
+        hasEnd = true;
+      }
+      if (
+        startSide === 'additions' &&
+        startLine >= newLine &&
+        startLine < newLine + content.additions
+      ) {
+        hasStart = true;
+      }
+      oldLine += content.deletions;
+      newLine += content.additions;
+    }
+    return hasStart && hasEnd;
+  });
+};
+
+export const resolveReviewCommentSection = (
+  file: ChangedFile,
+  comment: Pick<
+    ReviewComment,
+    'anchor' | 'lineNumber' | 'position' | 'side' | 'startLineNumber' | 'startSide'
+  > & { sectionId?: string },
+  showWhitespace: boolean,
+): ReviewCommentSectionResolution => {
+  const positionedRange = comment.position?.range;
+  if (positionedRange) {
+    return resolveReviewCommentSectionCandidates(
+      file.sections.filter(
+        (candidate) =>
+          diffRangesMatch(candidate.range, positionedRange) &&
+          sectionContainsReviewCommentAnchor(file, candidate, comment, showWhitespace),
+      ),
+      'position',
+    );
+  }
+
+  if (comment.sectionId) {
+    const sections = file.sections.filter((candidate) => candidate.id === comment.sectionId);
+    if (sections.length > 0) {
+      return resolveReviewCommentSectionCandidates(sections, 'section-id');
+    }
+  }
+
+  if (isFileReviewComment(comment)) {
+    return resolveReviewCommentSectionCandidates(file.sections, 'file');
+  }
+
+  const matchingSections = file.sections.filter((section) =>
+    sectionContainsReviewCommentAnchor(file, section, comment, showWhitespace),
+  );
+  return resolveReviewCommentSectionCandidates(matchingSections, 'coordinates');
+};
+
+export const getReviewCommentSection = (
+  file: ChangedFile,
+  comment: Pick<
+    ReviewComment,
+    'anchor' | 'lineNumber' | 'position' | 'side' | 'startLineNumber' | 'startSide'
+  > & { sectionId?: string },
+  showWhitespace: boolean,
+) => {
+  const resolution = resolveReviewCommentSection(file, comment, showWhitespace);
+  return resolution.kind === 'resolved' ? resolution.section : undefined;
+};
+
 export const buildReviewCommentsMarkdown = (
   files: ReadonlyArray<ChangedFile>,
   comments: ReadonlyArray<ReviewComment>,
   showWhitespace: boolean,
   prefix?: string,
 ) => {
-  const pendingComments = comments.filter((comment) => !comment.isReadOnly && comment.body.trim());
+  const pendingComments = comments.filter(
+    (comment): comment is ReviewDraft => isReviewDraft(comment) && Boolean(comment.body.trim()),
+  );
   const filesByPath = new Map(files.map((file) => [file.path, file]));
   const orderedComments = pendingComments.sort((left, right) => {
     const leftFileIndex = files.findIndex((file) => file.path === left.filePath);
@@ -407,7 +682,7 @@ export const buildReviewCommentsMarkdown = (
   const markdown = orderedComments
     .map((comment, index) => {
       const file = filesByPath.get(comment.filePath);
-      const section = file?.sections.find((candidate) => candidate.id === comment.sectionId);
+      const section = file ? getReviewCommentSection(file, comment, showWhitespace) : undefined;
       const context =
         file && section
           ? getReviewCommentPatchContext(file, section, comment, showWhitespace)
@@ -429,36 +704,55 @@ export const buildReviewCommentsMarkdown = (
   return markdown ? `${resolvedPrefix}${markdown}` : '';
 };
 
-export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArray<ReviewComment> =>
-  (state.reviewComments ?? []).flatMap((comment) => {
+export const getReviewCommentsFromState = (
+  state: RepositoryState,
+  destination: 'provider' | 'share' = 'provider',
+): ReadonlyArray<RenderedSubmittedReviewComment> =>
+  (state.reviewComments ?? []).map((comment) => {
     const file = state.files.find((candidate) => candidate.path === comment.filePath);
+    const hasProviderPosition =
+      comment.position != null && isProviderReviewCommentPosition(comment.position);
     const section =
-      file?.sections.find((candidate) => candidate.id === comment.sectionId) ?? file?.sections[0];
-    return section
-      ? [
-          {
-            author: comment.author,
-            body: comment.body,
-            ...(comment.canDelete ? { canDelete: true } : {}),
-            ...(comment.canEdit ? { canEdit: true } : {}),
-            ...(comment.canReplyThread === false ? { canReplyThread: false } : {}),
-            ...(comment.canResolveThread ? { canResolveThread: true } : {}),
-            filePath: comment.filePath,
-            id: comment.id,
-            ...(comment.isOutdated ? { isOutdated: true } : {}),
-            isReadOnly: true,
-            ...(comment.isThreadResolved ? { isThreadResolved: true } : {}),
-            ...(comment.anchor === 'file' ? { anchor: 'file' as const } : {}),
-            ...(comment.lineNumber != null ? { lineNumber: comment.lineNumber } : {}),
-            sectionId: section.id,
-            ...(comment.side ? { side: comment.side } : {}),
-            ...getReviewCommentRangeProps(comment),
-            submittedAt: comment.submittedAt,
-            ...(comment.threadId ? { threadId: comment.threadId } : {}),
-            url: comment.url,
-          },
-        ]
-      : [];
+      file && (destination === 'share' || hasProviderPosition)
+        ? getReviewCommentSection(file, comment, false)
+        : undefined;
+    const common = {
+      author: comment.author,
+      body: comment.body,
+      ...(comment.canDelete ? { canDelete: true } : {}),
+      ...(comment.canEdit ? { canEdit: true } : {}),
+      ...(comment.canReplyThread === false ? { canReplyThread: false } : {}),
+      ...(comment.canResolveThread ? { canResolveThread: true } : {}),
+      filePath: comment.filePath,
+      id: comment.id,
+      ...(comment.isOutdated ? { isOutdated: true } : {}),
+      isReadOnly: true as const,
+      kind: 'submitted-comment' as const,
+      ...(comment.isThreadResolved ? { isThreadResolved: true } : {}),
+      ...(comment.anchor === 'file' ? { anchor: 'file' as const } : {}),
+      ...(comment.lineNumber != null ? { lineNumber: comment.lineNumber } : {}),
+      ...(section ? { resolvedSectionId: section.id } : {}),
+      ...(comment.side ? { side: comment.side } : {}),
+      ...getReviewCommentRangeProps(comment),
+      ...(comment.submittedAt ? { submittedAt: comment.submittedAt } : {}),
+      ...(comment.threadId ? { threadId: comment.threadId } : {}),
+      ...(comment.url ? { url: comment.url } : {}),
+    };
+
+    return destination === 'share'
+      ? {
+          ...common,
+          destination,
+          ...(comment.position ? { position: comment.position } : {}),
+          ...(comment.sectionId ? { sectionId: comment.sectionId } : {}),
+        }
+      : {
+          ...common,
+          destination,
+          ...(comment.position && isProviderReviewCommentPosition(comment.position)
+            ? { position: comment.position }
+            : {}),
+        };
   });
 
 export const getVisibleReviewComments = (

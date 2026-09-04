@@ -28,6 +28,7 @@ export const ShareCommentThreadView = view<ShareCommentThread>()({
   lineNumber: true,
   messages: ShareCommentMessageConnectionView,
   planId: true,
+  positionJson: true,
   resolvedAt: true,
   sectionId: true,
   side: true,

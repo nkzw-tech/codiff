@@ -8,6 +8,8 @@ import { ReviewFileTree } from '../app/components/FileTree.tsx';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
 
+HTMLElement.prototype.scrollIntoView ??= function scrollIntoView() {};
+
 test('review file trees share selection, activation, decorations, and row styling', async () => {
   const firstFile = createChangedFile('src/first.ts', {
     fingerprint: 'first-current',
@@ -59,4 +61,37 @@ test('review file trees share selection, activation, decorations, and row stylin
         ?.getAttribute('aria-selected'),
     ).toBe('true');
   });
+});
+
+test('reveals an initially selected restored path exactly once', async () => {
+  const scrollIntoView = vi
+    .spyOn(HTMLElement.prototype, 'scrollIntoView')
+    .mockImplementation(() => {});
+  const firstFile = createChangedFile('src/first.ts');
+  const restoredFile = createChangedFile('src/restored.ts');
+  await using view = await renderReact(
+    <ReviewFileTree
+      files={[firstFile, restoredFile]}
+      onActivatePath={() => {}}
+      scrollSelectedPathIntoView
+      selectedPath={restoredFile.path}
+      showWhitespace={false}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' }),
+  );
+  scrollIntoView.mockClear();
+  await view.rerender(
+    <ReviewFileTree
+      files={[firstFile, restoredFile]}
+      onActivatePath={() => {}}
+      scrollSelectedPathIntoView
+      selectedPath={restoredFile.path}
+      showWhitespace={false}
+    />,
+  );
+  expect(scrollIntoView).not.toHaveBeenCalled();
+  scrollIntoView.mockRestore();
 });

@@ -8,14 +8,16 @@
  * @param {() => boolean} [isCurrent]
  */
 const createWalkthroughProgressReporter = (webContents, isCurrent = () => true) => {
-  /** @param {import('../core/types.ts').WalkthroughProgressPhase} phase */
-  return (phase) => {
+  /**
+   * @param {import('../core/types.ts').WalkthroughGenerationProgress | import('../core/types.ts').WalkthroughProgressPhase} update
+   */
+  return (update) => {
     if (webContents.isDestroyed() || !isCurrent()) {
       return;
     }
 
     /** @type {import('../core/types.ts').WalkthroughProgressEvent} */
-    const progress = { phase };
+    const progress = typeof update === 'string' ? { phase: update } : { generation: update };
     webContents.send('codiff:walkthroughProgress', progress);
   };
 };

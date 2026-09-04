@@ -11,7 +11,6 @@ import {
   fileHasVisibleDiff,
   loadSectionContents,
   shouldLoadDiffSectionContents,
-  shouldPreloadSectionContentsForSearch,
 } from '../lib/diff.ts';
 import { isDiffSearchShortcut } from '../lib/keyboard.ts';
 import { renderInlineMarkdown, sanitizeMarkdownImages } from '../lib/markdown.tsx';
@@ -73,6 +72,42 @@ test('pure renames are visible without content hunks', () => {
   expect(fileHasVisibleDiff(file, false)).toBe(true);
 });
 
+test('loaded added and deleted files reconstruct an exact absent side', () => {
+  const added = {
+    fingerprint: 'added',
+    path: 'added.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'added',
+        kind: 'pull-request',
+        loadState: 'ready',
+        newFile: { contents: 'one\ntwo\n', name: 'added.ts' },
+        patch: '',
+      },
+    ],
+    status: 'added',
+  } satisfies ChangedFile;
+  const deleted = {
+    fingerprint: 'deleted',
+    path: 'deleted.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'deleted',
+        kind: 'pull-request',
+        loadState: 'ready',
+        oldFile: { contents: 'one\ntwo\n', name: 'deleted.ts' },
+        patch: '',
+      },
+    ],
+    status: 'deleted',
+  } satisfies ChangedFile;
+
+  expect(getDiffLineCount(added, false)).toMatchObject({ additions: 2, deletions: 0 });
+  expect(getDiffLineCount(deleted, false)).toMatchObject({ additions: 0, deletions: 2 });
+});
+
 test('patch-only text sections hydrate lazily instead of eager loading', () => {
   const patchOnlySection = {
     binary: false,
@@ -82,10 +117,8 @@ test('patch-only text sections hydrate lazily instead of eager loading', () => {
     patch: 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n',
   } as const;
 
-  // Patch-only sections expand via `loadDiffFiles` hydration, not the eager
-  // Load flow, but diff search still preloads their full contents.
+  // Patch-only sections expand through explicit unchanged-context requests.
   expect(shouldLoadDiffSectionContents(patchOnlySection)).toBe(false);
-  expect(shouldPreloadSectionContentsForSearch(patchOnlySection)).toBe(true);
 
   expect(
     shouldLoadDiffSectionContents({
@@ -93,16 +126,6 @@ test('patch-only text sections hydrate lazily instead of eager loading', () => {
       loadState: 'deferred',
     }),
   ).toBe(true);
-
-  expect(
-    shouldPreloadSectionContentsForSearch({
-      ...patchOnlySection,
-      summary: {
-        canLoad: false,
-        reason: 'Codiff could not load full file context.',
-      },
-    }),
-  ).toBe(false);
 
   expect(
     shouldLoadDiffSectionContents({
@@ -322,6 +345,80 @@ test('diff search finds content matches across sides', () => {
     },
   ]);
   expect(result?.matchCount).toBe(1);
+});
+
+test('diff search independently filters new, old, and unchanged lines', () => {
+  const file = {
+    fingerprint: 'search-filters',
+    path: 'src/search.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/search.ts:unstaged',
+        kind: 'unstaged',
+        patch:
+          'diff --git a/src/search.ts b/src/search.ts\n@@ -1,3 +1,3 @@\n needle context\n-old needle\n+new needle\n needle context\n',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  expect(getDiffSearchResult(file, false, 'needle')?.matchCount).toBe(2);
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: false,
+      deletions: false,
+      unchanged: true,
+    })?.matchCount,
+  ).toBe(2);
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: true,
+      deletions: false,
+      unchanged: false,
+    })?.matchCount,
+  ).toBe(1);
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: false,
+      deletions: true,
+      unchanged: false,
+    })?.matchCount,
+  ).toBe(1);
+});
+
+test('diff search does not search hidden unchanged lines from complete file contents', () => {
+  const file = {
+    fingerprint: 'search-unloaded-context',
+    path: 'src/search.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/search.ts:unstaged',
+        kind: 'unstaged',
+        newFile: {
+          contents:
+            'before\nneedle outside the patch\nafter\nline four\nline five\nline six\nline seven\nline eight\nline nine\nline ten\nnew value\n',
+          name: 'src/search.ts',
+        },
+        oldFile: {
+          contents:
+            'before\nneedle outside the patch\nafter\nline four\nline five\nline six\nline seven\nline eight\nline nine\nline ten\nold value\n',
+          name: 'src/search.ts',
+        },
+        patch: 'diff --git a/src/search.ts b/src/search.ts\n@@ -4 +4 @@\n-old value\n+new value\n',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  expect(
+    getDiffSearchResult(file, false, 'needle', {
+      additions: false,
+      deletions: false,
+      unchanged: true,
+    }),
+  ).toBeNull();
 });
 
 test('diff search includes file path matches', () => {
@@ -647,6 +744,7 @@ test('review comment markdown includes file and patch context', () => {
         body: 'Please double-check this value.',
         filePath: 'src/comment.ts',
         id: 'comment-1',
+        kind: 'local-note',
         lineNumber: 2,
         sectionId: 'src/comment.ts:unstaged',
         side: 'additions',
@@ -688,6 +786,7 @@ test('review comment markdown includes file-level comments', () => {
         body: 'Please review the file structure.',
         filePath: 'src/comment.ts',
         id: 'comment-file',
+        kind: 'local-note',
         sectionId: 'src/comment.ts:unstaged',
       },
     ],
@@ -729,6 +828,7 @@ test('review comment markdown uses custom prefix', () => {
         body: 'Check this.',
         filePath: 'src/comment.ts',
         id: 'comment-1',
+        kind: 'local-note',
         lineNumber: 2,
         sectionId: 'src/comment.ts:unstaged',
         side: 'additions',
@@ -772,6 +872,7 @@ test('review comment markdown omits prefix when set to empty string', () => {
         body: 'Check this.',
         filePath: 'src/comment.ts',
         id: 'comment-1',
+        kind: 'local-note',
         lineNumber: 2,
         sectionId: 'src/comment.ts:unstaged',
         side: 'additions',
@@ -815,6 +916,7 @@ test('review comment markdown includes multi-line ranges', () => {
         body: 'These should be considered together.',
         filePath: 'src/range.ts',
         id: 'comment-1',
+        kind: 'local-note',
         lineNumber: 2,
         sectionId: 'src/range.ts:unstaged',
         side: 'additions',

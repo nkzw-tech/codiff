@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ReviewIdentity } from '../../lib/app-types.ts';
 import { isGeneratedWalkthroughFile } from '../../lib/narrative-walkthrough-diff.js';
 import {
@@ -9,19 +9,71 @@ import {
 import type { ChangedFile } from '../../types.ts';
 
 type UseReviewFileStateOptions = {
+  collapsed?: ReadonlySet<string>;
+  initialCollapsed?: ReadonlySet<string>;
   initialSelectedPath?: string | null;
+  initialViewed?: Record<string, string>;
+  onCollapsedChange?: (collapsed: Set<string>) => void;
   onViewedChange?: (viewed: Record<string, string>) => void;
+  viewed?: Readonly<Record<string, string>>;
 };
 
 export function useReviewFileState({
+  collapsed: controlledCollapsed,
+  initialCollapsed = new Set(),
   initialSelectedPath = null,
+  initialViewed = {},
+  onCollapsedChange,
   onViewedChange,
+  viewed: controlledViewed,
 }: UseReviewFileStateOptions = {}) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState<Set<string>>(
+    () => new Set(initialCollapsed),
+  );
   const [expandedGenerated, setExpandedGenerated] = useState<Set<string>>(() => new Set());
   const [itemVersionByKey, setItemVersionByKey] = useState<Record<string, number>>({});
   const [selectedPath, setSelectedPath] = useState<string | null>(initialSelectedPath);
-  const [viewed, setViewed] = useState<Record<string, string>>({});
+  const [uncontrolledViewed, setUncontrolledViewed] =
+    useState<Record<string, string>>(initialViewed);
+  const collapsed = useMemo(
+    () => (controlledCollapsed ? new Set(controlledCollapsed) : uncontrolledCollapsed),
+    [controlledCollapsed, uncontrolledCollapsed],
+  );
+  const viewed = controlledViewed ?? uncontrolledViewed;
+
+  const setCollapsed = useCallback<Dispatch<SetStateAction<Set<string>>>>(
+    (update) => {
+      if (controlledCollapsed == null) {
+        setUncontrolledCollapsed((current) => {
+          const next = typeof update === 'function' ? update(new Set(current)) : update;
+          onCollapsedChange?.(next);
+          return next;
+        });
+        return;
+      }
+      const current = new Set(controlledCollapsed);
+      const next = typeof update === 'function' ? update(current) : update;
+      onCollapsedChange?.(next);
+    },
+    [controlledCollapsed, onCollapsedChange],
+  );
+
+  const setViewed = useCallback<Dispatch<SetStateAction<Record<string, string>>>>(
+    (update) => {
+      if (controlledViewed == null) {
+        setUncontrolledViewed((current) => {
+          const next = typeof update === 'function' ? update({ ...current }) : update;
+          onViewedChange?.(next);
+          return next;
+        });
+        return;
+      }
+      const current = { ...controlledViewed };
+      const next = typeof update === 'function' ? update(current) : update;
+      onViewedChange?.(next);
+    },
+    [controlledViewed, onViewedChange],
+  );
 
   const bumpItemVersion = useCallback((key: string) => {
     setItemVersionByKey((current) => ({
@@ -52,7 +104,7 @@ export function useReviewFileState({
       });
       bumpItemVersion(reviewKey);
     },
-    [bumpItemVersion],
+    [bumpItemVersion, setCollapsed],
   );
 
   const toggleViewed = useCallback(
@@ -62,9 +114,7 @@ export function useReviewFileState({
       reviewIdentity: ReviewIdentity = getFileReviewIdentity(file),
     ) => {
       setViewed((current) => {
-        const next = updateReviewIdentityViewed(current, reviewIdentity, isViewed);
-        onViewedChange?.(next);
-        return next;
+        return updateReviewIdentityViewed(current, reviewIdentity, isViewed);
       });
       setCollapsed((current) => updateReviewIdentityCollapsed(current, reviewIdentity, isViewed));
       if (!isViewed) {
@@ -76,7 +126,7 @@ export function useReviewFileState({
       }
       bumpItemVersion(reviewIdentity.key);
     },
-    [bumpItemVersion, onViewedChange],
+    [bumpItemVersion, setCollapsed, setViewed],
   );
 
   return {

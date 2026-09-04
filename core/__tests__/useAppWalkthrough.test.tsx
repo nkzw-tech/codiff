@@ -6,9 +6,16 @@ import { act } from 'react';
 import { expect, test, vi } from 'vite-plus/test';
 import { useAppWalkthrough } from '../app/hooks/useAppWalkthrough.ts';
 import { createDefaultConfig } from '../config/defaults.ts';
-import type { NarrativeWalkthrough, RepositoryState, WalkthroughProgressEvent } from '../types.ts';
+import type {
+  GitSha,
+  NarrativeWalkthrough,
+  RepositoryState,
+  WalkthroughProgressEvent,
+} from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
+
+const gitSha = (value: string) => value as GitSha;
 
 type AppWalkthroughController = ReturnType<typeof useAppWalkthrough>;
 
@@ -106,6 +113,7 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
   }));
   await using view = await renderWalkthroughController({
     codiff: {
+      cancelNarrativeWalkthrough: vi.fn(async () => {}),
       getNarrativeWalkthrough,
       onWalkthroughProgress: vi.fn(() => () => {}),
     },
@@ -153,7 +161,7 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
 test('walkthrough controller routes progress, commit APIs, and sharing through current state', async () => {
   let onProgress: ((progress: WalkthroughProgressEvent) => void) | null = null;
   const createWalkthroughCommit = vi.fn(async () => ({
-    hash: 'abc123',
+    sha: gitSha('abc123'),
     status: 'committed' as const,
   }));
   const updateWalkthroughCommitMessage = vi.fn(async () => ({
@@ -168,6 +176,7 @@ test('walkthrough controller routes progress, commit APIs, and sharing through c
   const state = createRepositoryState();
   await using view = await renderWalkthroughController({
     codiff: {
+      cancelNarrativeWalkthrough: vi.fn(async () => {}),
       createWalkthroughCommit,
       onWalkthroughProgress: vi.fn((callback) => {
         onProgress = callback;
@@ -188,16 +197,35 @@ test('walkthrough controller routes progress, commit APIs, and sharing through c
   expect(getController().walkthroughProgress.phase).toBe('agent-generation');
   expect(getController().walkthroughProgress.stageRevision).toBe(1);
   await act(async () => {
+    onProgress?.({
+      generation: {
+        completed: 1,
+        phase: 'generating-units',
+        summary: 'Completed the first task.',
+        total: 2,
+        units: [
+          { id: 'first', label: 'First task', status: 'ready' },
+          { id: 'second', label: 'Second task', status: 'pending' },
+        ],
+      },
+    });
+  });
+  expect(getController().walkthroughProgress).toMatchObject({
+    generation: { completed: 1, phase: 'generating-units', total: 2 },
+    phase: 'agent-generation',
+    stageRevision: 1,
+  });
+  await act(async () => {
     await getController().commitWalkthrough({
       body: 'Body',
       paths: ['src/app.ts'],
-      source: { ref: 'old', type: 'commit' },
+      source: { sha: gitSha('old'), type: 'commit' },
       subject: 'Subject',
     });
     await getController().updateWalkthroughCommitMessage({
       body: 'Body',
       paths: ['src/app.ts'],
-      source: { ref: 'old', type: 'commit' },
+      source: { sha: gitSha('old'), type: 'commit' },
       subject: 'Subject',
     });
   });

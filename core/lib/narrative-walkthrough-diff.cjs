@@ -220,7 +220,7 @@ const fileHasRenameMetadata = (file) =>
 
 /**
  * @param {{oldPath?: string; path: string; status?: string}} file
- * @param {{binary?: boolean; loadState?: string; patch?: string; summary?: {reason?: string}}} section
+ * @param {{binary?: boolean; lineCount?: {additions: number; deletions: number}; loadState?: string; patch?: string; summary?: {reason?: string}}} section
  */
 const shouldCreateSyntheticHunk = (file, section) => {
   if (section.binary) {
@@ -232,13 +232,16 @@ const shouldCreateSyntheticHunk = (file, section) => {
   if (fileHasRenameMetadata(file)) {
     return true;
   }
+  if (section.lineCount != null) {
+    return true;
+  }
 
   return typeof section.patch === 'string' && section.patch.trim().length > 0;
 };
 
 /**
  * @param {{generated?: boolean; oldPath?: string; path: string; status: string}} file
- * @param {{binary?: boolean; id: string; kind: string; loadState?: string; patch?: string; summary?: {reason?: string}}} section
+ * @param {{binary?: boolean; id: string; kind: string; lineCount?: {additions: number; deletions: number}; loadState?: string; patch?: string; summary?: {reason?: string}}} section
  */
 const createSyntheticSectionHunk = (file, section, lineCount = { added: 0, deleted: 0 }) => ({
   added: lineCount.added,
@@ -262,7 +265,7 @@ const createSyntheticSectionHunk = (file, section, lineCount = { added: 0, delet
  * synthetic hunk so walkthroughs remain hunk-based for every visible change.
  *
  * @param {{generated?: boolean; oldPath?: string; path: string; status: string}} file
- * @param {{binary?: boolean; id: string; kind: string; loadState?: string; patch?: string; summary?: {reason?: string}}} section
+ * @param {{binary?: boolean; id: string; kind: string; lineCount?: {additions: number; deletions: number}; loadState?: string; patch?: string; summary?: {reason?: string}}} section
  */
 const getSectionWalkthroughHunks = (file, section) => {
   const patchHunks = extractPatchHunks(section.patch || '');
@@ -285,7 +288,18 @@ const getSectionWalkthroughHunks = (file, section) => {
   }
 
   return shouldCreateSyntheticHunk(file, section)
-    ? [createSyntheticSectionHunk(file, section)]
+    ? [
+        createSyntheticSectionHunk(
+          file,
+          section,
+          section.lineCount == null
+            ? undefined
+            : {
+                added: section.lineCount.additions,
+                deleted: section.lineCount.deletions,
+              },
+        ),
+      ]
     : [];
 };
 

@@ -6,10 +6,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
-import { ReviewSurface, type ReviewCommenting } from '../react.ts';
+import { createDefaultConfig } from '../config/defaults.ts';
+import { ReviewSurface } from '../ReviewSurface.tsx';
 import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
-import { renderReact, waitFor } from './helpers/react.tsx';
+import { waitFor } from './helpers/react.tsx';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   ResizeObserver?: typeof ResizeObserver;
@@ -20,6 +21,7 @@ reactActEnvironment.ResizeObserver ??= class ResizeObserver {
   unobserve() {}
 };
 HTMLElement.prototype.scrollBy ??= function scrollBy() {};
+HTMLElement.prototype.scrollIntoView ??= function scrollIntoView() {};
 HTMLElement.prototype.scrollTo ??= function scrollTo() {};
 
 const createMarkdownFile = (path = 'README.md') =>
@@ -57,290 +59,323 @@ const commenting = {
   onReplyGeneralComment: async () => {},
   onResolveDiscussion: async () => {},
   onSignIn: () => {},
-  onSubmitComment: async () => {
-    throw new Error('Not used by this test.');
-  },
   onSubmitGeneralComment: async () => {},
   onUpdateComment: async () => {},
   onUpdateGeneralComment: async () => {},
-} satisfies ReviewCommenting;
+};
 
-const sharedWalkthroughSource = { type: 'working-tree' } as const;
-const sharedWalkthroughSnapshot = {
-  branch: 'main',
-  codiffVersion: '1.4.1',
-  exportedAt: '2026-06-19T00:00:00.000Z',
-  files: [createChangedFile('src/app.ts')],
-  kind: 'codiff-walkthrough-share',
-  preferences: {
-    codeFontFamily: 'Fira Code',
-    codeFontSize: 13,
-    diffStyle: 'split',
-    showWhitespace: false,
-    theme: 'system',
-    wordWrap: false,
-  },
-  repository: { root: '/Users/ada/dev/codiff-web', source: sharedWalkthroughSource },
-  version: 1,
-  walkthrough: {
-    agent: 'codex',
-    chapters: [],
-    focus: 'Focus on the implementation.',
-    generatedAt: '2026-06-19T00:00:00.000Z',
-    kind: 'narrative',
-    repo: { branch: 'main', root: '/Users/ada/dev/codiff-web' },
-    source: sharedWalkthroughSource,
-    support: [],
-    title: 'Shared walkthrough',
-    version: 4,
-  },
-} satisfies SharedWalkthroughSnapshot;
+test('review top bar renders its leading control at the far left', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
 
-test.each([
-  { iconTransform: null, position: 'left' },
-  { iconTransform: 'scale(-1, 1)', position: 'right' },
-] as const)('review top bar places its sidebar control on the $position', async (testCase) => {
-  await using view = await renderReact(
-    <ReviewTopBar
-      leading={
-        <button className="codiff-logo" type="button">
-          Codiff
-        </button>
-      }
-      mode="tree"
-      modes={[{ icon: null, label: 'Tree', value: 'tree' }]}
-      onModeChange={() => {}}
-      onToggleSidebar={() => {}}
-      repository="cloudflare/voidzero/codiff-web"
-      sidebarCollapsed={false}
-      sidebarPosition={testCase.position}
-      toggleTitle="Collapse sidebar"
-    />,
-  );
+  await act(async () => {
+    root.render(
+      <ReviewTopBar
+        leading={
+          <button className="codiff-logo" type="button">
+            Codiff
+          </button>
+        }
+        mode="tree"
+        modes={[{ icon: null, label: 'Tree', value: 'tree' }]}
+        onModeChange={() => {}}
+        onToggleSidebar={() => {}}
+        repository="cloudflare/voidzero/codiff-web"
+        sidebarCollapsed={false}
+        toggleTitle="Collapse sidebar"
+      />,
+    );
+  });
 
-  const leftRegion = view.container.querySelector('.review-top-bar-left');
+  const leftRegion = container.querySelector('.review-top-bar-left');
   expect(leftRegion?.firstElementChild?.className).toBe('codiff-logo');
   expect(leftRegion?.nextElementSibling?.classList.contains('review-mode-control')).toBe(true);
   expect(leftRegion?.nextElementSibling?.nextElementSibling?.className).toBe(
     'review-top-bar-right',
   );
-  const toggle = view.container.querySelector(
-    `.review-top-bar-${testCase.position} > .sidebar-toggle-button`,
-  );
-  expect(toggle).not.toBeNull();
-  expect(toggle?.querySelector('svg')?.getAttribute('transform')).toBe(testCase.iconTransform);
-});
 
-test.each([
-  { columns: '292px 0 minmax(0, 1fr)', position: 'left' },
-  { columns: 'minmax(0, 1fr) 0 292px', position: 'right' },
-] as const)('$position review surface layout', async (testCase) => {
-  window.localStorage.clear();
-  await using view = await renderReact(
-    <ReviewSurface sidebarPosition={testCase.position} snapshot={sharedWalkthroughSnapshot} />,
-  );
-
-  const shell = view.container.querySelector<HTMLElement>('.app-shell');
-  expect(shell?.dataset.sidebarPosition).toBe(testCase.position);
-  await waitFor(() => {
-    expect(shell?.style.gridTemplateColumns).toBe(testCase.columns);
-  });
-});
-
-test('review surface starts with the sidebar collapsed on mobile viewports', async () => {
-  window.localStorage.clear();
-  const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(
-    (query) =>
-      ({
-        addEventListener() {},
-        addListener() {},
-        dispatchEvent: () => false,
-        matches: query === '(max-width: 720px)',
-        media: query,
-        onchange: null,
-        removeEventListener() {},
-        removeListener() {},
-      }) as MediaQueryList,
-  );
-
-  try {
-    await using view = await renderReact(<ReviewSurface snapshot={sharedWalkthroughSnapshot} />);
-
-    await waitFor(() => {
-      expect(
-        view.container.querySelector('.app-shell')?.classList.contains('sidebar-collapsed'),
-      ).toBe(true);
-      expect(
-        view.container
-          .querySelector<HTMLButtonElement>('.sidebar-toggle-button')
-          ?.getAttribute('aria-label'),
-      ).toBe('Expand sidebar');
-    });
-
-    await act(async () => {
-      view.container.querySelector<HTMLButtonElement>('.sidebar-toggle-button')?.click();
-    });
-    expect(
-      view.container.querySelector('.app-shell')?.classList.contains('sidebar-collapsed'),
-    ).toBe(false);
-    expect(
-      JSON.parse(window.localStorage.getItem('codiff:web-review-surface-preferences:v1') ?? '{}'),
-    ).toEqual({ sidebarCollapsed: false });
-
-    await using persistedView = await renderReact(
-      <ReviewSurface snapshot={sharedWalkthroughSnapshot} />,
-    );
-    await waitFor(() => {
-      expect(
-        persistedView.container
-          .querySelector('.app-shell')
-          ?.classList.contains('sidebar-collapsed'),
-      ).toBe(false);
-    });
-  } finally {
-    window.localStorage.clear();
-    matchMedia.mockRestore();
-  }
-});
-
-test('a resolved general discussion stays collapsed unless its hash targets the thread', async () => {
-  let finishResolve: (() => void) | null = null;
-  const onResolveDiscussion = vi.fn(
-    () =>
-      new Promise<void>((resolve) => {
-        finishResolve = resolve;
-      }),
-  );
-  const resolvedSnapshot = {
-    ...sharedWalkthroughSnapshot,
-    repository: {
-      ...sharedWalkthroughSnapshot.repository,
-      generalComments: [
-        {
-          canReply: true,
-          canResolve: true,
-          comments: [
-            {
-              author: { login: 'reviewer' },
-              body: 'This conversation is resolved.',
-              id: 'gitlab:200',
-              url: 'https://gitlab.example.com/group/project/-/merge_requests/1#note_200',
-            },
-          ],
-          id: 'general-discussion',
-          isResolved: true,
-        },
-      ],
-    },
-  } satisfies SharedWalkthroughSnapshot;
-
-  window.history.replaceState(null, '', '/review');
-  await using collapsedView = await renderReact(
-    <ReviewSurface
-      commenting={{ ...commenting, canComment: true, onResolveDiscussion }}
-      initialMode="comments"
-      snapshot={resolvedSnapshot}
-    />,
-  );
-  expect(
-    collapsedView.container
-      .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
-      ?.getAttribute('aria-expanded'),
-  ).toBe('false');
-  expect(collapsedView.container.querySelector('.resolved-thread-content')).toBeNull();
-
-  window.history.replaceState(null, '', '/review#general-discussion');
-  window.dispatchEvent(new HashChangeEvent('hashchange'));
-  await waitFor(() => {
-    expect(
-      collapsedView.container
-        .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
-        ?.getAttribute('aria-expanded'),
-    ).toBe('true');
-    expect(collapsedView.container.textContent).toContain('This conversation is resolved.');
-  });
-
-  const reopen = [...collapsedView.container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent === 'Reopen',
-  );
-  await act(async () => reopen?.click());
-  expect(onResolveDiscussion).toHaveBeenCalledWith('general-discussion', false);
-  expect(collapsedView.container.querySelector('.resolved-thread-toggle')).toBeNull();
-  expect(
-    [...collapsedView.container.querySelectorAll<HTMLButtonElement>('button')].some(
-      (button) => button.textContent === 'Reply',
-    ),
-  ).toBe(false);
-
-  await act(async () => finishResolve?.());
-  expect(
-    [...collapsedView.container.querySelectorAll<HTMLButtonElement>('button')].some(
-      (button) => button.textContent === 'Reply',
-    ),
-  ).toBe(true);
-  window.history.replaceState(null, '', '/');
-});
-
-test('a resolved inline discussion expands when its note hash is targeted', async () => {
-  const resolvedSnapshot = {
-    ...sharedWalkthroughSnapshot,
-    reviewComments: [
-      {
-        author: { login: 'reviewer' },
-        body: 'This inline conversation is resolved.',
-        canResolveThread: true,
-        filePath: 'src/app.ts',
-        id: 'gitlab:99',
-        isThreadResolved: true,
-        lineNumber: 1,
-        side: 'additions',
-        threadId: 'line-discussion',
-        url: 'https://gitlab.example.com/group/project/-/merge_requests/1#note_99',
-      },
-    ],
-  } satisfies SharedWalkthroughSnapshot;
-
-  window.history.replaceState(null, '', '/review#note_99');
-  await using view = await renderReact(
-    <ReviewSurface commenting={commenting} initialMode="tree" snapshot={resolvedSnapshot} />,
-  );
-
-  await waitFor(() => {
-    expect(
-      view.container
-        .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
-        ?.getAttribute('aria-expanded'),
-    ).toBe('true');
-    expect(view.container.textContent).toContain('This inline conversation is resolved.');
-  });
-  window.history.replaceState(null, '', '/');
+  await act(async () => root.unmount());
+  container.remove();
 });
 
 test('share viewer shows the complete repository path when there is no repository link', async () => {
+  const file = createChangedFile('src/app.ts');
+  const source = { type: 'working-tree' } as const;
+  const snapshot = {
+    branch: 'main',
+    codiffVersion: '1.4.1',
+    exportedAt: '2026-06-19T00:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/Users/ada/dev/codiff-web', source },
+    reviewComments: [],
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the change.',
+      generatedAt: '2026-06-19T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'main', root: '/Users/ada/dev/codiff-web' },
+      source,
+      support: [],
+      title: 'Review',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const originalHome = process.env.HOME;
+  process.env.HOME = '/Users/ada';
   const container = document.createElement('div');
   document.body.append(container);
-  let root: Root | null = null;
-  await using _resource = {
-    async [Symbol.asyncDispose]() {
-      if (root) {
-        await act(async () => root?.unmount());
-      }
-      container.remove();
-    },
-  };
-  await act(async () => {
-    root = createRoot(container);
-    root.render(
-      <ReviewSurface snapshot={sharedWalkthroughSnapshot} title="Review shared walkthrough" />,
-    );
-  });
+  let root!: Root;
 
-  await waitFor(() => {
-    expect(container.querySelector('.review-top-bar-repository')).not.toBeNull();
-  });
-  expect(container.querySelector('.review-top-bar-repository')?.textContent).toBe(
-    '~/dev/codiff-web',
-  );
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<ReviewSurface snapshot={snapshot} title="Review shared walkthrough" />);
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.review-top-bar-repository')).not.toBeNull();
+    });
+    expect(container.querySelector('.review-top-bar-repository')?.textContent).toBe(
+      '~/dev/codiff-web',
+    );
+  } finally {
+    if (originalHome == null) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('shared review surface owns configured search and portable commands', async () => {
+  const file = createChangedFile('src/shared-command.ts');
+  const snapshot = {
+    branch: 'main',
+    codiffVersion: 'test',
+    exportedAt: '2026-07-29T00:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source: { type: 'working-tree' } },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the change.',
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'main', root: '/repo' },
+      source: { type: 'working-tree' },
+      support: [],
+      title: 'Review',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const keymap = {
+    ...createDefaultConfig().keymap,
+    commandBar: 'Ctrl+p',
+    diffSearch: 'Ctrl+g',
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(<ReviewSurface initialMode="tree" keymap={keymap} snapshot={snapshot} />);
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'g' }),
+      );
+    });
+    expect(container.querySelector('.diff-search-panel.visible')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'p' }),
+      );
+    });
+    const commandBar = container.querySelector('.command-bar');
+    expect(commandBar?.textContent).toContain('Find in Diffs');
+    expect(commandBar?.textContent).not.toContain('Open File in Editor');
+    expect(commandBar?.textContent).not.toContain('Open Config File');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('review threads expose provider provenance and code status navigates to the current diff', async () => {
+  const firstFile = createChangedFile('src/first.ts');
+  const file = createChangedFile('src/thread.ts', { kind: 'pull-request' });
+  const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+  const source = {
+    number: 31,
+    projectPath: 'example-org/example-repo',
+    provider: 'gitlab',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/example-org/example-repo/-/merge_requests/31',
+  } as const;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: 'test',
+    exportedAt: '2026-07-29T00:00:00.000Z',
+    files: [firstFile, file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: {
+      generalComments: [
+        {
+          comments: [
+            {
+              author: {
+                login: 'overview-reviewer',
+                name: 'Overview Reviewer',
+                url: 'https://gitlab.example.com/overview-reviewer',
+              },
+              body: 'Overview feedback.',
+              id: 'overview-comment',
+              submittedAt: '2026-07-29T00:00:00.000Z',
+              url: `${source.url}#note_1`,
+            },
+          ],
+          id: 'overview-thread',
+        },
+      ],
+      root: '/repo',
+      source,
+    },
+    reviewComments: [
+      {
+        author: {
+          login: 'code-reviewer',
+          name: 'Code Reviewer',
+          url: 'https://gitlab.example.com/code-reviewer',
+        },
+        body: 'This line changed later.',
+        filePath: file.path,
+        id: 'outdated-comment',
+        isOutdated: true,
+        lineNumber: 1,
+        position: { range: file.sections[0]!.range! },
+        sectionId: file.sections[0]!.id,
+        side: 'additions' as const,
+        submittedAt: '2026-07-29T00:01:00.000Z',
+        url: `${source.url}#note_2`,
+      },
+    ],
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the change.',
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'feature', root: '/repo' },
+      source,
+      support: [],
+      title: 'Review',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            comments: {
+              authoring: {},
+              destination: 'provider',
+              inline: {},
+            },
+            desktop: { collapsed: new Set([file.path]) },
+          }}
+          initialMode="comments"
+          providerLabel="GitLab"
+          snapshot={snapshot}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Overview comments');
+    expect(container.textContent).toContain('Inline review comments');
+    expect(
+      [...container.querySelectorAll('[role="tab"]')]
+        .find((tab) => tab.textContent?.includes('Comments'))
+        ?.getAttribute('aria-label'),
+    ).toBe('Comments (2)');
+    expect(
+      container.querySelector(`a[href="https://gitlab.example.com/overview-reviewer"]`),
+    ).not.toBeNull();
+    const overviewPermalink = container.querySelector<HTMLAnchorElement>(
+      `a[href="${source.url}#note_1"]`,
+    );
+    expect(overviewPermalink?.textContent).toContain('View on GitLab');
+
+    const outdatedStatus = [...container.querySelectorAll('span')].find(
+      ({ textContent }) => textContent === 'Outdated',
+    );
+    expect(outdatedStatus?.getAttribute('role')).toBeNull();
+    const inlineEntry = [
+      ...container.querySelectorAll<HTMLButtonElement>('.sidebar-comment-entry'),
+    ].find((entry) => entry.title === 'This line changed later.');
+    expect(inlineEntry).not.toBeUndefined();
+    await act(async () => inlineEntry?.click());
+    await waitFor(() => expect(container.querySelector('.file-tree-shell')).not.toBeNull());
+    await waitFor(() =>
+      expect(
+        container.querySelector('.codiff-file-header.selected .codiff-file-path')?.textContent,
+      ).toBe(file.path),
+    );
+    const targetHeader = [...container.querySelectorAll<HTMLElement>('.codiff-file-header')].find(
+      (header) => header.textContent?.includes(file.path),
+    );
+    expect(
+      targetHeader
+        ?.querySelector<HTMLElement>('.codiff-header-toggle')
+        ?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('review-comment-thread')).toBe(true),
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+  } finally {
+    scrollIntoView.mockRestore();
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });
 
 test('shared walkthroughs switch between walkthrough and tree review modes', async () => {
@@ -437,7 +472,25 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
     root = createRoot(container);
     root.render(
       <ReviewSurface
-        commenting={commenting}
+        capabilities={{
+          comments: {
+            authoring: { canCreateInline: false },
+            destination: 'share',
+            general: {
+              onCreate: commenting.onSubmitGeneralComment,
+              onDelete: commenting.onDeleteGeneralComment,
+              onReply: commenting.onReplyGeneralComment,
+              onResolve: commenting.onResolveDiscussion,
+              onUpdate: commenting.onUpdateGeneralComment,
+            },
+            inline: {
+              onDelete: commenting.onDeleteComment,
+              onResolve: commenting.onResolveDiscussion,
+              onUpdate: commenting.onUpdateComment,
+            },
+            onSignIn: commenting.onSignIn,
+          },
+        }}
         onDeleteShare={onDeleteShare}
         providerLabel="GitLab"
         repositoryUrl="/cloudflare/voidzero/codiff-web"
@@ -449,8 +502,13 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
   await waitFor(() => {
     expect(container.querySelector('.walkthrough-list')).not.toBeNull();
   });
-  const searchInput = container.querySelector<HTMLInputElement>('.sidebar-search');
-  expect(searchInput).not.toBeNull();
+  const walkthroughArc = container.querySelector('.wt-arc');
+  const walkthroughBody = container.querySelector('.wt-hybrid');
+  expect(walkthroughArc).not.toBeNull();
+  expect(walkthroughBody).not.toBeNull();
+  expect(walkthroughBody?.contains(walkthroughArc)).toBe(false);
+  expect(walkthroughArc?.parentElement).toBe(walkthroughBody?.parentElement);
+  expect(container.querySelector('.sidebar-search')).toBeNull();
   const deleteShare = container.querySelector<HTMLButtonElement>(
     'button[aria-label="Delete shared walkthrough"]',
   );
@@ -463,8 +521,6 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
   confirmDelete.mockReturnValue(true);
   await act(async () => deleteShare?.click());
   await waitFor(() => expect(onDeleteShare).toHaveBeenCalledOnce());
-  expect(searchInput?.placeholder).toBe('Filter files');
-  const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
   const tablist = container.querySelector('[role="tablist"]');
   expect(tablist?.classList.contains('review-mode-control')).toBe(true);
   const topBar = tablist?.closest('.review-top-bar');
@@ -510,6 +566,9 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
   ).toBe(true);
   expect(tabs[0]?.getAttribute('aria-selected')).toBe('false');
   expect(tabs[1]?.getAttribute('aria-selected')).toBe('true');
+  const searchInput = container.querySelector<HTMLInputElement>('.sidebar-search');
+  expect(searchInput?.placeholder).toBe('Filter files');
+  const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
   const sidebarToggle = container.querySelector<HTMLButtonElement>(
     '.review-top-bar .sidebar-toggle-button',
   );
@@ -561,6 +620,7 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
   await waitFor(() => {
     expect(container.querySelector('.walkthrough-list')).not.toBeNull();
     expect(container.querySelector('.file-tree-shell')).toBeNull();
+    expect(container.querySelector('.sidebar-search')).toBeNull();
   });
 });
 

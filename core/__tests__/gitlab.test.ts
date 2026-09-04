@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, test } from 'vite-plus/test';
+import type { SubmitPullRequestReviewResult } from '../types.ts';
 import { createTemporaryDirectory, createTemporaryEnvironment } from './helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
@@ -16,8 +17,11 @@ type GitLabPosition = Record<string, unknown> & {
 const {
   createGitLabPosition,
   createMergeRequestFetchRefspecs,
+  createMergeRequestSource,
+  normalizeGitLabGeneralDiscussion,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
+  readMergeRequestReviewComments,
   submitMergeRequestComment,
   submitMergeRequestReview,
 } = require('../../electron/git-state/merge-request.cjs') as {
@@ -30,11 +34,28 @@ const {
     mergeRequest: Record<string, unknown>,
     metadata: Record<string, unknown>,
   ) => ReadonlyArray<string>;
+  createMergeRequestSource: (
+    mergeRequest: Record<string, unknown>,
+    metadata: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  normalizeGitLabGeneralDiscussion: (
+    discussion: Record<string, unknown>,
+    url: string,
+  ) => Record<string, unknown> | null;
   normalizeGitLabReviewComment: (
     note: Record<string, unknown>,
     url: string,
+    threadId?: string,
+    rootNote?: Record<string, unknown>,
   ) => Record<string, unknown> | null;
   parseGitLabMergeRequestUrl: (url: string) => Record<string, unknown>;
+  readMergeRequestReviewComments: (
+    launchPath: string,
+    source: Record<string, unknown>,
+  ) => Promise<{
+    generalComments: ReadonlyArray<Record<string, unknown>>;
+    reviewComments: ReadonlyArray<Record<string, unknown>>;
+  }>;
   submitMergeRequestComment: (
     launchPath: string,
     request: {
@@ -50,7 +71,7 @@ const {
       event: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
       source: Record<string, unknown>;
     },
-  ) => Promise<void>;
+  ) => Promise<SubmitPullRequestReviewResult>;
 };
 
 const execFileAsync = promisify(execFile);
@@ -95,6 +116,19 @@ process.stdin.on('end', () => {
     );
     return;
   }
+  if (endpoint.endsWith('/discussions?per_page=100')) {
+    process.stdout.write(JSON.stringify([{
+      id: 'discussion-from-provider',
+      notes: [{
+        author: { username: 'reviewer' },
+        body: 'Loaded discussion comment.',
+        created_at: '2026-07-08T00:00:00Z',
+        id: 47,
+        position: { new_line: 12, new_path: 'src/new.ts', old_path: 'src/old.ts' },
+      }],
+    }]));
+    return;
+  }
   if (endpoint.endsWith('/discussions/discussion%2Fwith%20spaces/notes')) {
     process.stdout.write(JSON.stringify({
       author: { username: 'reviewer' },
@@ -102,6 +136,10 @@ process.stdin.on('end', () => {
       created_at: '2026-07-08T00:00:00Z',
       id: 46,
     }));
+    return;
+  }
+  if (endpoint.endsWith('/draft_notes')) {
+    process.stdout.write(JSON.stringify({ id: 101 }));
     return;
   }
   if (endpoint.endsWith('/merge_requests/23')) {
@@ -174,6 +212,24 @@ describe('GitLab merge requests', () => {
       '+refs/merge-requests/23/head:refs/codiff/merge-requests/23/head',
       '+refs/heads/main:refs/codiff/merge-requests/23/base',
     ]);
+  });
+
+  test('preserves the GitLab target branch in the review source', () => {
+    expect(
+      createMergeRequestSource(
+        {
+          host: 'gitlab.example.com',
+          number: 23,
+          projectPath: 'group/project',
+          url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+        },
+        {
+          sha: 'head-sha',
+          target_branch: 'main',
+          title: 'Focused fix',
+        },
+      ),
+    ).toMatchObject({ provider: 'gitlab', targetBranch: 'main', type: 'pull-request' });
   });
 
   test('builds single-line and ranged GitLab diff positions', () => {
@@ -289,6 +345,7 @@ describe('GitLab merge requests', () => {
           },
         },
         'https://gitlab.example.com/group/project/-/merge_requests/23',
+        'discussion-44',
       ),
     ).toMatchObject({
       author: { login: 'reviewer' },
@@ -297,6 +354,7 @@ describe('GitLab merge requests', () => {
       id: 'gitlab:44',
       lineNumber: 12,
       side: 'additions',
+      threadId: 'discussion-44',
       url: 'https://gitlab.example.com/group/project/-/merge_requests/23#note_44',
     });
   });
@@ -327,39 +385,193 @@ describe('GitLab merge requests', () => {
     });
   });
 
+  test('makes GitLab replies inherit the root position, range, and thread identity', () => {
+    const root = {
+      author: { username: 'root-reviewer' },
+      body: 'Root.',
+      created_at: '2026-06-17T00:00:00Z',
+      id: 44,
+      position: {
+        base_sha: 'a'.repeat(40),
+        head_sha: 'b'.repeat(40),
+        line_range: {
+          end: { new_line: 14, old_line: null, type: 'new' },
+          start: { new_line: null, old_line: 10, type: 'old' },
+        },
+        new_line: 14,
+        new_path: 'src/new-name.ts',
+        old_line: 10,
+        old_path: 'src/old-name.ts',
+      },
+      resolvable: true,
+    };
+    const reply = {
+      author: { username: 'reply-reviewer' },
+      body: 'Reply with misleading coordinates.',
+      created_at: '2026-06-18T00:00:00Z',
+      id: 45,
+      position: {
+        new_line: 99,
+        new_path: 'src/reply.ts',
+        old_path: 'src/reply.ts',
+      },
+    };
+
+    expect(
+      normalizeGitLabReviewComment(
+        reply,
+        'https://gitlab.example.com/group/project/-/merge_requests/23',
+        'discussion-44',
+        root,
+      ),
+    ).toMatchObject({
+      body: 'Reply with misleading coordinates.',
+      canResolveThread: true,
+      filePath: 'src/new-name.ts',
+      lineNumber: 14,
+      position: {
+        range: {
+          base: { sha: 'a'.repeat(40) },
+          head: { sha: 'b'.repeat(40) },
+        },
+      },
+      side: 'additions',
+      startLineNumber: 10,
+      startSide: 'deletions',
+      threadId: 'discussion-44',
+    });
+  });
+
+  test('uses original GitLab positions for outdated old-side and file comments', () => {
+    const url = 'https://gitlab.example.com/group/project/-/merge_requests/23';
+    const oldSide = normalizeGitLabReviewComment(
+      {
+        author: { username: 'reviewer' },
+        body: 'Historical old-side comment.',
+        created_at: '2026-06-17T00:00:00Z',
+        id: 46,
+        original_position: {
+          base_sha: 'a'.repeat(40),
+          head_sha: 'b'.repeat(40),
+          new_path: 'src/new-name.ts',
+          old_line: 7,
+          old_path: 'src/old-name.ts',
+        },
+      },
+      url,
+    );
+    const file = normalizeGitLabReviewComment(
+      {
+        author: { username: 'reviewer' },
+        body: 'Historical file comment.',
+        created_at: '2026-06-17T00:00:00Z',
+        id: 47,
+        original_position: {
+          base_sha: 'a'.repeat(40),
+          head_sha: 'b'.repeat(40),
+          new_path: 'src/new-name.ts',
+          old_path: 'src/old-name.ts',
+          position_type: 'file',
+        },
+      },
+      url,
+    );
+
+    expect(oldSide).toMatchObject({
+      filePath: 'src/new-name.ts',
+      isOutdated: true,
+      lineNumber: 7,
+      side: 'deletions',
+    });
+    expect(file).toMatchObject({
+      anchor: 'file',
+      filePath: 'src/new-name.ts',
+      isOutdated: true,
+    });
+  });
+
+  test('maps positionless GitLab discussions to overview threads', () => {
+    expect(
+      normalizeGitLabGeneralDiscussion(
+        {
+          id: 'overview-thread',
+          notes: [
+            {
+              author: { username: 'author' },
+              body: 'Overview root.',
+              created_at: '2026-06-17T00:00:00Z',
+              id: 50,
+              resolvable: true,
+            },
+            {
+              author: { username: 'reply-author' },
+              body: 'Overview reply.',
+              created_at: '2026-06-18T00:00:00Z',
+              id: 51,
+            },
+          ],
+        },
+        'https://gitlab.example.com/group/project/-/merge_requests/23',
+      ),
+    ).toMatchObject({
+      canResolve: true,
+      comments: [
+        { body: 'Overview root.', id: 'gitlab:50' },
+        { body: 'Overview reply.', id: 'gitlab:51' },
+      ],
+      id: 'overview-thread',
+    });
+  });
+
   test('submits GitLab reviews with paginated diffs and JSON request bodies', async () => {
     await withFakeGitLab(async (repo, readCalls) => {
       const source = {
+        headSha: 'head',
         provider: 'gitlab',
         type: 'pull-request',
         url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
       };
 
-      await submitMergeRequestReview(repo, {
-        body: 'Looks good.',
-        comments: [
-          {
-            body: 'Keep this explicit.',
-            filePath: 'src/new.ts',
-            lineNumber: 12,
-            side: 'additions',
-          },
-        ],
-        event: 'APPROVE',
-        source,
-      });
-      await submitMergeRequestReview(repo, {
-        comments: [],
-        event: 'REQUEST_CHANGES',
-        source,
-      });
       await expect(
         submitMergeRequestReview(repo, {
+          body: 'Looks good.',
+          comments: [
+            {
+              body: 'Keep this explicit.',
+              filePath: 'src/new.ts',
+              lineNumber: 12,
+              localDraftId: 'draft-1',
+              position: {
+                range: {
+                  base: { label: { kind: 'commit', text: 'base' }, sha: 'base' },
+                  head: { label: { kind: 'commit', text: 'head' }, sha: 'head' },
+                },
+              },
+              side: 'additions',
+            },
+          ],
+          event: 'APPROVE',
+          source,
+        }),
+      ).resolves.toEqual({ status: 'submitted', submittedDraftIds: ['draft-1'] });
+      await expect(
+        submitMergeRequestReview(repo, {
+          comments: [],
+          event: 'REQUEST_CHANGES',
+          source,
+        }),
+      ).resolves.toEqual({ status: 'submitted', submittedDraftIds: [] });
+      await expect(
+        submitMergeRequestReview(repo, {
+          body: 'Neutral review summary.',
           comments: [],
           event: 'COMMENT',
           source,
         }),
-      ).rejects.toThrow('GitLab merge request reviews do not support COMMENT.');
+      ).resolves.toEqual({
+        status: 'submitted',
+        submittedDraftIds: [],
+      });
 
       const calls = await readCalls();
       const requestsWithBodies = calls.filter((call) => call.input);
@@ -386,6 +598,34 @@ describe('GitLab merge requests', () => {
         'Looks good.\n\n/submit_review approve',
         '/submit_review request_changes',
       ]);
+      const neutralPublication = calls.find((call) =>
+        call.args.at(-1)?.endsWith('/draft_notes/bulk_publish'),
+      );
+      expect(JSON.parse(neutralPublication?.input || '')).toEqual({
+        note: 'Neutral review summary.',
+        reviewer_state: 'reviewed',
+      });
+    });
+  });
+
+  test('loads GitLab discussion IDs as provider thread identity', async () => {
+    await withFakeGitLab(async (repo) => {
+      await expect(
+        readMergeRequestReviewComments(repo, {
+          provider: 'gitlab',
+          type: 'pull-request',
+          url: 'https://gitlab.example.com/group/project/-/merge_requests/23',
+        }),
+      ).resolves.toEqual({
+        generalComments: [],
+        reviewComments: [
+          expect.objectContaining({
+            body: 'Loaded discussion comment.',
+            id: 'gitlab:47',
+            threadId: 'discussion-from-provider',
+          }),
+        ],
+      });
     });
   });
 
@@ -416,7 +656,7 @@ describe('GitLab merge requests', () => {
 
       const [call] = await readCalls();
       expect(call.args.at(-1)).toBe(
-        'projects/group%2Fproject/merge_requests/23/discussions/discussion%2Fwith%20spaces/notes',
+        '/projects/group%2Fproject/merge_requests/23/discussions/discussion%2Fwith%20spaces/notes',
       );
       expect(call.args).toContain('Content-Type: application/json');
       expect(JSON.parse(call.input)).toEqual({ body: 'Reply in the existing discussion.' });
@@ -456,7 +696,7 @@ if [ "$GITLAB_TOKEN" != 'from-login-shell' ]; then
   echo 'To get started with GitLab CLI, please run:  glab auth login.' >&2
   exit 4
 fi
-printf '%s' '{}'
+printf '%s' '[]'
 `,
     );
     await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);
@@ -507,7 +747,7 @@ if [ "$GITLAB_TOKEN" != 'from-process' ]; then
   echo 'Expected the process GITLAB_TOKEN to win, got:' "$GITLAB_TOKEN" >&2
   exit 4
 fi
-printf '%s' '{}'
+printf '%s' '[]'
 `,
     );
     await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);

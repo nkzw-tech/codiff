@@ -26,6 +26,8 @@ export default defineConfig({
       'pnpm-lock.yaml',
       'core/__generated__/',
       'core/node_modules/',
+      'gitlab/node_modules/',
+      'gitlab/dist/',
       'service/node_modules/',
       'service/dist/',
       'web/.fate/',
@@ -42,6 +44,8 @@ export default defineConfig({
       'dist/',
       'electron/',
       'core/node_modules/',
+      'gitlab/node_modules/',
+      'gitlab/dist/',
       'service/node_modules/',
       'service/dist/',
       'web/.fate/',
@@ -101,18 +105,27 @@ export default defineConfig({
       },
     },
   },
+  server: {
+    watch: {
+      // Jujutsu operation files change with local history, not product source.
+      ignored: ['**/.jj/**'],
+    },
+  },
   staged: {
     '*': 'vp check --fix',
   },
   test: {
     include: [
       'core/**/*.test.{ts,tsx}',
+      'gitlab/**/*.test.ts',
+      'github/**/*.test.ts',
       'electron/**/*.test.ts',
       'service/**/*.test.ts',
       'web/**/*.test.{ts,tsx}',
     ],
     maxWorkers: testWorkers,
     setupFiles: ['./core/__tests__/setup.ts'],
+    testTimeout: 15_000,
   },
   worker: {
     format: 'es',

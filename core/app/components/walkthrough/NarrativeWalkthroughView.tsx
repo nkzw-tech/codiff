@@ -675,12 +675,7 @@ export function NarrativeWalkthroughView({
     : null;
 
   return (
-    <div
-      className="wt-hybrid"
-      onPointerDownCapture={navigation.releaseStopScrollLock}
-      onTouchStartCapture={navigation.releaseStopScrollLock}
-      onWheelCapture={navigation.releaseStopScrollLock}
-    >
+    <>
       <Arc
         committable={committable}
         navigation={navigation}
@@ -689,111 +684,117 @@ export function NarrativeWalkthroughView({
         supportAvailable={supportAvailable}
         walkthroughView={walkthroughView}
       />
+      <div
+        className="wt-hybrid"
+        onPointerDownCapture={navigation.releaseStopScrollLock}
+        onTouchStartCapture={navigation.releaseStopScrollLock}
+        onWheelCapture={navigation.releaseStopScrollLock}
+      >
+        {navigation.mode === 'commit' ? (
+          <CommitView
+            branch={walkthrough.repo.branch}
+            draft={navigation}
+            model={buildCommitModel(walkthroughView, files)}
+            onCommit={onCommit}
+            onCommitOutput={onCommitOutput}
+            onUpdateMessage={onUpdateCommitMessage}
+          />
+        ) : walkthroughView.sequence.length > 0 ? (
+          renderDiffBlocks(reviewBlocks, reviewBlockScrollTarget, handleActiveBlockChange)
+        ) : (
+          renderDiffBlocks(reviewBlocks, reviewBlockScrollTarget, handleActiveBlockChange)
+        )}
 
-      {navigation.mode === 'commit' ? (
-        <CommitView
-          branch={walkthrough.repo.branch}
-          draft={navigation}
-          model={buildCommitModel(walkthroughView, files)}
-          onCommit={onCommit}
-          onCommitOutput={onCommitOutput}
-          onUpdateMessage={onUpdateCommitMessage}
-        />
-      ) : walkthroughView.sequence.length > 0 ? (
-        renderDiffBlocks(reviewBlocks, reviewBlockScrollTarget, handleActiveBlockChange)
-      ) : (
-        renderDiffBlocks(reviewBlocks, reviewBlockScrollTarget, handleActiveBlockChange)
-      )}
-
-      {navigation.mode === 'commit' ? null : completionAction ? (
-        <button
-          className="wt-upnext complete"
-          disabled={!completionAction.onClick}
-          onClick={completionAction.onClick ?? undefined}
-          type="button"
-        >
-          <span className="wt-upnext-action">
-            <span className="wt-upnext-main">
-              <span className="wt-upnext-label">Walkthrough complete:</span>{' '}
-              <span className="wt-upnext-title">{completionAction.title}</span>
-            </span>
-            {'file' in completionAction ? (
-              <span className="wt-upnext-file">{completionAction.file}</span>
-            ) : null}
-            <span className="wt-upnext-complete-check">
-              <Check size={12} weight="bold" />
-            </span>
-          </span>
-        </button>
-      ) : navigation.mode === 'stop' && next ? (
-        <button className="wt-upnext" onClick={navigation.goNext} type="button">
-          <span className="wt-upnext-action">
-            <span className="wt-upnext-main">
-              <span className="wt-upnext-label">Next:</span>{' '}
-              <span className="wt-upnext-title">
-                {next.title ?? walkthroughItemTitleFallback(next)}
+        {navigation.mode === 'commit' ? null : completionAction ? (
+          <button
+            className="wt-upnext complete"
+            disabled={!completionAction.onClick}
+            onClick={completionAction.onClick ?? undefined}
+            type="button"
+          >
+            <span className="wt-upnext-action">
+              <span className="wt-upnext-main">
+                <span className="wt-upnext-label">Walkthrough complete:</span>{' '}
+                <span className="wt-upnext-title">{completionAction.title}</span>
+              </span>
+              {'file' in completionAction ? (
+                <span className="wt-upnext-file">{completionAction.file}</span>
+              ) : null}
+              <span className="wt-upnext-complete-check">
+                <Check size={12} weight="bold" />
               </span>
             </span>
-            <span className="wt-upnext-file">
-              {walkthroughFileName(walkthroughItemPaths(next)[0] ?? '')}
-            </span>
-            <ArrowRight size={17} />
-          </span>
-        </button>
-      ) : navigation.mode === 'stop' && supportAvailable ? (
-        <button className="wt-upnext" onClick={navigation.openSupport} type="button">
-          <span className="wt-upnext-action">
-            <span className="wt-upnext-main">
-              <span className="wt-upnext-label">Next:</span>{' '}
-              <span className="wt-upnext-title">Support</span>
-            </span>
-            <span className="wt-upnext-file" title={supportFiles.title}>
-              {supportFiles.label}
-            </span>
-            <ArrowRight size={17} />
-          </span>
-        </button>
-      ) : navigation.mode === 'stop' && committable ? (
-        <button className="wt-upnext commit" onClick={navigation.enterCommit} type="button">
-          <span className="wt-upnext-action">
-            <span className="wt-upnext-main">
-              <span className="wt-upnext-label">End of sequence:</span>{' '}
-              <span className="wt-upnext-title">Commit the change</span>
-            </span>
-            <ArrowRight size={17} />
-          </span>
-        </button>
-      ) : navigation.mode === 'support' && committable ? (
-        <button className="wt-upnext commit" onClick={navigation.enterCommit} type="button">
-          <span className="wt-upnext-action">
-            <span className="wt-upnext-main">
-              <span className="wt-upnext-label">Done skimming:</span>{' '}
-              <span className="wt-upnext-title">Commit the change</span>
-            </span>
-            <ArrowRight size={17} />
-          </span>
-        </button>
-      ) : navigation.mode === 'support' ? (
-        <button
-          className="wt-upnext"
-          onClick={() => navigation.goStop(navigation.index)}
-          type="button"
-        >
-          <span className="wt-upnext-action">
-            <ArrowLeft className="wt-upnext-back-icon" size={17} />
-            <span className="wt-upnext-main">
-              <span className="wt-upnext-label">Previous:</span>{' '}
-              <span className="wt-upnext-title">
-                {walkthroughView.sequence[navigation.index]?.title ??
-                  (walkthroughView.sequence[navigation.index]
-                    ? walkthroughItemTitleFallback(walkthroughView.sequence[navigation.index])
-                    : '')}
+          </button>
+        ) : navigation.mode === 'stop' && next ? (
+          <button className="wt-upnext" onClick={navigation.goNext} type="button">
+            <span className="wt-upnext-action">
+              <span className="wt-upnext-main">
+                <span className="wt-upnext-label">Next:</span>{' '}
+                <span className="wt-upnext-title">
+                  {next.title ?? walkthroughItemTitleFallback(next)}
+                </span>
               </span>
+              <span className="wt-upnext-file">
+                {walkthroughFileName(walkthroughItemPaths(next)[0] ?? '')}
+              </span>
+              <ArrowRight size={17} />
             </span>
-            <span className="wt-upnext-file">Chapter {navigation.index + 1}</span>
-          </span>
-        </button>
-      ) : null}
-    </div>
+          </button>
+        ) : navigation.mode === 'stop' && supportAvailable ? (
+          <button className="wt-upnext" onClick={navigation.openSupport} type="button">
+            <span className="wt-upnext-action">
+              <span className="wt-upnext-main">
+                <span className="wt-upnext-label">Next:</span>{' '}
+                <span className="wt-upnext-title">Support</span>
+              </span>
+              <span className="wt-upnext-file" title={supportFiles.title}>
+                {supportFiles.label}
+              </span>
+              <ArrowRight size={17} />
+            </span>
+          </button>
+        ) : navigation.mode === 'stop' && committable ? (
+          <button className="wt-upnext commit" onClick={navigation.enterCommit} type="button">
+            <span className="wt-upnext-action">
+              <span className="wt-upnext-main">
+                <span className="wt-upnext-label">End of sequence:</span>{' '}
+                <span className="wt-upnext-title">Commit the change</span>
+              </span>
+              <ArrowRight size={17} />
+            </span>
+          </button>
+        ) : navigation.mode === 'support' && committable ? (
+          <button className="wt-upnext commit" onClick={navigation.enterCommit} type="button">
+            <span className="wt-upnext-action">
+              <span className="wt-upnext-main">
+                <span className="wt-upnext-label">Done skimming:</span>{' '}
+                <span className="wt-upnext-title">Commit the change</span>
+              </span>
+              <ArrowRight size={17} />
+            </span>
+          </button>
+        ) : navigation.mode === 'support' ? (
+          <button
+            className="wt-upnext"
+            onClick={() => navigation.goStop(navigation.index)}
+            type="button"
+          >
+            <span className="wt-upnext-action">
+              <ArrowLeft className="wt-upnext-back-icon" size={17} />
+              <span className="wt-upnext-main">
+                <span className="wt-upnext-label">Previous:</span>{' '}
+                <span className="wt-upnext-title">
+                  {walkthroughView.sequence[navigation.index]?.title ??
+                    (walkthroughView.sequence[navigation.index]
+                      ? walkthroughItemTitleFallback(walkthroughView.sequence[navigation.index])
+                      : '')}
+                </span>
+              </span>
+              <span className="wt-upnext-file">Chapter {navigation.index + 1}</span>
+            </span>
+          </button>
+        ) : null}
+      </div>
+    </>
   );
 }

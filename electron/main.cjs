@@ -1,5 +1,7 @@
 // @ts-check
 
+const electronProcessStartedAt = new Date(Date.now() - process.uptime() * 1000).toISOString();
+
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { basename, dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -15,14 +17,23 @@ const {
   screen,
   shell,
 } = require('electron');
+const {
+  configureCommandLog,
+  recordCommandMilestone,
+  runWithCommandAction,
+  startCommandAction,
+} = require('./command-log.cjs');
+
+app.setName('Codiff');
 const squirrelStartup = require('electron-squirrel-startup');
 const {
   listRepositoryHistory,
-  readDiffImageContent,
-  readDiffSectionContent,
   readGitIdentity,
   readRepositoryState,
+  readRevisionContent,
+  readReviewComments,
   readWalkthroughRepositoryState,
+  runWithCommandSignal,
   submitPullRequestComment,
   submitPullRequestReview,
   validateRepositoryPath,
@@ -68,7 +79,7 @@ const {
 const {
   findMatchingWindowIdentity,
   getWindowIdentity,
-  getWindowIdentityForRepositoryState,
+  storeResolvedWindowState,
 } = require('./window-identity.cjs');
 const { createPendingCommentsClipboardController } = require('./pending-comments.cjs');
 const {
@@ -88,11 +99,22 @@ const {
   writeWindowState,
 } = require('./window-state.cjs');
 const {
-  getNarrativeWalkthroughCacheKey,
+  NARRATIVE_WALKTHROUGH_AUTHORING_VERSION,
+  buildNarrativeWalkthroughPrompt,
+  createNarrativeWalkthroughGenerationRequest,
+  narrativeWalkthroughResponseSchema,
   normalizeNarrativeWalkthrough,
-  readNarrativeWalkthrough,
   resolveNarrativeWalkthroughModel,
 } = require('./narrative-walkthrough.cjs');
+const { runWalkthroughGenerationTasks } = require('./walkthrough-generation-bridge.cjs');
+const {
+  createWalkthroughGenerationCoordinator,
+} = require('./walkthrough-generation-coordinator.cjs');
+const { getWalkthroughGenerationCacheKey } = require('./walkthrough-generation-cache-key.cjs');
+const {
+  invokeWalkthroughModel,
+  parseStructuredModelResponse,
+} = require('./walkthrough-model-invocation.cjs');
 const { readStoredWalkthrough, writeStoredWalkthrough } = require('./walkthrough-store.cjs');
 const { uploadSharedSnapshot } = require('./shared-walkthrough-upload.cjs');
 const {
@@ -110,6 +132,7 @@ const {
 } = require('./markdown-document.cjs');
 const {
   createRepositoryWatcherCoordinator,
+  getRepositoryWatcherInitialSnapshot,
   readRepositoryWatcherSnapshot,
 } = require('./repository-watcher.cjs');
 const { getPlanReviewPath, readPlanReview, writePlanReview } = require('./plan-review.cjs');
@@ -133,12 +156,15 @@ const root = dirname(__dirname);
 const windowIdentities = new Map();
 /** @type {Map<number, string>} */
 const windowRepositories = new Map();
+/** @type {Map<number, Map<string, AbortController>>} */
+const diffContentRequests = new Map();
 /** @type {Map<number, CodiffLaunchOptions>} */
 const windowLaunchOptions = new Map();
 /** @type {Map<number, Promise<RepositoryState>>} */
 const windowInitialRepositoryStates = new Map();
 /** @type {Map<number, number>} */
 const walkthroughProgressGenerations = new Map();
+const walkthroughGenerationCoordinator = createWalkthroughGenerationCoordinator();
 /** @type {Map<number, string>} */
 const planInitialVersions = new Map();
 /** @type {Set<number>} */
@@ -149,9 +175,17 @@ const markdownDocumentWatchers = new Map();
 const completedPlanWindows = new Set();
 /** @type {Set<import('electron').BrowserWindow>} */
 const openWindows = new Set();
+/** @type {Map<number, ReturnType<typeof startCommandAction>>} */
+const initialLoadActions = new Map();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
 /** @type {CodiffConfig} */
 let config = createDefaultConfig();
+
+/** @template Value @param {number} webContentsId @param {() => Value} callback */
+const runInInitialLoadAction = (webContentsId, callback) => {
+  const action = initialLoadActions.get(webContentsId);
+  return action ? action.run(callback) : callback();
+};
 
 /**
  * @type {Map<string, ReturnType<typeof createSkillInstaller>>}
@@ -183,20 +217,56 @@ const refreshInstalledAgentFiles = () => {
 };
 
 const getActiveAgent = () => getAgent(config.settings.agentBackend);
+const abortDiffContentRequests = (webContentsId) => {
+  const requests = diffContentRequests.get(webContentsId);
+  if (!requests) {
+    return;
+  }
+  diffContentRequests.delete(webContentsId);
+  for (const controller of requests.values()) {
+    controller.abort(new DOMException('Diff content request canceled.', 'AbortError'));
+  }
+};
 
-/** @param {string} repositoryPath @param {ReviewSource} [source] */
-const readRepositoryStateWithConfig = (repositoryPath, source) =>
+const runDiffContentRequest = async (event, request, read) => {
+  const requestId =
+    typeof request?.requestId === 'string' && request.requestId
+      ? request.requestId
+      : `legacy:${Date.now()}:${Math.random()}`;
+  const webContentsId = event.sender.id;
+  const requests = diffContentRequests.get(webContentsId) ?? new Map();
+  diffContentRequests.set(webContentsId, requests);
+  requests
+    .get(requestId)
+    ?.abort(new DOMException('Diff content request superseded.', 'AbortError'));
+  const controller = new AbortController();
+  requests.set(requestId, controller);
+  try {
+    return await runWithCommandSignal(controller.signal, read);
+  } finally {
+    if (requests.get(requestId) === controller) {
+      requests.delete(requestId);
+    }
+    if (requests.size === 0) {
+      diffContentRequests.delete(webContentsId);
+    }
+  }
+};
+
+/** @param {string} repositoryPath @param {ReviewSource} [source] @param {string} [repositoryRoot] */
+const readRepositoryStateWithConfig = (repositoryPath, source, repositoryRoot) =>
   readRepositoryState(repositoryPath, source, {
+    repositoryRoot,
     showWhitespace: config.settings.showWhitespace,
   });
 
-/** @param {string} repositoryPath @param {CodiffLaunchOptions} launchOptions */
-const readInitialRepositoryStateWithConfig = (repositoryPath, launchOptions) =>
+/** @param {string} repositoryPath @param {CodiffLaunchOptions} launchOptions @param {string} [repositoryRoot] */
+const readInitialRepositoryStateWithConfig = (repositoryPath, launchOptions, repositoryRoot) =>
   launchOptions.walkthrough && !launchOptions.walkthroughFile
     ? readWalkthroughRepositoryState(repositoryPath, launchOptions.source, {
         showWhitespace: config.settings.showWhitespace,
       })
-    : readRepositoryStateWithConfig(repositoryPath, launchOptions.source);
+    : readRepositoryStateWithConfig(repositoryPath, launchOptions.source, repositoryRoot);
 
 /** @param {number} webContentsId */
 const resolveWindowAgent = (webContentsId) => {
@@ -240,23 +310,16 @@ const getMarkdownDocumentContext = (webContentsId) => ({
 
 /** @param {number} webContentsId @param {RepositoryState} state */
 const storeResolvedRepositoryState = (webContentsId, state) => {
-  windowRepositories.set(webContentsId, state.root);
+  storeResolvedWindowState(webContentsId, state, {
+    identities: windowIdentities,
+    launchOptions: windowLaunchOptions,
+    repositories: windowRepositories,
+  });
   const browserWindow = BrowserWindow.getAllWindows().find(
     (window) => window.webContents.id === webContentsId,
   );
   if (browserWindow && !browserWindow.isDestroyed()) {
     browserWindow.setTitle(getRepositoryWindowTitle(state));
-  }
-  const launchOptions = windowLaunchOptions.get(webContentsId);
-  if (launchOptions) {
-    windowLaunchOptions.set(webContentsId, {
-      ...launchOptions,
-      source: state.source,
-    });
-  }
-  const identity = getWindowIdentityForRepositoryState(state);
-  if (identity) {
-    windowIdentities.set(webContentsId, identity);
   }
 };
 
@@ -505,8 +568,12 @@ const beginRepositorySelfWrite = (webContentsId, path) =>
 const finishRepositorySelfWrite = (token, version) =>
   repositoryWatcherCoordinator.finishWrite(token, version);
 
-/** @param {import('electron').BrowserWindow} browserWindow @param {string} repositoryPath */
-const startRepositoryWatcher = (browserWindow, repositoryPath) => {
+/**
+ * @param {import('electron').BrowserWindow} browserWindow
+ * @param {string} repositoryPath
+ * @param {Promise<{head: string; pathSignatures: Record<string, string>; pathVersions: Record<string, string>; root: string; signature: string}> | undefined} initialSnapshot
+ */
+const startRepositoryWatcher = (browserWindow, repositoryPath, initialSnapshot) => {
   const webContentsId = browserWindow.webContents.id;
   void repositoryWatcherCoordinator.attach({
     getState: () => ({
@@ -515,6 +582,7 @@ const startRepositoryWatcher = (browserWindow, repositoryPath) => {
         !browserWindow.isDestroyed() && browserWindow.isVisible() && !browserWindow.isMinimized(),
     }),
     id: webContentsId,
+    initialSnapshot,
     notify: (root) => {
       if (!browserWindow.isDestroyed()) {
         browserWindow.webContents.send('codiff:repositoryChanged', { root });
@@ -866,11 +934,13 @@ ipcMain.on(
  * @param {string} repositoryPath
  * @param {CodiffLaunchOptions} [launchOptions]
  * @param {WindowIdentity | null} [identity]
+ * @param {ReturnType<typeof startCommandAction>} initialLoadAction
  */
 const createWindow = (
   repositoryPath,
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
-  identity = getWindowIdentity(repositoryPath, launchOptions),
+  identity,
+  initialLoadAction,
 ) => {
   const savedState = readWindowState();
   const validatedState = savedState
@@ -919,6 +989,7 @@ const createWindow = (
   attachExternalLinkHandling(window.webContents, (url) => shell.openExternal(url));
 
   const webContentsId = window.webContents.id;
+  initialLoadActions.set(webContentsId, initialLoadAction);
   openWindows.add(window);
   if (identity) {
     windowIdentities.set(webContentsId, identity);
@@ -927,13 +998,31 @@ const createWindow = (
   windowLaunchOptions.set(webContentsId, launchOptions);
   const initialRepositoryStatePromise = launchOptions.planFile
     ? null
-    : readInitialRepositoryStateWithConfig(repositoryPath, launchOptions);
-  const initialRepositoryState = initialRepositoryStatePromise?.then((state) => {
-    if (!window.isDestroyed()) {
-      storeResolvedRepositoryState(webContentsId, state);
-    }
-    return state;
-  });
+    : initialLoadAction.run(() =>
+        readInitialRepositoryStateWithConfig(
+          repositoryPath,
+          launchOptions,
+          identity?.repositoryRoot,
+        ),
+      );
+  const initialRepositoryState = initialRepositoryStatePromise?.then(
+    (state) => {
+      recordCommandMilestone('repository-review-state-available', {
+        actionId: initialLoadAction.id,
+      });
+      if (!window.isDestroyed()) {
+        storeResolvedRepositoryState(webContentsId, state);
+      }
+      return state;
+    },
+    (error) => {
+      initialLoadAction.finish({ error });
+      if (initialLoadActions.get(webContentsId) === initialLoadAction) {
+        initialLoadActions.delete(webContentsId);
+      }
+      throw error;
+    },
+  );
   initialRepositoryState?.catch(() => {});
   if (initialRepositoryState) {
     windowInitialRepositoryStates.set(webContentsId, initialRepositoryState);
@@ -950,7 +1039,7 @@ const createWindow = (
           (state.source.type === 'working-tree' || state.source.type === 'branch-working-tree') &&
           !window.isDestroyed()
         ) {
-          startRepositoryWatcher(window, state.root);
+          startRepositoryWatcher(window, state.root, getRepositoryWatcherInitialSnapshot(state));
         }
       })
       .catch(() => {});
@@ -967,7 +1056,13 @@ const createWindow = (
   window.on('minimize', () => repositoryWatcherCoordinator.visibilityChanged(webContentsId));
   window.on('restore', () => repositoryWatcherCoordinator.focus(webContentsId));
   window.on('show', () => repositoryWatcherCoordinator.focus(webContentsId));
-  window.once('ready-to-show', () => window.show());
+  window.once('ready-to-show', () => {
+    window.show();
+    if (launchOptions.planFile) {
+      initialLoadAction.finish();
+      initialLoadActions.delete(webContentsId);
+    }
+  });
   let allowClose = false;
   let copyingPendingCommentsBeforeClose = false;
   window.on('close', (event) => {
@@ -1016,6 +1111,8 @@ const createWindow = (
     });
   });
   window.on('closed', () => {
+    initialLoadActions.get(webContentsId)?.cancel();
+    initialLoadActions.delete(webContentsId);
     openWindows.delete(window);
     definitionSearchCoordinator.cancel(webContentsId);
     repositoryWatcherCoordinator.detach(webContentsId);
@@ -1023,14 +1120,33 @@ const createWindow = (
     completedPlanWindows.delete(webContentsId);
     planInitialVersions.delete(webContentsId);
     readyPlanWindows.delete(webContentsId);
+    walkthroughGenerationCoordinator.clear(
+      webContentsId,
+      new Error('The walkthrough window was closed.'),
+    );
+    abortDiffContentRequests(webContentsId);
     windowIdentities.delete(webContentsId);
     windowInitialRepositoryStates.delete(webContentsId);
     walkthroughProgressGenerations.delete(webContentsId);
     windowRepositories.delete(webContentsId);
     windowLaunchOptions.delete(webContentsId);
   });
+  window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) {
+      abortDiffContentRequests(webContentsId);
+      walkthroughGenerationCoordinator.clear(
+        webContentsId,
+        new Error('The walkthrough renderer was reloaded.'),
+      );
+    }
+  });
   window.webContents.on('render-process-gone', () => {
     definitionSearchCoordinator.cancel(webContentsId);
+    walkthroughGenerationCoordinator.clear(
+      webContentsId,
+      new Error('The walkthrough renderer process exited.'),
+    );
+    abortDiffContentRequests(webContentsId);
     writePlanResult(webContentsId, 'canceled');
   });
   window.webContents.on(
@@ -1094,7 +1210,9 @@ const focusWindow = (window) => {
 /** @param {number} webContentsId */
 const getWalkthroughShareContext = async (webContentsId) => {
   const repositoryPath = windowRepositories.get(webContentsId) || getLaunchPath();
-  const uploader = await readGitIdentity(repositoryPath);
+  const uploader = await runInInitialLoadAction(webContentsId, () =>
+    readGitIdentity(repositoryPath),
+  );
 
   return {
     target: resolveWalkthroughShareTarget({
@@ -1170,7 +1288,15 @@ const focusOrCreateWindow = (
   repositoryPath,
   launchOptions = { repositoryPathProvided: true, walkthrough: false },
 ) => {
-  const identity = getWindowIdentity(repositoryPath, launchOptions);
+  const initialLoadAction = startCommandAction({
+    command: 'initial-load',
+    cwd: repositoryPath,
+    details: {
+      explicitSource: Boolean(launchOptions.source),
+      sourceType: launchOptions.source?.type,
+    },
+  });
+  const identity = initialLoadAction.run(() => getWindowIdentity(repositoryPath, launchOptions));
   const matchingWebContentsId = findMatchingWindowIdentity(identity, windowIdentities);
   const matchingWindow =
     matchingWebContentsId == null
@@ -1181,6 +1307,8 @@ const focusOrCreateWindow = (
 
   if (matchingWindow) {
     if (launchOptions.planFile || launchOptions.walkthrough || launchOptions.walkthroughFile) {
+      initialLoadActions.get(matchingWebContentsId)?.cancel();
+      initialLoadActions.set(matchingWebContentsId, initialLoadAction);
       windowRepositories.set(matchingWebContentsId, identity?.repositoryRoot || repositoryPath);
       windowLaunchOptions.set(matchingWebContentsId, launchOptions);
       if (launchOptions.planFile) {
@@ -1188,21 +1316,48 @@ const focusOrCreateWindow = (
         readyPlanWindows.delete(matchingWebContentsId);
         windowInitialRepositoryStates.delete(matchingWebContentsId);
       } else {
-        windowInitialRepositoryStates.set(
-          matchingWebContentsId,
-          readInitialRepositoryStateWithConfig(repositoryPath, launchOptions),
+        const initialState = initialLoadAction.run(() =>
+          readInitialRepositoryStateWithConfig(
+            repositoryPath,
+            launchOptions,
+            identity?.repositoryRoot,
+          ),
+        );
+        windowInitialRepositoryStates.set(matchingWebContentsId, initialState);
+        initialState.then(
+          () =>
+            recordCommandMilestone('repository-review-state-available', {
+              actionId: initialLoadAction.id,
+            }),
+          (error) => {
+            initialLoadAction.finish({ error });
+            if (initialLoadActions.get(matchingWebContentsId) === initialLoadAction) {
+              initialLoadActions.delete(matchingWebContentsId);
+            }
+          },
         );
       }
       if (identity) {
         windowIdentities.set(matchingWebContentsId, identity);
       }
+      walkthroughGenerationCoordinator.clear(
+        matchingWebContentsId,
+        new Error('The walkthrough window was retargeted.'),
+      );
+      abortDiffContentRequests(matchingWebContentsId);
       matchingWindow.reload();
+      if (launchOptions.planFile) {
+        initialLoadAction.finish();
+        initialLoadActions.delete(matchingWebContentsId);
+      }
+    } else {
+      initialLoadAction.finish();
     }
     focusWindow(matchingWindow);
     return matchingWindow;
   }
 
-  return createWindow(repositoryPath, launchOptions, identity);
+  return createWindow(repositoryPath, launchOptions, identity, initialLoadAction);
 };
 
 const INITIAL_UPDATE_CHECK_DELAY_MS = 10 * 1000;
@@ -1289,8 +1444,11 @@ const lock =
 if (squirrelStartup || !lock) {
   app.quit();
 } else {
-  app.setName('Codiff');
-
+  configureCommandLog(app.getPath('logs'), { processStartedAt: electronProcessStartedAt });
+  recordCommandMilestone('electron-process-start', {
+    monotonicMs: 0,
+    timestamp: electronProcessStartedAt,
+  });
   app.on('second-instance', (event, commandLine, workingDirectory, additionalData) => {
     const data = /** @type {SingleInstanceAdditionalData} */ (additionalData || {});
     const launchOptions =
@@ -1443,7 +1601,9 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
     : await readRepositoryStateWithConfig(repositoryPath, source || launchOptions?.source);
   storeResolvedRepositoryState(event.sender.id, state);
   rememberLastRepositoryPath(state.root);
-  void resetRepositoryWatcher(event.sender.id, state.root);
+  if (!initialState) {
+    void resetRepositoryWatcher(event.sender.id, state.root);
+  }
   return state;
 });
 
@@ -1562,8 +1722,15 @@ ipcMain.handle('codiff:installTerminalHelper', async (event) => {
   return getTerminalHelperStatus();
 });
 
+ipcMain.handle('codiff:cancelNarrativeWalkthrough', (event) => {
+  const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
+  walkthroughProgressGenerations.set(event.sender.id, progressGeneration);
+  walkthroughGenerationCoordinator.cancel(event.sender.id, new Error('The review source changed.'));
+});
+
 ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) => {
   const launchOptions = windowLaunchOptions.get(event.sender.id);
+  const abortController = walkthroughGenerationCoordinator.begin(event.sender.id);
   const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
   walkthroughProgressGenerations.set(event.sender.id, progressGeneration);
   const reportProgress = createWalkthroughProgressReporter(
@@ -1572,11 +1739,12 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
   );
 
   try {
+    reportProgress({ phase: 'preparing', summary: 'Loading review state.' });
     const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-    const state = await readRepositoryStateWithConfig(
-      repositoryPath,
-      source || launchOptions?.source,
+    const state = await runWithCommandSignal(abortController.signal, () =>
+      readRepositoryStateWithConfig(repositoryPath, source || launchOptions?.source),
     );
+    abortController.signal.throwIfAborted();
     const agent = resolveWindowAgent(event.sender.id);
     const walkthroughFile = launchOptions?.walkthroughFile;
     if (walkthroughFile) {
@@ -1585,6 +1753,9 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       try {
         contents = readFileSync(walkthroughFile, 'utf8');
       } catch (error) {
+        if (abortController.signal.aborted) {
+          throw abortController.signal.reason;
+        }
         const detail = error instanceof Error ? error.message : String(error);
         return {
           reason: `Could not read walkthrough file: ${detail}`,
@@ -1595,9 +1766,13 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       const sessionContext = await Promise.resolve(
         agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
       ).catch(() => null);
+      abortController.signal.throwIfAborted();
       try {
         input = JSON.parse(contents);
       } catch (error) {
+        if (abortController.signal.aborted) {
+          throw abortController.signal.reason;
+        }
         const detail = error instanceof Error ? error.message : String(error);
         return {
           reason: `Could not read walkthrough file: ${detail}`,
@@ -1606,6 +1781,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       }
 
       try {
+        abortController.signal.throwIfAborted();
         return {
           status: 'ready',
           walkthrough: normalizeNarrativeWalkthrough(input, state.files, {
@@ -1618,6 +1794,9 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
           }),
         };
       } catch (error) {
+        if (abortController.signal.aborted) {
+          throw abortController.signal.reason;
+        }
         const detail = error instanceof Error ? error.message : String(error);
         // The usual cause of an unanchored working-tree walkthrough is that the
         // changes were committed (or reverted) after it was authored. Surface a
@@ -1638,19 +1817,40 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       launchOptions?.walkthroughContext,
       await agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
     );
+    abortController.signal.throwIfAborted();
     const agentOptions = getAgentOptions(agent);
     const walkthroughModel = resolveNarrativeWalkthroughModel(state, agent, agentOptions.model);
     const walkthroughPrompt = config.settings.walkthroughPrompt;
-    const cacheKey = getNarrativeWalkthroughCacheKey(
+    const modelCandidates = agent.getModelCandidates(walkthroughModel);
+    const profile = {
+      agent: agent.id,
+      authoringVersion: NARRATIVE_WALKTHROUGH_AUTHORING_VERSION,
+      modelCandidates,
+    };
+    const cacheRequest = {
+      prompt: buildNarrativeWalkthroughPrompt(
+        state,
+        walkthroughContext,
+        agent.label,
+        walkthroughPrompt,
+      ),
+      responseSchema: narrativeWalkthroughResponseSchema,
+    };
+    const cacheKey = getWalkthroughGenerationCacheKey({
+      profile,
+      request: cacheRequest,
       state,
-      agent,
-      walkthroughModel,
-      walkthroughContext,
-      walkthroughPrompt,
-    );
+    });
     if (!options?.force) {
       const cachedWalkthrough = readStoredWalkthrough(cacheKey);
       if (cachedWalkthrough) {
+        reportProgress({
+          completed: 1,
+          phase: 'combining',
+          summary: 'Loaded the cached walkthrough.',
+          total: 1,
+          units: [{ id: 'narrative', label: 'Walkthrough narrative', status: 'ready' }],
+        });
         return {
           status: 'ready',
           walkthrough: {
@@ -1667,46 +1867,116 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       }
     }
 
-    let generatedModel = walkthroughModel;
-    const onModelFallback = agentOptions.onModelFallback;
-    const result = await readNarrativeWalkthrough(
+    const generationRequest = createNarrativeWalkthroughGenerationRequest(
       state,
       agent,
-      {
-        ...agentOptions,
-        model: walkthroughModel,
-        onModelFallback: async (fallbackModel, originalModel) => {
-          generatedModel = fallbackModel;
-          await onModelFallback(fallbackModel, originalModel);
-        },
-        onProgress: reportProgress,
-      },
       walkthroughContext,
       walkthroughPrompt,
       options?.previousWalkthrough,
     );
+    let notFoundCode;
+    const result = await runWalkthroughGenerationTasks({
+      onProgress: reportProgress,
+      reusableComponents: walkthroughGenerationCoordinator.getReusable(
+        event.sender.id,
+        cacheKey,
+        options?.force,
+      ),
+      signal: abortController.signal,
+      tasks: [
+        {
+          id: 'narrative',
+          identity: cacheKey,
+          label: 'Walkthrough narrative',
+          profile,
+          run: async ({ profile: taskProfile, semanticInput, signal }) => {
+            try {
+              reportProgress('agent-generation');
+              const invocation = await invokeWalkthroughModel({
+                agent,
+                agentOptions: { ...agentOptions, onProgress: reportProgress },
+                outputName: generationRequest.outputName,
+                profile: taskProfile,
+                prompt: semanticInput.prompt,
+                repoRoot: state.root,
+                schema: generationRequest.schema,
+                signal,
+                timeoutMessage: generationRequest.timeoutMessage,
+                timeoutMs: generationRequest.timeoutMs,
+              });
+              reportProgress('response-received');
+              const walkthrough = normalizeNarrativeWalkthrough(
+                parseStructuredModelResponse(invocation.response),
+                state.files,
+                {
+                  agent: agent.id,
+                  branch: state.branch,
+                  generatedAt: invocation.generationMetadata.generatedAt,
+                  root: state.root,
+                  source: state.source,
+                },
+                generationRequest.hunkIdByAlias,
+              );
+              if (walkthroughContext && !walkthrough.context) {
+                walkthrough.context = walkthroughContext;
+              }
+              return { generationMetadata: invocation.generationMetadata, output: walkthrough };
+            } catch (error) {
+              if (agent.isNotFoundError(error)) {
+                notFoundCode = agent.notFoundCode;
+              }
+              throw error;
+            }
+          },
+          semanticInput: { prompt: generationRequest.prompt },
+        },
+      ],
+    });
+    walkthroughGenerationCoordinator.retain(
+      event.sender.id,
+      abortController,
+      cacheKey,
+      result.components,
+    );
     if (result.status === 'ready') {
-      const generatedCacheKey = getNarrativeWalkthroughCacheKey(
-        state,
-        agent,
-        generatedModel,
-        walkthroughContext,
-        walkthroughPrompt,
-      );
+      const walkthrough = result.components.find(
+        (component) => component.identity === cacheKey,
+      )?.output;
+      if (!walkthrough) {
+        throw new Error('Walkthrough generation completed without a validated narrative.');
+      }
+      abortController.signal.throwIfAborted();
       try {
-        const cacheableWalkthrough = { ...result.walkthrough };
+        const cacheableWalkthrough = { ...walkthrough };
         delete cacheableWalkthrough.context;
-        writeStoredWalkthrough(generatedCacheKey, cacheableWalkthrough);
+        writeStoredWalkthrough(cacheKey, cacheableWalkthrough);
       } catch {
         // Caching is optional; a filesystem failure must not hide a generated result.
       }
+      return { status: 'ready', walkthrough };
     }
-    return result;
-  } catch (error) {
     return {
-      reason: error instanceof Error ? error.message : String(error),
+      ...(notFoundCode ? { code: notFoundCode } : {}),
+      reason: result.reason,
       status: 'unavailable',
     };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    reportProgress({
+      completed: 0,
+      phase: 'generating',
+      summary: 'Walkthrough generation failed.',
+      total: 1,
+      units: [
+        { detail: reason, id: 'narrative', label: 'Walkthrough narrative', status: 'failed' },
+      ],
+    });
+    return {
+      reason,
+      status: 'unavailable',
+    };
+  } finally {
+    walkthroughGenerationCoordinator.finish(event.sender.id, abortController);
   }
 });
 
@@ -1763,15 +2033,24 @@ ipcMain.handle('codiff:askReviewAssistant', async (event, request) => {
 
 ipcMain.handle('codiff:createWalkthroughCommit', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  const result = await createWalkthroughCommit(repositoryPath, request, (chunk) => {
-    if (!event.sender.isDestroyed()) {
-      event.sender.send('codiff:walkthroughCommitOutput', chunk);
-    }
-  });
-  if (result.status === 'committed') {
-    await resetRepositoryWatcher(event.sender.id, repositoryPath);
-  }
-  return result;
+  return runWithCommandAction(
+    {
+      command: 'walkthrough-commit',
+      cwd: repositoryPath,
+      details: { fileCount: Array.isArray(request?.paths) ? request.paths.length : 0 },
+    },
+    async () => {
+      const result = await createWalkthroughCommit(repositoryPath, request, (chunk) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('codiff:walkthroughCommitOutput', chunk);
+        }
+      });
+      if (result.status === 'committed') {
+        await resetRepositoryWatcher(event.sender.id, repositoryPath);
+      }
+      return result;
+    },
+  );
 });
 
 ipcMain.handle('codiff:updateWalkthroughCommitMessage', async (event, request) => {
@@ -1792,30 +2071,67 @@ ipcMain.handle('codiff:submitPullRequestComment', async (event, request) => {
 
 ipcMain.handle('codiff:submitPullRequestReview', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return submitPullRequestReview(repositoryPath, request);
+  try {
+    return await submitPullRequestReview(repositoryPath, request);
+  } catch (error) {
+    return {
+      reason: error instanceof Error ? error.message : String(error),
+      status: 'failed',
+      submittedDraftIds: [],
+    };
+  }
 });
 
-ipcMain.handle('codiff:getDiffSectionContent', async (event, request) => {
+ipcMain.handle('codiff:readRevisionContent', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return readDiffSectionContent(repositoryPath, {
-    ...request,
-    showWhitespace: request?.showWhitespace ?? config.settings.showWhitespace,
-  });
+  return runDiffContentRequest(event, request, () => readRevisionContent(repositoryPath, request));
 });
 
-ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
-  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return readDiffImageContent(repositoryPath, request);
+ipcMain.on('codiff:cancelDiffContentRequest', (event, requestId) => {
+  if (typeof requestId !== 'string') {
+    return;
+  }
+  diffContentRequests
+    .get(event.sender.id)
+    ?.get(requestId)
+    ?.abort(new DOMException('Diff content request canceled.', 'AbortError'));
 });
 
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return listRepositoryHistory(repositoryPath, limit, source);
+  return runInInitialLoadAction(event.sender.id, () =>
+    listRepositoryHistory(repositoryPath, limit, source),
+  );
+});
+
+ipcMain.on('codiff:initialLoadMilestone', (event, name) => {
+  if (name !== 'first-usable-review-rendered' && name !== 'deferred-review-data-complete') {
+    return;
+  }
+  const action = initialLoadActions.get(event.sender.id);
+  if (!action) {
+    return;
+  }
+  recordCommandMilestone(name, { actionId: action.id });
+  if (name === 'deferred-review-data-complete') {
+    action.finish();
+    initialLoadActions.delete(event.sender.id);
+  }
+});
+
+ipcMain.handle('codiff:getReviewComments', async (event, source, requestId) => {
+  if (source?.type !== 'pull-request') {
+    throw new Error('Review comments require a pull-request source.');
+  }
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return runDiffContentRequest(event, { requestId }, () =>
+    runInInitialLoadAction(event.sender.id, () => readReviewComments(repositoryPath, source)),
+  );
 });
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
-  return readGitIdentity(repositoryPath);
+  return runInInitialLoadAction(event.sender.id, () => readGitIdentity(repositoryPath));
 });
 
 ipcMain.handle('codiff:getPreferences', () => configToPreferences(config));

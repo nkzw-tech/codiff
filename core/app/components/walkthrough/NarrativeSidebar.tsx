@@ -8,6 +8,7 @@ import {
   formatWalkthroughFileLineRows,
   getUncoveredWalkthroughFileLineItems,
   isWalkthroughCommittable,
+  resolveWalkthroughFileLineItems,
   walkthroughItemTitleFallback,
   type WalkthroughView,
   type WalkthroughStopView,
@@ -22,6 +23,7 @@ function TocFileRows({
   files: ReadonlyArray<{
     added: number;
     deleted: number;
+    diffAvailable?: false;
     label: string;
     path?: string;
     title: string;
@@ -35,8 +37,14 @@ function TocFileRows({
             {file.label}
           </span>
           <span className="wt-toc-count">
-            <span className="added">+{file.added}</span>
-            {file.deleted > 0 ? <span className="deleted">−{file.deleted}</span> : null}
+            {file.diffAvailable === false ? (
+              'Diff unavailable'
+            ) : (
+              <>
+                <span className="added">+{file.added}</span>
+                {file.deleted > 0 ? <span className="deleted">−{file.deleted}</span> : null}
+              </>
+            )}
           </span>
         </span>
       ))}
@@ -46,17 +54,21 @@ function TocFileRows({
 
 function TocStop({
   current,
+  files,
   onSelect,
   stop,
   visited,
 }: {
   current: boolean;
+  files: ReadonlyArray<ChangedFile>;
   onSelect: (index: number) => void;
   stop: WalkthroughStopView;
   visited: boolean;
 }) {
   const isDone = visited && !current;
-  const files = formatWalkthroughFileLineRows(stop.hunks);
+  const fileRows = formatWalkthroughFileLineRows(
+    resolveWalkthroughFileLineItems(stop.hunks, files),
+  );
   const title = stop.title ?? walkthroughItemTitleFallback(stop);
   return (
     <button
@@ -81,7 +93,7 @@ function TocStop({
           <span className="wt-toc-num">{stop.index + 1}</span>
           <span className="wt-toc-title">{title}</span>
         </span>
-        <TocFileRows files={files} />
+        <TocFileRows files={fileRows} />
       </span>
     </button>
   );
@@ -109,7 +121,10 @@ function SupportingFilesStop({
   const current = navigation.mode === 'support';
   const isDone = navigation.supportVisited && !current;
   const fileRows = formatWalkthroughFileLineRows([
-    ...walkthroughView.support.flatMap((item) => item.hunks),
+    ...resolveWalkthroughFileLineItems(
+      walkthroughView.support.flatMap((item) => item.hunks),
+      files,
+    ),
     ...uncoveredFiles,
   ]);
   return (
@@ -200,6 +215,7 @@ export function NarrativeSidebar({
               {chapter.stops.map((stop) => (
                 <TocStop
                   current={navigation.mode === 'stop' && stop.id === currentStopId}
+                  files={files}
                   key={stop.id}
                   onSelect={navigation.goStop}
                   stop={stop}

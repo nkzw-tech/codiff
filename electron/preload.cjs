@@ -17,6 +17,9 @@ const codiff = {
   applyUpdate: () => ipcRenderer.invoke('codiff:applyUpdate'),
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
   dismissUpdate: () => ipcRenderer.invoke('codiff:dismissUpdate'),
+  cancelDiffContentRequest: (requestId) =>
+    ipcRenderer.send('codiff:cancelDiffContentRequest', requestId),
+  cancelNarrativeWalkthrough: () => ipcRenderer.invoke('codiff:cancelNarrativeWalkthrough'),
   createWalkthroughCommit: (request) =>
     ipcRenderer.invoke('codiff:createWalkthroughCommit', request),
   completePlan: (review, status) => ipcRenderer.invoke('codiff:completePlan', review, status),
@@ -25,9 +28,7 @@ const codiff = {
   getAgentSkillStatus: () => ipcRenderer.invoke('codiff:getAgentSkillStatus'),
   getConfig: () => ipcRenderer.invoke('codiff:getConfig'),
   decreaseCodeFontSize: () => ipcRenderer.invoke('codiff:decreaseCodeFontSize'),
-  getDiffSectionContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionContent', request),
   getFeatureFlags: () => ipcRenderer.invoke('codiff:getFeatureFlags'),
-  getDiffImageContent: (request) => ipcRenderer.invoke('codiff:getDiffImageContent', request),
   getGitIdentity: () => ipcRenderer.invoke('codiff:getGitIdentity'),
   getKeyboardLayout: () => ipcRenderer.invoke('codiff:getKeyboardLayout'),
   getLaunchOptions: () => ipcRenderer.invoke('codiff:getLaunchOptions'),
@@ -37,6 +38,8 @@ const codiff = {
   getRepositoryHistory: (limit, source) =>
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
+  getReviewComments: (source, requestId) =>
+    ipcRenderer.invoke('codiff:getReviewComments', source, requestId),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getUpdateStatus: () => ipcRenderer.invoke('codiff:getUpdateStatus'),
   getNarrativeWalkthrough: (source, options) =>
@@ -139,6 +142,8 @@ const codiff = {
   openFile: (path, lineNumber) => ipcRenderer.invoke('codiff:openFile', path, lineNumber),
   openRepositoryFolder: () => ipcRenderer.invoke('codiff:openRepositoryFolder'),
   resolvePullRequestUrl: (value) => ipcRenderer.invoke('codiff:resolvePullRequestUrl', value),
+  reportInitialLoadMilestone: (name) => ipcRenderer.send('codiff:initialLoadMilestone', name),
+  readRevisionContent: (request) => ipcRenderer.invoke('codiff:readRevisionContent', request),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),
   setWordWrap: (value) => ipcRenderer.invoke('codiff:setWordWrap', value),

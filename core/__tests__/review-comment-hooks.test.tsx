@@ -5,17 +5,18 @@
 import { act, useState } from 'react';
 import { expect, test, vi } from 'vite-plus/test';
 import { useReviewCommentDrafts } from '../app/hooks/useReviewCommentDrafts.ts';
-import type { ReviewComment } from '../lib/app-types.ts';
+import type { LocalReviewNote, ReviewComment } from '../lib/app-types.ts';
 import { renderReact } from './helpers/react.tsx';
 
 type ReviewCommentDrafts = ReturnType<typeof useReviewCommentDrafts> & {
   comments: ReadonlyArray<ReviewComment>;
 };
 
-const createComment = (id: string, overrides: Partial<ReviewComment> = {}): ReviewComment => ({
+const createComment = (id: string, overrides: Partial<LocalReviewNote> = {}): LocalReviewNote => ({
   body: '',
   filePath: 'src/app.ts',
   id,
+  kind: 'local-note',
   lineNumber: 1,
   sectionId: 'src/app.ts:unstaged',
   side: 'additions',
@@ -37,6 +38,7 @@ function ReviewCommentDraftsHarness({
   const state = useReviewCommentDrafts({
     canCreateComment,
     comments,
+    draftKind: 'local-note',
     onCommentFileChange,
     setComments,
   });
@@ -86,7 +88,7 @@ test('review comment drafts create, update, focus, and delete local comments', a
     },
   };
   const comment = createComment('ignored');
-  const { body: _body, id: _id, ...location } = comment;
+  const { body: _body, id: _id, kind: _kind, ...location } = comment;
   await act(async () => {
     getState().createComment(location);
   });
@@ -95,6 +97,7 @@ test('review comment drafts create, update, focus, and delete local comments', a
       ...location,
       body: '',
       id: '00000000-0000-4000-8000-000000000001',
+      kind: 'local-note',
     },
   ]);
   expect(getState().focusCommentId).toBe('00000000-0000-4000-8000-000000000001');
@@ -127,7 +130,7 @@ test('review comment drafts focus an existing empty comment at the same location
   });
   const { getState, onCommentFileChange } = view;
 
-  const { body: _body, id: _id, ...location } = existing;
+  const { body: _body, id: _id, kind: _kind, ...location } = existing;
   await act(async () => {
     getState().createComment(location);
   });
@@ -166,7 +169,7 @@ test('review comment drafts preserve active text when reusing another empty draf
     filePath: 'src/new.ts',
     sectionId: 'src/new.ts:unstaged',
   });
-  const { body: _body, id: _id, ...location } = next;
+  const { body: _body, id: _id, kind: _kind, ...location } = next;
   await act(async () => {
     getState().createComment(location);
   });
@@ -175,6 +178,7 @@ test('review comment drafts preserve active text when reusing another empty draf
     ...location,
     body: '',
     id: '00000000-0000-4000-8000-000000000002',
+    kind: 'local-note',
   });
   expect(onCommentFileChange).toHaveBeenNthCalledWith(1, 'src/old.ts');
   expect(onCommentFileChange).toHaveBeenNthCalledWith(2, 'src/new.ts');
@@ -187,7 +191,7 @@ test('review comment drafts can disable comment creation', async () => {
   const { getState, onCommentFileChange } = view;
 
   const comment = createComment('ignored');
-  const { body: _body, id: _id, ...location } = comment;
+  const { body: _body, id: _id, kind: _kind, ...location } = comment;
   await act(async () => {
     getState().createComment(location);
   });

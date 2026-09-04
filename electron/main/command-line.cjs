@@ -1,9 +1,9 @@
 // @ts-check
 
-const { execFileSync } = require('node:child_process');
 const { existsSync } = require('node:fs');
 const { resolve } = require('node:path');
 const { parseArgs } = require('node:util');
+const { gitSync } = require('../git-state/common.cjs');
 const { readWalkthroughContext } = require('../walkthrough-context.cjs');
 const { parseReviewUrl, resolveReviewUrl } = require('../review-source.cjs');
 
@@ -43,9 +43,7 @@ const parseRangeArgument = (arg) => {
 /** @param {string} repositoryPath @param {ReadonlyArray<string>} args */
 const gitSucceeds = (repositoryPath, args) => {
   try {
-    execFileSync('git', ['-C', repositoryPath, ...args], {
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
+    gitSync(repositoryPath, args);
     return true;
   } catch {
     return false;

@@ -16,12 +16,15 @@
     "index.ts",
     "react.ts",
     "share.ts",
+    "walkthrough-generation.ts",
+    "walkthrough-progress.ts",
     "types.ts",
     "SharedPlanApp.tsx",
-    "SharedWalkthroughApp.tsx",
+    "ReviewSurface.tsx",
     "app/**/*.ts",
     "app/**/*.tsx",
     "config/**/*.ts",
+    "lib/**/*.cjs",
     "lib/**/*.js",
     "lib/**/*.ts"
   ]

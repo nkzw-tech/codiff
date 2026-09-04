@@ -10,6 +10,7 @@
 **/.env.*.local
 .cache/
 .pnpm-debug.log
+/.pnpm-store/
 /node_modules/
 **/node_modules/
 coverage/

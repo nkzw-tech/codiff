@@ -1,0 +1,206 @@
+import type {
+  PullRequestMergeState,
+  PullRequestReviewStatus,
+  PullRequestReviewer,
+  ReviewAuthor,
+} from './review-history.ts';
+
+export type DiffSection = {
+  binary: boolean;
+  id: string;
+  kind: 'commit' | 'pull-request' | 'staged' | 'unstaged';
+  lineCount?: { additions: number; deletions: number };
+  loadState?: 'binary' | 'deferred' | 'directory' | 'error' | 'ready' | 'too-large';
+  newFile?: { cacheKey?: string; contents: string; name: string };
+  oldFile?: { cacheKey?: string; contents: string; name: string };
+  patch: string;
+  range?: DiffRange;
+  summary?: {
+    canLoad?: boolean;
+    fileCount?: number;
+    fingerprint?: string;
+    limit?: number;
+    reason: string;
+    size?: number;
+  };
+};
+
+export type GitFileStatus =
+  | 'added'
+  | 'conflicted'
+  | 'deleted'
+  | 'modified'
+  | 'renamed'
+  | 'untracked';
+
+export type ChangedFile = {
+  fingerprint: string;
+  generated?: boolean;
+  oldPath?: string;
+  path: string;
+  sections: ReadonlyArray<DiffSection>;
+  status: GitFileStatus;
+};
+
+export type GitSha = string & { readonly __gitSha: unique symbol };
+
+/** Sources that can be entered from the palette or native application menu. */
+export type OpenReviewSourceKind = 'branch' | 'commit' | 'pull-request';
+
+export type ReviewSource =
+  | { type: 'working-tree' }
+  | { ref: string; type: 'commit' }
+  | { ref: string; type: 'branch' }
+  | { baseSha: GitSha; headSha: GitSha; ref: string; type: 'branch-diff' }
+  | {
+      baseSha?: GitSha;
+      headSha?: GitSha;
+      ref: string;
+      type: 'branch-working-tree';
+    }
+  | { base: string; head: string; symmetric: boolean; type: 'range' }
+  | {
+      author?: ReviewAuthor;
+      canEditDescription?: boolean;
+      canEditReviewers?: boolean;
+      canEditTitle?: boolean;
+      description?: string;
+      draft?: boolean;
+      headSha?: string;
+      host?: string;
+      mergeState?: PullRequestMergeState;
+      number?: number;
+      owner?: string;
+      projectPath?: string;
+      provider?: 'github' | 'gitlab';
+      repo?: string;
+      reviewers?: ReadonlyArray<PullRequestReviewer>;
+      reviewStatus?: PullRequestReviewStatus;
+      targetBranch?: string;
+      title?: string;
+      type: 'pull-request';
+      url: string;
+    };
+
+export type ResolvedReviewSource =
+  | Exclude<ReviewSource, { type: 'branch' | 'branch-working-tree' | 'commit' }>
+  | { sha: GitSha; type: 'commit' }
+  | { baseSha: GitSha; headSha: GitSha; ref: string; type: 'branch-working-tree' };
+
+export type RevisionLabel = {
+  kind: 'bookmark' | 'branch' | 'commit' | 'review-marker' | 'tag' | 'version';
+  text: string;
+  url?: string;
+};
+
+export type Revision =
+  | { aliases?: ReadonlyArray<RevisionLabel>; kind?: 'commit'; label: RevisionLabel; sha: GitSha }
+  | {
+      aliases?: ReadonlyArray<RevisionLabel>;
+      kind: 'index';
+      label: RevisionLabel;
+      stage?: 1 | 2 | 3;
+    }
+  | { aliases?: ReadonlyArray<RevisionLabel>; kind: 'working-copy'; label: RevisionLabel };
+
+/** A null endpoint represents an absent file side, such as an unborn-repository addition. */
+export type DiffRange = { base: Revision | null; head: Revision | null };
+
+export type RevisionContentRequest = {
+  key: string;
+  maxBytes: number;
+  path: string;
+  revision: Revision;
+};
+
+export type ResolvedRevisionBytes = {
+  bytes: Uint8Array;
+  cacheKey: string;
+  objectId?: string;
+  path: string;
+  provenance: 'filesystem' | 'git-index' | 'github-api' | 'gitlab-api' | 'native-git';
+  size: number;
+};
+
+export type RevisionContentItemResult =
+  | { key: string; status: 'missing' }
+  | { key: string; reason: string; status: 'unavailable' }
+  | { key: string; status: 'ready'; value: ResolvedRevisionBytes };
+
+export type RevisionContentBatchRequest = {
+  generation: string;
+  requestId?: string;
+  requests: ReadonlyArray<RevisionContentRequest>;
+  source: ResolvedReviewSource;
+};
+
+export type RevisionContentBatchResult = {
+  results: ReadonlyArray<RevisionContentItemResult>;
+};
+
+export type DiffImageRevision = { dataUrl: string; mimeType: string; name: string; size: number };
+
+export type DiffImageContentResult =
+  | { newImage?: DiffImageRevision; oldImage?: DiffImageRevision; status: 'ready' }
+  | { reason: string; status: 'unavailable' };
+
+export type GitIdentity = {
+  email: string;
+  gravatarUrl?: string;
+  name: string;
+  username?: string;
+};
+
+export type DiffSectionContentRequest = {
+  force?: boolean;
+  kind: DiffSection['kind'];
+  path: string;
+  requestId?: string;
+  showWhitespace?: boolean;
+  source?: ResolvedReviewSource;
+};
+export type DiffSectionsContentRequest = {
+  requestId?: string;
+  source: Extract<ResolvedReviewSource, { type: 'pull-request' }>;
+};
+
+export type DiffSectionsContentResult = {
+  headSha?: GitSha;
+  sections: ReadonlyArray<{ path: string; section: DiffSection }>;
+};
+
+export type DefinitionSearchRequest = {
+  identifier: string;
+  kind: DiffSection['kind'];
+  lineNumber: number;
+  path: string;
+  side: 'additions' | 'deletions';
+  source: ResolvedReviewSource;
+};
+
+export type DefinitionCandidate = {
+  canOpenInEditor: boolean;
+  kind: string;
+  line: string;
+  lineNumber: number;
+  path: string;
+  side: 'additions' | 'deletions';
+};
+
+export type DefinitionSearchResult =
+  | {
+      candidates: ReadonlyArray<DefinitionCandidate>;
+      identifier: string;
+      status: 'ready';
+    }
+  | {
+      reason: string;
+      status: 'unavailable';
+    };
+
+export type DiffImageContentRequest = {
+  kind: DiffSection['kind'];
+  path: string;
+  requestId?: string;
+  source?: ResolvedReviewSource;
+};

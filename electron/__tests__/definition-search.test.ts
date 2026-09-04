@@ -86,7 +86,7 @@ test('marks historical snapshot candidates as unsafe for editor fallback', async
   const result = await findDefinitions(directory.path, {
     ...request,
     kind: 'commit',
-    source: { ref: 'HEAD', type: 'commit' },
+    source: { sha: 'HEAD' as import('../../core/types.ts').GitSha, type: 'commit' },
   });
 
   expect(result.status).toBe('ready');
