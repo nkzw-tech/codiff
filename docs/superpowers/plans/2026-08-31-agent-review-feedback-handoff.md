@@ -24,13 +24,11 @@
 ### Task 1: Shared Feedback Contract And Formatter
 
 **Files:**
-
 - Modify: `core/types.ts:426-443,675-706`
 - Modify: `core/lib/review-comments.ts:249-380`
 - Test: `core/__tests__/review-comments.test.ts`
 
 **Interfaces:**
-
 - Produces: `AgentReviewFeedbackComment`, `AgentReviewFeedback`, and `AgentReviewResult` in `core/types.ts`.
 - Produces: `buildAgentReviewFeedback(files, comments, showWhitespace, prefix): AgentReviewFeedbackContent` in `core/lib/review-comments.ts`.
 - Preserves: `buildReviewCommentsMarkdown(...)` as a compatibility wrapper over the new builder.
@@ -63,12 +61,10 @@ test('buildAgentReviewFeedback returns ordered structured comments and matching 
 
   const feedback = buildAgentReviewFeedback(files, comments, false, '# Fix these');
 
-  expect(feedback.comments.map(({ body, filePath, order }) => ({ body, filePath, order }))).toEqual(
-    [
-      { body: 'First range.', filePath: 'src/a.ts', order: 1 },
-      { body: 'Second file.', filePath: 'src/b.ts', order: 2 },
-    ],
-  );
+  expect(feedback.comments.map(({ body, filePath, order }) => ({ body, filePath, order }))).toEqual([
+    { body: 'First range.', filePath: 'src/a.ts', order: 1 },
+    { body: 'Second file.', filePath: 'src/b.ts', order: 2 },
+  ]);
   expect(feedback.comments[0]).toMatchObject({
     anchor: 'line',
     lineNumber: 7,
@@ -170,7 +166,6 @@ git commit -m "Add agent review feedback contract"
 ### Task 2: Result Path Propagation And Window Identity
 
 **Files:**
-
 - Modify: `bin/arguments.js:9-109,330-475`
 - Modify: `bin/codiff.js:286-358`
 - Modify: `bin/codiff-app:263-280,343-407,429-545,607-663`
@@ -182,7 +177,6 @@ git commit -m "Add agent review feedback contract"
 - Test: `core/__tests__/codiff-cli.test.ts`
 
 **Interfaces:**
-
 - Consumes: `CodiffLaunchOptions` from Task 1's shared type file.
 - Produces: hidden CLI option `--review-result-file <file>` and environment variable `CODIFF_REVIEW_RESULT_FILE`.
 - Produces: `CodiffLaunchOptions.reviewResultFile?: string`.
@@ -193,9 +187,7 @@ Add a command-line assertion:
 
 ```ts
 test('parses agent review handoff command-line options', () => {
-  expect(
-    readCommandLine(['codiff', '--review-result-file', '/tmp/review.json', '/repo']),
-  ).toMatchObject({
+  expect(readCommandLine(['codiff', '--review-result-file', '/tmp/review.json', '/repo'])).toMatchObject({
     launchOptions: {
       repositoryPathProvided: true,
       reviewResultFile: '/tmp/review.json',
@@ -209,9 +201,9 @@ test('parses agent review handoff command-line options', () => {
 Add a window identity assertion proving two handoffs for the same working tree do not share a window:
 
 ```ts
-expect(getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-a.json' })?.key).not.toBe(
-  getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-b.json' })?.key,
-);
+expect(
+  getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-a.json' })?.key,
+).not.toBe(getWindowIdentity(directory.path, { reviewResultFile: '/tmp/review-b.json' })?.key);
 ```
 
 Extend the packaged terminal-helper forwarding test to assert `--review-result-file` survives unchanged in the `open -n ... --args` list.
@@ -264,7 +256,6 @@ git commit -m "Propagate agent review handoff paths"
 ### Task 3: Atomic Electron Handoff Lifecycle
 
 **Files:**
-
 - Create: `electron/agent-review-handoff.cjs`
 - Create: `electron/__tests__/agent-review-handoff.test.ts`
 - Modify: `electron/main.cjs:132-152,921-1067,1434-1541`
@@ -272,7 +263,6 @@ git commit -m "Propagate agent review handoff paths"
 - Modify: `core/global.d.ts:45-126`
 
 **Interfaces:**
-
 - Consumes: `AgentReviewFeedback` and `AgentReviewResult` from Task 1.
 - Produces: `createAgentReviewHandoffController({ writeResult? })` with `complete`, `close`, `hasCompleted`, and `clear` methods.
 - Produces: `window.codiff.completeAgentReview(feedback): Promise<void>`.
@@ -370,7 +360,6 @@ git commit -m "Add atomic agent review handoff"
 ### Task 4: Renderer Submission And Send Feedback Control
 
 **Files:**
-
 - Modify: `core/app/hooks/useReviewCommentDrafts.ts:21-35,128-162`
 - Modify: `core/app/hooks/useAppReviewComments.ts:25-263`
 - Modify: `core/app/components/Panels.tsx:384-438`
@@ -381,7 +370,6 @@ git commit -m "Add atomic agent review handoff"
 - Test: `core/__tests__/App-render.test.tsx`
 
 **Interfaces:**
-
 - Consumes: `buildAgentReviewFeedback` from Task 1 and `window.codiff.completeAgentReview` from Task 3.
 - Produces: `flushActiveReviewCommentDraft(): ReadonlyArray<ReviewComment>` from `useReviewCommentDrafts` and `useAppReviewComments`.
 - Produces: `pendingReviewCommentCount: number` from `useAppReviewComments`.
@@ -464,7 +452,6 @@ git commit -m "Add send feedback review action"
 ### Task 5: Blocking Agent Launcher Results
 
 **Files:**
-
 - Create: `bin/agent-review-result.js`
 - Modify: `codex/skills/codiff/scripts/open-codiff.mjs`
 - Modify: `claude/skills/codiff/scripts/open-codiff.mjs`
@@ -475,7 +462,6 @@ git commit -m "Add send feedback review action"
 - Test: `core/__tests__/codiff-cli.test.ts`
 
 **Interfaces:**
-
 - Consumes: `--review-result-file` from Task 2 and the version 1 result written by Task 3.
 - Produces: `createAgentReviewResultPath()`, `readAgentReviewResult(path, expectedRoot)`, and `formatAgentReviewResult(result)` from `bin/agent-review-result.js`.
 - Produces: exactly one stdout line `CODIFF_REVIEW_RESULT <json>` for valid `submitted` or `closed` results.
@@ -501,7 +487,7 @@ Expected: FAIL because launchers do not create, pass, read, or print review resu
 `createAgentReviewResultPath` creates `mkdtempSync(join(tmpdir(), 'codiff-review-result-'))` and returns `{ directory, path: join(directory, 'result.json') }`. `readAgentReviewResult` strictly checks `version === 1`, `status` in `submitted|closed`, exact root equality after `resolve`, empty feedback for `closed`, and non-empty comments/Markdown for `submitted`. The launcher scripts import this packaged helper from `../../../../bin/agent-review-result.js`; their installed skill directories are symlinks to the packaged source, so that relative path resolves in development and packaged apps. `formatAgentReviewResult` returns:
 
 ```js
-`CODIFF_REVIEW_RESULT ${JSON.stringify(result)}\n`;
+`CODIFF_REVIEW_RESULT ${JSON.stringify(result)}\n`
 ```
 
 Export a cleanup function using `rmSync(directory, { force: true, recursive: true })` so every launcher uses identical cleanup.
@@ -532,7 +518,6 @@ git commit -m "Return Codiff feedback to agent launchers"
 ### Task 6: Agent Guidance, Documentation, And Full Verification
 
 **Files:**
-
 - Modify: `codex/skills/codiff/SKILL.md:79-139`
 - Modify: `claude/skills/codiff/SKILL.md:79-139`
 - Modify: `opencode/skills/codiff/SKILL.md:79-139`
@@ -543,7 +528,6 @@ git commit -m "Return Codiff feedback to agent launchers"
 - Test: `core/__tests__/codiff-cli.test.ts`
 
 **Interfaces:**
-
 - Consumes: the `CODIFF_REVIEW_RESULT` contract from Task 5.
 - Produces: identical backend-neutral processing instructions in all installed skills and updated `--walkthrough-guide` output.
 
