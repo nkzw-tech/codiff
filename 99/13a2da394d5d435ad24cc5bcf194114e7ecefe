@@ -1,0 +1,27 @@
+config/defaults.json
+  s_fffcb36711afd8::t_1d1f7d3e33067f 26,32
+core/__tests__/App-render.test.tsx
+  s_fffcb36711afd8::t_cef401f9be918f 325,327-329,357,723,771,1282-1297,1302,1308,1316
+core/__tests__/keymap.test.ts
+  s_fffcb36711afd8::t_df4396f7fbe94c 953,959
+README.md
+  s_fffcb36711afd8::t_942ab77f0abb79 157,161,188
+core/config/codiff-config.schema.json
+  s_fffcb36711afd8::t_53efc230b370cf 127,157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9913a2da394d5d435ad24cc5bcf194114e7ecefe",
+  "prompts": {},
+  "sessions": {
+    "s_fffcb36711afd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07af4-5a5f-75a3-88cd-a36e83d6940c",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
