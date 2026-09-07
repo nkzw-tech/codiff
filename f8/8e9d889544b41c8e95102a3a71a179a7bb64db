@@ -1,0 +1,21 @@
+package.json
+  s_fffcb36711afd8::t_52f8de7b34d361 84,86
+pnpm-lock.yaml
+  s_fffcb36711afd8::t_9a0425f5450a2e 1-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f88e9d889544b41c8e95102a3a71a179a7bb64db",
+  "prompts": {},
+  "sessions": {
+    "s_fffcb36711afd8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07af4-5a5f-75a3-88cd-a36e83d6940c",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
