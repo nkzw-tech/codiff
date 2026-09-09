@@ -1285,6 +1285,10 @@ html[data-codiff-platform='darwin'] .sidebar {
   background: var(--sidebar-vibrancy-tint);
 }
 
+.app-shell.command-bar-open > :not(.command-bar-overlay) {
+  filter: blur(4px);
+}
+
 .merge-request-nav-button {
   align-items: center;
   background: transparent;
@@ -4304,13 +4308,16 @@ diffs-container .review-comment-thread {
 .command-bar-overlay,
 .open-review-source-overlay {
   align-items: flex-start;
-  backdrop-filter: blur(4px);
   background: rgb(255 255 255 / 0.28);
   display: flex;
   inset: 0;
   justify-content: center;
   padding-top: 180px;
   position: fixed;
+}
+
+.open-review-source-overlay {
+  backdrop-filter: blur(4px);
 }
 
 .command-bar-overlay {
@@ -4348,6 +4355,7 @@ diffs-container .review-comment-thread {
   flex-direction: column;
   max-height: 400px;
   overflow: hidden;
+  padding-top: 6px;
   width: min(520px, 90vw);
 }
 
@@ -4357,11 +4365,12 @@ diffs-container .review-comment-thread {
   border-radius: 16px;
   color: var(--text);
   corner-shape: squircle;
-  font: 14px/1.35 var(--font-sans);
+  font: 13px/1.35 var(--font-sans);
   height: 34px;
-  margin: 10px;
+  margin: 4px 10px 8px;
+  min-height: 34px;
   outline: none;
-  padding: 0 12px;
+  padding: 0 10px;
   width: calc(100% - 20px);
 }
 

@@ -14,6 +14,7 @@ import {
   focusChangedFileForHunks,
   formatWalkthroughFileList,
   getUncoveredWalkthroughFiles,
+  getUncoveredWalkthroughReviewIdentity,
   getWalkthroughRunNote,
   isWalkthroughCommittable,
   resolveWalkthroughHunkRuns,
@@ -23,6 +24,10 @@ import {
   type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
+import {
+  getSectionReviewHunkIds,
+  getWalkthroughReviewIdentity,
+} from '../../../lib/review-identity.ts';
 import type { ChangedFile, NarrativeWalkthrough, WalkthroughHunkGroup } from '../../../types.ts';
 import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import {
@@ -88,10 +93,14 @@ const getFocusedRunDiffs = (
           {
             file: focused,
             note: getWalkthroughRunNote(item, run),
-            reviewIdentity: {
-              fingerprint: focused.fingerprint,
-              key: `walkthrough:${run.key}`,
-            },
+            reviewIdentity: getWalkthroughReviewIdentity(
+              run.resolved.file,
+              run.hunks.flatMap((hunk) =>
+                hunk.kind === 'synthetic'
+                  ? getSectionReviewHunkIds(run.resolved.file, run.resolved.section)
+                  : [hunk.id],
+              ),
+            ),
           },
         ]
       : [];
@@ -271,10 +280,11 @@ const createSupportBlocks = (
       id: blockId,
       itemIdPrefix: blockId,
       note: 'Not included in the generated walkthrough.',
-      reviewIdentity: {
-        fingerprint: file.fingerprint,
-        key: blockId,
-      },
+      reviewIdentity: getUncoveredWalkthroughReviewIdentity(
+        files.find((candidate) => candidate.path === file.path)!,
+        walkthroughView,
+        showWhitespace,
+      ),
     });
   }
 

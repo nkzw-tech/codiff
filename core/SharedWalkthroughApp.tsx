@@ -334,7 +334,7 @@ export function ReviewSurface({
   const {
     bumpItemVersion,
     collapsed,
-    expandedGenerated,
+    expandedReviewKeys,
     itemVersionByKey,
     selectedPath,
     setSelectedPath,
@@ -931,7 +931,7 @@ export function ReviewSurface({
     diffLineHeight,
     diffStyle: snapshot.preferences.diffStyle,
     disableWorkerPool: true,
-    expandedGenerated,
+    expandedReviewKeys,
     focusCommentId,
     focusCommentRequest,
     gitIdentity,

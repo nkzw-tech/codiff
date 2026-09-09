@@ -4,6 +4,21 @@ on:
   push:
     tags:
       - '*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to attach builds to
+        required: true
+        type: string
+      platform:
+        description: Platform to rebuild
+        required: true
+        default: windows
+        type: choice
+        options:
+          - windows
+          - linux
+          - all
 
 permissions:
   contents: write
@@ -14,6 +29,7 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  TAG_NAME: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
   create-release:
@@ -24,22 +40,27 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate Release Version
-        env:
-          TAG_NAME: ${{ github.ref_name }}
         run: |
           [[ "${TAG_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test "${TAG_NAME}" = "v$(node -p "require('./package.json').version")"
 
       - name: Create Release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
         run: |
           gh release view "${TAG_NAME}" >/dev/null 2>&1 \
             || gh release create "${TAG_NAME}" --draft --generate-notes --title "${TAG_NAME}" --verify-tag
 
+      - name: Verify Existing Release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "${TAG_NAME}"
+
   build-linux:
     needs: create-release
+    if: github.event_name == 'push' || inputs.platform == 'linux' || inputs.platform == 'all'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
@@ -90,7 +111,6 @@ jobs:
       - name: Attach Linux App to Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
         run: |
           shopt -s nullglob
 
@@ -109,6 +129,7 @@ jobs:
 
   build-windows:
     needs: create-release
+    if: github.event_name == 'push' || inputs.platform == 'windows' || inputs.platform == 'all'
     runs-on: windows-2022
     timeout-minutes: 60
     env:
@@ -158,7 +179,6 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
         run: |
           shopt -s nullglob
 
@@ -176,6 +196,7 @@ jobs:
 
   publish-release:
     needs: [build-linux, build-windows]
+    if: github.event_name == 'push'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
 
@@ -183,5 +204,4 @@ jobs:
       - name: Publish Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.ref_name }}
         run: gh release edit "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest

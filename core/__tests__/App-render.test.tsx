@@ -337,9 +337,11 @@ const createNarrativeWalkthroughFixture = (
     version: 4,
   }) satisfies NarrativeWalkthrough;
 
-const dispatchModK = () => {
+const dispatchModifiedKey = (key: string, shiftKey = false) => {
   const isMac = navigator.platform.toLowerCase().includes('mac');
-  window.dispatchEvent(new KeyboardEvent('keydown', { ctrlKey: !isMac, key: 'k', metaKey: isMac }));
+  window.dispatchEvent(
+    new KeyboardEvent('keydown', { ctrlKey: !isMac, key, metaKey: isMac, shiftKey }),
+  );
 };
 
 const findInOpenShadowRoots = <ElementType extends Element>(
@@ -399,6 +401,7 @@ const renderAppForOpenFileShortcut = async (file: ChangedFile) => {
   });
 
   return {
+    container,
     openFile,
     async [Symbol.asyncDispose]() {
       await act(async () => root.unmount());
@@ -1373,7 +1376,7 @@ test('repository reload restores the selected file when it still exists', async 
     expect(container.querySelector('.codiff-file-header')).not.toBeNull();
   });
   await act(async () => {
-    dispatchModK();
+    dispatchModifiedKey('O', true);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(openFile).toHaveBeenCalledWith(secondFile.path);
@@ -1421,7 +1424,7 @@ test('repository reload restores the selected file from the previous source', as
     expect(container.querySelector('.codiff-file-header')).not.toBeNull();
   });
   await act(async () => {
-    dispatchModK();
+    dispatchModifiedKey('O', true);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(openFile).toHaveBeenCalledWith(secondFile.path);
@@ -1932,18 +1935,33 @@ test('before unload saves the current source and selected file for any reload tr
   expect(getReloadSelectionPath(selection, nextState)).toBe(changedFile.path);
 });
 
-test('Mod+K opens the selected file in the editor', async () => {
+test('Mod+K opens the command bar', async () => {
   const changedFile = createChangedFile('src/app.ts');
   await using app = await renderAppForOpenFileShortcut(changedFile);
 
   await act(async () => {
-    dispatchModK();
+    dispatchModifiedKey('k');
+  });
+
+  expect(app.container.querySelector('.command-bar-input')).not.toBeNull();
+  expect(app.container.querySelector('.app-shell')?.classList.contains('command-bar-open')).toBe(
+    true,
+  );
+  expect(app.openFile).not.toHaveBeenCalled();
+});
+
+test('Mod+Shift+O opens the selected file in the editor', async () => {
+  const changedFile = createChangedFile('src/app.ts');
+  await using app = await renderAppForOpenFileShortcut(changedFile);
+
+  await act(async () => {
+    dispatchModifiedKey('O', true);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(app.openFile).toHaveBeenCalledWith(changedFile.path);
 });
 
-test('Mod+K does not open deleted files', async () => {
+test('Mod+Shift+O does not open deleted files', async () => {
   const deletedFile = {
     ...createChangedFile('src/removed.ts'),
     status: 'deleted',
@@ -1951,7 +1969,7 @@ test('Mod+K does not open deleted files', async () => {
   await using app = await renderAppForOpenFileShortcut(deletedFile);
 
   await act(async () => {
-    dispatchModK();
+    dispatchModifiedKey('O', true);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   expect(app.openFile).not.toHaveBeenCalled();
@@ -4415,4 +4433,79 @@ test('Pi not-found walkthrough errors show the agent recovery panel', async () =
   });
   expect(container.textContent).toContain('Pi CLI was not found.');
   expect(container.textContent).toContain('Review Files');
+});
+
+test('commit viewed progress synchronizes tree, walkthrough, and uncovered support without persistence', async () => {
+  const file = createChangedFile('src/app.ts', {
+    patch:
+      'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n@@ -10 +10 @@\n-before\n+after\n',
+  });
+  const source = { ref: 'abc1234', type: 'commit' } satisfies ReviewSource;
+  const walkthrough = {
+    ...createNarrativeWalkthroughFixture([{ added: 1, path: file.path, status: file.status }]),
+    source,
+  };
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      source,
+      walkthrough: true,
+    })),
+    getNarrativeWalkthrough: vi.fn(async () => ({ status: 'ready' as const, walkthrough })),
+    getRepositoryState: vi.fn(async () => ({ ...repositoryState, files: [file], source })),
+  });
+  await using app = await renderReact(<App />);
+  const buttons = () => [
+    ...app.container.querySelectorAll<HTMLButtonElement>('.codiff-viewed-button'),
+  ];
+  const collapsedCount = () => app.container.querySelectorAll('[aria-label="Expand file"]').length;
+  const switchMode = async (label: string) => {
+    const tab = [...app.container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].find(
+      (button) => button.textContent === label,
+    );
+    expect(tab).toBeDefined();
+    await act(async () => tab!.click());
+  };
+  await waitFor(() => expect(buttons()).toHaveLength(2));
+  expect(app.container.textContent).toContain('Not included in the generated walkthrough.');
+  await act(async () => buttons()[0].click());
+  await switchMode('Tree');
+  await waitFor(() => expect(buttons()).toHaveLength(1));
+  expect(buttons()[0].getAttribute('aria-pressed')).toBe('false');
+  expect(collapsedCount()).toBe(0);
+  await switchMode('Walkthrough');
+  await waitFor(() => expect(buttons()).toHaveLength(2));
+  expect(buttons().map((button) => button.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+  await act(async () => buttons()[1].click());
+  await switchMode('Tree');
+  await waitFor(() => expect(buttons()).toHaveLength(1));
+  expect(buttons()[0].getAttribute('aria-pressed')).toBe('true');
+  expect(collapsedCount()).toBe(1);
+  const tree = app.container.querySelector('file-tree-container')?.shadowRoot;
+  expect(tree?.querySelector('style[data-codiff-viewed-rows]')?.textContent).toContain(
+    'src/app.ts',
+  );
+  await act(async () => buttons()[0].click());
+  await switchMode('Walkthrough');
+  await waitFor(() => expect(buttons()).toHaveLength(2));
+  expect(buttons().map((button) => button.getAttribute('aria-pressed'))).toEqual([
+    'false',
+    'false',
+  ]);
+  expect(collapsedCount()).toBe(0);
+  await switchMode('Tree');
+  await act(async () => buttons()[0].click());
+  await switchMode('Walkthrough');
+  await waitFor(() => expect(buttons()).toHaveLength(2));
+  expect(buttons().map((button) => button.getAttribute('aria-pressed'))).toEqual(['true', 'true']);
+  expect(collapsedCount()).toBe(2);
+  expect(window.localStorage.getItem('codiff:viewed:/repo')).toBeNull();
+  await app.rerender(<App key="new-session" />);
+  await waitFor(() => {
+    expect(buttons()).toHaveLength(2);
+    expect(buttons().map((button) => button.getAttribute('aria-pressed'))).toEqual([
+      'false',
+      'false',
+    ]);
+  });
 });

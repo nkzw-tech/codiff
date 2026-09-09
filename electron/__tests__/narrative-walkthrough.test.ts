@@ -322,7 +322,13 @@ test('prompts generated walkthroughs to use deterministic hunk groups', () => {
     branch: 'main',
     files: Array.from({ length: 28 }, (_, index) => ({
       path: `file-${index}.ts`,
-      sections: [],
+      sections: [
+        {
+          id: `file-${index}.ts:staged`,
+          kind: 'staged',
+          patch: `@@ -1 +1 @@\n-old ${index}\n+new ${index}\n`,
+        },
+      ],
       status: 'modified',
     })),
     generatedAt: 1,
@@ -331,13 +337,18 @@ test('prompts generated walkthroughs to use deterministic hunk groups', () => {
   });
 
   expect(prompt).toContain('digest has 28 files');
-  expect(prompt).toContain('Target 6-9 main-path stops');
+  expect(prompt).toContain('Aim for 6-9 main-path stops');
   expect(prompt).toContain('Define chapters[] in display order');
   expect(prompt).toContain('Default to one review idea per stop');
+  expect(prompt).toContain('Every patch hunk contains its own bounded patch excerpt');
   expect(prompt).toContain('Every stop must have a concise semantic title');
   expect(prompt).toContain('Never use a filename or path as a stop title');
   expect(prompt).toContain('A stop may contain at most 14 hunkIds');
   expect(prompt).toContain('Use multiple hunkIds when the prose needs those hunks read together');
+  expect(prompt).toContain('A Git hunk boundary is not a walkthrough boundary');
+  expect(prompt).toContain(
+    'never create a stop whose explanation depends primarily on code assigned to another stop',
+  );
   expect(prompt).toContain('compact request-local aliases');
   expect(prompt).toContain('Generated-like files have "generated": true');
   expect(prompt).toContain('Never split them');
@@ -380,11 +391,55 @@ test('prompts small walkthroughs to group similar hunks into compact chapters', 
   });
 
   expect(prompt).toContain('digest has 2 files and 3 reviewable hunks');
-  expect(prompt).toContain('Target 1-2 main-path stops');
+  expect(prompt).toContain('Use at most 2 main-path stops');
+  expect(prompt).toContain('this is a ceiling, not a target');
   expect(prompt).toContain('Use 1 story chapter');
   expect(prompt).toContain('For one- or two-file diffs, prefer one chapter');
   expect(prompt).toContain('Similar same-file hunks should usually be one stop');
 });
+
+test.each([
+  { chapters: 'Use 1 story chapter', files: 2, hunks: 5, stops: 'at most 3' },
+  { chapters: 'at most 2 story chapters', files: 3, hunks: 8, stops: 'at most 3' },
+  { chapters: 'at most 2 story chapters', files: 3, hunks: 9, stops: 'at most 3' },
+  { chapters: 'at most 2 story chapters', files: 3, hunks: 16, stops: 'at most 3' },
+  { chapters: 'at most 2 story chapters', files: 4, hunks: 10, stops: 'at most 3' },
+  { chapters: 'at most 2 story chapters', files: 5, hunks: 5, stops: 'at most 3' },
+])(
+  'keeps $files-file/$hunks-hunk walkthrough guidance compact',
+  ({ chapters, files: fileCount, hunks: hunkCount, stops }) => {
+    let remainingHunks = hunkCount;
+    const prompt = buildNarrativeWalkthroughPrompt({
+      branch: 'main',
+      files: Array.from({ length: fileCount }, (_, fileIndex) => {
+        const fileHunks = Math.ceil(remainingHunks / (fileCount - fileIndex));
+        remainingHunks -= fileHunks;
+        return {
+          path: `file-${fileIndex}.ts`,
+          sections: [
+            {
+              id: `file-${fileIndex}.ts:staged`,
+              kind: 'staged',
+              patch: Array.from(
+                { length: fileHunks },
+                (_, hunkIndex) =>
+                  `@@ -${hunkIndex * 10 + 1} +${hunkIndex * 10 + 1} @@\n-old\n+new\n`,
+              ).join(''),
+            },
+          ],
+          status: 'modified',
+        };
+      }),
+      generatedAt: 1,
+      root: '/repo',
+      source: { type: 'working-tree' },
+    });
+
+    expect(prompt).toContain(`digest has ${fileCount} files and ${hunkCount} reviewable hunks`);
+    expect(prompt).toContain(`Use ${stops} main-path stops`);
+    expect(prompt).toContain(chapters);
+  },
+);
 
 test('uses GPT-5.5 for large walkthroughs only when Codex is on the default model', () => {
   const createState = (hunkCount: number) => ({
@@ -666,6 +721,53 @@ test('repository digest exposes compact hunk aliases and counts', () => {
   expect(prompt).toContain('Do not provide added/deleted counts');
 });
 
+test('repository digest associates every hunk alias with its own patch excerpt', () => {
+  const prompt = buildNarrativeWalkthroughPrompt({
+    branch: 'main',
+    files: [
+      {
+        path: 'src/callback.ts',
+        sections: [
+          {
+            id: 'src/callback.ts:staged',
+            kind: 'staged',
+            patch: [
+              '@@ -40,3 +40,5 @@',
+              ' context',
+              '+  return () => {',
+              '+    onCommit?.();',
+              '   broadcast();',
+              '@@ -60,3 +62,4 @@',
+              '   finish();',
+              '+  };',
+              ' }',
+              '',
+            ].join('\n'),
+          },
+        ],
+        status: 'modified',
+      },
+    ],
+    generatedAt: 1,
+    root: '/repo',
+    source: { type: 'working-tree' },
+  });
+  const digest = JSON.parse(prompt.split('Repository change digest:\n')[1] ?? '{}') as {
+    files: ReadonlyArray<{
+      sections: ReadonlyArray<{ hunks: ReadonlyArray<{ id: string; patch: string }> }>;
+    }>;
+  };
+  const hunks = digest.files[0]?.sections[0]?.hunks ?? [];
+
+  expect(hunks).toHaveLength(2);
+  expect(hunks[0]).toMatchObject({ id: 'h1' });
+  expect(hunks[0]?.patch).toContain('+  return () => {');
+  expect(hunks[0]?.patch).not.toContain('+  };');
+  expect(hunks[1]).toMatchObject({ id: 'h2' });
+  expect(hunks[1]?.patch).toContain('+  };');
+  expect(hunks[1]?.patch).not.toContain('+  return () => {');
+});
+
 test('repository digest strictly enforces section and total patch budgets', () => {
   const prompt = buildNarrativeWalkthroughPrompt({
     branch: 'main',
@@ -675,7 +777,7 @@ test('repository digest strictly enforces section and total patch budgets', () =
         {
           id: `src/file-${index}.ts:staged`,
           kind: 'staged',
-          patch: 'x'.repeat(700),
+          patch: `@@ -1 +1 @@\n-${'x'.repeat(700)}\n+${'y'.repeat(700)}\n`,
         },
       ],
       status: 'modified',
@@ -685,17 +787,19 @@ test('repository digest strictly enforces section and total patch budgets', () =
     source: { type: 'working-tree' },
   });
   const digest = JSON.parse(prompt.split('Repository change digest:\n')[1] ?? '{}') as {
-    files: ReadonlyArray<{ sections: ReadonlyArray<{ patchExcerpt: string }> }>;
+    files: ReadonlyArray<{
+      sections: ReadonlyArray<{ hunks: ReadonlyArray<{ patch?: string }> }>;
+    }>;
   };
   const lengths = digest.files.flatMap((file) =>
-    file.sections.map((section) => section.patchExcerpt.length),
+    file.sections.flatMap((section) => section.hunks.map((hunk) => hunk.patch?.length ?? 0)),
   );
 
   expect(Math.max(...lengths)).toBeLessThanOrEqual(700);
   expect(lengths.reduce((total, length) => total + length, 0)).toBeLessThanOrEqual(35_000);
 });
 
-test('repository digest includes summaries within the section patch budget', () => {
+test('repository digest keeps summaries separate from bounded hunk patches', () => {
   const prompt = buildNarrativeWalkthroughPrompt({
     branch: 'main',
     files: [
@@ -705,7 +809,7 @@ test('repository digest includes summaries within the section patch budget', () 
           {
             id: 'src/summary.ts:staged',
             kind: 'staged',
-            patch: 'x'.repeat(5_000),
+            patch: `@@ -1 +1 @@\n-${'x'.repeat(5_000)}\n+${'y'.repeat(5_000)}\n`,
             summary: { reason: 'R'.repeat(1_000) },
           },
         ],
@@ -717,10 +821,17 @@ test('repository digest includes summaries within the section patch budget', () 
     source: { type: 'working-tree' },
   });
   const digest = JSON.parse(prompt.split('Repository change digest:\n')[1] ?? '{}') as {
-    files: ReadonlyArray<{ sections: ReadonlyArray<{ patchExcerpt: string }> }>;
+    files: ReadonlyArray<{
+      sections: ReadonlyArray<{
+        hunks: ReadonlyArray<{ patch?: string }>;
+        summary?: string;
+      }>;
+    }>;
   };
+  const section = digest.files[0]?.sections[0];
 
-  expect(digest.files[0]?.sections[0]?.patchExcerpt.length).toBeLessThanOrEqual(2_500);
+  expect(section?.hunks[0]?.patch?.length).toBeLessThanOrEqual(8_000);
+  expect(section?.summary).toBe('R'.repeat(1_000));
 });
 
 test('repository digest collapses generated files to one synthetic hunk', () => {

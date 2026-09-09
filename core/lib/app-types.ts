@@ -78,6 +78,11 @@ export type ReviewScrollTarget = {
 };
 
 export type ReviewIdentity = {
+  coverage?: {
+    allHunkIds: ReadonlyArray<string>;
+    file: { fingerprint: string; key: string };
+    hunkIds: ReadonlyArray<string>;
+  };
   fingerprint: string;
   key: string;
 };
@@ -136,7 +141,7 @@ export type WalkthroughNote = {
 
 export type SourceSession = {
   collapsed: Set<string>;
-  expandedGenerated: Set<string>;
+  expandedReviewKeys: Set<string>;
   /** Populated by a generated or pre-authored narrative walkthrough document. */
   narrativeWalkthrough?: NarrativeWalkthrough | null;
   reviewComments: ReadonlyArray<ReviewComment>;

@@ -45,6 +45,7 @@ const {
 const MAX_PROSE_CHARS = 4_000;
 const MAX_TOTAL_PATCH_CHARS = 60_000;
 const MAX_LARGE_TOTAL_PATCH_CHARS = 35_000;
+const MAX_SMALL_SECTION_PATCH_CHARS = 8_000;
 const MAX_SECTION_PATCH_CHARS = 2_500;
 const MAX_LARGE_SECTION_PATCH_CHARS = 700;
 const BASE_WALKTHROUGH_TIMEOUT_MS = 90_000;
@@ -515,17 +516,13 @@ const normalizeNarrativeWalkthrough = (input, files, facts = {}, hunkIdByAlias =
   return /** @type {NarrativeWalkthrough} */ (result);
 };
 
-/** @param {DiffSection} section @param {number} remainingBudget @param {number} sectionPatchBudget */
-const buildPatchExcerpt = (section, remainingBudget, sectionPatchBudget) => {
-  const summary = section.summary?.reason ? `Summary: ${section.summary.reason}\n` : '';
-  const maxLength = Math.max(0, Math.min(sectionPatchBudget, remainingBudget));
-  const excerpt = `${summary}${section.patch || ''}` || '[patch omitted: no text patch available]';
-  return excerpt.length <= maxLength
-    ? excerpt
+/** @param {string} patch @param {number} maxLength */
+const buildPatchExcerpt = (patch, maxLength) =>
+  patch.length <= maxLength
+    ? patch
     : maxLength <= 1
-      ? excerpt.slice(0, maxLength)
-      : `${excerpt.slice(0, maxLength - 1)}…`;
-};
+      ? patch.slice(0, maxLength)
+      : `${patch.slice(0, maxLength - 1)}…`;
 
 /** @param {number} start @param {number} end */
 const formatPromptLineRange = (start, end) => (start === end ? `${start}` : `${start}-${end}`);
@@ -533,8 +530,9 @@ const formatPromptLineRange = (start, end) => (start === end ? `${start}` : `${s
 /**
  * @param {ReturnType<typeof getSectionWalkthroughHunks>[number]} hunk
  * @param {string} id
+ * @param {string} patch
  */
-const buildPromptHunkInput = (hunk, id) => {
+const buildPromptHunkInput = (hunk, id, patch = '') => {
   if (isSyntheticWalkthroughHunk(hunk)) {
     return {
       added: hunk.added,
@@ -553,6 +551,7 @@ const buildPromptHunkInput = (hunk, id) => {
     kind: 'patch',
     newLines: formatPromptLineRange(hunk.additionStart, hunk.additionEnd),
     oldLines: formatPromptLineRange(hunk.deletionStart, hunk.deletionEnd),
+    patch,
   };
 };
 
@@ -563,10 +562,15 @@ const getPromptPatchBudgets = (fileCount) =>
         section: MAX_LARGE_SECTION_PATCH_CHARS,
         total: MAX_LARGE_TOTAL_PATCH_CHARS,
       }
-    : {
-        section: MAX_SECTION_PATCH_CHARS,
-        total: MAX_TOTAL_PATCH_CHARS,
-      };
+    : fileCount > 8
+      ? {
+          section: MAX_SECTION_PATCH_CHARS,
+          total: MAX_TOTAL_PATCH_CHARS,
+        }
+      : {
+          section: MAX_SMALL_SECTION_PATCH_CHARS,
+          total: MAX_TOTAL_PATCH_CHARS,
+        };
 
 /** @param {RepositoryState['source']} source */
 const buildPromptSource = (source) => {
@@ -613,17 +617,21 @@ const buildPromptInput = (state) => {
         oldPath: file.oldPath,
         path: file.path,
         sections: file.sections.map((section) => {
-          const patchExcerpt = buildPatchExcerpt(
-            section,
-            remainingPatchBudget,
-            patchBudget.section,
-          );
-          remainingPatchBudget = Math.max(0, remainingPatchBudget - patchExcerpt.length);
-          const hunks = getSectionWalkthroughHunks(file, section).map((hunk) => {
+          const sectionHunks = getSectionWalkthroughHunks(file, section);
+          let remainingSectionPatchBudget = Math.min(remainingPatchBudget, patchBudget.section);
+          const hunks = sectionHunks.map((hunk, index) => {
             const alias = `h${nextHunkAlias}`;
             nextHunkAlias += 1;
             hunkIdByAlias.set(alias, hunk.id);
-            return buildPromptHunkInput(hunk, alias);
+            const fairPatchBudget = Math.floor(
+              remainingSectionPatchBudget / (sectionHunks.length - index),
+            );
+            const patchExcerpt = isSyntheticWalkthroughHunk(hunk)
+              ? ''
+              : buildPatchExcerpt(hunk.patch || '', fairPatchBudget);
+            remainingSectionPatchBudget -= patchExcerpt.length;
+            remainingPatchBudget -= patchExcerpt.length;
+            return buildPromptHunkInput(hunk, alias, patchExcerpt);
           });
 
           return {
@@ -632,7 +640,6 @@ const buildPromptInput = (state) => {
             id: section.id,
             kind: section.kind,
             loadState: section.loadState,
-            patchExcerpt,
             summary: section.summary?.reason,
           };
         }),
@@ -766,39 +773,40 @@ const getNarrativeWalkthroughTimeoutMs = (state, minimumMs = BASE_WALKTHROUGH_TI
 
 const buildWalkthroughSizingGuidance = (state) => {
   const { fileCount, hunkCount } = getWalkthroughSize(state);
-  const targetStops =
-    fileCount <= 2
-      ? hunkCount <= 4
-        ? '1-2'
-        : '2-3'
-      : fileCount <= 4 && hunkCount <= 4
-        ? '1-2'
-        : fileCount <= 4 && hunkCount <= 8
-          ? '1-3'
+  const focusedSmallChange = hunkCount <= 12 || (fileCount <= 4 && hunkCount <= 16);
+  const stopInstruction =
+    hunkCount <= 4
+      ? 'Use at most 2 main-path stops'
+      : focusedSmallChange
+        ? 'Use at most 3 main-path stops'
+        : fileCount <= 8 && hunkCount <= 32
+          ? 'Use at most 5 main-path stops'
           : fileCount <= 16
-            ? '5-9'
-            : '6-9';
-  const targetChapters =
+            ? 'Aim for 5-9 main-path stops'
+            : 'Aim for 6-9 main-path stops';
+  const chapterInstruction =
     fileCount <= 2
-      ? '1'
-      : fileCount <= 4 && hunkCount <= 8
-        ? '1-2'
-        : `2-${MAX_WALKTHROUGH_CHAPTERS}`;
-  const targetChapterInstruction =
-    targetChapters === '1' ? '1 story chapter' : `${targetChapters} story chapters`;
+      ? 'Use 1 story chapter'
+      : focusedSmallChange
+        ? 'Use at most 2 story chapters'
+        : fileCount <= 8 && hunkCount <= 32
+          ? 'Use at most 3 story chapters'
+          : `Use 2-${MAX_WALKTHROUGH_CHAPTERS} story chapters`;
   return `Coverage contract:
 - The digest has ${fileCount} files and ${hunkCount} reviewable hunks. Put the highest-leverage review path in chapters[]; Codiff preserves everything else as support.
 - Digest hunk ids are compact request-local aliases like h1 and h2. Return those aliases exactly; Codiff maps them back to stable live-diff ids.
+- Every patch hunk contains its own bounded patch excerpt. Use that excerpt to associate each alias with its exact change; an excerpt ending in … is truncated.
 - Define chapters[] in display order. Inside each chapter, define stops[] in display order.
 - Use stable item ids like s1, s2, ... for main stops. Do not invent hunk ids.
 - Default to one review idea per stop. Include multiple hunkIds when the hunks implement the same idea, especially in small diffs.
 
 Grouping contract:
-- Target ${targetStops} main-path stops and at most ${MAX_WALKTHROUGH_STOPS}. Prefer the low end when it still preserves distinct state transitions, submission paths, or runtime contracts.
-- Use ${targetChapterInstruction}. A chapter is a conceptual group, not a file. For one- or two-file diffs, prefer one chapter unless there are clearly separate review phases.
+- ${stopInstruction}; this is a ceiling, not a target. Use fewer whenever they still preserve distinct state transitions, submission paths, or runtime contracts. Never exceed ${MAX_WALKTHROUGH_STOPS}.
+- ${chapterInstruction}. A chapter is a conceptual group, not a file. For one- or two-file diffs, prefer one chapter unless there are clearly separate review phases.
 - Chapter titles render in a compact top bar: keep each title to 1-2 short words and at most 16 characters, e.g. "UI", "CLI", "Tests", "Docs", "Runtime", "Cleanup".
 - Every stop must have a concise semantic title that names the review idea in roughly 2-6 words, e.g. "Prevent duplicate payments" or "Preserve offline drafts". Never use a filename or path as a stop title.
 - A stop may contain at most ${MAX_HUNKS_PER_WALKTHROUGH_GROUP} hunkIds. Use multiple hunkIds when the prose needs those hunks read together to understand one invariant, behavior, or repeated pattern.
+- A Git hunk boundary is not a walkthrough boundary. Group hunks that only make sense together, and never create a stop whose explanation depends primarily on code assigned to another stop.
 - Generated-like files have "generated": true and one synthetic hunk per changed section. Never split them; main-path them only when they explain behavior, like snapshots proving output.
 - For 1-4 total hunks, usually write 1-2 stops. Similar same-file hunks should usually be one stop with multiple hunkIds, not separate chapters or stops.
 - Split distant same-file hunks into separate consecutive stops when they deserve separate prose. Do not make a chapter-sized stop.

@@ -7,6 +7,7 @@ import { expect, test, vi } from 'vite-plus/test';
 import { useResizableSidebar } from '../app/hooks/useResizableSidebar.ts';
 import { useReviewFileState } from '../app/hooks/useReviewState.ts';
 import type { ReviewIdentity } from '../lib/app-types.ts';
+import { getWalkthroughReviewIdentity } from '../lib/review-identity.ts';
 import { SIDEBAR_COLLAPSE_THRESHOLD } from '../lib/sidebar-width.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact } from './helpers/react.tsx';
@@ -55,7 +56,7 @@ test('review file state keeps collapse, generated expansion, viewed state, and v
     getState().toggleCollapsed(file, true, reviewIdentity.key);
   });
   expect(getState().collapsed.has(reviewIdentity.key)).toBe(false);
-  expect(getState().expandedGenerated.has(reviewIdentity.key)).toBe(true);
+  expect(getState().expandedReviewKeys.has(reviewIdentity.key)).toBe(true);
   expect(getState().itemVersionByKey[reviewIdentity.key]).toBe(1);
   await act(async () => {
     getState().toggleViewed(file, false, reviewIdentity);
@@ -64,7 +65,7 @@ test('review file state keeps collapse, generated expansion, viewed state, and v
     [reviewIdentity.key]: reviewIdentity.fingerprint,
   });
   expect(getState().collapsed.has(reviewIdentity.key)).toBe(true);
-  expect(getState().expandedGenerated.has(reviewIdentity.key)).toBe(false);
+  expect(getState().expandedReviewKeys.has(reviewIdentity.key)).toBe(false);
   expect(getState().itemVersionByKey[reviewIdentity.key]).toBe(2);
   expect(onViewedChange).toHaveBeenLastCalledWith({
     [reviewIdentity.key]: reviewIdentity.fingerprint,
@@ -179,3 +180,25 @@ test.each([
     expect(handle.classList.contains('dragging')).toBe(false);
   },
 );
+
+test('viewing one walkthrough block preserves manual collapse choices for sibling blocks', async () => {
+  const file = createChangedFile('src/shared.ts', {
+    patch: '@@ -1 +1 @@\n-old\n+new\n@@ -10 +10 @@\n-before\n+after\n',
+  });
+  const first = getWalkthroughReviewIdentity(file, [`${file.sections[0].id}:h1`]);
+  const second = getWalkthroughReviewIdentity(file, [`${file.sections[0].id}:h2`]);
+  let state: ReviewFileState;
+  await using _view = await renderReact(
+    <ReviewFileStateHarness
+      onState={(next) => {
+        state = next;
+      }}
+    />,
+  );
+  await act(async () => state.toggleCollapsed(file, false, first.key));
+  await act(async () => state.toggleViewed(file, false, second));
+  expect(state!.collapsed.has(first.key)).toBe(true);
+  await act(async () => state.toggleCollapsed(file, true, first.key));
+  await act(async () => state.toggleViewed(file, true, second));
+  expect(state!.expandedReviewKeys.has(first.key)).toBe(true);
+});

@@ -154,11 +154,11 @@ counts; when it is `false`, Codiff hides those changes from the working-tree rev
     "wordWrap": false,
   },
   "keymap": {
-    "commandBar": "Mod+Shift+p",
+    "commandBar": "Mod+k",
     "diffSearch": "Mod+f",
     "fileFilter": "Mod+p",
     "nextSearchMatch": "Enter",
-    "openFile": "Mod+k",
+    "openFile": "Mod+Shift+o",
     "prevSearchMatch": "Shift+Enter",
     "closeSearch": "Escape",
     "submitComment": "Mod+Enter",
@@ -185,7 +185,7 @@ Choose `View > Diff > Font Size`, use the code font size commands in the command
 Set `settings.codeFontFamily` manually to an installed CSS font family name, for example
 `"JetBrains Mono"` or `"SF Mono"`. Leave it empty to use Codiff's bundled mono stack.
 Use `Mod` for <kbd>Cmd</kbd> on macOS and <kbd>Ctrl</kbd> on other platforms. Shortcut strings can
-combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+Shift+p` or
+combine `Mod`, `Ctrl`, `Alt`, `Shift`, or `Meta` with a key, for example `Mod+k` or
 `Alt+Enter`.
 
 ## Walkthroughs

@@ -16,6 +16,7 @@ import {
   getSectionWalkthroughHunks,
   isSyntheticWalkthroughHunk,
 } from './narrative-walkthrough-diff.js';
+import { getWalkthroughReviewIdentity } from './review-identity.ts';
 
 type NarrativeLineCount = {
   added: number;
@@ -188,6 +189,7 @@ const getSectionHunkIds = (file: ChangedFile, section: DiffSection): ReadonlyArr
   getSectionWalkthroughHunks(file, section).map((hunk: { id: string }) => hunk.id);
 
 type UncoveredWalkthroughSection = {
+  hunkIds: ReadonlyArray<string>;
   identity: string;
   section: DiffSection;
 };
@@ -205,7 +207,9 @@ const getUncoveredWalkthroughSection = (
 
   const hunkIds = getSectionHunkIds(file, section);
   if (hunkIds.length === 0) {
-    return coveredSectionIds.has(section.id) ? null : { identity: section.id, section };
+    return coveredSectionIds.has(section.id)
+      ? null
+      : { hunkIds: [section.id], identity: section.id, section };
   }
 
   const uncoveredHunkIds = hunkIds.filter((hunkId) => !coveredHunkIds.has(hunkId));
@@ -215,11 +219,32 @@ const getUncoveredWalkthroughSection = (
 
   const identity = `${section.id}:${uncoveredHunkIds.join(',')}`;
   if (uncoveredHunkIds.length === hunkIds.length) {
-    return { identity, section };
+    return { hunkIds: uncoveredHunkIds, identity, section };
   }
 
   const patch = filterPatchToHunkIds(section.patch, section.id, uncoveredHunkIds);
-  return patch ? { identity, section: { ...section, patch } } : null;
+  return patch ? { hunkIds: uncoveredHunkIds, identity, section: { ...section, patch } } : null;
+};
+
+export const getUncoveredWalkthroughReviewIdentity = (
+  file: ChangedFile,
+  view: WalkthroughView,
+  showWhitespace: boolean,
+) => {
+  const coveredHunkIds = walkthroughCoveredHunkIds(view);
+  const coveredSectionIds = walkthroughCoveredSectionIds(view);
+  const coveredSyntheticSectionIds = walkthroughCoveredSyntheticSectionIds(view);
+  const hunkIds = getVisibleDiffSections(file, showWhitespace).flatMap(
+    ({ section }) =>
+      getUncoveredWalkthroughSection(
+        file,
+        section,
+        coveredHunkIds,
+        coveredSectionIds,
+        coveredSyntheticSectionIds,
+      )?.hunkIds ?? [],
+  );
+  return getWalkthroughReviewIdentity(file, hunkIds);
 };
 
 export const getUncoveredWalkthroughFiles = (

@@ -10,6 +10,7 @@ This suite measures Codiff walkthrough generation on two axes:
 The fixed cases are:
 
 - `small`: `c0adcf7`, one file and two reviewable hunks.
+- `focused-small`: `88a977c`, three files and nine reviewable hunks.
 - `medium`: `7e71d5f`, 21 files and 67 reviewable hunks.
 - `large`: `6354103`, 30 files and 145 reviewable hunks.
 

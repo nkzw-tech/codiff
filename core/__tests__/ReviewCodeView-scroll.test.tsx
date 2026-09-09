@@ -2,11 +2,14 @@
  * @vitest-environment jsdom
  */
 
-import { act, useState } from 'react';
+import { act, useCallback, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
+import { useReviewCommentDrafts } from '../app/hooks/useReviewCommentDrafts.ts';
+import { useReviewFileState } from '../app/hooks/useReviewState.ts';
 import type { ReviewComment, ReviewIdentity } from '../lib/app-types.ts';
 import {
+  getWalkthroughReviewIdentity,
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
 } from '../lib/review-identity.ts';
@@ -174,7 +177,7 @@ test('generated files are collapsed by default and can be explicitly expanded pe
   await view.rerender(
     <ReviewCodeViewHarness
       blocks={blocks}
-      expandedGenerated={new Set([reviewKey])}
+      expandedReviewKeys={new Set([reviewKey])}
       files={[]}
       itemVersionByKey={{ [reviewKey]: 1 }}
     />,
@@ -1474,12 +1477,14 @@ const renderLocalReviewComment = async ({
   body,
   onAskCodex,
   onCommentDraftChange,
+  onCreateComment,
   onDeleteComment,
   onUpdateComment,
 }: {
   body: string;
   onAskCodex: () => void;
   onCommentDraftChange?: () => void;
+  onCreateComment?: () => void;
   onDeleteComment?: () => void;
   onUpdateComment: () => void;
 }) => {
@@ -1498,6 +1503,7 @@ const renderLocalReviewComment = async ({
       files={[file]}
       onAskCodex={onAskCodex}
       onCommentDraftChange={onCommentDraftChange}
+      onCreateComment={onCreateComment}
       onDeleteComment={onDeleteComment}
       onUpdateComment={onUpdateComment}
     />,
@@ -1524,6 +1530,183 @@ const pressCommentShortcut = async (textarea: HTMLTextAreaElement, altKey: boole
     );
   });
 };
+
+const dispatchTestPointerEvent = (type: 'pointerdown' | 'pointerup') => {
+  const event = new Event(type);
+  Object.defineProperty(event, 'pointerId', { value: 1 });
+  window.dispatchEvent(event);
+};
+
+type StatefulReviewCommentState = ReturnType<typeof useReviewCommentDrafts> & {
+  comments: ReadonlyArray<ReviewComment>;
+};
+
+const ignoreCommentFileChange = () => {};
+
+function StatefulReviewCommentHarness({
+  file,
+  initialComment,
+  onState,
+  onUpdateComment,
+}: {
+  file: ChangedFile;
+  initialComment: ReviewComment;
+  onState: (state: StatefulReviewCommentState) => void;
+  onUpdateComment: (commentId: string, body: string) => void;
+}) {
+  const [comments, setComments] = useState<ReadonlyArray<ReviewComment>>([initialComment]);
+  const commentState = useReviewCommentDrafts({
+    comments,
+    onCommentFileChange: ignoreCommentFileChange,
+    setComments,
+  });
+  const updateCommentState = commentState.updateComment;
+  const updateComment = useCallback(
+    (commentId: string, body: string) => {
+      onUpdateComment(commentId, body);
+      updateCommentState(commentId, body);
+    },
+    [onUpdateComment, updateCommentState],
+  );
+  onState({ ...commentState, comments });
+
+  return (
+    <ReviewCodeViewHarness
+      comments={comments}
+      files={[file]}
+      focusCommentId={commentState.focusCommentId}
+      focusCommentRequest={commentState.focusCommentRequest}
+      onCommentDraftChange={commentState.updateActiveReviewCommentDraft}
+      onCreateComment={commentState.createComment}
+      onDeleteComment={commentState.deleteComment}
+      onUpdateComment={updateComment}
+    />
+  );
+}
+
+test('pointer-driven comment blurs preserve each newly focused editor across repeated moves', async () => {
+  vi.useFakeTimers();
+  using _timers = {
+    [Symbol.dispose]() {
+      vi.useRealTimers();
+    },
+  };
+  const randomUUID = vi
+    .spyOn(crypto, 'randomUUID')
+    .mockReturnValueOnce('00000000-0000-4000-8000-000000000002')
+    .mockReturnValueOnce('00000000-0000-4000-8000-000000000003')
+    .mockReturnValueOnce('00000000-0000-4000-8000-000000000004');
+  using _uuid = {
+    [Symbol.dispose]() {
+      randomUUID.mockRestore();
+    },
+  };
+  const onUpdateComment = vi.fn();
+  const file = createChangedFileWithPatch(
+    'src/comment.ts',
+    'diff --git a/src/comment.ts b/src/comment.ts\n@@ -1,4 +1,4 @@\n-old one\n-old two\n-old three\n-old four\n+new one\n+new two\n+new three\n+new four\n',
+  );
+  const initialComment = {
+    body: '',
+    filePath: file.path,
+    id: 'comment-1',
+    lineNumber: 1,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+  } satisfies ReviewComment;
+  const stateRef: { current: StatefulReviewCommentState | null } = { current: null };
+  const getState = () => {
+    if (!stateRef.current) {
+      throw new Error('Expected review comment state.');
+    }
+    return stateRef.current;
+  };
+  const view = await renderReact(
+    <StatefulReviewCommentHarness
+      file={file}
+      initialComment={initialComment}
+      onState={(state) => (stateRef.current = state)}
+      onUpdateComment={onUpdateComment}
+    />,
+  );
+  await using _view = view;
+  const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
+  if (!textarea) {
+    throw new Error('Expected review comment textarea.');
+  }
+  await act(async () => textarea.focus());
+  await setInputValue(textarea, 'Keep this draft.');
+  const lineElement = document.createElement('span');
+
+  const moveFocusedCommentToLine = async (lineNumber: number, expectedCommentId: string) => {
+    const focusedEditor = document.activeElement;
+    const activeDraftBeforeBlur = getState().activeReviewCommentDraftRef.current;
+    const updateCountBeforeBlur = onUpdateComment.mock.calls.length;
+    expect(focusedEditor).toBeInstanceOf(HTMLTextAreaElement);
+
+    await act(async () => {
+      dispatchTestPointerEvent('pointerdown');
+      (focusedEditor as HTMLTextAreaElement).blur();
+    });
+    expect(getState().activeReviewCommentDraftRef.current).toEqual(activeDraftBeforeBlur);
+    expect(onUpdateComment).toHaveBeenCalledTimes(updateCountBeforeBlur);
+
+    const { item, onLineClick } = getReviewCodeViewHandlers();
+    await act(async () => {
+      dispatchTestPointerEvent('pointerup');
+      onLineClick(
+        {
+          annotationSide: 'additions',
+          event: nonInteractivePointerEvent,
+          lineElement,
+          lineNumber,
+        },
+        { item },
+      );
+    });
+    expect(onUpdateComment).toHaveBeenCalledTimes(updateCountBeforeBlur);
+
+    const destinationEditor = view.container.querySelector<HTMLTextAreaElement>(
+      `[aria-label="Comment on src/comment.ts New line ${lineNumber}"]`,
+    );
+    expect(document.activeElement).toBe(destinationEditor);
+    expect(getState().focusCommentId).toBe(expectedCommentId);
+    expect(getState().activeReviewCommentDraftRef.current).toEqual({
+      body: '',
+      id: expectedCommentId,
+    });
+
+    await act(async () => vi.advanceTimersByTime(0));
+
+    // The deferred blur belongs to the previous editor. It must not clear the
+    // destination editor's active draft after that editor has received focus.
+    expect(getState().activeReviewCommentDraftRef.current).toEqual({
+      body: '',
+      id: expectedCommentId,
+    });
+  };
+
+  await moveFocusedCommentToLine(2, '00000000-0000-4000-8000-000000000002');
+  expect(onUpdateComment).toHaveBeenCalledOnce();
+  expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Keep this draft.');
+  expect(getState().comments.map(({ body, lineNumber }) => ({ body, lineNumber }))).toEqual([
+    { body: 'Keep this draft.', lineNumber: 1 },
+    { body: '', lineNumber: 2 },
+  ]);
+
+  await moveFocusedCommentToLine(3, '00000000-0000-4000-8000-000000000003');
+  expect(getState().comments.map(({ body, lineNumber }) => ({ body, lineNumber }))).toEqual([
+    { body: 'Keep this draft.', lineNumber: 1 },
+    { body: '', lineNumber: 3 },
+  ]);
+
+  await moveFocusedCommentToLine(4, '00000000-0000-4000-8000-000000000004');
+  expect(getState().comments.map(({ body, lineNumber }) => ({ body, lineNumber }))).toEqual([
+    { body: 'Keep this draft.', lineNumber: 1 },
+    { body: '', lineNumber: 4 },
+  ]);
+  expect(onUpdateComment).toHaveBeenCalledOnce();
+});
 
 test('local review comments are added with Mod+Enter instead of asking the agent', async () => {
   const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
@@ -2426,17 +2609,22 @@ test('modifier navigation follows file hosts reused by CodeView virtualization',
   });
 });
 
-test('line content clicks create review comments unless text is selected', async () => {
+test('line content clicks only ignore text selected on the clicked line', async () => {
   const onCreateComment = vi.fn();
   const file = createChangedFileWithPatch(
     'src/click.ts',
-    'diff --git a/src/click.ts b/src/click.ts\n@@ -1 +1 @@\n-old\n+new\n',
+    'diff --git a/src/click.ts b/src/click.ts\n@@ -1,2 +1,2 @@\n-old one\n-old two\n+new one\n+new two\n',
   );
   const container = document.createElement('div');
-  const selectionHost = document.createElement('span');
-  selectionHost.textContent = 'selected code';
-  document.body.append(container);
-  document.body.append(selectionHost);
+  const shadowHost = document.createElement('div');
+  const shadowRoot = shadowHost.attachShadow({ mode: 'open' });
+  const lineElement = document.createElement('span');
+  const lineText = document.createTextNode('selected code');
+  lineElement.append(lineText);
+  const otherLineElement = document.createElement('span');
+  otherLineElement.textContent = 'other code';
+  shadowRoot.append(lineElement, otherLineElement);
+  document.body.append(container, shadowHost);
   let root: Root | null = null;
 
   await using _resource = {
@@ -2446,7 +2634,7 @@ test('line content clicks create review comments unless text is selected', async
         await act(async () => root?.unmount());
       }
       container.remove();
-      selectionHost.remove();
+      shadowHost.remove();
     },
   };
   await act(async () => {
@@ -2461,6 +2649,7 @@ test('line content clicks create review comments unless text is selected', async
       {
         annotationSide: 'additions',
         event: nonInteractivePointerEvent,
+        lineElement,
         lineNumber: 1,
       },
       { item },
@@ -2473,28 +2662,66 @@ test('line content clicks create review comments unless text is selected', async
     sectionId: 'src/click.ts:unstaged',
     side: 'additions',
   });
-  const selection = window.getSelection();
-  const textSelection = document.createRange();
-  textSelection.selectNodeContents(selectionHost);
-  selection?.removeAllRanges();
-  selection?.addRange(textSelection);
-  await act(async () => {
-    onLineClick(
-      {
-        annotationSide: 'additions',
-        event: nonInteractivePointerEvent,
-        lineNumber: 1,
-      },
-      { item },
-    );
-  });
-  expect(onCreateComment).toHaveBeenCalledTimes(1);
-  selection?.removeAllRanges();
+
+  const getComposedRanges = vi.fn(() => [
+    {
+      collapsed: false,
+      endContainer: lineText,
+      endOffset: lineText.length,
+      startContainer: lineText,
+      startOffset: 0,
+    } as StaticRange,
+  ]);
+  const selectedRange = document.createRange();
+  selectedRange.selectNodeContents(lineElement);
+  {
+    using _selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
+      getComposedRanges,
+      getRangeAt: () => selectedRange,
+      isCollapsed: true,
+      rangeCount: 1,
+      toString: () => '',
+    } as unknown as Selection);
+
+    await act(async () => {
+      onLineClick(
+        {
+          annotationSide: 'additions',
+          event: nonInteractivePointerEvent,
+          lineElement,
+          lineNumber: 1,
+        },
+        { item },
+      );
+    });
+    expect(getComposedRanges).toHaveBeenCalledWith({ shadowRoots: [shadowRoot] });
+    expect(onCreateComment).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      onLineClick(
+        {
+          annotationSide: 'additions',
+          event: nonInteractivePointerEvent,
+          lineElement: otherLineElement,
+          lineNumber: 2,
+        },
+        { item },
+      );
+    });
+    expect(onCreateComment).toHaveBeenCalledTimes(2);
+    expect(onCreateComment).toHaveBeenLastCalledWith({
+      filePath: 'src/click.ts',
+      lineNumber: 2,
+      sectionId: 'src/click.ts:unstaged',
+      side: 'additions',
+    });
+  }
+
   await act(async () => {
     onLineSelectionEnd(range, { item });
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(onCreateComment).toHaveBeenCalledTimes(2);
+  expect(onCreateComment).toHaveBeenCalledTimes(3);
   expect(onCreateComment).toHaveBeenLastCalledWith({
     filePath: 'src/click.ts',
     lineNumber: 1,
@@ -2508,5 +2735,70 @@ test('line content clicks create review comments unless text is selected', async
     onLineSelectionEnd(range, { item });
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(onCreateComment).toHaveBeenCalledTimes(3);
+  expect(onCreateComment).toHaveBeenCalledTimes(4);
+});
+
+test('viewed state and collapse synchronize when switching between tree and walkthrough', async () => {
+  const file = createChangedFile('src/shared.ts', {
+    patch: '@@ -1 +1 @@\n-old\n+new\n@@ -10 +10 @@\n-before\n+after\n',
+  });
+  const blocks = [1, 2].map((ordinal) => ({
+    file,
+    id: `block-${ordinal}`,
+    itemIdPrefix: `block-${ordinal}`,
+    reviewIdentity: getWalkthroughReviewIdentity(file, [`${file.sections[0].id}:h${ordinal}`]),
+  }));
+  function Harness({ walkthrough = false }: { walkthrough?: boolean }) {
+    const {
+      collapsed,
+      expandedReviewKeys,
+      itemVersionByKey,
+      toggleCollapsed,
+      toggleViewed,
+      viewed,
+    } = useReviewFileState();
+    return (
+      <ReviewCodeViewHarness
+        blocks={walkthrough ? blocks : undefined}
+        collapsed={collapsed}
+        expandedReviewKeys={expandedReviewKeys}
+        files={walkthrough ? [] : [file]}
+        itemVersionByKey={itemVersionByKey}
+        onToggleCollapsed={toggleCollapsed}
+        onToggleViewed={toggleViewed}
+        viewed={viewed}
+      />
+    );
+  }
+  await using view = await renderReact(<Harness />);
+  const buttons = () => [
+    ...view.container.querySelectorAll<HTMLButtonElement>('.codiff-viewed-button'),
+  ];
+  const collapsedCount = () => view.container.querySelectorAll('[aria-label="Expand file"]').length;
+  await act(async () => buttons()[0].click());
+  await view.rerender(<Harness walkthrough />);
+  expect(buttons().map((button) => button.getAttribute('aria-pressed'))).toEqual(['true', 'true']);
+  expect(collapsedCount()).toBe(2);
+  // A viewed block can still be opened explicitly.
+  await act(async () =>
+    view.container.querySelector<HTMLButtonElement>('[aria-label="Expand file"]')!.click(),
+  );
+  expect(collapsedCount()).toBe(1);
+  await act(async () => buttons()[0].click());
+  await view.rerender(<Harness />);
+  expect(buttons()[0].getAttribute('aria-pressed')).toBe('false');
+  expect(collapsedCount()).toBe(0);
+  await view.rerender(<Harness walkthrough />);
+  expect(buttons().map((button) => button.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+  await act(async () => buttons()[0].click());
+  await view.rerender(<Harness />);
+  expect(buttons()[0].getAttribute('aria-pressed')).toBe('true');
+  expect(collapsedCount()).toBe(1);
+  await act(async () => buttons()[0].click());
+  await view.rerender(<Harness walkthrough />);
+  expect(buttons().map((button) => button.getAttribute('aria-pressed'))).toEqual([
+    'false',
+    'false',
+  ]);
+  expect(collapsedCount()).toBe(0);
 });

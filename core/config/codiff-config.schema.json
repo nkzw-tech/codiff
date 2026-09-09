@@ -124,7 +124,7 @@
       "properties": {
         "commandBar": {
           "type": "string",
-          "default": "Mod+Shift+p",
+          "default": "Mod+k",
           "description": "Open the command palette."
         },
         "diffSearch": {
@@ -154,7 +154,7 @@
         },
         "openFile": {
           "type": "string",
-          "default": "Mod+k",
+          "default": "Mod+Shift+o",
           "description": "Open the currently selected file in the configured editor."
         },
         "prevSearchMatch": {

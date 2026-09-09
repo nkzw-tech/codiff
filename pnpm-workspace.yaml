@@ -31,7 +31,6 @@ onlyBuiltDependencies:
   - electron-winstaller
   - unrs-resolver
 overrides:
-  better-auth: 1.7.1
   extract-zip>yauzl: ^3.4.0
   vite: 'catalog:'
   vitest: 'catalog:'

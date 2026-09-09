@@ -15,6 +15,7 @@ import {
   getCommitSelectionPaths,
   getUncoveredWalkthroughFileLineItems,
   getUncoveredWalkthroughFiles,
+  getUncoveredWalkthroughReviewIdentity,
   getWalkthroughRunNote,
   isWalkthroughCommittable,
   resolveWalkthroughHunkFile,
@@ -22,6 +23,12 @@ import {
   walkthroughItemPaths,
   walkthroughItemTitleFallback,
 } from '../lib/narrative-walkthrough.ts';
+import {
+  getFileReviewIdentity,
+  getWalkthroughReviewIdentity,
+  isReviewIdentityViewed,
+  updateReviewIdentityViewed,
+} from '../lib/review-identity.ts';
 import type {
   ChangedFile,
   NarrativeWalkthrough,
@@ -802,6 +809,13 @@ test('uncovered walkthrough files preserve uncovered hunks from partially covere
 
   const uncoveredFiles = getUncoveredWalkthroughFiles([file], view, false);
 
+  const coveredIdentity = getWalkthroughReviewIdentity(file, [`${section.id}:h1`]);
+  const uncoveredIdentity = getUncoveredWalkthroughReviewIdentity(file, view, false);
+  expect(uncoveredIdentity.coverage?.hunkIds).toEqual([`${section.id}:h2`, `${section.id}:h3`]);
+  let viewed = updateReviewIdentityViewed({}, uncoveredIdentity, false);
+  expect(isReviewIdentityViewed(viewed, getFileReviewIdentity(file))).toBe(false);
+  viewed = updateReviewIdentityViewed(viewed, coveredIdentity, false);
+  expect(isReviewIdentityViewed(viewed, getFileReviewIdentity(file))).toBe(true);
   expect(uncoveredFiles).toHaveLength(1);
   expect(uncoveredFiles[0].sections).toHaveLength(1);
   expect(uncoveredFiles[0].sections[0].patch).not.toContain('favorite.drag()');
