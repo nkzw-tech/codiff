@@ -190,6 +190,8 @@ test('patch-only diffs are registered for lazy hydration and side-cached content
   const reparsedFlippedFlag = getVisibleDiffSections(file, true)[0].fileDiff;
   expect(reparsedFlippedFlag.isPartial).toBe(false);
   expect(reparsedFlippedFlag).not.toBe(fileDiff);
+  expect(reparsedFlippedFlag.cacheKey).toBeTruthy();
+  expect(reparsedFlippedFlag.cacheKey).not.toBe(fileDiff.cacheKey);
 });
 
 test('non-loadable and placeholder diffs are not registered for hydration', () => {

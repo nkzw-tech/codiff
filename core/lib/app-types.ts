@@ -51,7 +51,7 @@ export type ReviewAnnotationMetadata =
   | WalkthroughHeaderAnnotationMetadata;
 
 export type CodeViewInstance = NonNullable<
-  ReturnType<CodeViewHandle<ReviewAnnotationMetadata>['getInstance']>
+  ReturnType<CodeViewHandle<ReviewAnnotationMetadata, undefined>['getInstance']>
 >;
 
 export type DiffSearchMatch = {

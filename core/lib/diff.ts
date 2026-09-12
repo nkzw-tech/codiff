@@ -342,7 +342,7 @@ export const parseSectionDiffWithOptions = (
   } else if (section.patch.trim().length === 0) {
     fileDiff = createEmptyFileDiff(file, section);
   } else {
-    const parsedFileDiff = parsePatchFiles(section.patch)[0]?.files[0];
+    const parsedFileDiff = parsePatchFiles(section.patch, cacheKey)[0]?.files[0];
     if (parsedFileDiff) {
       const loaded = parsedFileDiff.isPartial ? getLoadedSectionContents(file, section) : undefined;
       let hydrated: FileDiffMetadata | null = null;

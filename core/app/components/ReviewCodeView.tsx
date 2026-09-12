@@ -2615,7 +2615,7 @@ export function ReviewCodeView({
   walkthroughNotes: ReadonlyMap<string, WalkthroughNote>;
   wordWrap: boolean;
 }) {
-  const codeViewRef = useRef<CodeViewHandle<ReviewAnnotationMetadata>>(null);
+  const codeViewRef = useRef<CodeViewHandle<ReviewAnnotationMetadata, undefined>>(null);
   const markdownEditorRefs = useRef(new Map<string, MarkdownDocumentEditorHandle>());
   const refreshingMarkdownSectionsRef = useRef(new Set<string>());
   const deferredTimersRef = useRef<Set<number>>(new Set());
@@ -3363,7 +3363,7 @@ export function ReviewCodeView({
     };
   }, [isReadOnly, onLoadSectionContents]);
 
-  const codeViewOptions: CodeViewOptions<ReviewAnnotationMetadata> = useMemo(
+  const codeViewOptions: CodeViewOptions<ReviewAnnotationMetadata, undefined> = useMemo(
     () =>
       ({
         collapsedContextThreshold: diffCollapsedContextThreshold,
@@ -3535,7 +3535,7 @@ export function ReviewCodeView({
         themeType: theme,
         tokenizeMaxLength: 100_000,
         unsafeCSS: codeViewUnsafeCSS,
-      }) satisfies CodeViewOptions<ReviewAnnotationMetadata>,
+      }) satisfies CodeViewOptions<ReviewAnnotationMetadata, undefined>,
     [
       bottomInset,
       cancelPendingEmptyCommentDeletes,

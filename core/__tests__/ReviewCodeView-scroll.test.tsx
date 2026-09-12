@@ -659,7 +659,7 @@ test('focused walkthrough blocks render only global comments visible in the focu
 test('focused walkthrough blocks keep cross-side comments when their rendered anchor is visible', async () => {
   const file = createChangedFileWithPatch(
     'src/ranged-comment.ts',
-    'diff --git a/src/ranged-comment.ts b/src/ranged-comment.ts\n@@ -8,3 +8,3 @@\n context\n-old\n+new\n',
+    'diff --git a/src/ranged-comment.ts b/src/ranged-comment.ts\n@@ -8,3 +8,3 @@\n context\n-old\n+new\n trailing context\n',
   );
   const rangedComment = {
     body: 'Cross-side comment.',
