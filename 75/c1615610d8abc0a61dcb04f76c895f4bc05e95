@@ -1,0 +1,19 @@
+electron/__tests__/codex.test.ts
+  s_ffbe7785fd23bb::t_1da2710a614faa 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "75c1615610d8abc0a61dcb04f76c895f4bc05e95",
+  "prompts": {},
+  "sessions": {
+    "s_ffbe7785fd23bb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09f13-b372-7011-9bd1-8da685268279",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
