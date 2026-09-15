@@ -3,6 +3,7 @@ import type { ReviewComment } from '../lib/app-types.ts';
 import {
   findReusableReviewCommentDraft,
   getPendingPullRequestReviewComments,
+  getRefreshedReviewComments,
   getReviewCommentsFromState,
   getVisibleReviewComments,
   mergeReviewComments,
@@ -344,4 +345,39 @@ test('keeps a submitted shared comment visible until the matching snapshot comme
 
   const snapshotComment = { ...submitted, body: 'Canonical server comment.' };
   expect(mergeReviewComments([snapshotComment], [submitted])).toEqual([snapshotComment]);
+});
+
+test('getRefreshedReviewComments keeps locally created comments across a Markdown refresh', () => {
+  const state = createPullRequestState();
+  state.source = { type: 'working-tree' };
+  state.reviewComments = undefined;
+  const localComment = createReviewComment({
+    body: 'Local draft.',
+    id: 'local:1',
+  });
+  const emptyLocalComment = createReviewComment({
+    body: '',
+    id: 'local:2',
+    lineNumber: 9,
+  });
+
+  expect(getRefreshedReviewComments(state, [localComment, emptyLocalComment])).toEqual([
+    localComment,
+    emptyLocalComment,
+  ]);
+});
+
+test('getRefreshedReviewComments replaces read-only comments with the refreshed state', () => {
+  const state = createPullRequestState();
+  const localComment = createReviewComment({ body: 'Local draft.', id: 'local:1' });
+  const staleComment = createReviewComment({
+    body: 'Stale server comment.',
+    id: 'github:1',
+    isReadOnly: true,
+  });
+
+  const comments = getRefreshedReviewComments(state, [staleComment, localComment]);
+
+  expect(comments.map((comment) => comment.id)).toEqual(['github:1', 'github:2', 'local:1']);
+  expect(comments.find((comment) => comment.id === 'github:1')?.body).toBe('Outdated comment.');
 });

@@ -461,6 +461,18 @@ export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArra
       : [];
   });
 
+// Refreshing the repository state to pick up Markdown edits must not discard
+// locally created review comments, which only live in React state. Comments
+// from the refreshed state win over local ones that share an id.
+export const getRefreshedReviewComments = (
+  state: RepositoryState,
+  currentComments: ReadonlyArray<ReviewComment>,
+): ReadonlyArray<ReviewComment> =>
+  mergeReviewComments(
+    getReviewCommentsFromState(state),
+    currentComments.filter((comment) => !comment.isReadOnly),
+  );
+
 export const getVisibleReviewComments = (
   comments: ReadonlyArray<ReviewComment>,
   showOutdated: boolean,

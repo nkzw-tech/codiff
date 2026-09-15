@@ -85,6 +85,7 @@ import {
 import { resolveReviewCommandTarget } from './lib/review-command-target.ts';
 import {
   buildReviewCommentsMarkdown,
+  getRefreshedReviewComments,
   getReviewCommentsFromState,
   getVisibleReviewComments,
 } from './lib/review-comments.ts';
@@ -533,7 +534,7 @@ export default function App() {
           stateRef.current = orderedState;
           setState(orderedState);
           setLocalChangesDetected(false);
-          setReviewComments(getReviewCommentsFromState(orderedState));
+          setReviewComments((current) => getRefreshedReviewComments(orderedState, current));
           if (walkthroughNeedsRefresh) {
             refreshWalkthroughForState(orderedState);
           }
