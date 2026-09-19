@@ -1102,6 +1102,30 @@ test('resolveWalkthroughHunkRuns groups adjacent same-file hunks without reorder
   ]);
 });
 
+test('resolveWalkthroughHunkRuns splits backward hunks while preserving authored order', () => {
+  const file = multiHunkFile();
+  const section = file.sections[0];
+  const hunks = [3, 1, 2].map((ordinal) =>
+    hunk({
+      added: 1,
+      deleted: 1,
+      display: file.path,
+      id: `${section.id}:h${ordinal}`,
+      path: file.path,
+      sectionId: section.id,
+      status: file.status,
+    }),
+  );
+
+  const runs = resolveWalkthroughHunkRuns(group({ hunks, id: 'backward' }), [file]);
+
+  expect(runs.map((run) => run.hunks.map((hunk) => hunk.id))).toEqual([
+    [`${section.id}:h3`],
+    [`${section.id}:h1`, `${section.id}:h2`],
+  ]);
+  expect(runs.flatMap((run) => run.hunks)).toEqual(hunks);
+});
+
 test('getWalkthroughRunNote combines header notes for grouped hunks', () => {
   const file = multiHunkFile();
   const section = file.sections[0];

@@ -13,6 +13,7 @@ import type {
 import { getDiffLineCount, getVisibleDiffSections } from './diff.ts';
 import {
   filterPatchToHunkIds,
+  getHunkOrdinal,
   getSectionWalkthroughHunks,
   isSyntheticWalkthroughHunk,
 } from './narrative-walkthrough-diff.js';
@@ -381,7 +382,7 @@ export const resolveWalkthroughHunkFile = (
 const walkthroughHunkRunKey = (item: WalkthroughHunkGroup, hunks: ReadonlyArray<WalkthroughHunk>) =>
   `${item.id}:${hunks.map((hunk) => hunk.id).join(',')}`;
 
-/** Resolve item hunks in authored order, coalescing adjacent hunks from the same file section. */
+/** Resolve authored hunk order, coalescing only forward runs within each file section. */
 export const resolveWalkthroughHunkRuns = (
   item: WalkthroughHunkGroup,
   files: ReadonlyArray<ChangedFile>,
@@ -393,10 +394,20 @@ export const resolveWalkthroughHunkRuns = (
       continue;
     }
     const previous = runs.at(-1);
+    const previousHunk = previous?.hunks.at(-1);
+    const previousOrdinal = previousHunk
+      ? getHunkOrdinal(resolved.section.id, previousHunk.id)
+      : null;
+    const ordinal = getHunkOrdinal(resolved.section.id, hunk.id);
+    // Pierre's scroll anchors assume source-order hunks within each diff item.
+    // Split backward jumps into separate runs to preserve the narrative order.
     if (
       previous &&
       previous.resolved.file.path === resolved.file.path &&
-      previous.resolved.section.id === resolved.section.id
+      previous.resolved.section.id === resolved.section.id &&
+      previousOrdinal != null &&
+      ordinal != null &&
+      previousOrdinal < ordinal
     ) {
       const hunks = [...previous.hunks, hunk];
       runs[runs.length - 1] = {
