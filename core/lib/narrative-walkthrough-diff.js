@@ -289,7 +289,9 @@ const getSectionWalkthroughHunks = (file, section) => {
     : [];
 };
 
-/** @param {string} sectionId @param {string} hunkId */
+/** Read the source-order hunk ordinal from a section-scoped id.
+ * @param {string} sectionId @param {string} hunkId
+ */
 const getHunkOrdinal = (sectionId, hunkId) => {
   const prefix = `${sectionId}:h`;
   if (!hunkId.startsWith(prefix)) {
@@ -365,6 +367,7 @@ export {
   buildAnchorDisplay,
   extractPatchHunks,
   filterPatchToHunkIds,
+  getHunkOrdinal,
   getSectionWalkthroughHunks,
   HUNK_HEADER,
   hunkDisplayEnd,
