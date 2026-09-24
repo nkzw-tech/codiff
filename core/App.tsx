@@ -1843,11 +1843,13 @@ export default function App() {
                   rel="noreferrer"
                   target="_blank"
                 >
-                  <span>{sidebarSourceLabel}</span>
+                  <span className="review-top-bar-source-label">{sidebarSourceLabel}</span>
                   <ArrowSquareOut aria-hidden size={14} weight="bold" />
                 </a>
               ) : (
-                <span className="review-top-bar-source">{sidebarSourceLabel}</span>
+                <span className="review-top-bar-source">
+                  <span className="review-top-bar-source-label">{sidebarSourceLabel}</span>
+                </span>
               )
             ) : null}
           </>

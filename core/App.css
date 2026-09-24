@@ -816,6 +816,19 @@ html[data-codiff-platform='darwin'] .workspace-top-bar {
   white-space: nowrap;
 }
 
+@supports (text-box: trim-both cap alphabetic) {
+  .review-top-bar-repository-head,
+  .review-top-bar-repository-tail {
+    /* Keep accents and descenders inside the ellipsis clipping area. */
+    padding-block: 0.5em;
+    text-box: trim-both cap alphabetic;
+  }
+
+  .review-top-bar-source-label {
+    text-box: trim-both cap alphabetic;
+  }
+}
+
 .review-top-bar-branch {
   align-items: center;
   border-radius: 14px;
