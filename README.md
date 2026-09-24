@@ -219,9 +219,9 @@ pi --version
 ```
 
 Codiff looks for the CLI on `PATH` and the usual install locations. On macOS, it also recognizes
-the CLI embedded in `/Applications/Codex.app` or `~/Applications/Codex.app`. It does not run your
-shell startup files to discover CLIs. If a CLI is installed somewhere else, launch Codiff with an
-explicit path:
+the CLI embedded in `Codex.app` or `ChatGPT.app` under `/Applications` or `~/Applications`. It does
+not run your shell startup files to discover CLIs. If a CLI is installed somewhere else, launch
+Codiff with an explicit path:
 
 ```bash
 CODIFF_CODEX_PATH=/absolute/path/to/codex codiff -w

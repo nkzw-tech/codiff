@@ -1,6 +1,6 @@
-import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { beforeEach, expect, test } from 'vite-plus/test';
 import {
   createTemporaryDirectory,
@@ -15,12 +15,14 @@ const {
   CODEX_NOT_FOUND_CODE,
   DEFAULT_OPENAI_MODEL,
   getCodexCommand,
+  getCodexInstallPaths,
   normalizeOpenAIModel,
   runCodex,
 } = require('../codex.cjs') as {
   CODEX_NOT_FOUND_CODE: string;
   DEFAULT_OPENAI_MODEL: string;
-  getCodexCommand: () => string;
+  getCodexCommand: (installPaths?: ReadonlyArray<string>) => string;
+  getCodexInstallPaths: (platform: NodeJS.Platform, home: string) => string[];
   normalizeOpenAIModel: (value: unknown) => string;
   runCodex: (
     repoRoot: string,
@@ -107,6 +109,24 @@ test('rejects invalid explicit Codex CLI overrides', async () => {
   } catch (error) {
     expect(error).toMatchObject({ code: CODEX_NOT_FOUND_CODE });
   }
+});
+
+test('resolves the ChatGPT app CLI without a codex command on PATH', async () => {
+  await using directory = await createTemporaryDirectory('codiff-chatgpt-cli-');
+  const bundledCLI = join(directory.path, 'Applications/ChatGPT.app/Contents/Resources/codex');
+  await mkdir(dirname(bundledCLI), { recursive: true });
+  await writeFile(bundledCLI, '#!/bin/sh\n');
+  await chmod(bundledCLI, 0o755);
+  await using _environment = createTemporaryEnvironment({
+    CODIFF_CODEX_PATH: undefined,
+    PATH: directory.path,
+  });
+
+  // Keep the test hermetic when a real CLI is installed in /Applications.
+  const macOSInstallPaths = getCodexInstallPaths('darwin', directory.path);
+  expect(macOSInstallPaths).toContain('/Applications/ChatGPT.app/Contents/Resources/codex');
+  const installPaths = macOSInstallPaths.filter((path: string) => path.startsWith(directory.path));
+  expect(getCodexCommand(installPaths)).toBe(bundledCLI);
 });
 
 test.skipIf(process.platform !== 'darwin')(

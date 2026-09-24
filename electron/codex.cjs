@@ -24,7 +24,7 @@ const CODEX_MACOS_BLOCKED_MESSAGE =
 const CODEX_NOT_FOUND_CODE = 'CODEX_NOT_FOUND';
 const CODEX_APP_SERVER_UNAVAILABLE_CODE = 'CODEX_APP_SERVER_UNAVAILABLE';
 const CODEX_NOT_FOUND_MESSAGE =
-  'Codex CLI was not found. Install Codex and verify `codex --version` works in Terminal. On macOS, Codiff also checks for the CLI bundled with Codex.app. If Codex is installed somewhere else, launch Codiff with `CODIFF_CODEX_PATH=/absolute/path/to/codex codiff -w`.';
+  'Codex CLI was not found. Install Codex and verify `codex --version` works in Terminal. On macOS, Codiff also checks for the CLI bundled with Codex.app or ChatGPT.app. If Codex is installed somewhere else, launch Codiff with `CODIFF_CODEX_PATH=/absolute/path/to/codex codiff -w`.';
 /**
  * @typedef {{
  *   fallbackModel?: string;
@@ -98,11 +98,14 @@ const getCodexInstallPaths = (platform = process.platform, home = homedir()) => 
     ? [
         '/Applications/Codex.app/Contents/Resources/codex',
         join(home, 'Applications/Codex.app/Contents/Resources/codex'),
+        '/Applications/ChatGPT.app/Contents/Resources/codex',
+        join(home, 'Applications/ChatGPT.app/Contents/Resources/codex'),
       ]
     : []),
 ];
 
-const getCodexCommand = () => {
+/** @param {ReadonlyArray<string>} [installPaths] */
+const getCodexCommand = (installPaths = getCodexInstallPaths()) => {
   const codexPath = process.env.CODIFF_CODEX_PATH?.trim();
   if (codexPath) {
     if (isExecutableFile(codexPath)) {
@@ -119,7 +122,7 @@ const getCodexCommand = () => {
     return pathCommand;
   }
 
-  for (const path of getCodexInstallPaths()) {
+  for (const path of installPaths) {
     if (isExecutableFile(path)) {
       return path;
     }
@@ -816,6 +819,7 @@ module.exports = {
   DEFAULT_OPENAI_MODEL,
   FALLBACK_OPENAI_MODEL,
   getCodexCommand,
+  getCodexInstallPaths,
   isCodexNotFoundError,
   normalizeOpenAIModel,
   OPENAI_MODELS,
