@@ -924,7 +924,7 @@ a.review-top-bar-source:focus-visible {
   corner-shape: squircle;
   cursor: pointer;
   display: inline-flex;
-  font: 600 11px/1 var(--font-sans);
+  font: 600 11px/1.35 var(--font-sans);
   gap: 5px;
   height: 24px;
   justify-content: center;
