@@ -88,6 +88,9 @@ beforeEach(() => {
 });
 
 test('normalizes OpenAI model preferences to known models', () => {
+  expect(normalizeOpenAIModel('gpt-6-astra')).toBe('gpt-6-astra');
+  expect(normalizeOpenAIModel('gpt-6-sol')).toBe('gpt-6-sol');
+  expect(normalizeOpenAIModel('gpt-6-luna')).toBe('gpt-6-luna');
   expect(normalizeOpenAIModel('gpt-5.6-sol')).toBe('gpt-5.6-sol');
   expect(normalizeOpenAIModel('gpt-5.6-terra')).toBe('gpt-5.6-terra');
   expect(normalizeOpenAIModel('gpt-5.6-luna')).toBe('gpt-5.6-luna');
@@ -199,6 +202,31 @@ test('retries unavailable GPT-5.6 models with model-specific reasoning', async (
     'gpt-5.5|model_reasoning_effort="low"',
   ]);
   expect(fallbacks).toEqual([['gpt-5.5', 'gpt-5.6-sol']]);
+});
+
+test('retries unavailable GPT-6 models with Terra before GPT-5.5', async () => {
+  const attempts: Array<string> = [];
+  const { transport } = createCommandTransport((commandProcess) => {
+    commandProcess.stdin.on('finish', () => {
+      const model = getArgumentValue(commandProcess.args, '-m') || '';
+      attempts.push(model);
+      if (model === 'gpt-6-sol') {
+        commandProcess.stderr(`You do not have access to model ${model}.`);
+        commandProcess.close(1);
+      } else {
+        void completeCodexExec(commandProcess);
+      }
+    });
+  });
+
+  await expect(
+    runCodex('/repo', 'prompt', {}, 'walkthrough.json', 'Timed out.', {
+      commandTransport: transport,
+      model: 'gpt-6-sol',
+    }),
+  ).resolves.toBe('{"version":1}');
+
+  expect(attempts).toEqual(['gpt-6-sol', 'gpt-5.6-terra']);
 });
 
 test('streams Codex app-server reasoning and message deltas as semantic progress', async () => {

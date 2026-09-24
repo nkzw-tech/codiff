@@ -71,7 +71,12 @@ const OPENAI_MODELS = Object.freeze([
     label: 'Compatibility: GPT-5.5',
   },
 ]);
-const OPENAI_MODEL_IDS = new Set(OPENAI_MODELS.map((model) => model.id));
+const OPENAI_MODEL_IDS = new Set([
+  ...OPENAI_MODELS.map((model) => model.id),
+  'gpt-6-astra',
+  'gpt-6-sol',
+  'gpt-6-luna',
+]);
 const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
 const OPENAI_MODEL_REASONING_EFFORTS = new Map([
   ['gpt-5.6-sol', 'medium'],
@@ -234,7 +239,9 @@ const getOpenAIModelReasoningEffort = (model, reasoningEffort) =>
 const getOpenAIModelFallbacks = (model, fallbackModel = FALLBACK_OPENAI_MODEL) => {
   const normalizedModel = normalizeOpenAIModel(model);
   const candidates = [
-    ...(normalizedModel === 'gpt-5.6-sol' || normalizedModel === 'gpt-5.6-luna'
+    ...(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-luna'].includes(
+      normalizedModel,
+    )
       ? [DEFAULT_OPENAI_MODEL]
       : []),
     normalizeOpenAIModel(fallbackModel),

@@ -203,11 +203,12 @@ application menu:
   `settings.opencodeModel`.
 - `pi` — the Pi CLI, using its configured default model.
 
-Codex walkthroughs default to GPT-5.6 Terra with low reasoning. The Model menu also offers Sol
-with medium reasoning for deeper analysis and Luna with medium reasoning for faster work. If a
-selected GPT-5.6 model is unavailable, Codiff retries with Terra when applicable and then GPT-5.5,
-persisting the first model that succeeds. Walkthroughs with at least 100 reviewable hunks use
-GPT-5.5 with low reasoning when Terra is the configured default.
+Codex walkthroughs default to GPT-5.6 Terra with low reasoning. The Model menu also offers GPT-5.6
+Sol and Luna with medium reasoning. GPT-6 Astra, Sol, and Luna can be set by model ID in
+`settings.openAIModel`; they use low reasoning by default. If a selected GPT-6 or GPT-5.6 model is
+unavailable, Codiff retries with Terra when applicable and then GPT-5.5, persisting the first model
+that succeeds. Walkthroughs with at least 100 reviewable hunks use GPT-5.5 with low reasoning when
+Terra is the configured default.
 
 Install the backend you want and verify it is available before using `codiff -w`:
 

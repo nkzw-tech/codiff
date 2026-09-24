@@ -21,6 +21,7 @@ const { readRepositoryState } = require('../electron/git-state.cjs');
 const {
   buildNarrativeWalkthroughPrompt,
   readNarrativeWalkthrough,
+  resolveNarrativeWalkthroughModel,
 } = require('../electron/narrative-walkthrough.cjs');
 
 const args = process.argv.slice(2);
@@ -42,8 +43,12 @@ label ||= `run-${Date.now()}`;
 const repetitions = Number(readOption('--repetitions', '2'));
 const caseFilter = readOption('--case', '');
 const effort = readOption('--effort', 'high');
+const productionDefaults = args.includes('--production-defaults');
 const configuredModel = readConfig().settings.openAIModel;
-const model = readOption('--model', configuredModel);
+const model = readOption(
+  '--model',
+  productionDefaults ? getAgent('codex').defaultModel : configuredModel,
+);
 const runDir = resolveRunDir(label);
 const cases = (await readCases()).filter((item) => !caseFilter || item.id === caseFilter);
 
@@ -62,6 +67,7 @@ await writeJson(join(runDir, 'run.json'), {
   effort,
   label,
   model,
+  productionDefaults,
   repetitions,
   startedAt: new Date().toISOString(),
 });
@@ -84,11 +90,15 @@ for (const evalCase of cases) {
     await writeFile(join(attemptDir, 'prompt.txt'), expectedPrompt);
 
     const baseAgent = getAgent('codex');
+    const caseModel = productionDefaults
+      ? resolveNarrativeWalkthroughModel(state, baseAgent, model)
+      : model;
     let rawResponse = '';
     let actualPrompt = '';
     let agentStartedAt = 0;
     let agentFinishedAt = 0;
     let agentMetrics = null;
+    let actualModel = caseModel;
     const phases = [];
     const generationStarted = nowMs();
     const agent = {
@@ -110,9 +120,12 @@ for (const evalCase of cases) {
       agent,
       {
         fallbackModel: baseAgent.fallbackModel,
-        model,
+        model: caseModel,
         onMetrics: (metrics) => {
           agentMetrics = metrics;
+        },
+        onModelFallback: (fallbackModel) => {
+          actualModel = fallbackModel;
         },
         onProgress: (phase) => {
           phases.push({
@@ -138,6 +151,7 @@ for (const evalCase of cases) {
     }
 
     const meta = {
+      actualModel,
       agentMs: agentStartedAt && agentFinishedAt ? roundMs(agentFinishedAt - agentStartedAt) : null,
       commit: evalCase.commit,
       effort,
@@ -145,7 +159,7 @@ for (const evalCase of cases) {
       firstResponseMs: firstResponse?.elapsedMs ?? null,
       generationMs: roundMs(generationFinished - generationStarted),
       metrics: result.status === 'ready' ? getWalkthroughMetrics(state, result.walkthrough) : null,
-      model,
+      model: caseModel,
       phases,
       postprocessMs: agentFinishedAt ? roundMs(generationFinished - agentFinishedAt) : null,
       promptBuildMs,

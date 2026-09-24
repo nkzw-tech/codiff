@@ -1,5 +1,7 @@
 # Walkthrough evaluations
 
+Latest full model comparison: [GPT-6 evaluation, 2026-09-24](gpt6-2026-09-24.md).
+
 This suite measures Codiff walkthrough generation on two axes:
 
 1. Performance: repository-state loading, prompt construction, time to first response,
@@ -35,7 +37,8 @@ The enforced comparison rejects a quality drop greater than 10% and a median rep
 regression greater than 5% with a 3ms noise floor.
 
 Use `--case small` to run one case. The model defaults to the current Codiff
-`openAIModel` setting and can be overridden with `--model`.
+`openAIModel` setting and can be overridden with `--model`. Use `--production-defaults`
+to evaluate the built-in default model and its large-walkthrough routing.
 
 Generated artifacts stay under ignored `evals/runs/<label>/`. Each attempt contains the
 prompt, raw response, normalized walkthrough, timings, phase events, usage, deterministic
