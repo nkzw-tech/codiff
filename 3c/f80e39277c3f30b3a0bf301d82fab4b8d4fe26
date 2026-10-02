@@ -1,0 +1,19 @@
+web/src/SignInButton.tsx
+  s_a03e52db462d0b::t_a767f2aa58ce2d 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3cf80e39277c3f30b3a0bf301d82fab4b8d4fe26",
+  "prompts": {},
+  "sessions": {
+    "s_a03e52db462d0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fbcf-0735-7750-a1a1-684ee7aca297",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
