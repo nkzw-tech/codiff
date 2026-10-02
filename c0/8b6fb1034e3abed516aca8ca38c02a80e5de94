@@ -1,0 +1,23 @@
+web/src/Header.tsx
+  s_a03e52db462d0b::t_1388f4d4365fb3 73-75
+web/src/HomeGuide.tsx
+  s_a03e52db462d0b::t_1f0f3fbfaf4324 36-37,41-42
+web/src/styles.css
+  s_a03e52db462d0b::t_6e2825de1c4b40 597-598,771
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c08b6fb1034e3abed516aca8ca38c02a80e5de94",
+  "prompts": {},
+  "sessions": {
+    "s_a03e52db462d0b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0fbcf-0735-7750-a1a1-684ee7aca297",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
