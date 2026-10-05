@@ -641,6 +641,44 @@ test('packaged terminal helper forwards branch names to Electron as branches', a
   ]);
 });
 
+test.each(['base...feature', 'base..feature'])(
+  'packaged terminal helper forwards the %s range to Electron unclassified',
+  async (range) => {
+    await using logger = await createFakeOpenLogger();
+
+    await execFileAsync(resolve('bin/codiff-app'), [range], {
+      cwd: refRepositoryPath,
+      env: logger.env,
+    });
+
+    expect(await logger.readArgs()).toEqual([
+      '-n',
+      resolve('bin/../../../..'),
+      '--args',
+      range,
+      refRepositoryPath,
+    ]);
+  },
+);
+
+test('packaged terminal helper forwards ranges with unknown ends to Electron as branches', async () => {
+  await using logger = await createFakeOpenLogger();
+
+  await execFileAsync(resolve('bin/codiff-app'), ['base...missing'], {
+    cwd: refRepositoryPath,
+    env: logger.env,
+  });
+
+  expect(await logger.readArgs()).toEqual([
+    '-n',
+    resolve('bin/../../../..'),
+    '--args',
+    '--branch',
+    'base...missing',
+    refRepositoryPath,
+  ]);
+});
+
 test('packaged terminal helper forwards missing branch names to Electron as branches', async () => {
   await using logger = await createFakeOpenLogger();
 

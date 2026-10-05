@@ -272,6 +272,7 @@ pull_request_source=""
 pull_request_branch=""
 pull_request_provider=""
 source_ref=""
+range_ref=""
 walkthrough_context_path=""
 walkthrough_file_path=""
 plan_file_path=""
@@ -333,6 +334,14 @@ is_git_branch_ref() {
 
 is_git_commit_ref() {
   git -C "$1" rev-parse --verify "$2^{commit}" >/dev/null 2>&1
+}
+
+# `base...head` (merge-base) or `base..head` (direct), matching bin/arguments.js.
+# Both ends must resolve to commits so a stray dotted argument isn't misread.
+is_git_range_ref() {
+  printf '%s' "$2" | grep -Eq '^[^.][^[:space:]]*\.\.\.?[^.][^[:space:]]*$' &&
+    is_git_commit_ref "$1" "${2%%..*}" &&
+    is_git_commit_ref "$1" "${2##*..}"
 }
 
 is_git_repository() {
@@ -557,7 +566,9 @@ if [ -n "$source_ref" ] && [ -z "$commit_ref" ] && [ -z "$branch_ref" ]; then
     *) repository_context="$PWD/$repository_context" ;;
   esac
 
-  if is_commit_ref_arg "$source_ref" && is_git_commit_ref "$repository_context" "$source_ref"; then
+  if is_git_range_ref "$repository_context" "$source_ref"; then
+    range_ref="$source_ref"
+  elif is_commit_ref_arg "$source_ref" && is_git_commit_ref "$repository_context" "$source_ref"; then
     commit_ref="$source_ref"
   elif is_git_branch_ref "$repository_context" "$source_ref"; then
     branch_ref="$source_ref"
@@ -713,6 +724,10 @@ elif [ -n "$branch_ref" ] && [ "$walkthrough" -eq 1 ]; then
   open_codiff --walkthrough --branch "$branch_ref" "$repository_path"
 elif [ -n "$branch_ref" ]; then
   open_codiff --branch "$branch_ref" "$repository_path"
+elif [ -n "$range_ref" ] && [ "$walkthrough" -eq 1 ]; then
+  open_codiff --walkthrough "$range_ref" "$repository_path"
+elif [ -n "$range_ref" ]; then
+  open_codiff "$range_ref" "$repository_path"
 elif [ "$walkthrough" -eq 1 ]; then
   open_codiff --walkthrough "$repository_path"
 else
