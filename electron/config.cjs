@@ -300,6 +300,10 @@ const mergeConfig = (raw) => {
         typeof rawSettings.editorCommand === 'string'
           ? rawSettings.editorCommand
           : defaults.settings.editorCommand,
+      expandUnchanged:
+        typeof rawSettings.expandUnchanged === 'boolean'
+          ? rawSettings.expandUnchanged
+          : defaults.settings.expandUnchanged,
       lastRepositoryPath: normalizeLastRepositoryPath(rawSettings.lastRepositoryPath),
       openAIModel:
         typeof rawSettings.openAIModel === 'string'

@@ -11,6 +11,7 @@ export type CodiffSettings = {
   copyCommentsOnClose: boolean;
   diffStyle: CodiffDiffStyle;
   editorCommand: string;
+  expandUnchanged: boolean;
   lastRepositoryPath: string;
   openAIModel: string;
   opencodeModel: string;

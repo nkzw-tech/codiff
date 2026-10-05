@@ -179,6 +179,8 @@ Choose `View > Diff > Split` or `View > Diff > Unified`, use Toggle Diff Layout 
 or set `settings.diffStyle` to `split` for side-by-side diffs or `unified` for unified diffs.
 Choose `View > Diff > Word Wrap`, use Toggle Word Wrap in the command bar, or set
 `settings.wordWrap` to `true` to wrap long diff lines.
+Choose `View > Diff > Expand Unchanged Lines` or set `settings.expandUnchanged` to `true` to show
+full files instead of collapsing unchanged lines between hunks.
 Choose `View > Diff > Font Size`, use the code font size commands in the command bar, or use
 <kbd>Cmd/Ctrl</kbd>+<kbd>+</kbd>, <kbd>Cmd/Ctrl</kbd>+<kbd>-</kbd>, and
 <kbd>Cmd/Ctrl</kbd>+<kbd>0</kbd> to change only diff and code rendering font size.

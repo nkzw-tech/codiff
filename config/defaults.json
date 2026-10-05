@@ -8,6 +8,7 @@
     "copyCommentsOnClose": false,
     "diffStyle": "split",
     "editorCommand": "",
+    "expandUnchanged": false,
     "lastRepositoryPath": "",
     "openAIModel": "gpt-5.6-terra",
     "opencodeModel": "opencode-default",

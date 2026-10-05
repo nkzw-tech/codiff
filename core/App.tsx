@@ -1754,6 +1754,7 @@ export default function App() {
     diffStyle,
     disableWorkerPool: disableCodeViewWorkerPool,
     expandedReviewKeys,
+    expandUnchanged: preferences.expandUnchanged,
     focusCommentId,
     focusCommentRequest,
     gitIdentity,

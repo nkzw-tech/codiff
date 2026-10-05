@@ -181,6 +181,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     copyCommentsOnClose: true,
     diffStyle: 'split' as const,
     editorCommand: '',
+    expandUnchanged: false,
     lastRepositoryPath: '/repo',
     openAIModel: defaultSettings.openAIModel,
     opencodeModel: defaultSettings.opencodeModel,

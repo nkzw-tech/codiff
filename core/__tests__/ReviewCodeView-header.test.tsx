@@ -249,3 +249,21 @@ test('narrow pane layout and sticky header metrics resize together without losin
   expect(codeViewMock.lastOptions?.itemMetrics).toEqual({ diffHeaderHeight: 54 });
   expect(viewport.style.getPropertyValue('--codiff-file-header-height')).toBe('54px');
 });
+
+test('expandUnchanged only expands diffs when full file contents can be loaded', async () => {
+  const loadContents = vi.fn();
+  await using view = await renderReact(
+    <ReviewCodeViewHarness expandUnchanged files={[file]} onLoadSectionContents={loadContents} />,
+  );
+  expect(codeViewMock.lastOptions?.expandUnchanged).toBe(true);
+
+  await view.rerender(
+    <ReviewCodeViewHarness
+      expandUnchanged
+      files={[file]}
+      isReadOnly
+      onLoadSectionContents={loadContents}
+    />,
+  );
+  expect(codeViewMock.lastOptions?.expandUnchanged).toBe(false);
+});

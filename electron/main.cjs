@@ -757,6 +757,16 @@ const buildApplicationMenu = () =>
                 label: 'Show Whitespace',
                 type: 'checkbox',
               },
+              {
+                checked: config.settings.expandUnchanged,
+                click: (menuItem) => {
+                  updateConfig({
+                    settings: { ...config.settings, expandUnchanged: menuItem.checked },
+                  });
+                },
+                label: 'Expand Unchanged Lines',
+                type: 'checkbox',
+              },
               { type: 'separator' },
               {
                 label: 'Font Size',

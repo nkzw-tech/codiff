@@ -2618,6 +2618,7 @@ export function ReviewCodeView({
   diffStyle,
   disableWorkerPool = false,
   expandedReviewKeys = emptyExpandedReviewKeys,
+  expandUnchanged = false,
   files,
   focusCommentId,
   focusCommentRequest,
@@ -2681,6 +2682,7 @@ export function ReviewCodeView({
   diffStyle: CodiffDiffStyle;
   disableWorkerPool?: boolean;
   expandedReviewKeys?: ReadonlySet<string>;
+  expandUnchanged?: boolean;
   files: ReadonlyArray<ChangedFile>;
   focusCommentId: string | null;
   focusCommentRequest: number;
@@ -3625,7 +3627,7 @@ export function ReviewCodeView({
         diffStyle,
         enableGutterUtility: !isReadOnly,
         enableLineSelection: !isReadOnly,
-        expandUnchanged: false,
+        expandUnchanged: expandUnchanged && loadDiffFiles != null,
         expansionLineCount: diffContextExpansionLineCount,
         hunkSeparators: 'line-info-basic',
         itemMetrics,
@@ -3805,6 +3807,7 @@ export function ReviewCodeView({
       cancelPendingEmptyCommentDeletes,
       createCommentForRange,
       diffStyle,
+      expandUnchanged,
       isReadOnly,
       itemMetadata,
       itemMetrics,
