@@ -208,8 +208,11 @@ application menu:
 
 The Codex `Model` and `Reasoning Effort` menus load the installed CLI's model catalog in the
 background. They offer its visible models and supported reasoning efforts, including new models
-without a Codiff update. If discovery fails or an older CLI does not support it, the predefined
-model choices remain available. Custom model IDs in `settings.openAIModel` are also accepted.
+without a Codiff update. Legacy models omitted from a successful catalog, including GPT-5.5,
+remain configurable by ID; a selected model missing from the catalog appears as a custom choice.
+If discovery fails or an older CLI does not support it, the predefined model choices remain
+available, and selecting Codex or changing configuration retries discovery. Custom model IDs in
+`settings.openAIModel` are also accepted.
 
 Set `settings.openAIReasoningEffort` to an effort supported by your selected model, for example
 `"high"` with `settings.openAIModel` set to `"gpt-6.1-sol"`. Selecting a different model in the menu
@@ -224,7 +227,8 @@ Codex walkthroughs still default to GPT-5.6 Terra with low reasoning. GPT-5.6 So
 medium reasoning unless you override it. If a selected model is unavailable, Codiff retries with
 Terra when applicable and then GPT-5.5, persisting the first model that succeeds unless you changed
 the selection during the run. Walkthroughs with at least 100 reviewable hunks use GPT-5.5 with low
-reasoning when Terra is the configured default and no explicit effort overrides it.
+reasoning when Terra is the configured default and no explicit effort is configured. An explicit
+effort keeps the selected model for these large walkthroughs.
 
 Install the backend you want and verify it is available before using `codiff -w`:
 

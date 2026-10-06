@@ -238,6 +238,32 @@ test.each([
   expect(calls).toHaveLength(1);
 });
 
+test('reports the unavailable selected model and a fallback effort error together', async () => {
+  const attempts: string[] = [];
+  const { transport } = createCommandTransport((process) => {
+    process.stdin.on('finish', () => {
+      const model = getArgumentValue(process.args, '-m') || '';
+      attempts.push(model);
+      process.stderr(
+        model === 'gpt-5.6-terra'
+          ? 'You do not have access to model gpt-5.6-terra.'
+          : 'Model gpt-5.5 does not support reasoning effort ultra.',
+      );
+      process.close(1);
+    });
+  });
+  await expect(
+    runCodex('/repo', 'prompt', {}, undefined, undefined, {
+      commandTransport: transport,
+      model: 'gpt-5.6-terra',
+      reasoningEffort: 'ultra',
+    }),
+  ).rejects.toThrow(
+    'Codex model gpt-5.6-terra was unavailable: You do not have access to model gpt-5.6-terra. Fallback model gpt-5.5 failed: Model gpt-5.5 does not support reasoning effort ultra.',
+  );
+  expect(attempts).toEqual(['gpt-5.6-terra', 'gpt-5.5']);
+});
+
 test('retries unavailable GPT-5.6 models with model-specific reasoning', async () => {
   const attempts: Array<string> = [];
   const { transport } = createCommandTransport((commandProcess) => {

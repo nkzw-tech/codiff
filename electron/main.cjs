@@ -597,7 +597,9 @@ const loadCodexModels = () => {
         Menu.setApplicationMenu(buildApplicationMenu());
       }
     })
-    .catch(() => {});
+    .catch(() => {
+      codexModelDiscovery = undefined;
+    });
   return codexModelDiscovery;
 };
 
@@ -1750,7 +1752,12 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       await agent.readSessionContext(launchOptions?.[agent.sessionLaunchOptionKey]),
     );
     const agentOptions = getAgentOptions(agent);
-    const walkthroughModel = resolveNarrativeWalkthroughModel(state, agent, agentOptions.model);
+    const walkthroughModel = resolveNarrativeWalkthroughModel(
+      state,
+      agent,
+      agentOptions.model,
+      agentOptions.reasoningEffort,
+    );
     const walkthroughPrompt = config.settings.walkthroughPrompt;
     const cacheKey = getNarrativeWalkthroughCacheKey(
       state,

@@ -802,6 +802,7 @@ const runCodex = async (
   };
 
   const candidates = [model, ...fallbackModels];
+  let availabilityError;
   for (const [index, candidate] of candidates.entries()) {
     try {
       const response = await invokeCodex(candidate);
@@ -811,9 +812,17 @@ const runCodex = async (
       return response;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (index === candidates.length - 1 || !isOpenAIModelAvailabilityError(message)) {
+      const unavailable = isOpenAIModelAvailabilityError(message);
+      if (index === candidates.length - 1 || !unavailable) {
+        if (availabilityError && options.reasoningEffort?.trim() && !unavailable) {
+          throw new Error(
+            `Codex model ${model} was unavailable: ${availabilityError} Fallback model ${candidate} failed: ${message}`,
+            { cause: error },
+          );
+        }
         throw error;
       }
+      availabilityError ??= message;
     }
   }
 
