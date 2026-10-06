@@ -14,6 +14,7 @@ export type CodiffSettings = {
   expandUnchanged: boolean;
   lastRepositoryPath: string;
   openAIModel: string;
+  openAIReasoningEffort: string;
   opencodeModel: string;
   piModel: string;
   reviewCommentsPrefix: string;

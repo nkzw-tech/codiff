@@ -27,7 +27,7 @@ const { readPiSessionContext } = require('./pi-session-context.cjs');
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onPartialText?: (delta: string) => void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
- *   reasoningEffort?: 'low' | 'medium' | 'high';
+ *   reasoningEffort?: string;
  *   timeoutMs?: number;
  * }} AgentOptions
  * @typedef {{
@@ -182,12 +182,13 @@ const listAgents = () => AGENT_BACKENDS.map((id) => AGENT_FACTORIES[id]());
 /**
  * @param {Agent} agent
  * @param {string} selectedModel
+ * @param {Agent['models']} [models]
  * @returns {ReadonlyArray<{id: string; label: string}>}
  */
-const getAgentMenuModels = (agent, selectedModel) =>
-  agent.models.some((model) => model.id === selectedModel)
-    ? agent.models
-    : [...agent.models, { id: selectedModel, label: `Custom: ${selectedModel}` }];
+const getAgentMenuModels = (agent, selectedModel, models = agent.models) =>
+  models.some((model) => model.id === selectedModel)
+    ? models
+    : [...models, { id: selectedModel, label: `Custom: ${selectedModel}` }];
 
 /**
  * Select the first installed backend without launching a CLI process.

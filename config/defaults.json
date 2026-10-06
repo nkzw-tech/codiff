@@ -11,6 +11,7 @@
     "expandUnchanged": false,
     "lastRepositoryPath": "",
     "openAIModel": "gpt-5.6-terra",
+    "openAIReasoningEffort": "",
     "opencodeModel": "opencode-default",
     "piModel": "pi-default",
     "reviewCommentsPrefix": "# Address these Review Comments",

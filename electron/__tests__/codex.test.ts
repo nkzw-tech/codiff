@@ -46,7 +46,7 @@ const {
       }) => void;
       onModelFallback?: (fallbackModel: string, originalModel: string) => void;
       onProgress?: (phase: string) => void;
-      reasoningEffort?: 'low' | 'medium' | 'high';
+      reasoningEffort?: string;
       timeoutMs?: number;
     },
   ) => Promise<string>;
@@ -87,18 +87,11 @@ beforeEach(() => {
   };
 });
 
-test('normalizes OpenAI model preferences to known models', () => {
-  expect(normalizeOpenAIModel('gpt-6-astra')).toBe('gpt-6-astra');
-  expect(normalizeOpenAIModel('gpt-6-sol')).toBe('gpt-6-sol');
-  expect(normalizeOpenAIModel('gpt-6-luna')).toBe('gpt-6-luna');
-  expect(normalizeOpenAIModel('gpt-5.6-sol')).toBe('gpt-5.6-sol');
-  expect(normalizeOpenAIModel('gpt-5.6-terra')).toBe('gpt-5.6-terra');
-  expect(normalizeOpenAIModel('gpt-5.6-luna')).toBe('gpt-5.6-luna');
-  expect(normalizeOpenAIModel('gpt-5.5')).toBe('gpt-5.5');
-  expect(normalizeOpenAIModel('gpt-5.3-codex-spark')).toBe(DEFAULT_OPENAI_MODEL);
-  expect(normalizeOpenAIModel('gpt-5.4-mini')).toBe(DEFAULT_OPENAI_MODEL);
-  expect(normalizeOpenAIModel('gpt-5.3-codex')).toBe(DEFAULT_OPENAI_MODEL);
-  expect(normalizeOpenAIModel('gpt-4o')).toBe(DEFAULT_OPENAI_MODEL);
+test('uses the default model only for empty or invalid preferences', () => {
+  for (const value of [undefined, null, 42, '', '  ']) {
+    expect(normalizeOpenAIModel(value)).toBe(DEFAULT_OPENAI_MODEL);
+  }
+  expect(normalizeOpenAIModel('  gpt-6.1-sol  ')).toBe('gpt-6.1-sol');
 });
 
 test('rejects invalid explicit Codex CLI overrides', async () => {
@@ -169,6 +162,82 @@ test('runs Codex walkthroughs as fresh ephemeral repository-scoped calls', async
   expect(calls[0].args).not.toContain('resume');
 });
 
+test.each(['high', 'ultra'])(
+  'passes a custom Codex model with explicit %s effort to exec',
+  async (effort) => {
+    const { calls, transport } = createCommandTransport((commandProcess) => {
+      commandProcess.stdin.on('finish', () => void completeCodexExec(commandProcess));
+    });
+    await expect(
+      runCodex('/repo', 'prompt', {}, undefined, undefined, {
+        commandTransport: transport,
+        model: 'gpt-6.1-sol',
+        reasoningEffort: effort,
+      }),
+    ).resolves.toBe('{"version":1}');
+    expect(getArgumentValue(calls[0].args, '-m')).toBe('gpt-6.1-sol');
+    expect(getArgumentValue(calls[0].args, '-c')).toBe(`model_reasoning_effort="${effort}"`);
+  },
+);
+
+test('inherits Codex effort for custom models when no override is configured', async () => {
+  const { calls, transport } = createCommandTransport((commandProcess) => {
+    commandProcess.stdin.on('finish', () => void completeCodexExec(commandProcess));
+  });
+  await runCodex('/repo', 'prompt', {}, undefined, undefined, {
+    commandTransport: transport,
+    model: 'future-codex-model',
+  });
+  expect(getArgumentValue(calls[0].args, '-m')).toBe('future-codex-model');
+  expect(calls[0].args).not.toContain('-c');
+});
+
+test('keeps an explicit effort override when an unavailable model falls back', async () => {
+  const attempts: string[] = [];
+  const { transport } = createCommandTransport((process) => {
+    process.stdin.on('finish', () => {
+      const model = getArgumentValue(process.args, '-m');
+      attempts.push(`${model}|${getArgumentValue(process.args, '-c')}`);
+      if (model === 'gpt-6.1-sol') {
+        process.stderr('You do not have access to model gpt-6.1-sol.');
+        process.close(1);
+      } else void completeCodexExec(process);
+    });
+  });
+  await expect(
+    runCodex('/repo', 'prompt', {}, undefined, undefined, {
+      commandTransport: transport,
+      model: 'gpt-6.1-sol',
+      reasoningEffort: 'high',
+    }),
+  ).resolves.toBe('{"version":1}');
+  expect(attempts).toEqual([
+    'gpt-6.1-sol|model_reasoning_effort="high"',
+    'gpt-5.6-terra|model_reasoning_effort="high"',
+  ]);
+});
+
+test.each([
+  'The model does not support the requested reasoning effort.',
+  'model_reasoning_effort is not supported.',
+  'Unsupported reasoning effort: HTTP 404.',
+])('reports unsupported effort without retrying another model: %s', async (message) => {
+  const { calls, transport } = createCommandTransport((commandProcess) => {
+    commandProcess.stdin.on('finish', () => {
+      commandProcess.stderr(message);
+      commandProcess.close(1);
+    });
+  });
+  await expect(
+    runCodex('/repo', 'prompt', {}, undefined, undefined, {
+      commandTransport: transport,
+      model: 'gpt-6.1-sol',
+      reasoningEffort: 'unsupported-effort',
+    }),
+  ).rejects.toThrow(message);
+  expect(calls).toHaveLength(1);
+});
+
 test('retries unavailable GPT-5.6 models with model-specific reasoning', async () => {
   const attempts: Array<string> = [];
   const { transport } = createCommandTransport((commandProcess) => {
@@ -204,14 +273,18 @@ test('retries unavailable GPT-5.6 models with model-specific reasoning', async (
   expect(fallbacks).toEqual([['gpt-5.5', 'gpt-5.6-sol']]);
 });
 
-test('retries unavailable GPT-6 models with Terra before GPT-5.5', async () => {
+test.each([
+  'You do not have access to model gpt-6-sol.',
+  'HTTP 403 Forbidden',
+  'HTTP 404 Not Found',
+])('retries unavailable GPT-6 models with Terra before GPT-5.5: %s', async (message) => {
   const attempts: Array<string> = [];
   const { transport } = createCommandTransport((commandProcess) => {
     commandProcess.stdin.on('finish', () => {
       const model = getArgumentValue(commandProcess.args, '-m') || '';
       attempts.push(model);
       if (model === 'gpt-6-sol') {
-        commandProcess.stderr(`You do not have access to model ${model}.`);
+        commandProcess.stderr(message);
         commandProcess.close(1);
       } else {
         void completeCodexExec(commandProcess);
@@ -304,6 +377,8 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 
   await expect(
     runCodex(directory.path, 'prompt', {}, 'walkthrough.json', 'Timed out.', {
+      model: 'gpt-6.1-sol',
+      reasoningEffort: 'high',
       onProgress: (phase) => phases.push(phase),
       onMetrics: (value) => metrics.push(value),
     }),
@@ -338,18 +413,24 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   expect(records.filter((record) => record.arg).map((record) => record.arg)).toContain(
     'app-server',
   );
+  expect(records.filter((record) => record.arg).map((record) => record.arg)).toContain(
+    'model_reasoning_effort="high"',
+  );
   const threadStart = records.find((record) => record.message?.method === 'thread/start').message;
   expect(threadStart.params).toMatchObject({
     approvalPolicy: 'never',
     cwd: directory.path,
     ephemeral: true,
+    model: 'gpt-6.1-sol',
+    config: { model_reasoning_effort: 'high' },
     sandbox: 'read-only',
   });
   const turnStart = records.find((record) => record.message?.method === 'turn/start').message;
   expect(turnStart.params).toMatchObject({
     approvalPolicy: 'never',
     cwd: directory.path,
-    effort: 'low',
+    effort: 'high',
+    model: 'gpt-6.1-sol',
     outputSchema: {},
     sandboxPolicy: {
       networkAccess: false,

@@ -24,6 +24,7 @@ const {
     model: unknown,
     context?: unknown,
     customPrompt?: string,
+    reasoningEffort?: string,
   ) => string;
   narrativeWalkthroughSchema: {
     properties: Record<string, any>;
@@ -644,6 +645,25 @@ test('builds cache keys from semantic generation inputs', () => {
       summary: 'Prior discussion',
     }),
   ).not.toBe(key);
+  const codex = { ...agent, id: 'codex', label: 'Codex' };
+  const automatic = getNarrativeWalkthroughCacheKey(state, codex, 'gpt-6.1-sol', null);
+  const low = getNarrativeWalkthroughCacheKey(state, codex, 'gpt-6.1-sol', null, undefined, 'low');
+  const high = getNarrativeWalkthroughCacheKey(
+    state,
+    codex,
+    'gpt-6.1-sol',
+    null,
+    undefined,
+    'high',
+  );
+  expect(high).not.toBe(low);
+  expect(high).not.toBe(automatic);
+  expect(getNarrativeWalkthroughCacheKey(state, codex, 'gpt-6.1-sol', null, undefined, '')).toBe(
+    automatic,
+  );
+  expect(
+    getNarrativeWalkthroughCacheKey(state, agent, 'claude-sonnet', null, undefined, 'high'),
+  ).toBe(key);
 });
 
 test('omits blank custom walkthrough prompt guidance', () => {

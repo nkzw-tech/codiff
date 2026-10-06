@@ -2,18 +2,24 @@ import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vite-plus/test';
+import { expect, test, vi } from 'vite-plus/test';
 import packageJson from '../../package.json' with { type: 'json' };
 import schema from '../config/codiff-config.schema.json' with { type: 'json' };
 import { createDefaultConfig } from '../config/defaults.ts';
 import { createTemporaryDirectorySync, createTemporaryEnvironment } from './helpers/resources.ts';
 
 const require = createRequire(import.meta.url);
-const { createDefaultConfig: createElectronDefaultConfig, readConfig } =
-  require('../../electron/config.cjs') as {
-    createDefaultConfig: typeof createDefaultConfig;
-    readConfig: () => ReturnType<typeof createDefaultConfig>;
-  };
+const {
+  createDefaultConfig: createElectronDefaultConfig,
+  readConfig,
+  watchConfig,
+  writeConfig,
+} = require('../../electron/config.cjs') as {
+  createDefaultConfig: typeof createDefaultConfig;
+  readConfig: () => ReturnType<typeof createDefaultConfig>;
+  watchConfig: (onChange: (config: ReturnType<typeof createDefaultConfig>) => void) => () => void;
+  writeConfig: (config: ReturnType<typeof createDefaultConfig>) => void;
+};
 
 const readElectronConfig = (raw: unknown) => {
   using home = createTemporaryDirectorySync('codiff-config-home.');
@@ -86,6 +92,45 @@ test('electron config normalizes sidebar position', () => {
   expect(
     readElectronConfig({ settings: { sidebarPosition: 'bottom' } }).settings.sidebarPosition,
   ).toBe('left');
+});
+
+test('old configurations retain automatic reasoning and custom values survive save and reload', async () => {
+  expect(readElectronConfig({}).settings.openAIReasoningEffort).toBe('');
+  expect(
+    readElectronConfig({ settings: { openAIReasoningEffort: 42 } }).settings.openAIReasoningEffort,
+  ).toBe('');
+  using home = createTemporaryDirectorySync('codiff-model-config.');
+  using _environment = createTemporaryEnvironment({ HOME: home.path });
+  const configDirectory = join(home.path, '.codiff');
+  mkdirSync(configDirectory);
+  writeFileSync(
+    join(configDirectory, 'codiff.jsonc'),
+    JSON.stringify({ settings: { openAIModel: 'gpt-6.1-sol', openAIReasoningEffort: ' high ' } }),
+  );
+  const config = readConfig();
+  expect(config.settings).toMatchObject({
+    openAIModel: 'gpt-6.1-sol',
+    openAIReasoningEffort: 'high',
+  });
+  let reloaded: ReturnType<typeof createDefaultConfig> | undefined;
+  const stop = watchConfig((next) => {
+    reloaded = next;
+  });
+  try {
+    writeConfig({ ...config, settings: { ...config.settings, openAIReasoningEffort: 'ultra' } });
+    expect(readConfig().settings).toMatchObject({
+      openAIModel: 'gpt-6.1-sol',
+      openAIReasoningEffort: 'ultra',
+    });
+    await vi.waitFor(() =>
+      expect(reloaded?.settings).toMatchObject({
+        openAIModel: 'gpt-6.1-sol',
+        openAIReasoningEffort: 'ultra',
+      }),
+    );
+  } finally {
+    stop();
+  }
 });
 
 test('electron config keeps custom walkthrough prompt text only when it is a string', () => {

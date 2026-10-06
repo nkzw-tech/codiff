@@ -9,7 +9,6 @@ const {
   cleanText,
   findExecutableOnPath,
   isExecutableFile,
-  normalizeEnum,
   oneLine,
   parseJSONMessage,
   truncate,
@@ -42,7 +41,7 @@ const CODEX_NOT_FOUND_MESSAGE =
  *   }) => void;
  *   onModelFallback?: (fallbackModel: string, originalModel: string) => Promise<void> | void;
  *   onProgress?: (phase: import('../core/types.ts').WalkthroughProgressPhase) => void;
- *   reasoningEffort?: 'low' | 'medium' | 'high';
+ *   reasoningEffort?: string;
  *   timeoutMs?: number;
  * }} CodexOptions
  */
@@ -71,16 +70,14 @@ const OPENAI_MODELS = Object.freeze([
     label: 'Compatibility: GPT-5.5',
   },
 ]);
-const OPENAI_MODEL_IDS = new Set([
-  ...OPENAI_MODELS.map((model) => model.id),
-  'gpt-6-astra',
-  'gpt-6-sol',
-  'gpt-6-luna',
-]);
-const CODEX_REASONING_EFFORTS = new Set(['low', 'medium', 'high']);
 const OPENAI_MODEL_REASONING_EFFORTS = new Map([
+  [DEFAULT_OPENAI_MODEL, CODEX_REASONING_EFFORT],
+  [FALLBACK_OPENAI_MODEL, CODEX_REASONING_EFFORT],
   ['gpt-5.6-sol', 'medium'],
   ['gpt-5.6-luna', 'medium'],
+  ['gpt-6-astra', CODEX_REASONING_EFFORT],
+  ['gpt-6-sol', CODEX_REASONING_EFFORT],
+  ['gpt-6-luna', CODEX_REASONING_EFFORT],
 ]);
 
 /** @param {string} [detail] */
@@ -225,23 +222,19 @@ const getCodexStructuredErrorMessage = (value) => {
 
 /** @param {unknown} value @returns {string} */
 const normalizeOpenAIModel = (value) =>
-  normalizeEnum(value, OPENAI_MODEL_IDS, DEFAULT_OPENAI_MODEL);
+  typeof value === 'string' && value.trim() ? value.trim() : DEFAULT_OPENAI_MODEL;
 
 /** @param {unknown} model @param {unknown} [reasoningEffort] */
 const getOpenAIModelReasoningEffort = (model, reasoningEffort) =>
-  normalizeEnum(
-    reasoningEffort,
-    CODEX_REASONING_EFFORTS,
-    OPENAI_MODEL_REASONING_EFFORTS.get(normalizeOpenAIModel(model)) || CODEX_REASONING_EFFORT,
-  );
+  typeof reasoningEffort === 'string' && reasoningEffort.trim()
+    ? reasoningEffort.trim()
+    : OPENAI_MODEL_REASONING_EFFORTS.get(normalizeOpenAIModel(model));
 
 /** @param {unknown} model @param {unknown} [fallbackModel] */
 const getOpenAIModelFallbacks = (model, fallbackModel = FALLBACK_OPENAI_MODEL) => {
   const normalizedModel = normalizeOpenAIModel(model);
   const candidates = [
-    ...(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-luna'].includes(
-      normalizedModel,
-    )
+    ...(normalizedModel !== DEFAULT_OPENAI_MODEL && normalizedModel !== FALLBACK_OPENAI_MODEL
       ? [DEFAULT_OPENAI_MODEL]
       : []),
     normalizeOpenAIModel(fallbackModel),
@@ -251,7 +244,8 @@ const getOpenAIModelFallbacks = (model, fallbackModel = FALLBACK_OPENAI_MODEL) =
 
 /** @param {string} value */
 const isOpenAIModelAvailabilityError = (value) =>
-  /\b(?:model_not_found|unknown model|invalid model|model is not available|not available for|not supported|does not have access|do not have access|don't have access|access to model|403|404)\b/i.test(
+  !/\b(?:model_reasoning_effort|reasoning[_\s-]*effort|effort)\b/i.test(value) &&
+  /\b(?:model_not_found|unknown model|invalid model|model is not available|not available for|model\b.*not supported|does not have access|do not have access|don't have access|access to model|403|404)\b/i.test(
     value,
   );
 
@@ -410,8 +404,9 @@ const runCodex = async (
           'exec',
           '-m',
           codexModel,
-          '-c',
-          `model_reasoning_effort="${reasoningEffort}"`,
+          ...(reasoningEffort
+            ? ['-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`]
+            : []),
           '--cd',
           repoRoot,
           '--sandbox',
@@ -515,7 +510,13 @@ const runCodex = async (
       );
       const child = commandTransport.spawn(
         commandTransport.command,
-        ['app-server', '--stdio', '-c', `model_reasoning_effort="${reasoningEffort}"`],
+        [
+          'app-server',
+          '--stdio',
+          ...(reasoningEffort
+            ? ['-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`]
+            : []),
+        ],
         {
           cwd: repoRoot,
           env: environment,

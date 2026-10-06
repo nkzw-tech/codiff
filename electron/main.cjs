@@ -29,6 +29,7 @@ const {
 } = require('./git-state.cjs');
 const { attachExternalLinkHandling } = require('./external-links.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
+const { readCodexModels } = require('./codex-models.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
@@ -155,6 +156,11 @@ const openWindows = new Set();
 const pendingCommentsClipboardController = createPendingCommentsClipboardController({ clipboard });
 /** @type {CodiffConfig} */
 let config = createDefaultConfig();
+/** @type {ReadonlyArray<import('./codex-models.cjs').CodexModel> | undefined} */
+let codexModels;
+/** @type {Promise<void> | undefined} */
+let codexModelDiscovery;
+const codexModelDiscoveryAbort = new AbortController();
 
 /**
  * @type {Map<string, ReturnType<typeof createSkillInstaller>>}
@@ -401,6 +407,7 @@ const selectAgentBackend = (backend) => {
   }
 
   updateConfig({ settings: { ...config.settings, agentBackend } });
+  if (agentBackend === 'codex') void loadCodexModels();
 };
 
 /** @param {import('./agent.cjs').Agent} agent @param {string} model */
@@ -410,16 +417,32 @@ const selectAgentModel = (agent, model) => {
     return;
   }
 
-  updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: normalized } });
+  const modelInfo =
+    agent.id === 'codex' ? codexModels?.find((item) => item.id === normalized) : undefined;
+  const effort = config.settings.openAIReasoningEffort;
+  updateConfig({
+    settings: {
+      ...config.settings,
+      [agent.modelSettingKey]: normalized,
+      ...(modelInfo && effort && !modelInfo.reasoningEfforts.includes(effort)
+        ? { openAIReasoningEffort: '' }
+        : {}),
+    },
+  });
 };
 
 /** @param {import('./agent.cjs').Agent} agent */
 const getAgentOptions = (agent) => ({
   fallbackModel: agent.fallbackModel,
   model: config.settings[agent.modelSettingKey],
-  /** @param {string} fallbackModel */
-  onModelFallback: async (fallbackModel) => {
-    updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } });
+  ...(agent.id === 'codex'
+    ? { reasoningEffort: config.settings.openAIReasoningEffort || undefined }
+    : {}),
+  /** @param {string} fallbackModel @param {string} originalModel */
+  onModelFallback: async (fallbackModel, originalModel) => {
+    if (config.settings[agent.modelSettingKey] === originalModel) {
+      updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } });
+    }
   },
 });
 
@@ -554,10 +577,40 @@ const buildAgentSubmenu = () =>
 const buildModelSubmenu = () => {
   const agent = getActiveAgent();
   const selectedModel = config.settings[agent.modelSettingKey];
-  return getAgentMenuModels(agent, selectedModel).map((model) => ({
+  return getAgentMenuModels(
+    agent,
+    selectedModel,
+    agent.id === 'codex' ? codexModels : undefined,
+  ).map((model) => ({
     checked: selectedModel === model.id,
     click: () => selectAgentModel(agent, model.id),
     label: model.label,
+    type: 'radio',
+  }));
+};
+
+const loadCodexModels = () => {
+  codexModelDiscovery ??= readCodexModels({ signal: codexModelDiscoveryAbort.signal })
+    .then((models) => {
+      if (models.length && !codexModelDiscoveryAbort.signal.aborted) {
+        codexModels = models;
+        Menu.setApplicationMenu(buildApplicationMenu());
+      }
+    })
+    .catch(() => {});
+  return codexModelDiscovery;
+};
+
+/** @returns {Array<import('electron').MenuItemConstructorOptions>} */
+const buildReasoningEffortSubmenu = () => {
+  const selected = config.settings.openAIReasoningEffort;
+  const model = codexModels?.find((item) => item.id === config.settings.openAIModel);
+  const advertised = model ? model.reasoningEfforts : ['low', 'medium', 'high'];
+  const efforts = [...new Set(['', ...advertised, ...(selected ? [selected] : [])])];
+  return efforts.map((effort) => ({
+    checked: selected === effort,
+    click: () => updateConfig({ settings: { ...config.settings, openAIReasoningEffort: effort } }),
+    label: !effort ? 'Default' : advertised.includes(effort) ? effort : `Custom: ${effort}`,
     type: 'radio',
   }));
 };
@@ -619,6 +672,9 @@ const buildApplicationMenu = () =>
                   label: 'Model',
                   submenu: buildModelSubmenu(),
                 },
+                ...(getActiveAgent().id === 'codex'
+                  ? [{ label: 'Reasoning Effort', submenu: buildReasoningEffortSubmenu() }]
+                  : []),
                 { type: 'separator' },
                 {
                   click: () => {
@@ -659,6 +715,9 @@ const buildApplicationMenu = () =>
                   label: 'Model',
                   submenu: buildModelSubmenu(),
                 },
+                ...(getActiveAgent().id === 'codex'
+                  ? [{ label: 'Reasoning Effort', submenu: buildReasoningEffortSubmenu() }]
+                  : []),
                 { type: 'separator' },
                 {
                   click: () => {
@@ -1392,8 +1451,12 @@ if (squirrelStartup || !lock) {
       nativeTheme.themeSource = config.settings.theme;
       sendConfigChanged();
       Menu.setApplicationMenu(buildApplicationMenu());
+      if (getActiveAgent().id === 'codex') void loadCodexModels();
     });
+    if (getActiveAgent().id === 'codex') void loadCodexModels();
   });
+
+  app.on('will-quit', () => codexModelDiscoveryAbort.abort());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -1695,6 +1758,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       walkthroughModel,
       walkthroughContext,
       walkthroughPrompt,
+      agentOptions.reasoningEffort,
     );
     if (!options?.force) {
       const cachedWalkthrough = readStoredWalkthrough(cacheKey);
@@ -1740,6 +1804,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
         generatedModel,
         walkthroughContext,
         walkthroughPrompt,
+        agentOptions.reasoningEffort,
       );
       try {
         const cacheableWalkthrough = { ...result.walkthrough };

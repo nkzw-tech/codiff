@@ -309,6 +309,10 @@ const mergeConfig = (raw) => {
         typeof rawSettings.openAIModel === 'string'
           ? rawSettings.openAIModel
           : defaults.settings.openAIModel,
+      openAIReasoningEffort:
+        typeof rawSettings.openAIReasoningEffort === 'string'
+          ? rawSettings.openAIReasoningEffort.trim()
+          : defaults.settings.openAIReasoningEffort,
       opencodeModel:
         typeof rawSettings.opencodeModel === 'string'
           ? rawSettings.opencodeModel

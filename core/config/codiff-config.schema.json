@@ -73,6 +73,12 @@
           "default": "gpt-5.6-terra",
           "description": "The OpenAI model to use for review assistance and walkthroughs."
         },
+        "openAIReasoningEffort": {
+          "type": "string",
+          "default": "",
+          "examples": ["high", "xhigh", "max", "ultra"],
+          "description": "Codex reasoning effort for review assistance and walkthroughs. Supported values depend on the selected model and installed Codex CLI. Leave empty to preserve Codiff's existing defaults for its predefined models and inherit Codex settings for other models."
+        },
         "opencodeModel": {
           "type": "string",
           "default": "opencode-default",

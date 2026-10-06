@@ -26,6 +26,7 @@ const {
   getAgentMenuModels: (
     agent: ReturnType<typeof getAgent>,
     selectedModel: string,
+    models?: ReadonlyArray<{ id: string; label: string }>,
   ) => ReadonlyArray<{ id: string; label: string }>;
   listAgents: () => ReadonlyArray<{ id: string }>;
   normalizeAgentBackend: (value: unknown) => string;
@@ -108,6 +109,19 @@ test('shows a custom configured model in the agent model menu', () => {
   expect(getAgentMenuModels(agent, 'cloudflare/custom-model')).toEqual([
     ...agent.models,
     { id: 'cloudflare/custom-model', label: 'Custom: cloudflare/custom-model' },
+  ]);
+});
+
+test('uses the runtime Codex catalog and preserves a selection missing from it', () => {
+  const agent = getAgent('codex');
+  const catalog = [
+    { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
+    { id: 'gpt-6-astra', label: 'GPT-6 Astra' },
+  ];
+  expect(getAgentMenuModels(agent, 'gpt-6.1-sol', catalog)).toEqual(catalog);
+  expect(getAgentMenuModels(agent, 'custom-codex-model', catalog)).toEqual([
+    ...catalog,
+    { id: 'custom-codex-model', label: 'Custom: custom-codex-model' },
   ]);
 });
 

@@ -864,8 +864,16 @@ const buildNarrativeWalkthroughPrompt = (
  * @param {unknown} model
  * @param {WalkthroughContext | null | undefined} context
  * @param {unknown} customPrompt
+ * @param {string} [reasoningEffort]
  */
-const getNarrativeWalkthroughCacheKey = (state, agent, model, context, customPrompt) => {
+const getNarrativeWalkthroughCacheKey = (
+  state,
+  agent,
+  model,
+  context,
+  customPrompt,
+  reasoningEffort,
+) => {
   const prompt = buildNarrativeWalkthroughPrompt(state, context, agent.label, customPrompt);
   return createHash('sha256')
     .update(
@@ -883,6 +891,9 @@ const getNarrativeWalkthroughCacheKey = (state, agent, model, context, customPro
           })),
         })),
         model: agent.normalizeModel(model),
+        ...(agent.id === 'codex' && reasoningEffort?.trim()
+          ? { reasoningEffort: reasoningEffort.trim() }
+          : {}),
         prompt,
         responseSchema: narrativeWalkthroughResponseSchema,
         version: WALKTHROUGH_CACHE_KEY_VERSION,
