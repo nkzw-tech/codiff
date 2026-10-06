@@ -761,6 +761,76 @@ test('focused walkthrough blocks resolve active search matches to rendered item 
   });
 });
 
+test('focused walkthrough blocks keep the scroll position when a comment opens during search', async () => {
+  const file = createChangedFileWithPatch(
+    'src/search.ts',
+    'diff --git a/src/search.ts b/src/search.ts\n@@ -1,2 +1,2 @@\n-old\n-other\n+needle\n+other2\n',
+  );
+  const activeSearchMatch = {
+    filePath: file.path,
+    itemId: `diff:${file.sections[0].id}`,
+    lineNumber: 1,
+    side: 'additions',
+  } as const;
+  const blocks: ReadonlyArray<ReviewDiffBlock> = [
+    { file, id: 'walkthrough:s1:0', itemIdPrefix: 'walkthrough:s1:0' },
+  ];
+  const comment = {
+    body: '',
+    filePath: file.path,
+    id: 'comment-1',
+    lineNumber: 2,
+    sectionId: file.sections[0].id,
+    side: 'additions',
+  } satisfies ReviewComment;
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(
+      <ReviewCodeViewHarness
+        activeSearchMatch={activeSearchMatch}
+        blocks={blocks}
+        comments={[]}
+        files={[file]}
+      />,
+    );
+  });
+  await waitFor(() => {
+    expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+      expect.objectContaining({ lineNumber: 1, type: 'line' }),
+    );
+  });
+  codeViewMock.scrollTo.mockClear();
+
+  await act(async () => {
+    root?.render(
+      <ReviewCodeViewHarness
+        activeSearchMatch={activeSearchMatch}
+        blocks={blocks}
+        comments={[comment]}
+        files={[file]}
+      />,
+    );
+  });
+
+  expect(container.querySelector('textarea')).not.toBeNull();
+  expect(codeViewMock.scrollTo).not.toHaveBeenCalledWith(
+    expect.objectContaining({ lineNumber: 1, type: 'line' }),
+  );
+});
+
 test('review comment drafts resync clean external updates and reset on comment switch', async () => {
   const file = createChangedFile('src/draft.ts');
   const baseComment = {

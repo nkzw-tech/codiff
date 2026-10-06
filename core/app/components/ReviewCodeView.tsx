@@ -2771,6 +2771,9 @@ export function ReviewCodeView({
   const focusedCommentEditorIdRef = useRef<string | null>(null);
   const definitionHighlightFrameRef = useRef<number | null>(null);
   const highlightFrameRef = useRef<number | null>(null);
+  const lastScrolledSearchMatchRef = useRef<{ itemId: string; match: DiffSearchMatch } | null>(
+    null,
+  );
   const ignoreNextLineSelectionEndRef = useRef(false);
   const navigatedSelectionRef = useRef<CodeViewLineSelection | null>(null);
   const initialMarkdownFiles =
@@ -4441,11 +4444,33 @@ export function ReviewCodeView({
   useEffect(() => invalidateDefinitionLookup, [invalidateDefinitionLookup]);
 
   useEffect(() => {
+    if (!activeSearchMatch) {
+      lastScrolledSearchMatchRef.current = null;
+      return;
+    }
+
     const handle = codeViewRef.current;
     const viewer = handle?.getInstance();
     if (!handle || !viewer || !resolvedActiveSearchMatch) {
       return;
     }
+
+    // Walkthrough blocks re-resolve the match into a fresh object whenever the
+    // rendered items change, e.g. when opening a comment. Only scroll when the
+    // active match itself or its rendered item changes, so editing the diff
+    // while searching does not yank the view back to the match.
+    const lastScrolledSearchMatch = lastScrolledSearchMatchRef.current;
+    if (
+      lastScrolledSearchMatch?.match === activeSearchMatch &&
+      lastScrolledSearchMatch.itemId === resolvedActiveSearchMatch.itemId
+    ) {
+      scheduleSearchHighlights();
+      return;
+    }
+    lastScrolledSearchMatchRef.current = {
+      itemId: resolvedActiveSearchMatch.itemId,
+      match: activeSearchMatch,
+    };
 
     if (resolvedActiveSearchMatch.lineNumber == null) {
       handle.scrollTo({
@@ -4467,7 +4492,7 @@ export function ReviewCodeView({
     }
 
     scheduleSearchHighlights();
-  }, [resolvedActiveSearchMatch, scheduleSearchHighlights]);
+  }, [activeSearchMatch, resolvedActiveSearchMatch, scheduleSearchHighlights]);
 
   // Rendered as a non-virtualized element at the top of the CodeView scroll
   // content. Height changes (async markdown layout, editing) are re-measured
