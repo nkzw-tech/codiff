@@ -107,23 +107,34 @@ test('rejects invalid explicit Codex CLI overrides', async () => {
   }
 });
 
-test('resolves the ChatGPT app CLI without a codex command on PATH', async () => {
-  await using directory = await createTemporaryDirectory('codiff-chatgpt-cli-');
-  const bundledCLI = join(directory.path, 'Applications/ChatGPT.app/Contents/Resources/codex');
-  await mkdir(dirname(bundledCLI), { recursive: true });
-  await writeFile(bundledCLI, '#!/bin/sh\n');
-  await chmod(bundledCLI, 0o755);
-  await using _environment = createTemporaryEnvironment({
-    CODIFF_CODEX_PATH: undefined,
-    PATH: directory.path,
-  });
+test.each(['codex', 'codex-cli/bin/codex'])(
+  'resolves the ChatGPT app CLI at %s without a codex command on PATH',
+  async (entryPoint) => {
+    await using directory = await createTemporaryDirectory('codiff-chatgpt-cli-');
+    const bundledCLI = join(
+      directory.path,
+      'Applications/ChatGPT.app/Contents/Resources',
+      entryPoint,
+    );
+    await mkdir(dirname(bundledCLI), { recursive: true });
+    await writeFile(bundledCLI, '#!/bin/sh\n');
+    await chmod(bundledCLI, 0o755);
+    await using _environment = createTemporaryEnvironment({
+      CODIFF_CODEX_PATH: undefined,
+      PATH: directory.path,
+    });
 
-  // Keep the test hermetic when a real CLI is installed in /Applications.
-  const macOSInstallPaths = getCodexInstallPaths('darwin', directory.path);
-  expect(macOSInstallPaths).toContain('/Applications/ChatGPT.app/Contents/Resources/codex');
-  const installPaths = macOSInstallPaths.filter((path: string) => path.startsWith(directory.path));
-  expect(getCodexCommand(installPaths)).toBe(bundledCLI);
-});
+    // Keep the test hermetic when a real CLI is installed in /Applications.
+    const macOSInstallPaths = getCodexInstallPaths('darwin', directory.path);
+    expect(macOSInstallPaths).toContain(
+      join('/Applications/ChatGPT.app/Contents/Resources', entryPoint),
+    );
+    const installPaths = macOSInstallPaths.filter((path: string) =>
+      path.startsWith(directory.path),
+    );
+    expect(getCodexCommand(installPaths)).toBe(bundledCLI);
+  },
+);
 
 test.skipIf(process.platform !== 'darwin')(
   'explains macOS Codex CLI security blocks through runCodex',

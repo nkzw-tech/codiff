@@ -102,6 +102,8 @@ const getCodexInstallPaths = (platform = process.platform, home = homedir()) => 
         join(home, 'Applications/Codex.app/Contents/Resources/codex'),
         '/Applications/ChatGPT.app/Contents/Resources/codex',
         join(home, 'Applications/ChatGPT.app/Contents/Resources/codex'),
+        '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+        join(home, 'Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'),
       ]
     : []),
 ];
