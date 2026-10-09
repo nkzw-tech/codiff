@@ -47,35 +47,36 @@ const createFixture = async () => {
   return { cache, diff, renderer, result, worker };
 };
 
-test('ending a keyless edit session highlights in a worker and preserves the original cache', async () => {
+test('highlighting an accepted edit uses its new worker cache key and preserves the original cache', async () => {
   const { cache, diff, renderer, result, worker } = await createFixture();
   renderer.hydrate(diff);
   const session = cloneFileDiffMetadata(diff);
   delete session.cacheKey;
   renderer.beginEditSession(session, diff);
   renderer.endEditSession();
+  session.cacheKey = 'completed-edit';
   const localHighlight = vi.spyOn(renderer, 'asyncHighlight');
   try {
     await renderer.refreshHighlightedResult();
     expect(localHighlight).not.toHaveBeenCalled();
     expect(worker.primeDiffHighlightCache).toHaveBeenCalledOnce();
     const target = worker.primeDiffHighlightCache.mock.calls[0]![0];
-    expect(target).not.toBe(session);
-    expect(target.cacheKey).toBeDefined();
-    expect(session.cacheKey).toBeUndefined();
+    expect(target).toBe(session);
+    expect(target.cacheKey).toBe('completed-edit');
     expect(cache.get(diff.cacheKey)).toBe(result);
-    expect(cache.size).toBe(1);
+    expect(cache.size).toBe(2);
   } finally {
     localHighlight.mockRestore();
     renderer.cleanUp();
   }
 });
 
-test('re-entering editing reuses the new worker cache while old session markup is still rendered', async () => {
+test('re-entering editing reuses the highlighted replacement diff', async () => {
   const { cache, diff, renderer, result } = await createFixture();
   renderer.hydrate(diff);
   const next = { ...diff, cacheKey: 'next' };
   cache.set(next.cacheKey, result);
+  renderer.renderDiff(next);
   const session = cloneFileDiffMetadata(next);
   delete session.cacheKey;
   const localHighlight = vi.spyOn(renderer, 'renderDiffWithHighlighter');

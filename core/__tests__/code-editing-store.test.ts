@@ -41,6 +41,10 @@ const session: EditSession = {
     sectionCount: 1,
   },
   originalContent,
+  originalDiff: parseDiffFromFile(
+    { contents: 'git baseline\n', name: file.path },
+    { contents: originalContent, name: file.path },
+  ),
   sourceKey: 'working-tree',
 };
 let registry: CodeEditingStore;
@@ -113,21 +117,14 @@ test('Done flushes immediately and clears the debounce before closing', async ()
   expect(window.codiff.saveRepositoryFile).toHaveBeenCalledOnce();
 });
 
-test('Done saves and refreshes input typed while waiting for the refreshed review', async () => {
-  const pending = Promise.withResolvers<void>();
-  const beforeClose = vi.fn(async () => {});
-  beforeClose.mockImplementationOnce(() => pending.promise);
-  store.setDraft('first draft');
-  const finished = store.finish(false, beforeClose);
-  await vi.waitFor(() => expect(beforeClose).toHaveBeenCalledOnce());
-  expect(store.getSnapshot()?.finishing).toBe('done');
-  store.setDraft('latest draft');
-  pending.resolve();
-  expect(await finished).toBe(true);
-  expect(beforeClose).toHaveBeenCalledTimes(2);
-  expect(window.codiff.saveRepositoryFile).toHaveBeenLastCalledWith(
-    expect.objectContaining({ baseVersion: 'version-1', content: 'latest draft' }),
-  );
+test('Done completes the saved session before removing it from the store', async () => {
+  store.setDraft('last draft');
+  const beforeClose = vi.fn(() => {
+    expect(store.getSnapshot()?.finishing).toBe('done');
+    expect(store.getSnapshot()?.document.content).toBe('last draft');
+  });
+  expect(await store.finish(false, beforeClose)).toBe(true);
+  expect(beforeClose).toHaveBeenCalledOnce();
   expect(store.getSnapshot()).toBeNull();
 });
 

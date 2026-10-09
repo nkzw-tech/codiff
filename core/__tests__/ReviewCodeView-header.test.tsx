@@ -61,6 +61,7 @@ const startEditing = () => {
     item: { ...item, annotations: [], edit: true },
     metadata: meta,
     originalContent: 'new\n',
+    originalDiff: item.fileDiff,
     sourceKey: 'working-tree',
   })!;
 };

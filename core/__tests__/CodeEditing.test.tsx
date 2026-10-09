@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import {
   DiffHunksRenderer,
-  CodeView as CodeViewInstance,
   parseDiffFromFile,
   parsePatchFiles,
   preloadHighlighter,
@@ -18,7 +17,7 @@ import {
   type CodeEditingStore,
 } from '../app/hooks/useCodeEditing.ts';
 import type { CodeViewItemMetadata, ReviewAnnotationMetadata } from '../lib/app-types.ts';
-import { loadSectionContents } from '../lib/diff.ts';
+import { getDiffParseOptions, loadSectionContents } from '../lib/diff.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
 
@@ -87,6 +86,7 @@ function Harness({
   oldContents = contents.replace(/^new/, 'old'),
   onRefresh = refresh,
   selectedItemId,
+  showWhitespace = true,
   sourceKey = 'working-tree',
   store = testStore,
 }: {
@@ -100,6 +100,7 @@ function Harness({
   oldContents?: string;
   onRefresh?: () => Promise<boolean>;
   selectedItemId?: string;
+  showWhitespace?: boolean;
   sourceKey?: string;
   store?: CodeEditingStore;
 }) {
@@ -149,7 +150,12 @@ function Harness({
       </button>
       <button
         disabled={!editing.canStartEdit(codeItem.id, editMetadata.file.path)}
-        onClick={() => void editing.startEdit(codeItem, editMetadata)}
+        onClick={() =>
+          void editing.startEdit(
+            editing.items.find((candidate) => candidate.id === codeItem.id) ?? codeItem,
+            editMetadata,
+          )
+        }
         type="button"
       >
         Edit
@@ -193,6 +199,7 @@ function Harness({
             diffStyle,
             disableErrorHandling: true,
             loadDiffFiles: () => loadSectionContents(editMetadata.file, editMetadata.section, load),
+            parseDiffOptions: getDiffParseOptions(showWhitespace),
             stickyHeaders: true,
             theme: 'github-dark',
             themeType: 'dark',
@@ -628,6 +635,12 @@ test('Done saves complete Pierre contents; Revert discards a draft before auto-s
     expect.objectContaining({ baseVersion: 'version', content: 'updated\n', path: file.path }),
   );
   expect(handle?.getEditor(item.id)).toBeUndefined();
+  vi.mocked(window.codiff.getRepositoryFile).mockResolvedValue({
+    content: 'updated\n',
+    path: file.path,
+    root: '/repo',
+    version: 'saved-version',
+  });
   await click(view.container, 'Edit');
   await edit();
   await click(view.container, 'Revert');
@@ -664,72 +677,44 @@ test('auto-save keeps Pierre editing and the hunk stable; Revert restores the st
 });
 
 test.each(['Done', 'Revert'])(
-  '%s keeps the live document visible until the refreshed diff replaces it',
+  '%s installs the finished diff before repository refresh completes',
   async (action) => {
     const pending = Promise.withResolvers<boolean>();
     refresh.mockImplementationOnce(() => pending.promise);
-    function RefreshingHarness() {
-      const [contents, setContents] = useState('new\n');
-      return (
-        <Harness
-          contents={contents}
-          oldContents="old\n"
-          onRefresh={async () => {
-            const success = await refresh();
-            if (success) {
-              setContents([...testStore.getSnapshot().values()][0]!.document.content);
-            }
-            return success;
-          }}
-        />
-      );
-    }
-    await using view = await renderReact(<RefreshingHarness />);
+    await using view = await renderReact(<Harness />);
     await click(view.container, 'Edit');
     await edit(item.id, 'updated\nextra line');
-    const editor = handle!.getEditor(item.id)!;
-    // Include the case where Revert has to restore an already autosaved edit.
     await act(async () => {
       await testStore.flush('working-tree');
     });
-    const installed = vi.spyOn(CodeViewInstance.prototype, 'setItems');
     await click(view.container, action);
     expect(refresh).toHaveBeenCalledOnce();
-    expect(handle?.getEditor(item.id)).toBe(editor);
-    expect(editor.getText()).toBe('updated\nextra line\n');
-    expect(testStore.getSnapshot().size).toBe(1);
-    await act(async () => {
-      pending.resolve(true);
-    });
-    await waitFor(() => expect(handle?.getEditor(item.id)).toBeUndefined());
-    const replacements = installed.mock.calls.flatMap(([items]) =>
-      items.filter((candidate) => candidate.type === 'diff' && !candidate.edit),
-    );
-    expect(replacements.length).toBeGreaterThan(0);
-    for (const replacement of replacements) {
-      expect(replacement.type === 'diff' && replacement.fileDiff.additionLines.join('')).toBe(
-        action === 'Done' ? 'updated\nextra line\n' : 'new\n',
-      );
-    }
+    expect(handle?.getEditor(item.id)).toBeUndefined();
     expect(testStore.getSnapshot().size).toBe(0);
+    const completed = handle!.getItem(item.id)!;
+    expect(completed.type === 'diff' && completed.fileDiff.additionLines.join('')).toBe(
+      action === 'Done' ? 'updated\nextra line\n' : 'new\n',
+    );
+    await act(async () => pending.resolve(true));
+    await view.rerender(<Harness />);
+    const retained = handle!.getItem(item.id)!;
+    expect(retained.type === 'diff' && retained.fileDiff).toBe(
+      completed.type === 'diff' && completed.fileDiff,
+    );
   },
 );
 
-test('a failed refresh after Done retains the saved draft for retrying', async () => {
+test('a failed repository refresh keeps the accepted diff and reports the saved state', async () => {
   refresh.mockResolvedValueOnce(false);
   await using view = await renderReact(<Harness />);
   await click(view.container, 'Edit');
   await edit();
-  const editor = handle!.getEditor(item.id)!;
-  await click(view.container, 'Done');
-  expect(handle?.getEditor(item.id)).toBe(editor);
-  expect(editor.getText()).toBe('updated\n');
-  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
-    'Refresh the review',
-  );
-  expect([...testStore.getSnapshot().values()][0]?.finishing).toBeUndefined();
   await click(view.container, 'Done');
   expect(handle?.getEditor(item.id)).toBeUndefined();
+  const completed = handle!.getItem(item.id)!;
+  expect(completed.type === 'diff' && completed.fileDiff.additionLines.join('')).toBe('updated\n');
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('File saved');
+  expect(testStore.getSnapshot().size).toBe(0);
   expect(window.codiff.saveRepositoryFile).toHaveBeenCalledOnce();
 });
 
@@ -766,14 +751,16 @@ test.each(['split', 'unified'] as const)(
           fileDiff={fileDiff}
           oldContents={oldContents}
           onRefresh={async () => {
-            setContents([...testStore.getSnapshot().values()][0]!.document.content);
+            const completed = handle!.getItem(item.id)!;
+            if (completed.type === 'diff') {
+              setContents(completed.fileDiff.additionLines.join(''));
+            }
             return true;
           }}
         />
       );
     }
     await using view = await renderReact(<RefreshingHarness />);
-    const begin = vi.spyOn(DiffHunksRenderer.prototype, 'beginEditSession');
     await click(view.container, 'Edit');
     await act(async () => handle?.getInstance()?.render(true));
     await waitFor(() => expect(handle?.getEditor(item.id)?.getFile()).toBeDefined());
@@ -805,16 +792,11 @@ test.each(['split', 'unified'] as const)(
       ].map((node) => node.textContent),
     });
     const before = layout();
-    const outgoingDiff = begin.mock.calls.at(-1)![0];
-    const outgoingHunks = structuredClone(outgoingDiff.hunks);
     expect(before.rows).toContain('44');
     await click(view.container, 'Done');
     await act(async () => handle?.getInstance()?.render(true));
     await waitFor(() => expect(handle?.getEditor(item.id)).toBeUndefined());
     expect(layout()).toEqual(before);
-    // A worker may still be painting this private diff while highlighting the
-    // replacement. Completion must not reflow its context underneath that DOM.
-    expect(outgoingDiff.hunks).toEqual(outgoingHunks);
   },
 );
 
@@ -871,6 +853,26 @@ test('tree and walkthrough surface remounts retain the draft in the App store', 
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
   expect(window.codiff.saveRepositoryFile).toHaveBeenCalledWith(
     expect.objectContaining({ content: 'updated\n' }),
+  );
+});
+
+test('Revert after a source switch restores the original diff and disk contents', async () => {
+  await using view = await renderReact(<Harness />);
+  await click(view.container, 'Edit');
+  await edit();
+  await act(async () => {
+    await testStore.flush('working-tree');
+  });
+  await view.rerender(<Harness hidden sourceKey="commit" />);
+  await view.rerender(<Harness />);
+  await act(async () => handle?.getInstance()?.render(true));
+  await waitFor(() => expect(handle?.getEditor(item.id)?.getText()).toBe('updated\n'));
+  await click(view.container, 'Revert');
+  expect(handle?.getEditor(item.id)).toBeUndefined();
+  const reverted = handle!.getItem(item.id)!;
+  expect(reverted.type === 'diff' && reverted.fileDiff.additionLines.join('')).toBe('new\n');
+  expect(window.codiff.saveRepositoryFile).toHaveBeenLastCalledWith(
+    expect.objectContaining({ baseVersion: 'saved-version', content: 'new\n' }),
   );
 });
 
@@ -1074,16 +1076,40 @@ test('Cmd+S in another input does not finish a code edit', async () => {
   expect(refresh).not.toHaveBeenCalled();
 });
 
-test.each(['Done', 'Revert'])(
-  '%s does not queue highlighting for the outgoing edit session',
-  async (action) => {
-    await using view = await renderReact(<Harness />);
+test.each([true, false])(
+  'completion uses the configured whitespace policy (showWhitespace: %s)',
+  async (showWhitespace) => {
+    const oldContents = 'const value = 1;\n';
+    const contents = 'const value = 2;\n';
+    vi.mocked(window.codiff.getRepositoryFile).mockResolvedValue({
+      content: contents,
+      path: file.path,
+      root: '/repo',
+      version: 'version',
+    });
+    await using view = await renderReact(
+      <Harness contents={contents} oldContents={oldContents} showWhitespace={showWhitespace} />,
+    );
     await click(view.container, 'Edit');
-    await edit();
-    const highlight = vi.spyOn(DiffHunksRenderer.prototype, 'refreshHighlightedResult');
-    await click(view.container, action);
-    await waitFor(() => expect(handle?.getEditor(item.id)).toBeUndefined());
-    expect(highlight).not.toHaveBeenCalled();
-    expect(testStore.getSnapshot().size).toBe(0);
+    await waitFor(() => expect(handle?.getEditor(item.id)?.getFile()).toBeDefined());
+    await act(async () => {
+      handle!.getEditor(item.id)!.applyEdits([
+        {
+          newText: '  const value = 1;',
+          range: { end: { character: 16, line: 0 }, start: { character: 0, line: 0 } },
+        },
+      ]);
+    });
+    await click(view.container, 'Done');
+    const completed = handle!.getItem(item.id)!;
+    expect(completed.type).toBe('diff');
+    if (completed.type !== 'diff') {
+      throw new Error('Expected a diff');
+    }
+    expect(completed.fileDiff.additionLines.join('')).toBe('  const value = 1;\n');
+    expect(completed.fileDiff.hunks.length > 0).toBe(showWhitespace);
+    expect(window.codiff.saveRepositoryFile).toHaveBeenCalledWith(
+      expect.objectContaining({ content: '  const value = 1;\n' }),
+    );
   },
 );

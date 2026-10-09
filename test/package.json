@@ -6,7 +6,7 @@
     "test": "vp test"
   },
   "devDependencies": {
-    "miniflare": "5.20260910.0-alpha",
+    "miniflare": "5.20261006.0-alpha",
     "vitest": "catalog:"
   }
 }

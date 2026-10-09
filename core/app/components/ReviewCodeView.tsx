@@ -80,6 +80,7 @@ import {
 import {
   canRenderImagePreview,
   getDiffLineCountFromVisibleSections,
+  getDiffParseOptions,
   getItemId,
   getMarkdownPreviewContents,
   getSectionForFileDiff,
@@ -3795,6 +3796,7 @@ export function ReviewCodeView({
           }
         },
         overflow: wordWrap ? 'wrap' : 'scroll',
+        parseDiffOptions: getDiffParseOptions(showWhitespace),
         stickyHeaders: true,
         theme: {
           dark: 'Dunkel',
@@ -3820,6 +3822,7 @@ export function ReviewCodeView({
       onFindDefinitions,
       onLoadSection,
       selectedHeaderItemIds,
+      showWhitespace,
       source,
       sourceKey,
       theme,

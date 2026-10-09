@@ -1,4 +1,4 @@
-import type { CodeViewDiffItem, CodeViewItem } from '@pierre/diffs';
+import type { CodeViewDiffItem, CodeViewItem, FileDiffMetadata } from '@pierre/diffs';
 import type { CodeViewItemMetadata, ReviewAnnotationMetadata } from '../../lib/app-types.ts';
 import type { RepositoryFileDocument } from '../../types.ts';
 
@@ -12,6 +12,7 @@ export type EditSession = {
   item: CodeViewDiffItem<ReviewAnnotationMetadata>;
   metadata: CodeViewItemMetadata;
   originalContent: string;
+  originalDiff: FileDiffMetadata;
   saveError?: string;
   saving?: boolean;
   sourceKey: string;
@@ -103,7 +104,7 @@ const createFileEditingStore = (onChange: () => void) => {
       });
     return pendingWrite;
   };
-  const finish = async (revert: boolean, beforeClose?: () => Promise<void>) => {
+  const finish = async (revert: boolean, beforeClose?: () => void) => {
     const current = sessionRef.current;
     if (!current || current.finishing) {
       return false;
@@ -120,18 +121,14 @@ const createFileEditingStore = (onChange: () => void) => {
         draftRef.current = current.originalContent;
       }
       do {
-        do {
-          if (!(await flush())) {
-            if (previousDraft !== undefined) {
-              draftRef.current = previousDraft;
-            }
-            return false;
+        if (!(await flush())) {
+          if (previousDraft !== undefined) {
+            draftRef.current = previousDraft;
           }
-        } while (!revert && draftRef.current !== sessionRef.current?.document.content);
-        // Keep Pierre's live document visible until the refreshed review is ready.
-        // Input arriving during the refresh needs another save and refresh before closing.
-        await beforeClose?.();
+          return false;
+        }
       } while (!revert && draftRef.current !== sessionRef.current?.document.content);
+      beforeClose?.();
       setSession(null);
       return true;
     } catch (error) {

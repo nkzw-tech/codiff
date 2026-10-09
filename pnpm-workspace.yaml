@@ -25,9 +25,9 @@ minimumReleaseAgeExclude:
   - react-fate
   - void
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
-  vite-plus: 1.0.0
-  vitest: 5.0.2
+  vite: npm:@voidzero-dev/vite-plus-core@1.1.0
+  vite-plus: 1.1.0
+  vitest: 5.0.3
 nodeLinker: hoisted
 onlyBuiltDependencies:
   - '@nkzw/mdx-editor'
@@ -39,7 +39,6 @@ overrides:
   extract-zip>yauzl: ^3.4.0
   vite@*: 'catalog:'
 patchedDependencies:
-  '@pierre/diffs@1.5.1': patches/@pierre__diffs@1.5.1.patch
   native-keymap@3.3.9: patches/native-keymap@3.3.9.patch
 peerDependencyRules:
   allowAny:

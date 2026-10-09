@@ -2826,7 +2826,7 @@ test('repository changes show the update banner without refreshing the working t
   expect(getRepositoryState).toHaveBeenCalledTimes(1);
 });
 
-test('Done keeps the editor until the refreshed working-tree section has full context', async () => {
+test('Done accepts the edited diff without fetching the full working-tree section again', async () => {
   const { Editor } = await import('@pierre/diffs/edit');
   const attached = vi.spyOn(Editor.prototype, 'edit');
   const getEditor = () => attached.mock.contexts[0] as InstanceType<typeof Editor> | undefined;
@@ -2851,20 +2851,20 @@ test('Done keeps the editor until the refreshed working-tree section has full co
     oldFile: { contents: 'old\n', name: file.path },
   };
   const refreshedSection = { ...file.sections[0]!, loadState: 'ready' as const };
-  const pending = Promise.withResolvers<typeof originalSection>();
+  const pending = Promise.withResolvers<RepositoryState>();
   let savedContent = '';
   window.codiff = createCodiffMock({
-    getDiffSectionContent: vi.fn(() => pending.promise),
+    getDiffSectionContent: vi.fn(async () => ({
+      ...originalSection,
+      newFile: { contents: savedContent, name: file.path },
+    })),
     getRepositoryState: vi
       .fn()
       .mockResolvedValueOnce({
         ...repositoryState,
         files: [{ ...file, sections: [originalSection] }],
       })
-      .mockResolvedValue({
-        ...repositoryState,
-        files: [{ ...file, fingerprint: 'saved', sections: [refreshedSection] }],
-      }),
+      .mockImplementation(() => pending.promise),
     saveRepositoryFile: vi.fn(async (request) => {
       savedContent = request.content;
       return { document: { ...request, version: 'saved' }, status: 'saved' as const };
@@ -2894,20 +2894,19 @@ test('Done keeps the editor until the refreshed working-tree section has full co
       .querySelector<HTMLButtonElement>(`[aria-label="Done editing ${file.path}"]`)!
       .click();
   });
-  await waitFor(() => expect(window.codiff.getDiffSectionContent).toHaveBeenCalledOnce());
+  await waitFor(() => expect(window.codiff.getRepositoryState).toHaveBeenCalledTimes(2));
+  expect(window.codiff.getDiffSectionContent).not.toHaveBeenCalled();
   expect(savedContent).toContain('updated ');
-  expect(findEditableContent()).toBeDefined();
-  expect(app.container.querySelector(`[aria-label="Done editing ${file.path}"]`)).not.toBeNull();
-  await act(async () =>
-    pending.resolve({
-      ...originalSection,
-      newFile: { contents: savedContent, name: file.path },
-    }),
-  );
   await waitFor(() =>
     expect(app.container.querySelector(`[aria-label="Edit ${file.path}"]`)).not.toBeNull(),
   );
   expect(app.container.querySelector(`[aria-label="Done editing ${file.path}"]`)).toBeNull();
+  await act(async () =>
+    pending.resolve({
+      ...repositoryState,
+      files: [{ ...file, fingerprint: 'saved', sections: [refreshedSection] }],
+    }),
+  );
 });
 
 test('clicking the change banner refreshes the repository in place', async () => {

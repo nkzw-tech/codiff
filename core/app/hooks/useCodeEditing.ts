@@ -25,6 +25,7 @@ import {
   useSyncExternalStore,
   type RefObject,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { defaultKeymap } from '../../config/defaults.ts';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
@@ -137,6 +138,12 @@ export function useCodeEditing({
   const busyRef = useRef(new Set<string>());
   const [busyItemKeys, setBusyItemKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [completedItems, setCompletedItems] = useState<
+    ReadonlyMap<
+      string,
+      { item: CodeViewDiffItem<ReviewAnnotationMetadata>; originalDiff: FileDiffMetadata }
+    >
+  >(() => new Map());
   const setBusy = useCallback((key: string, busy: boolean) => {
     if (busy) {
       busyRef.current.add(key);
@@ -293,6 +300,7 @@ export function useCodeEditing({
           },
           metadata,
           originalContent: document.content,
+          originalDiff: fileDiff,
           sourceKey,
         };
         if (store.start(nextSession)) {
@@ -322,23 +330,40 @@ export function useCodeEditing({
         current.document.content !== current.originalContent ||
         current.saving;
       try {
-        await entry.finish(revert, async () => {
+        const finished = await entry.finish(revert, () => {
           const latest = entry.getSnapshot();
-          if (
-            (needsRefresh || latest?.hasChanges) &&
-            onRefresh &&
-            !(await onRefresh(current.metadata.file, current.metadata.section))
-          ) {
-            throw new Error('File saved. Refresh the review to see the updated diff.');
+          const viewer = codeViewRef.current;
+          const displayed = viewer?.getItem(itemId);
+          if (latest && displayed?.type === 'diff' && displayed.fileDiff === latest.item.fileDiff) {
+            // End Pierre's session while the store still owns it, so completion
+            // can accept its diff before the repository metadata is refreshed.
+            flushSync(() => {
+              entry.setSession({
+                ...latest,
+                item: {
+                  ...latest.item,
+                  edit: false,
+                  version: getItemVersion(`code-edit-complete:${crypto.randomUUID()}`),
+                },
+              });
+            });
           }
         });
+        if (
+          finished &&
+          needsRefresh &&
+          onRefresh &&
+          !(await onRefresh(current.metadata.file, current.metadata.section))
+        ) {
+          throw new Error('File saved. Refresh the review to update its repository status.');
+        }
       } catch (error) {
         setError(itemKey, errorMessage(error));
       } finally {
         setBusy(itemKey, false);
       }
     },
-    [onRefresh, setBusy, setError, sourceKey, store],
+    [codeViewRef, onRefresh, setBusy, setError, sourceKey, store],
   );
 
   const doneEdit = useCallback((itemId: string) => finishEdit(itemId, false), [finishEdit]);
@@ -364,8 +389,26 @@ export function useCodeEditing({
         if (!entry || !current || nextItem.type !== 'diff') {
           return 'reject';
         }
-        // Source/view switches end Pierre's session. Retain the draft for returning
-        // to this review; Done/Revert clear our session before Pierre completes it.
+        if (current.finishing && !current.item.edit) {
+          nextItem.fileDiff.cacheKey = `code-edit:${crypto.randomUUID()}`;
+          const original = items.find((candidate) => candidate.id === item.id);
+          if (original?.type === 'diff') {
+            const completed: CodeViewDiffItem<ReviewAnnotationMetadata> = {
+              ...nextItem,
+              fileDiff: current.finishing === 'revert' ? current.originalDiff : nextItem.fileDiff,
+              type: 'diff',
+            };
+            setCompletedItems((previous) =>
+              new Map(previous).set(getCodeEditKey(current.sourceKey, item.id), {
+                item: completed,
+                originalDiff: original.fileDiff,
+              }),
+            );
+          }
+          return current.finishing === 'revert' ? 'reject' : 'accept';
+        }
+        // Source/view switches end Pierre's session. Retain the completed draft
+        // for returning to this review without parsing the document again.
         nextItem.fileDiff.cacheKey = `code-edit:${crypto.randomUUID()}`;
         entry.setSession({
           ...current,
@@ -373,17 +416,27 @@ export function useCodeEditing({
         });
         return 'accept';
       },
-      [store],
+      [items, store],
     );
 
   const editedItems = useMemo(() => {
-    if (currentSessions.size === 0) {
+    if (currentSessions.size === 0 && completedItems.size === 0) {
       return items;
     }
     const found = new Set<string>();
     const next = items.map((item) => {
       const session = currentSessions.get(item.id);
       if (!session) {
+        const completed = completedItems.get(getCodeEditKey(sourceKey, item.id));
+        if (item.type === 'diff' && completed?.originalDiff === item.fileDiff) {
+          return {
+            ...item,
+            fileDiff: completed.item.fileDiff,
+            version: getItemVersion(
+              `code-edit-completed:${completed.item.version}:${item.version}`,
+            ),
+          };
+        }
         return item;
       }
       found.add(item.id);
@@ -396,7 +449,7 @@ export function useCodeEditing({
       }
     }
     return next;
-  }, [currentSessions, items]);
+  }, [completedItems, currentSessions, items, sourceKey]);
 
   useEffect(() => {
     if (currentSessions.size === 0) {

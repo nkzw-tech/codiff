@@ -10,6 +10,11 @@ import type { DiffLineCount } from './app-types.ts';
 
 export const getItemId = (section: DiffSection) => `diff:${section.id}`;
 
+export const getDiffParseOptions = (showWhitespace: boolean) => ({
+  context: 3,
+  ignoreWhitespace: !showWhitespace,
+});
+
 export const isMarkdownFilePath = (path: string) => /\.md$/i.test(path);
 
 const isImageFilePath = (path: string) => /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|webp)$/i.test(path);
@@ -331,9 +336,7 @@ export const parseSectionDiffWithOptions = (
   } else if (section.oldFile && section.newFile) {
     try {
       fileDiff = {
-        ...parseDiffFromFile(section.oldFile, section.newFile, {
-          ignoreWhitespace: !showWhitespace,
-        }),
+        ...parseDiffFromFile(section.oldFile, section.newFile, getDiffParseOptions(showWhitespace)),
         cacheKey,
       };
     } catch {

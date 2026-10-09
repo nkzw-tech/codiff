@@ -502,7 +502,7 @@ export default function App() {
   );
 
   const refreshMarkdownFile = useCallback(
-    (file: ChangedFile, section: DiffSection) => {
+    (file: ChangedFile) => {
       const refresh = async () => {
         const currentState = stateRef.current;
         if (
@@ -518,38 +518,9 @@ export default function App() {
 
         try {
           const nextState = await window.codiff.getRepositoryState(currentState.source);
-          const refreshedFile = nextState.files.find((candidate) => candidate.path === file.path);
-          const refreshedSection = refreshedFile?.sections.find(
-            (candidate) => candidate.kind === section.kind,
-          );
-          // Keep the editor's complete context until the replacement has it too.
-          // Publishing a patch first drops expanded rows and trailing context.
-          const loadedSection =
-            refreshedSection &&
-            (isPatchOnlyDiffSection(refreshedSection) ||
-              shouldLoadDiffSectionContents(refreshedSection))
-              ? await window.codiff.getDiffSectionContent({
-                  force: true,
-                  kind: refreshedSection.kind,
-                  path: file.path,
-                  showWhitespace: preferencesRef.current.showWhitespace,
-                  source: currentState.source,
-                })
-              : undefined;
           const orderedState = {
             ...nextState,
-            files: sortFiles(
-              nextState.files.map((candidate) =>
-                candidate === refreshedFile && loadedSection
-                  ? {
-                      ...candidate,
-                      sections: candidate.sections.map((candidateSection) =>
-                        candidateSection === refreshedSection ? loadedSection : candidateSection,
-                      ),
-                    }
-                  : candidate,
-              ),
-            ),
+            files: sortFiles(nextState.files),
           };
           if (
             sourceRequestRef.current !== sourceRequest ||
