@@ -526,6 +526,7 @@ export function NarrativeWalkthroughView({
   renderDiffBlocks,
   shareWalkthroughDisabled,
   showWhitespace,
+  status,
   walkthrough,
 }: {
   allowCommit?: boolean;
@@ -539,8 +540,10 @@ export function NarrativeWalkthroughView({
   renderDiffBlocks: RenderWalkthroughDiffBlocks;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
+  status?: { content: ReactNode; key: string } | null;
   walkthrough: NarrativeWalkthrough;
 }) {
+  const hasStatus = status != null;
   const { walkthroughView } = navigation;
   const committable = allowCommit && isWalkthroughCommittable(walkthrough);
   const walkthroughBlocks = useMemo(
@@ -588,7 +591,9 @@ export function NarrativeWalkthroughView({
     [navigation, onActiveReviewTargetChange, reviewBlocks, supportBlockIds, walkthroughBlocks],
   );
   useEffect(() => {
-    if (navigation.mode === 'stop') {
+    if (hasStatus) {
+      onActiveReviewTargetChange(null);
+    } else if (navigation.mode === 'stop') {
       onActiveReviewTargetChange(getBlockReviewTarget(reviewBlocks, activeBlockId));
     } else if (navigation.mode === 'support') {
       onActiveReviewTargetChange(getBlockReviewTarget(reviewBlocks, firstSupportBlockId));
@@ -598,6 +603,7 @@ export function NarrativeWalkthroughView({
   }, [
     activeBlockId,
     firstSupportBlockId,
+    hasStatus,
     navigation.mode,
     onActiveReviewTargetChange,
     reviewBlocks,
@@ -614,7 +620,7 @@ export function NarrativeWalkthroughView({
       ) {
         return;
       }
-      if (!walkthroughView) {
+      if (hasStatus || !walkthroughView) {
         return;
       }
       const direction = getWalkthroughNavigationKeyDirection(event);
@@ -650,13 +656,27 @@ export function NarrativeWalkthroughView({
         }
       }
     },
-    [committable, navigation, supportAvailable, walkthroughView],
+    [committable, hasStatus, navigation, supportAvailable, walkthroughView],
   );
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
+
+  if (status) {
+    return (
+      <div className="wt-hybrid">
+        {/* Keep the diff surface in the same child slot when the navigation arc appears. */}
+        {null}
+        {renderDiffBlocks(
+          [{ header: status.content, id: `walkthrough:status:${status.key}` }],
+          null,
+          () => {},
+        )}
+      </div>
+    );
+  }
 
   if (!walkthroughView) {
     return <div className="wt-empty">This walkthrough has no readable sequence.</div>;

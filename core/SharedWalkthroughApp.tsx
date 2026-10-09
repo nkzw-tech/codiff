@@ -1339,7 +1339,7 @@ export function ReviewSurface({
               walkthroughNotes={emptyWalkthroughNotes}
             />
           )
-        ) : walkthroughReady ? (
+        ) : (
           <NarrativeWalkthroughView
             allowCommit={false}
             files={snapshot.files}
@@ -1349,28 +1349,36 @@ export function ReviewSurface({
             onUpdateCommitMessage={disabledCommitMessage}
             renderDiffBlocks={renderWalkthroughDiffBlocks}
             showWhitespace={snapshot.preferences.showWhitespace}
+            status={
+              walkthroughReady
+                ? null
+                : {
+                    content: walkthroughFailed ? (
+                      <div className="empty-state walkthrough-status" role="status">
+                        <div className="empty-panel squircle">
+                          <strong>{walkthroughStatusTitle}</strong>
+                          <p>{walkthroughStatusDescription}</p>
+                          <div className="empty-panel-actions">
+                            <button onClick={requestWalkthrough} type="button">
+                              Try again
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="loading codex walkthrough-status" role="status">
+                        <WalkthroughProgress
+                          phase={null}
+                          responseLabelIndex={0}
+                          stageRevision={walkthroughProgressRevision}
+                        />
+                      </div>
+                    ),
+                    key: `${walkthroughStatus}:${walkthroughProgressRevision}:${walkthroughStatusDescription ?? ''}`,
+                  }
+            }
             walkthrough={sharedWalkthrough}
           />
-        ) : walkthroughFailed ? (
-          <div className="empty-state">
-            <div className="empty-panel squircle">
-              <strong>{walkthroughStatusTitle}</strong>
-              <p>{walkthroughStatusDescription}</p>
-              <div className="empty-panel-actions">
-                <button onClick={requestWalkthrough} type="button">
-                  Try again
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="loading codex">
-            <WalkthroughProgress
-              phase={null}
-              responseLabelIndex={0}
-              stageRevision={walkthroughProgressRevision}
-            />
-          </div>
         )}
       </main>
     </div>

@@ -6,10 +6,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
-import { ReviewSurface, type ReviewCommenting } from '../react.ts';
+import { ReviewSurface, type ReviewCommenting, type ReviewSurfaceProps } from '../react.ts';
 import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
-import { renderReact, waitFor } from './helpers/react.tsx';
+import { renderReact, setInputValue, waitFor } from './helpers/react.tsx';
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   ResizeObserver?: typeof ResizeObserver;
@@ -95,6 +95,155 @@ const sharedWalkthroughSnapshot = {
     version: 4,
   },
 } satisfies SharedWalkthroughSnapshot;
+
+test('keeps the merge request header interactive through walkthrough generation and retry', async () => {
+  const source = {
+    canEditDescription: true,
+    canEditTitle: true,
+    description: 'Review this change while the walkthrough is generated.',
+    host: 'gitlab.example.com',
+    number: 42,
+    provider: 'gitlab',
+    title: 'Keep the header available',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/team/project/-/merge_requests/42',
+  } as const;
+  const snapshot: SharedWalkthroughSnapshot = {
+    ...sharedWalkthroughSnapshot,
+    repository: { ...sharedWalkthroughSnapshot.repository, source },
+    walkthrough: {
+      ...sharedWalkthroughSnapshot.walkthrough,
+      chapters: [
+        {
+          blurb: 'Review the change.',
+          icon: 'gear',
+          id: 'implementation',
+          stops: [
+            {
+              added: 1,
+              deleted: 1,
+              hunkIds: ['src/app.ts:unstaged:h1'],
+              hunks: [],
+              id: 'implementation-path',
+              importance: 'normal',
+              prose: 'Review the implementation.',
+              title: 'Implementation path',
+            },
+          ],
+          title: 'Implementation',
+        },
+      ],
+      source,
+    },
+  };
+  const onGenerateWalkthrough = vi.fn(async () => {});
+  const interactive = {
+    onGenerateWalkthrough,
+    onHome: () => {},
+    onSubmitComment: commenting.onSubmitComment,
+    onSubmitGeneralComment: commenting.onSubmitGeneralComment,
+    onSubmitReview: vi.fn(async () => {}),
+    onUpdateComment: commenting.onUpdateComment,
+    onUpdateDescription: vi.fn(async () => {}),
+    onUpdateGeneralComment: commenting.onUpdateGeneralComment,
+    onUpdateTitle: vi.fn(async () => {}),
+    walkthroughStatus: 'generating',
+  } satisfies NonNullable<ReviewSurfaceProps['interactive']>;
+  const renderSurface = (walkthroughStatus: 'failed' | 'generating' | 'ready') => (
+    <ReviewSurface
+      initialMode="walkthrough"
+      interactive={{ ...interactive, walkthroughError: 'Please retry.', walkthroughStatus }}
+      snapshot={
+        walkthroughStatus === 'ready'
+          ? snapshot
+          : { ...snapshot, walkthrough: { ...snapshot.walkthrough, chapters: [] } }
+      }
+      sourceDescriptionFooterAside={<button type="button">Manage reviewers</button>}
+    />
+  );
+  await using view = await renderReact(renderSurface('generating'));
+  const main = view.container.querySelector('main')!;
+  await waitFor(() => {
+    expect(main.querySelector('textarea[aria-label="Edit title"]')).not.toBeNull();
+    expect(main.textContent).toContain('Generating walkthrough');
+  });
+  const title = main.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit title"]')!;
+  expect(title.value).toBe(source.title);
+  expect(main.textContent).toContain('Manage reviewers');
+  expect(main.querySelector('.wt-arc')).toBeNull();
+  const editDescription = [...main.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Edit',
+  );
+  expect(editDescription?.disabled).toBe(false);
+  const approve = [...main.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Approve',
+  );
+  expect(approve?.disabled).toBe(false);
+  await act(async () => approve!.click());
+  expect(interactive.onSubmitReview).toHaveBeenCalledWith('APPROVE', []);
+  await setInputValue(title, 'An unsaved title edit');
+  title.focus();
+  title.setSelectionRange(3, 9);
+
+  await view.rerender(renderSurface('failed'));
+  await waitFor(() => expect(main.textContent).toContain('Walkthrough unavailable'));
+  expect(main.querySelector('textarea[aria-label="Edit title"]')).toBe(title);
+  expect(title.value).toBe('An unsaved title edit');
+  expect(document.activeElement).toBe(title);
+  expect([title.selectionStart, title.selectionEnd]).toEqual([3, 9]);
+  const retry = [...main.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Try again',
+  )!;
+  await act(async () => retry.click());
+  expect(onGenerateWalkthrough).toHaveBeenCalledOnce();
+
+  await view.rerender(renderSurface('generating'));
+  expect(main.querySelector('textarea[aria-label="Edit title"]')).toBe(title);
+  await act(async () => editDescription!.click());
+  await waitFor(() => {
+    expect(main.querySelector('.source-description-edit-shell.ready')).not.toBeNull();
+  });
+  const description = main.querySelector<HTMLElement>(
+    '[contenteditable="true"][aria-label="Edit source description"]',
+  )!;
+  expect(description).not.toBeNull();
+  await act(async () => {
+    description.focus();
+    const text = description.querySelector('p span')!.firstChild!;
+    text.textContent = 'An unsaved description edit';
+    const selection = window.getSelection()!;
+    selection.setBaseAndExtent(text, 3, text, 9);
+    description.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  });
+  const saveDescription = [...main.querySelectorAll('button')].find(
+    (button) => button.textContent === 'Save',
+  )!;
+  await waitFor(() => expect(saveDescription.disabled).toBe(false));
+  await view.rerender(renderSurface('ready'));
+  await waitFor(() => expect(main.querySelector('.wt-arc')).not.toBeNull());
+  expect(main.querySelector('textarea[aria-label="Edit title"]')).toBe(title);
+  expect(title.value).toBe('An unsaved title edit');
+  expect(main.querySelector('[contenteditable="true"][aria-label="Edit source description"]')).toBe(
+    description,
+  );
+  expect(description.textContent).toBe('An unsaved description edit');
+  expect(document.activeElement).toBe(description);
+  expect(window.getSelection()?.toString()).toBe('unsave');
+  expect(main.querySelectorAll('.codiff-source-description-panel')).toHaveLength(1);
+  expect(main.textContent).not.toContain('Generating walkthrough');
+  expect(main.textContent).not.toContain('Walkthrough unavailable');
+  await act(async () => saveDescription.click());
+  expect(interactive.onUpdateDescription).toHaveBeenCalledWith('An unsaved description edit');
+
+  await view.rerender(renderSurface('generating'));
+  title.focus();
+  title.setSelectionRange(3, 9);
+  await view.rerender(renderSurface('ready'));
+  expect(main.querySelector('textarea[aria-label="Edit title"]')).toBe(title);
+  expect(title.value).toBe('An unsaved title edit');
+  expect(document.activeElement).toBe(title);
+  expect([title.selectionStart, title.selectionEnd]).toEqual([3, 9]);
+});
 
 test.each([
   { iconTransform: null, position: 'left' },

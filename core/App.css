@@ -4134,6 +4134,13 @@ diffs-container .review-comment-thread {
   animation: codex-loading-pulse 1600ms ease-in-out infinite;
 }
 
+.walkthrough-status {
+  height: auto;
+  min-height: 200px;
+  padding: 32px 16px;
+  transform: none;
+}
+
 @keyframes codex-loading-pulse {
   0%,
   100% {
