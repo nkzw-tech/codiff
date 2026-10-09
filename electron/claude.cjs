@@ -13,8 +13,8 @@ const {
 
 // Claude Code can be slower to first token than Codex, so allow a longer budget.
 const CLAUDE_TIMEOUT_MS = 90_000;
-const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
-const FALLBACK_CLAUDE_MODEL = 'claude-haiku-4-5';
+const DEFAULT_CLAUDE_MODEL = 'sonnet';
+const FALLBACK_CLAUDE_MODEL = 'haiku';
 const CLAUDE_NOT_FOUND_CODE = 'CLAUDE_NOT_FOUND';
 const CLAUDE_NOT_FOUND_MESSAGE =
   'Claude Code CLI was not found. Install Claude Code and verify `claude --version` works in Terminal. Codiff searches PATH, ~/.local/bin/claude, /opt/homebrew/bin/claude, and /usr/local/bin/claude. If Claude Code is installed somewhere else, launch Codiff with `CODIFF_CLAUDE_PATH=/absolute/path/to/claude codiff -w`.';
@@ -40,16 +40,16 @@ const CLAUDE_NOT_LOGGED_IN_MESSAGE =
 /** @type {ReadonlyArray<ClaudeModel>} */
 const CLAUDE_MODELS = Object.freeze([
   {
-    id: 'claude-opus-4-8',
-    label: 'Best: Claude Opus 4.8',
+    id: 'opus',
+    label: 'Best: Claude Opus',
   },
   {
     id: DEFAULT_CLAUDE_MODEL,
-    label: 'Balanced: Claude Sonnet 4.6',
+    label: 'Balanced: Claude Sonnet',
   },
   {
     id: FALLBACK_CLAUDE_MODEL,
-    label: 'Fast: Claude Haiku 4.5',
+    label: 'Fast: Claude Haiku',
   },
 ]);
 const CLAUDE_MODEL_IDS = new Set(CLAUDE_MODELS.map((model) => model.id));
@@ -108,9 +108,14 @@ const isClaudeNotLoggedInError = (value) =>
     value,
   );
 
+// Legacy configs store pinned ids like `claude-sonnet-4-6`; map them to the CLI alias.
 /** @param {unknown} value @returns {string} */
 const normalizeClaudeModel = (value) =>
-  normalizeEnum(value, CLAUDE_MODEL_IDS, DEFAULT_CLAUDE_MODEL);
+  normalizeEnum(
+    typeof value === 'string' ? value.replace(/^claude-(opus|sonnet|haiku)\b.*$/, '$1') : value,
+    CLAUDE_MODEL_IDS,
+    DEFAULT_CLAUDE_MODEL,
+  );
 
 /** @param {string} value */
 const isClaudeModelAvailabilityError = (value) =>
