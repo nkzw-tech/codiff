@@ -52,8 +52,19 @@ beforeEach(() => {
 });
 
 test('normalizes Claude Code model preferences to known models', () => {
-  expect(normalizeClaudeModel('claude-opus-4-8')).toBe('claude-opus-4-8');
+  expect(normalizeClaudeModel('opus')).toBe('opus');
+  expect(normalizeClaudeModel('haiku')).toBe('haiku');
   expect(normalizeClaudeModel('gpt-4o')).toBe(DEFAULT_CLAUDE_MODEL);
+  expect(normalizeClaudeModel(undefined)).toBe(DEFAULT_CLAUDE_MODEL);
+  expect(DEFAULT_CLAUDE_MODEL).toBe('sonnet');
+});
+
+test('maps legacy pinned Claude model ids to CLI aliases', () => {
+  expect(normalizeClaudeModel('claude-opus-4-8')).toBe('opus');
+  expect(normalizeClaudeModel('claude-sonnet-4-6')).toBe('sonnet');
+  expect(normalizeClaudeModel('claude-haiku-4-5')).toBe('haiku');
+  expect(normalizeClaudeModel('claude-haiku-4-5-20251001')).toBe('haiku');
+  expect(normalizeClaudeModel('claude-sonnetx')).toBe(DEFAULT_CLAUDE_MODEL);
 });
 
 test('rejects invalid explicit Claude CLI overrides', async () => {
