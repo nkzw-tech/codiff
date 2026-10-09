@@ -45,6 +45,7 @@
     "package:app": "vp build && electron-forge package",
     "prepack": "vp build",
     "prepare": "vp config",
+    "ship": "vp run --filter '@nkzw/codiff-core' --filter '@nkzw/codiff-service' build && vp check && vp test && vp pm publish -r --access public",
     "test": "vp test",
     "test:integration": "vp run build && vp run --filter '@nkzw/codiff-integration-tests' test"
   },
