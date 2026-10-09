@@ -47,7 +47,7 @@ export default function HomeGuide() {
             <img
               alt="A Codiff walkthrough reviewing code changes"
               draggable={false}
-              height={1046}
+              height={1052}
               src={lightPreview}
               width={1600}
             />
