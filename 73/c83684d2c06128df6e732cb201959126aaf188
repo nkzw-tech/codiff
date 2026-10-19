@@ -1,0 +1,47 @@
+service/api.test.ts
+  s_8175f60366b13d::t_4945886fc86a23 51-55
+service/api.ts
+  s_8175f60366b13d::t_f783fdc63c16ae 3-12,556-561,771,775-780
+service/db.test.ts
+  s_8175f60366b13d::t_8accc41e7a3731 1-76
+service/db.ts
+  s_8175f60366b13d::t_921ea20d898f04 7,11-12,17-57
+service/fate.ts
+  s_8175f60366b13d::t_c4888f89ca2493 84-86,670
+test/web-build.integration.ts
+  s_8175f60366b13d::t_f2587af4dd8d95 1-28
+web/auth.test.ts
+  s_8175f60366b13d::t_868eb6cf9415ca 25-27
+web/auth.ts
+  s_8175f60366b13d::t_c7ed9cf5046933 17-24
+web/build/optimizeBuild.ts
+  s_8175f60366b13d::t_8d7629f8c48aff 1-42
+web/src/server/auth.test.ts
+  s_8175f60366b13d::t_779a1b871f845d 1-63
+web/src/server/auth.ts
+  s_8175f60366b13d::t_a5284edaa054e3 1-8
+web/src/server/routes.ts
+  s_8175f60366b13d::t_d85228ae9c7a22 2,4,11,21-31,33
+web/vite.config.ts
+  s_8175f60366b13d::t_6908dcd14c263e 8,38-50
+web/void.config.ts
+  s_8175f60366b13d::t_cc7edcce5f4e5f 7
+web/void.lock.json
+  s_8175f60366b13d::t_985c6785ff8768 5,80,97-98,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "73c83684d2c06128df6e732cb201959126aaf188",
+  "prompts": {},
+  "sessions": {
+    "s_8175f60366b13d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15291-245d-7840-96c1-fcdf276984fa",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
