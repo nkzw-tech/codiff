@@ -1,0 +1,57 @@
+core/app/components/Sidebar.tsx
+  s_f87ae00c308711::t_ada9f00b18cb3e 4,10,41,71,83-86,166-181
+core/app/components/DiffLineCountBadge.tsx
+  s_f87ae00c308711::t_f3dc74857fc0c0 1-31
+pnpm-lock.yaml
+  s_82667881210451::t_6459931210bfc5 241-242,292-293,310-311,364-365,370-371,631-632,2239-2240,3887-3888,3893-3894,4235-4236,4242-4243,4321-4322,4648-4649,4837-4838,5381-5382,5895-5896,6251,6257,6262,6264,6269,6271,6276,6278,6281,6283,6286,6288,6291,6293,6337,6339-6340,7915,8021,9187-9193,9200,9249-9250,9264,9268,9272,9274,9524,9540,9664,10020,10187,11024,11026,11640,11642,11644,11665
+core/app/components/DiffSummaryFooter.tsx
+  s_f87ae00c308711::t_7480e7792283dc 1-118
+core/lib/diff-summary.ts
+  s_82667881210451::t_39ddb1978795ee 1-69
+web/package.json
+  s_82667881210451::t_1e9363a87d742d 24,26
+core/App.css
+  s_f87ae00c308711::t_b6925bfbd06a51 1368-1369,1374-1378,1382-1416,1418,1420-1429,1431-1445,1449-1452,1454,1461,1471-1474,1490
+core/__tests__/diff-summary.test.ts
+  s_82667881210451::t_17faac627d3a1a 1-116
+core/SharedWalkthroughApp.tsx
+  s_f87ae00c308711::t_8a2f8d3ab21169 8,49,1269-1273
+core/app/components/ReviewCodeView.tsx
+  s_f87ae00c308711::t_6591f5a4eb939a 140
+service/package.json
+  s_82667881210451::t_2feec2d38348d1 71
+core/__tests__/App-render.test.tsx
+  s_f87ae00c308711::t_0f0712a879dc3f 697-777
+core/__tests__/DiffSummaryFooter.test.tsx
+  s_f87ae00c308711::t_c2da51c1a38be0 1-95
+core/package.json
+  s_82667881210451::t_a8cee323e8ec4e 65
+core/App.tsx
+  s_f87ae00c308711::t_e96024eee4d920 1965
+package.json
+  s_82667881210451::t_f9f17ecffcd4e1 72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ddc6f327ed1a7cfc04bb999c05ee6935a6d84fab",
+  "prompts": {},
+  "sessions": {
+    "s_82667881210451": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15c5d-5268-7cd3-bb4a-c418fea82578",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    },
+    "s_f87ae00c308711": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e32-4d37-7ca3-8f40-429bea48c3b0",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
