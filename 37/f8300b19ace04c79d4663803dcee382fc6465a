@@ -1,0 +1,30 @@
+CONTRIBUTING.md
+  s_cb7764c8456a9c::t_9832cd96dc7b5c 32
+test/sharing.integration.ts
+  s_f4ca83444c8a7c::t_9371dba581d572 639-640
+  s_f4ca83444c8a7c::t_16096e94b76408 636-638
+.github/workflows/build-app.yml
+  s_82667881210451::t_25e00c4fd87415 70,73,141,144
+core/__tests__/config-defaults.test.ts
+  s_82667881210451::t_8ae60e201d7282 125-131
+package.json
+  s_82667881210451::t_cdc1e93dd0b058 67,72,74-76,82
+web/routes/fate-live.ts
+  s_82667881210451::t_4253a963a4a161 3-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "37f8300b19ace04c79d4663803dcee382fc6465a",
+  "prompts": {},
+  "sessions": {
+    "s_82667881210451": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15c5d-5268-7cd3-bb4a-c418fea82578",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
