@@ -14,6 +14,7 @@
     "openAIReasoningEffort": "",
     "opencodeModel": "opencode-default",
     "piModel": "pi-default",
+    "renderMarkdownAs": "preview",
     "reviewCommentsPrefix": "# Address these Review Comments",
     "sidebarPosition": "left",
     "showOutdated": false,

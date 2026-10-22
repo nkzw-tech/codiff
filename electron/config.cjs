@@ -319,6 +319,7 @@ const mergeConfig = (raw) => {
           : defaults.settings.opencodeModel,
       piModel:
         typeof rawSettings.piModel === 'string' ? rawSettings.piModel : defaults.settings.piModel,
+      renderMarkdownAs: rawSettings.renderMarkdownAs === 'source' ? 'source' : 'preview',
       reviewCommentsPrefix:
         typeof rawSettings.reviewCommentsPrefix === 'string'
           ? rawSettings.reviewCommentsPrefix

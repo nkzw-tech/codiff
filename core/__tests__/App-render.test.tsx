@@ -187,6 +187,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     openAIReasoningEffort: defaultSettings.openAIReasoningEffort,
     opencodeModel: defaultSettings.opencodeModel,
     piModel: defaultSettings.piModel,
+    renderMarkdownAs: defaultSettings.renderMarkdownAs,
     reviewCommentsPrefix: defaultSettings.reviewCommentsPrefix,
     showOutdated: false,
     showWhitespace: false,

@@ -89,6 +89,12 @@
           "default": "pi-default",
           "description": "The Pi model to use for review assistance and walkthroughs when agentBackend is 'pi'."
         },
+        "renderMarkdownAs": {
+          "type": "string",
+          "enum": ["preview", "source"],
+          "default": "preview",
+          "description": "How Markdown files open in reviews. 'preview' shows the rendered document; 'source' shows the text diff."
+        },
         "reviewCommentsPrefix": {
           "type": "string",
           "default": "# Address these Review Comments",
