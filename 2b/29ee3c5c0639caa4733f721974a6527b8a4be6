@@ -1,0 +1,21 @@
+core/App.css
+  s_800b5be44ef6b0::t_aea0ec56b383db 4306-4319
+core/App.tsx
+  s_800b5be44ef6b0::t_2b4e544f370af4 1709
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2b29ee3c5c0639caa4733f721974a6527b8a4be6",
+  "prompts": {},
+  "sessions": {
+    "s_800b5be44ef6b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a160f4-a1a4-71b0-a467-6bd4081c9cfb",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
