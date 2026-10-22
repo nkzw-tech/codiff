@@ -1,0 +1,21 @@
+electron/icons/Codiff.icon/Assets/codiff.svg
+  s_800b5be44ef6b0::t_110de11d7761bf 1-106
+electron/icons/Codiff.icon/icon.json
+  s_800b5be44ef6b0::t_573fa96e305fc6 3,11-13,15,22,25-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2021bc9b3661d7f769d5abadbc65ccdcba487252",
+  "prompts": {},
+  "sessions": {
+    "s_800b5be44ef6b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a160f4-a1a4-71b0-a467-6bd4081c9cfb",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
