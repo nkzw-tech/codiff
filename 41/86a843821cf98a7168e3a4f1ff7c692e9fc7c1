@@ -1,0 +1,25 @@
+core/lib/code-view-options.ts
+  s_800b5be44ef6b0::t_5f8ceb7610dff0 6-7
+core/lib/identifier-navigation.ts
+  s_800b5be44ef6b0::t_47737601e94b0c 88,91-93
+core/themes/dunkel.json
+  s_800b5be44ef6b0::t_fa8a9eb4aba946 3-6,9-154,157
+core/themes/licht.json
+  s_800b5be44ef6b0::t_4a9d4da168c611 3-6,9-154,157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4186a843821cf98a7168e3a4f1ff7c692e9fc7c1",
+  "prompts": {},
+  "sessions": {
+    "s_800b5be44ef6b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a160f4-a1a4-71b0-a467-6bd4081c9cfb",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
