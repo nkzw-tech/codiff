@@ -1,0 +1,47 @@
+core/App.tsx
+  s_0bfef8c9e79264::t_fc55cd03ae2cb4 50,190-199,209-214,218-219,250,646,856,1075-1092,1164,1672-1692,1707,1709-1713,1746,1831
+core/__tests__/App-render.test.tsx
+  s_0bfef8c9e79264::t_87740e9082f04d 230,402-432
+core/__tests__/useInitialWindowReveal.test.tsx
+  s_0bfef8c9e79264::t_3d7dce02df0769 1-140
+core/app/components/PlanEditorView.tsx
+  s_0bfef8c9e79264::t_e67c4308ae227d 391,395,421-425
+core/app/components/ReviewCodeView.tsx
+  s_0bfef8c9e79264::t_27132076dfd332 76,2620,2685,3744-3746,3833,4031
+core/app/hooks/useInitialWindowReveal.ts
+  s_0bfef8c9e79264::t_fc644992d3ccd4 1-69
+core/global.d.ts
+  s_0bfef8c9e79264::t_58bc9eb08fc51e 88
+core/index.tsx
+  s_0bfef8c9e79264::t_91cfd365f72719 6,8-15,23
+core/lib/code-view-options.ts
+  s_0bfef8c9e79264::t_59732af640ede9 2,55-77
+electron/__tests__/window-reveal.test.ts
+  s_0bfef8c9e79264::t_185c8309ca9f9b 1-82
+electron/benchmarks/startup.cjs
+  s_0bfef8c9e79264::t_55f82ccfd063d5 1-121
+electron/main.cjs
+  s_0bfef8c9e79264::t_0a6f643605e474 86,137-138,960,971,1001-1004,1123,1177-1179,1970-1973
+electron/preload.cjs
+  s_0bfef8c9e79264::t_ed2dad090795ee 15-17,45-49,79
+electron/window-reveal.cjs
+  s_0bfef8c9e79264::t_46777805158ee2 1-54
+evals/startup.mjs
+  s_0bfef8c9e79264::t_9e46000591ee8a 1-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b4222c9cc72e70a29efc88bbaa279c3e1516f285",
+  "prompts": {},
+  "sessions": {
+    "s_0bfef8c9e79264": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16221-24ff-7d20-b326-3f950dcceda0",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
