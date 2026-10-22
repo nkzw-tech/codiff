@@ -1,0 +1,21 @@
+core/__tests__/helpers/react.tsx
+  s_800b5be44ef6b0::t_2c95b4e2b316b1 44,46,51-53,55
+core/__tests__/react-helpers.test.tsx
+  s_800b5be44ef6b0::t_abafda3fc3db7d 1-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a850f6dbb63162145eec6a04817e02c13071f6a6",
+  "prompts": {},
+  "sessions": {
+    "s_800b5be44ef6b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a160f4-a1a4-71b0-a467-6bd4081c9cfb",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
