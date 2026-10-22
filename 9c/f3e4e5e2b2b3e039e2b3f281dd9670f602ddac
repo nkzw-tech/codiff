@@ -1,0 +1,51 @@
+bin/codiff.js
+  s_800b5be44ef6b0::t_0998d6ded9e3a8 214,249-252
+core/App.tsx
+  s_800b5be44ef6b0::t_9b17a973aea2c8 6,24-28,72,137-139,651-652,655-664,666-671,685-692,697-725,754,756-757,759-791,795-797,1665-1667
+core/__tests__/App-render.test.tsx
+  s_800b5be44ef6b0::t_94f46dee4e8731 378-439
+core/__tests__/ReviewCodeView-scroll.test.tsx
+  s_800b5be44ef6b0::t_12b4dc2e043d16 184-185,187,280-282,284-287,296,336-365,467-471,473-474,476-477,482,493-494,497,544,555,609,619,661,664-667
+core/__tests__/git-state.test.ts
+  s_800b5be44ef6b0::t_305d33b68c5c62 1107-1132
+core/__tests__/helpers/review-code-view.tsx
+  s_800b5be44ef6b0::t_5368bc51c5d67e 18,30,74-76,141-143
+core/app/components/LazyMarkdownEditor.tsx
+  s_800b5be44ef6b0::t_2e339de1def925 1-18
+core/app/components/MarkdownPreviewDocument.tsx
+  s_800b5be44ef6b0::t_a822f2b480444d 1-35
+core/app/components/Panels.tsx
+  s_800b5be44ef6b0::t_9928cf125ae051 1,35,628
+core/app/components/ReadOnlyMarkdownView.tsx
+  s_800b5be44ef6b0::t_2ac71c79e3b818 1,7,10
+core/app/components/ReviewCodeView.tsx
+  s_800b5be44ef6b0::t_28a431dc3e7626 41,142,144,151-167,217,230,235,390,570-592,1002,1011,2761-2766,2768,3741,3743-3761,3823,3827,3925-3958,4679-4684,4686-4689,4698-4715,4719-4724,4733,4738-4754,4783-4785,4789
+core/app/components/SourceDescriptionEditor.tsx
+  s_800b5be44ef6b0::t_82f321e1d750ed 1-19
+core/lib/code-view-options.ts
+  s_800b5be44ef6b0::t_535f541cce5154 1,54-62
+electron/git-state/common.cjs
+  s_800b5be44ef6b0::t_a1a59ba200333c 713-716,756-759
+electron/git-state/working-tree.cjs
+  s_800b5be44ef6b0::t_807c9c32ef5402 147-165,220-221,224-225,239,249
+electron/main.cjs
+  s_800b5be44ef6b0::t_3ff384d435a074 1437-1442,1444,1463
+electron/preload.cjs
+  s_800b5be44ef6b0::t_ddf378b5acd8ca 5-20,49,56-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9cf3e4e5e2b2b3e039e2b3f281dd9670f602ddac",
+  "prompts": {},
+  "sessions": {
+    "s_800b5be44ef6b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a160f4-a1a4-71b0-a467-6bd4081c9cfb",
+        "model": "unknown"
+      },
+      "human_author": "Christoph Nakazawa <cnakazawa@cloudflare.com>"
+    }
+  }
+}
