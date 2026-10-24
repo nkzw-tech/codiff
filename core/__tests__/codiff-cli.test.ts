@@ -798,6 +798,128 @@ test('packaged terminal helper forwards Codex walkthrough seed options', async (
   ]);
 });
 
+// Windows and Linux packages place the executable next to resources/, so the
+// helper lives at <install>/resources/app/bin/codiff-app.
+const fakePackagedExecutable = `#!/bin/sh
+printf "ELECTRON_RUN_AS_NODE=%s\n" "\${ELECTRON_RUN_AS_NODE:-}" > "$PACKAGED_ARGS_FILE.tmp"
+for arg in "$@"; do
+  printf "%s\n" "$arg" >> "$PACKAGED_ARGS_FILE.tmp"
+done
+mv "$PACKAGED_ARGS_FILE.tmp" "$PACKAGED_ARGS_FILE"
+`;
+
+const createPackagedInstall = async (executableName: string, executableScript: string) => {
+  const directory = await createTemporaryDirectory('codiff-packaged-app-');
+  const binPath = join(directory.path, 'resources', 'app', 'bin');
+  const helperPath = join(binPath, 'codiff-app');
+  const executablePath = join(directory.path, executableName);
+  const argsPath = join(directory.path, 'args.txt');
+
+  await mkdir(binPath, { recursive: true });
+  await writeFile(helperPath, await readFile(resolve('bin/codiff-app')));
+  await chmod(helperPath, 0o755);
+  await writeFile(executablePath, executableScript);
+  await chmod(executablePath, 0o755);
+
+  const { CODIFF_NODE_COMMAND: _, ...env } = process.env;
+
+  return {
+    binPath: await realpath(binPath),
+    directory: directory.path,
+    env: { ...env, PACKAGED_ARGS_FILE: argsPath },
+    helperPath,
+    // The launch is backgrounded, so wait for the fake to finish writing.
+    async readArgs() {
+      for (let attempt = 0; attempt < 250; attempt++) {
+        try {
+          return (await readFile(argsPath, 'utf8')).trim().split('\n');
+        } catch {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+        }
+      }
+      throw new Error(`Timed out waiting for ${argsPath}.`);
+    },
+    [Symbol.asyncDispose]: directory[Symbol.asyncDispose],
+  };
+};
+
+for (const executableName of ['codiff.exe', 'codiff']) {
+  test(`packaged terminal helper starts ${executableName} instead of open`, async () => {
+    await using install = await createPackagedInstall(executableName, fakePackagedExecutable);
+    const repositoryPath = join(install.directory, 'repo');
+
+    await mkdir(repositoryPath);
+
+    await execFileAsync(install.helperPath, ['--commit', 'HEAD', repositoryPath], {
+      env: install.env,
+    });
+
+    expect(await install.readArgs()).toEqual([
+      'ELECTRON_RUN_AS_NODE=',
+      '--commit',
+      'HEAD',
+      repositoryPath,
+    ]);
+  });
+
+  test(`packaged terminal helper uses ${executableName} as the bundled runtime`, async () => {
+    await using install = await createPackagedInstall(executableName, fakePackagedExecutable);
+
+    await execFileAsync(install.helperPath, ['--completions', 'zsh'], { env: install.env });
+
+    expect(await install.readArgs()).toEqual([
+      'ELECTRON_RUN_AS_NODE=1',
+      join(install.binPath, 'codiff.js'),
+      '--completions',
+      'zsh',
+    ]);
+  });
+}
+
+test('packaged terminal helper checks the plan app PID with tasklist in Git Bash', async () => {
+  // The app reports a Windows PID that the MSYS `kill` cannot see.
+  const windowsPid = '999999';
+  await using install = await createPackagedInstall(
+    'codiff.exe',
+    `#!/bin/sh
+result_file=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--plan-result-file" ]; then
+    result_file="$arg"
+  fi
+  previous="$arg"
+done
+printf '{"pid":${windowsPid},"status":"open"}\n' > "$result_file"
+sleep 0.2
+printf '{"documentChanged":true,"status":"closed"}\n' > "$result_file"
+`,
+  );
+  const fakeBin = join(install.directory, 'fake-bin');
+  const repositoryPath = join(install.directory, 'repo');
+  const planFile = join(install.directory, 'plan.md');
+  const resultFile = join(install.directory, 'result.json');
+
+  await mkdir(fakeBin);
+  await mkdir(repositoryPath);
+  await writeFile(planFile, '# Plan\n');
+  await writeFile(join(fakeBin, 'uname'), '#!/bin/sh\nprintf "MINGW64_NT-10.0-26200\n"\n');
+  await writeFile(
+    join(fakeBin, 'tasklist'),
+    `#!/bin/sh\ncase "$*" in *"PID eq ${windowsPid}"*) printf "codiff.exe ${windowsPid} Console 1 100 K\n" ;; esac\n`,
+  );
+  await chmod(join(fakeBin, 'uname'), 0o755);
+  await chmod(join(fakeBin, 'tasklist'), 0o755);
+
+  const { stdout } = await execFileAsync(
+    install.helperPath,
+    ['--plan-file', planFile, '--plan-result-file', resultFile, repositoryPath],
+    { env: { ...install.env, PATH: `${fakeBin}:${process.env.PATH}` } },
+  );
+
+  expect(stdout).toBe('CODIFF_PLAN_RESULT {"documentChanged":true,"status":"closed"}\n');
+});
+
 test('packaged terminal helper forwards pre-authored walkthrough files', async () => {
   await using logger = await createFakeOpenLogger();
   const repositoryPath = join(logger.directory, 'repo');
