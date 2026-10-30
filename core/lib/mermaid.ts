@@ -105,12 +105,26 @@ export const renderMermaidDiagram = (code: string, theme: MermaidTheme) => {
       mermaid.initialize({
         htmlLabels: false,
         layout: 'dagre',
+        secure: [...(mermaid.mermaidAPI.defaultConfig.secure ?? []), 'htmlLabels'],
         securityLevel: 'strict',
         startOnLoad: false,
         suppressErrorRendering: true,
         theme,
       });
       initializedTheme = theme;
+    }
+
+    // Inspect the parsed nodes, rather than matching source text: image metadata is YAML.
+    // Mermaid waits for image downloads even in strict mode, before returning its SVG.
+    // Reject image nodes before rendering so an untrusted URL can't stall the shared queue.
+    if (code.length > (mermaid.mermaidAPI.defaultConfig.maxTextSize ?? 50_000)) {
+      throw new Error('Mermaid diagram is too large');
+    }
+    mermaid.mermaidAPI.reset();
+    const parsed = await mermaid.mermaidAPI.getDiagramFromText(code);
+    const db = parsed.db as { getVertices?: () => Map<string, { img?: string }> };
+    if (db.getVertices && [...db.getVertices().values()].some((node) => node.img)) {
+      throw new Error('Images are not supported in Mermaid diagrams');
     }
 
     const { svg } = await mermaid.render(`codiff-mermaid-${++renderCount}`, code);

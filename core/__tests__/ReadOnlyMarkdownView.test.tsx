@@ -15,6 +15,11 @@ import { renderReact, waitFor } from './helpers/react.tsx';
 
 const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
+  mermaidAPI: {
+    defaultConfig: { secure: [] },
+    getDiagramFromText: vi.fn(async () => ({ db: {} })),
+    reset: vi.fn(),
+  },
   render: vi.fn(async (id: string, code: string) => ({
     diagramType: 'flowchart',
     svg: `<svg id="${id}" viewBox="0 0 200 100"><text>${code}</text></svg>`,
@@ -295,6 +300,34 @@ test('ReadOnlyMarkdownView shows the code and an error note when a diagram fails
   expect(view.container.querySelector('.cm-content')?.textContent).toContain('broken-->');
   expect(view.container.querySelector('img.codiff-mermaid-diagram')).toBe(null);
   expect(view.container.querySelector('.codiff-mermaid-control')).toBe(null);
+});
+
+test('ReadOnlyMarkdownView falls back to source when the SVG image cannot be decoded', async () => {
+  await using view = await renderDiagram('flowchart TD\ndecode-->failure');
+  const image = view.container.querySelector('img.codiff-mermaid-diagram')!;
+
+  await dispatch(image, new Event('error'));
+  await waitFor(() => {
+    expect(view.container.querySelector('.codiff-mermaid-error')?.textContent).toBe(
+      'Unable to render Mermaid diagram',
+    );
+  });
+  expect(view.container.querySelector('.cm-content')?.textContent).toContain('decode-->failure');
+  expect(view.container.querySelector('img.codiff-mermaid-diagram')).toBe(null);
+
+  // A cached result must not replace the fallback, and another diagram must still work.
+  await view.rerender(
+    <ReadOnlyMarkdownView
+      ariaLabel="Markdown preview"
+      className="markdown-preview"
+      value={'```mermaid\nflowchart TD\ndecode-->recovered\n```\n'}
+      variant="embedded"
+    />,
+  );
+  await waitFor(() => {
+    expect(view.container.querySelector('img.codiff-mermaid-diagram')).not.toBe(null);
+  });
+  expect(view.container.querySelector('.codiff-mermaid-error')).toBe(null);
 });
 
 test('editable Markdown editors keep mermaid fences as code', async () => {

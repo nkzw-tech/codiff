@@ -15,6 +15,11 @@ const renderSvg = async (id: string, code: string) => ({
 
 const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
+  mermaidAPI: {
+    defaultConfig: { maxTextSize: 50_000, secure: ['securityLevel', 'maxTextSize'] },
+    getDiagramFromText: vi.fn(async () => ({ db: {} })),
+    reset: vi.fn(),
+  },
   render: vi.fn<(id: string, code: string) => Promise<{ diagramType: string; svg: string }>>(),
 }));
 
@@ -56,6 +61,7 @@ test('renderMermaidDiagram renders with strict security, dagre layout, and the t
     expect.objectContaining({
       htmlLabels: false,
       layout: 'dagre',
+      secure: ['securityLevel', 'maxTextSize', 'htmlLabels'],
       securityLevel: 'strict',
       startOnLoad: false,
       suppressErrorRendering: true,
@@ -116,6 +122,15 @@ test('renderMermaidDiagram does not cache failed renders', async () => {
     src: expect.stringMatching(/^data:image\/svg\+xml/),
   });
   expect(mermaid.render).toHaveBeenCalledTimes(2);
+});
+
+test('renderMermaidDiagram rejects oversized input before parsing', async () => {
+  mermaid.mermaidAPI.getDiagramFromText.mockClear();
+  await expect(renderMermaidDiagram('x'.repeat(50_001), 'default')).rejects.toThrow(
+    'Mermaid diagram is too large',
+  );
+  expect(mermaid.mermaidAPI.getDiagramFromText).not.toHaveBeenCalled();
+  expect(mermaid.render).not.toHaveBeenCalled();
 });
 
 test('zoomMermaidView keeps the point under the origin in place', () => {

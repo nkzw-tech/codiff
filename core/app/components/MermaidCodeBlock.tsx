@@ -107,7 +107,15 @@ function MermaidActions({
   );
 }
 
-function MermaidViewer({ actions, diagram }: { actions: ReactNode; diagram: MermaidDiagram }) {
+function MermaidViewer({
+  actions,
+  diagram,
+  onError,
+}: {
+  actions: ReactNode;
+  diagram: MermaidDiagram;
+  onError: (src: string) => void;
+}) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -184,6 +192,7 @@ function MermaidViewer({ actions, diagram }: { actions: ReactNode; diagram: Merm
           decoding="async"
           draggable={false}
           height={diagram.height}
+          onError={() => onError(diagram.src)}
           src={diagram.src}
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
           width={diagram.width}
@@ -226,6 +235,7 @@ function MermaidCodeBlock(props: CodeBlockEditorProps) {
     diagram: MermaidDiagram | null;
   } | null>(null);
   const [showSource, setShowSource] = useState(false);
+  const [failedSource, setFailedSource] = useState<string | null>(null);
   const cached = theme ? getCachedMermaidDiagram(code, theme) : null;
 
   useEffect(() => {
@@ -244,7 +254,8 @@ function MermaidCodeBlock(props: CodeBlockEditorProps) {
   }, [cached, code, theme]);
 
   // A diagram from the previous theme stays visible until the new one is ready.
-  const diagram = cached ?? (rendered?.code === code ? rendered.diagram : undefined);
+  const candidate = cached ?? (rendered?.code === code ? rendered.diagram : undefined);
+  const diagram = candidate?.src === failedSource ? null : candidate;
   const actions = (
     <MermaidActions
       code={code}
@@ -261,7 +272,7 @@ function MermaidCodeBlock(props: CodeBlockEditorProps) {
           {actions}
         </div>
       ) : diagram ? (
-        <MermaidViewer actions={actions} diagram={diagram} key={code} />
+        <MermaidViewer actions={actions} diagram={diagram} key={code} onError={setFailedSource} />
       ) : (
         <>
           <CodeMirrorEditor {...props} />
