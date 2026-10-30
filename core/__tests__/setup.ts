@@ -86,3 +86,9 @@ if (typeof Range !== 'undefined') {
   Range.prototype.getBoundingClientRect ??= () => new DOMRect();
   Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
 }
+
+if (typeof Element !== 'undefined') {
+  Element.prototype.hasPointerCapture ??= () => false;
+  Element.prototype.releasePointerCapture ??= () => {};
+  Element.prototype.setPointerCapture ??= () => {};
+}

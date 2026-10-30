@@ -2755,6 +2755,130 @@ html[data-codiff-platform='darwin'] .sidebar {
   --mdx-editor-padding: 8px 12px;
 }
 
+.codiff-mermaid-viewer {
+  margin: 18px 0;
+  position: relative;
+}
+
+.codiff-mermaid-viewport {
+  cursor: grab;
+  min-height: 120px;
+  overflow: hidden;
+  user-select: none;
+}
+
+.codiff-mermaid-viewport.dragging {
+  cursor: grabbing;
+}
+
+.codiff-mermaid-diagram {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  transform-origin: 0 0;
+}
+
+.codiff-mermaid-source {
+  position: relative;
+}
+
+.codiff-mermaid-source [class*='codeMirrorToolbar'] {
+  display: none;
+}
+
+.codiff-mermaid-actions,
+.codiff-mermaid-pan-zoom {
+  opacity: 0;
+  position: absolute;
+  right: 8px;
+  transition: opacity 120ms ease;
+  z-index: 1;
+}
+
+.codiff-mermaid-actions {
+  display: flex;
+  gap: 4px;
+  top: 8px;
+}
+
+.codiff-mermaid-pan-zoom {
+  bottom: 8px;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(3, 24px);
+  grid-template-rows: repeat(3, 24px);
+}
+
+.codiff-mermaid-block:is(:hover, :has(:focus-visible))
+  :is(.codiff-mermaid-actions, .codiff-mermaid-pan-zoom) {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .codiff-mermaid-actions,
+  .codiff-mermaid-pan-zoom {
+    opacity: 1;
+  }
+}
+
+.codiff-mermaid-block .codiff-mermaid-control {
+  align-items: center;
+  background: color-mix(in srgb, var(--mdx-editor-code-bg) 88%, transparent);
+  border: 1px solid var(--mdx-editor-border);
+  border-radius: 8px;
+  color: var(--copy-icon);
+  corner-shape: squircle;
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  opacity: 1;
+  padding: 0;
+  width: 24px;
+}
+
+.codiff-mermaid-block .codiff-mermaid-control:hover {
+  background: color-mix(in srgb, var(--mdx-editor-code-bg) 80%, rgb(127 127 127));
+}
+
+.codiff-mermaid-block .codiff-mermaid-control.copied {
+  color: var(--viewed);
+}
+
+.codiff-mermaid-pan-zoom > .zoom-in {
+  grid-area: 1 / 3;
+}
+
+.codiff-mermaid-pan-zoom > .zoom-out {
+  grid-area: 3 / 3;
+}
+
+.codiff-mermaid-pan-zoom > .reset {
+  grid-area: 2 / 2;
+}
+
+.codiff-mermaid-pan-zoom > .up {
+  grid-area: 1 / 2;
+}
+
+.codiff-mermaid-pan-zoom > .down {
+  grid-area: 3 / 2;
+}
+
+.codiff-mermaid-pan-zoom > .left {
+  grid-area: 2 / 1;
+}
+
+.codiff-mermaid-pan-zoom > .right {
+  grid-area: 2 / 3;
+}
+
+.codiff-mermaid-error {
+  color: var(--muted);
+  font-size: 12px;
+  margin: -12px 0 18px;
+}
+
 .codiff-markdown-document-editor
   .mdx-editor-content
   li[role='checkbox'][aria-checked='true']::after,
