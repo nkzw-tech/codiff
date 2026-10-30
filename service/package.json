@@ -68,7 +68,7 @@
   },
   "dependencies": {
     "@nkzw/codiff-core": "workspace:*",
-    "@nkzw/fate": "^1.12.1",
+    "@nkzw/fate": "^1.13.0",
     "drizzle-orm": "^0.45.4",
     "zod": "^4.6.7"
   },
