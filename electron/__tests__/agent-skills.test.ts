@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vite-plus/test';
@@ -205,4 +205,77 @@ test('does not replace a user-authored OpenCode command', async () => {
   await expect(lstat(join(home, '.config/opencode/skills/codiff'))).rejects.toMatchObject({
     code: 'ENOENT',
   });
+});
+
+test('replaces a dangling skill symlink on reinstall', async () => {
+  await using directory = await createTemporaryDirectory('codiff-dangling-skill-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const source = join(root, 'claude/skills/codiff');
+  const target = join(home, '.claude/skills/codiff');
+  const skill = listAgentSkills().find(({ id }) => id === 'claude');
+
+  await mkdir(source, { recursive: true });
+  await mkdir(join(home, '.claude/skills'), { recursive: true });
+  await symlink(join(directory.path, 'old-app/claude/skills/codiff'), target);
+  expect(skill).toBeDefined();
+  const installer = createSkillInstaller({
+    app: {
+      getPath: () => home,
+      isPackaged: false,
+    },
+    dialog: {
+      showMessageBox: async () => {},
+    },
+    root,
+    skill: skill!,
+  });
+
+  await expect(installer.install()).resolves.toBe(true);
+  await expect(realpath(target)).resolves.toBe(await realpath(source));
+});
+
+test('replaces a dangling terminal helper symlink on reinstall', async () => {
+  await using directory = await createTemporaryDirectory('codiff-dangling-helper-');
+  const home = join(directory.path, 'home');
+  const root = join(directory.path, 'app');
+  const source = join(root, 'bin/codiff.js');
+  const target = join(home, '.local/bin/codiff');
+
+  const fs = require('node:fs') as typeof import('node:fs');
+  const accessSync = fs.accessSync;
+  // Keep the helper out of the real /opt/homebrew/bin and /usr/local/bin.
+  const access = vi.spyOn(fs, 'accessSync').mockImplementation((path, mode) => {
+    if (path === '/opt/homebrew/bin' || path === '/usr/local/bin') {
+      throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    }
+    accessSync(path, mode);
+  });
+  const helperPath = require.resolve('../main/terminal-helper.cjs');
+  delete require.cache[helperPath];
+  const { createTerminalHelper } = require(helperPath) as {
+    createTerminalHelper: (options: {
+      app: { getPath: (name: string) => string; isPackaged: boolean };
+      dialog: { showMessageBox: (options: unknown) => Promise<void> };
+      root: string;
+    }) => { installTerminalHelper: (browserWindow?: unknown) => Promise<boolean> };
+  };
+
+  try {
+    await mkdir(join(root, 'bin'), { recursive: true });
+    await writeFile(source, '');
+    await mkdir(join(home, '.local/bin'), { recursive: true });
+    await symlink(join(directory.path, 'old-app/bin/codiff.js'), target);
+    const helper = createTerminalHelper({
+      app: { getPath: () => home, isPackaged: false },
+      dialog: { showMessageBox: async () => {} },
+      root,
+    });
+
+    await expect(helper.installTerminalHelper()).resolves.toBe(true);
+    await expect(realpath(target)).resolves.toBe(await realpath(source));
+  } finally {
+    access.mockRestore();
+    delete require.cache[helperPath];
+  }
 });
