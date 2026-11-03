@@ -112,8 +112,8 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
     mkdirSync(dirname(targetPath), { recursive: true });
     accessSync(dirname(targetPath), constants.W_OK);
 
-    if (existsSync(targetPath)) {
-      const stats = lstatSync(targetPath);
+    const stats = lstatSync(targetPath, { throwIfNoEntry: false });
+    if (stats) {
       if (!stats.isSymbolicLink()) {
         throw new Error(`${targetPath} already exists and is not a symlink.`);
       }
@@ -179,7 +179,7 @@ const createSkillInstaller = ({ app, dialog, renderManagedFile, root, skill }) =
         if (!existsSync(sourcePath)) {
           throw new Error(`Could not find the ${skill.label} at ${sourcePath}.`);
         }
-        if (existsSync(targetPath) && !lstatSync(targetPath).isSymbolicLink()) {
+        if (lstatSync(targetPath, { throwIfNoEntry: false })?.isSymbolicLink() === false) {
           throw new Error(`${targetPath} already exists and is not a symlink.`);
         }
       }

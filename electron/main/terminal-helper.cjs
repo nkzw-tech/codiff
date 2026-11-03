@@ -99,9 +99,8 @@ const createTerminalHelper = ({ app, dialog, root }) => {
         throw new Error(`Could not find terminal helper at ${sourcePath}.`);
       }
 
-      if (existsSync(targetPath)) {
-        const target = lstatSync(targetPath);
-
+      const target = lstatSync(targetPath, { throwIfNoEntry: false });
+      if (target) {
         if (!target.isSymbolicLink()) {
           throw new Error(`${targetPath} already exists and is not a symlink.`);
         }
