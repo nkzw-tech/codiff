@@ -308,7 +308,7 @@ test('warming an editor preserves the highlighted partial diff while preparing a
 +const value = "new";
  const last = 4;
 `,
-      'highlight-warmup',
+      { cacheKeyPrefix: 'highlight-warmup' },
     )[0]!.files[0]!,
     lang: 'tsx' as const,
   };
