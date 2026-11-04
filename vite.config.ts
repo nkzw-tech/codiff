@@ -1,8 +1,7 @@
 import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
 import nkzw from '@nkzw/oxlint-config';
-import babel from '@rolldown/plugin-babel';
-import react, { reactCompilerPreset } from '@vitejs/plugin-react';
+import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite-plus';
 
 const testWorkers = Math.max(1, Math.min(4, Math.floor(availableParallelism() / 6)));
@@ -81,12 +80,7 @@ export default defineConfig({
       '.svg': 'dataurl',
     },
   },
-  plugins: [
-    babel({
-      presets: [reactCompilerPreset()],
-    }),
-    react(),
-  ],
+  plugins: [react({ compiler: true })],
   resolve: {
     alias: [
       { find: /^react$/, replacement: resolve(__dirname, 'node_modules/react') },

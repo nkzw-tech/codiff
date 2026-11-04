@@ -1,6 +1,4 @@
 import { resolve } from 'node:path';
-import babel from '@rolldown/plugin-babel';
-import { reactCompilerPreset } from '@vitejs/plugin-react';
 import { voidReact } from '@void/react/plugin';
 import { fate } from 'react-fate/vite';
 import { defineConfig, lazyPlugins } from 'vite-plus';
@@ -26,11 +24,7 @@ export default defineConfig({
   },
   optimizeDeps: { exclude: workspacePackages },
   plugins: [
-    ...(lazyPlugins(() => [
-      babel({ presets: [reactCompilerPreset()] }),
-      ...voidPlugin(),
-      ...voidReact(),
-    ]) ?? []),
+    ...(lazyPlugins(() => [...voidPlugin(), ...voidReact({ react: { compiler: true } })]) ?? []),
     fate({
       module: './src/server/fate.ts',
       transport: 'void',
