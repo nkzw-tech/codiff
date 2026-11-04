@@ -296,6 +296,21 @@ test('readRepositoryState marks generated files from gitattributes and path heur
     await writeRepoFile(repo, 'ignored.txt', 'source\n');
     await writeRepoFile(repo, 'pnpm-lock.yaml', 'lockfileVersion: 9\n');
     await writeRepoFile(repo, 'src/__generated__/api.ts', 'export const api = 1;\n');
+    await writeRepoFile(repo, 'lib/__generated__/api.ts', 'export const api = 1;\n');
+    await writeRepoFile(repo, 'src/__snapshots__/output.txt', 'snapshot\n');
+    const sourceFolders = [
+      'codegen',
+      'gen',
+      'generated',
+      'generated-sources',
+      'generated-src',
+      '.generated',
+    ];
+    for (const folder of sourceFolders) {
+      await writeRepoFile(repo, `src/${folder}/api.ts`, 'export const api = 1;\n');
+    }
+    await writeRepoFile(repo, 'src/codegen/client.generated.ts', 'export const client = 1;\n');
+    await writeRepoFile(repo, 'src/gen/service.gen.yaml', 'generated\n');
 
     const state = await readRepositoryState(repo);
     const generatedByPath = new Map(state.files.map((file) => [file.path, file.generated]));
@@ -305,6 +320,14 @@ test('readRepositoryState marks generated files from gitattributes and path heur
     expect(generatedByPath.get('pnpm-lock.yaml')).toBe(false);
     expect(generatedByPath.get('src/__generated__/api.ts')).toBe(false);
     expect(generatedByPath.get('ignored.txt')).toBe(false);
+    expect(generatedByPath.get('lib/__generated__/api.ts')).toBe(true);
+    expect(generatedByPath.get('src/__snapshots__/output.txt')).toBe(true);
+    for (const folder of sourceFolders) {
+      expect(generatedByPath.has(`src/${folder}/api.ts`)).toBe(true);
+      expect(generatedByPath.get(`src/${folder}/api.ts`)).toBeUndefined();
+    }
+    expect(generatedByPath.get('src/codegen/client.generated.ts')).toBe(true);
+    expect(generatedByPath.get('src/gen/service.gen.yaml')).toBe(true);
   });
 });
 

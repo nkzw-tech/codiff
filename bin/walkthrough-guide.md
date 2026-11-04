@@ -44,6 +44,8 @@ choose.
   synthetic hunk per changed section; never split them. Codiff groups generated-only support items
   automatically, but keep behavior-relevant snapshots or artifacts on the main path. Codiff also
   recognizes `linguist-generated` and `gitlab-generated` attributes from `.gitattributes`.
+  Folder-name detection only applies to `__generated__` and `__snapshots__`; other folder names
+  such as `codegen`, `gen`, and `generated` do not imply generated files. Filename rules still apply.
 - **`changeType?` / `commitNote?`** — optional commit composer metadata for committable
   walkthroughs.
 - **`commit?`** — for working-tree walkthroughs, include `title` and `body` when there is enough

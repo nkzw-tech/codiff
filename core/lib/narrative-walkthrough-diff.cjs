@@ -2,16 +2,7 @@
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
-const GENERATED_DIRECTORY_NAMES = new Set([
-  '__generated__',
-  '__snapshots__',
-  '.generated',
-  'codegen',
-  'gen',
-  'generated',
-  'generated-sources',
-  'generated-src',
-]);
+const GENERATED_DIRECTORY_NAMES = new Set(['__generated__', '__snapshots__']);
 
 const GENERATED_BASENAMES = new Set([
   'bun.lock',
