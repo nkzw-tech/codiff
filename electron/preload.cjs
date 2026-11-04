@@ -184,6 +184,8 @@ const codiff = {
     ipcRenderer.invoke('codiff:submitPullRequestComment', request),
   submitPullRequestReview: (request) =>
     ipcRenderer.invoke('codiff:submitPullRequestReview', request),
+  setPullRequestFileViewed: (request) =>
+    ipcRenderer.invoke('codiff:setPullRequestFileViewed', request),
 };
 
 contextBridge.exposeInMainWorld('codiff', codiff);

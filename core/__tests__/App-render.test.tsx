@@ -264,6 +264,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     status: 'saved' as const,
   })),
   setDiffStyle: vi.fn(async () => {}),
+  setPullRequestFileViewed: vi.fn(async () => {}),
   setShowOutdated: vi.fn(async () => {}),
   setWordWrap: vi.fn(async () => {}),
   sharePlan: vi.fn(async () => ({
@@ -1427,6 +1428,54 @@ test('tree sidebar subtly mutes files currently marked viewed', async () => {
     expect(styleText).toContain("> [data-item-section='content']");
     expect(styleText).toContain('color: var(--muted)');
   });
+});
+
+test('GitHub Viewed state loads, saves checkbox changes, and reconciles on refresh', async () => {
+  const file = createChangedFile('src/app.ts');
+  const source = {
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/nkzw-tech/codiff/pull/12',
+  } as const;
+  let viewedFiles = { [file.path]: file.fingerprint } as Record<string, string>;
+  let refresh: (() => void) | undefined;
+  const setPullRequestFileViewed = vi.fn(async () => {});
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [file],
+      source,
+      viewedFiles,
+    })),
+    onRefreshRequest: (callback) => {
+      refresh = callback;
+      return () => {};
+    },
+    setPullRequestFileViewed,
+  });
+  await using app = await renderReact(<App />);
+  const checkbox = () => app.container.querySelector<HTMLButtonElement>('.codiff-viewed-button');
+  await waitFor(() => expect(checkbox()?.getAttribute('aria-pressed')).toBe('true'));
+  expect(setPullRequestFileViewed).not.toHaveBeenCalled();
+  await act(async () => checkbox()?.click());
+  expect(checkbox()?.getAttribute('aria-pressed')).toBe('false');
+  expect(setPullRequestFileViewed).toHaveBeenLastCalledWith({
+    path: file.path,
+    source,
+    viewed: false,
+  });
+  await act(async () => checkbox()?.click());
+  expect(checkbox()?.getAttribute('aria-pressed')).toBe('true');
+  expect(setPullRequestFileViewed).toHaveBeenLastCalledWith({
+    path: file.path,
+    source,
+    viewed: true,
+  });
+  viewedFiles = {};
+  await act(async () => refresh?.());
+  await waitFor(() => expect(checkbox()?.getAttribute('aria-pressed')).toBe('false'));
+  expect(app.container.querySelector('.codiff-file-header.viewed')).toBeNull();
+  expect(setPullRequestFileViewed).toHaveBeenCalledTimes(2);
 });
 
 test('before unload saves the current source and selected file for any reload trigger', async () => {

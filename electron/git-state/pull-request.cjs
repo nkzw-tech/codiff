@@ -26,6 +26,7 @@ const { parseReviewUrl } = require('../review-source.cjs');
  * @typedef {import('../../core/types.ts').PullRequestReviewComment} PullRequestReviewComment
  * @typedef {import('../../core/types.ts').RepositoryState} RepositoryState
  * @typedef {import('../../core/types.ts').ReviewSource} ReviewSource
+ * @typedef {import('../../core/types.ts').SetPullRequestFileViewedRequest} SetPullRequestFileViewedRequest
  * @typedef {import('../../core/types.ts').SubmitPullRequestCommentRequest} SubmitPullRequestCommentRequest
  * @typedef {import('../../core/types.ts').SubmitPullRequestReviewRequest} SubmitPullRequestReviewRequest
  * @typedef {{owner: string; repo: string}} GitHubRepositoryReference
@@ -34,7 +35,7 @@ const { parseReviewUrl } = require('../review-source.cjs');
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{direction: 'fetch' | 'push'; name: string; owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
- * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
+ * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; node_id?: string; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
  * @typedef {{author?: {avatar_url?: string}; commit?: {author?: {date?: string; email?: string; name?: string}; message?: string}; parents?: ReadonlyArray<{sha?: string}>; sha?: string}} GitHubCommit
  * @typedef {{[key: string]: any}} GitHubReviewComment
  * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
@@ -356,6 +357,62 @@ const readPullRequestFiles = async (repoRoot, pullRequest) => {
     ]),
   );
   return pages.flat();
+};
+
+const VIEWED_FILES_QUERY = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      headRefOid
+      files(first: 100, after: $cursor) {
+        nodes { path viewerViewedState }
+        pageInfo { endCursor hasNextPage }
+      }
+    }
+  }
+}`;
+
+/** @param {string} repoRoot @param {PullRequestReference} pullRequest */
+const readPullRequestViewedFiles = async (repoRoot, pullRequest) => {
+  const paths = new Set();
+  /** @type {string | undefined} */
+  let cursor;
+  /** @type {string | undefined} */
+  let headSha;
+  do {
+    const response = JSON.parse(
+      await ghApi(repoRoot, [
+        'graphql',
+        '-f',
+        `query=${VIEWED_FILES_QUERY}`,
+        '-f',
+        `owner=${pullRequest.owner}`,
+        '-f',
+        `repo=${pullRequest.repo}`,
+        '-F',
+        `number=${pullRequest.number}`,
+        ...(cursor ? ['-f', `cursor=${cursor}`] : []),
+      ]),
+    );
+    const result = response?.data?.repository?.pullRequest;
+    if (response.errors?.length || !Array.isArray(result?.files?.nodes) || !result.headRefOid) {
+      throw new Error('GitHub did not return file viewed states.');
+    }
+    if (headSha && headSha !== result.headRefOid) {
+      throw new Error('The pull request changed while loading file viewed states.');
+    }
+    headSha = result.headRefOid;
+    for (const file of result.files.nodes) {
+      if (file?.viewerViewedState === 'VIEWED' && typeof file.path === 'string') {
+        paths.add(file.path);
+      }
+    }
+    const pageInfo = result.files.pageInfo;
+    if (pageInfo?.hasNextPage && (!pageInfo.endCursor || pageInfo.endCursor === cursor)) {
+      throw new Error('GitHub did not return the next page of file viewed states.');
+    }
+    cursor = pageInfo?.hasNextPage ? pageInfo.endCursor : undefined;
+  } while (cursor);
+  return { headSha, paths };
 };
 
 /** @param {string} path */
@@ -844,11 +901,13 @@ const readPullRequestState = async (launchPath, source) => {
   const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
   const pullRequest = parseGitHubPullRequestUrl(source.url);
 
-  const [metadata, apiFiles, diff, reviewComments] = await Promise.all([
+  const [metadata, apiFiles, diff, reviewComments, viewedFiles] = await Promise.all([
     readPullRequestMetadata(repoRoot, pullRequest),
     readPullRequestFiles(repoRoot, pullRequest),
     readPullRequestDiff(repoRoot, pullRequest),
     readPullRequestComments(repoRoot, pullRequest),
+    // Viewing a PR must still work when GitHub's optional progress lookup fails.
+    readPullRequestViewedFiles(repoRoot, pullRequest).catch(() => undefined),
   ]);
   const remote = await selectPullRequestRemote(repoRoot, pullRequest, metadata.head?.sha);
   const diffByPath = splitPullRequestDiff(diff);
@@ -924,6 +983,15 @@ const readPullRequestState = async (launchPath, source) => {
     reviewComments,
     root: repoRoot,
     source: createPullRequestSource(pullRequest, metadata),
+    ...(viewedFiles && viewedFiles.headSha === metadata.head?.sha
+      ? {
+          viewedFiles: Object.fromEntries(
+            files
+              .filter((file) => viewedFiles.paths.has(file.path))
+              .map((file) => [file.path, file.fingerprint]),
+          ),
+        }
+      : {}),
   };
 };
 
@@ -1083,6 +1151,35 @@ const submitPullRequestReview = async (launchPath, request) => {
   );
 };
 
+/** @param {string} launchPath @param {SetPullRequestFileViewedRequest} request */
+const setPullRequestFileViewed = async (launchPath, request) => {
+  const repoRoot = (await git(launchPath, ['rev-parse', '--show-toplevel'])).trim();
+  const pullRequest = parseGitHubPullRequestUrl(request.source.url);
+  validateRepositoryPath(request.path);
+  if (typeof request.viewed !== 'boolean') {
+    throw new Error('Expected a boolean file viewed state.');
+  }
+  const metadata = await readPullRequestMetadata(repoRoot, pullRequest);
+  await selectPullRequestRemote(repoRoot, pullRequest, metadata.head?.sha);
+  if (!metadata.node_id) {
+    throw new Error('GitHub did not return the pull request ID.');
+  }
+  if (request.viewed && request.source.headSha && request.source.headSha !== metadata.head?.sha) {
+    throw new Error('The pull request has new changes. Refresh before marking files as Viewed.');
+  }
+  const mutation = request.viewed ? 'markFileAsViewed' : 'unmarkFileAsViewed';
+  const inputType = request.viewed ? 'MarkFileAsViewedInput' : 'UnmarkFileAsViewedInput';
+  const response = JSON.parse(
+    await ghApi(repoRoot, ['graphql', '--input', '-'], {
+      query: `mutation($input: ${inputType}!) { ${mutation}(input: $input) { clientMutationId } }`,
+      variables: { input: { path: request.path, pullRequestId: metadata.node_id } },
+    }),
+  );
+  if (response.errors?.length || !response.data?.[mutation]) {
+    throw new Error(response.errors?.[0]?.message || 'GitHub did not save the file viewed state.');
+  }
+};
+
 /** @param {SubmitPullRequestReviewRequest} request */
 const createPullRequestReviewPayload = (request) => {
   const body = request.body?.trim() || '';
@@ -1119,9 +1216,11 @@ module.exports = {
   parseGitHubPullRequestUrl,
   readPullRequestImageContent,
   readPullRequestState,
+  readPullRequestViewedFiles,
   resolvePullRequestContentRefs,
   selectPullRequestRemote,
   selectUnresolvedReviewComments,
+  setPullRequestFileViewed,
   submitPullRequestComment,
   submitPullRequestReview,
 };

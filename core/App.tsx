@@ -48,6 +48,7 @@ import {
   useDocumentAppearance,
 } from './app/hooks/useDocumentAppearance.ts';
 import { useInitialWindowReveal } from './app/hooks/useInitialWindowReveal.ts';
+import { usePullRequestViewedSync } from './app/hooks/usePullRequestViewedSync.ts';
 import { useResizableSidebar } from './app/hooks/useResizableSidebar.ts';
 import { useReviewFileState } from './app/hooks/useReviewState.ts';
 import { createDefaultConfig } from './config/defaults.ts';
@@ -94,6 +95,7 @@ import {
   getReviewCommentsFromState,
   getVisibleReviewComments,
 } from './lib/review-comments.ts';
+import { getFileReviewIdentity, updateReviewIdentityViewed } from './lib/review-identity.ts';
 import { getSelectedPathFromScroll } from './lib/review-scroll.ts';
 import {
   SIDEBAR_COLLAPSE_THRESHOLD,
@@ -113,7 +115,7 @@ import {
   supportsLazyDiffContent,
   usesViewedFileState,
 } from './lib/source.ts';
-import { readViewed, writeViewed } from './lib/viewed.ts';
+import { readViewedForState, writeViewed } from './lib/viewed.ts';
 import type {
   ChangedFile,
   AgentSkillStatus,
@@ -274,18 +276,31 @@ export default function App({
     toggleViewed: toggleReviewViewed,
     viewed,
   } = useReviewFileState({ onViewedChange: persistViewed });
+  const { getRepositoryState, syncViewed } = usePullRequestViewedSync({
+    setViewed,
+    stateRef,
+    viewedRef,
+  });
   const toggleViewed = useCallback(
     (file: ChangedFile, isViewed: boolean, reviewIdentity?: ReviewIdentity) => {
       if (!stateRef.current) {
         return;
       }
+      const previous = viewedRef.current;
+      const next = updateReviewIdentityViewed(
+        previous,
+        reviewIdentity ?? getFileReviewIdentity(file),
+        isViewed,
+      );
+      viewedRef.current = next;
+      syncViewed(file, previous, next);
       if (reviewIdentity) {
         toggleReviewViewed(file, isViewed, reviewIdentity);
       } else {
         toggleReviewViewed(file, isViewed);
       }
     },
-    [toggleReviewViewed],
+    [syncViewed, toggleReviewViewed],
   );
   const {
     askCodex,
@@ -538,7 +553,7 @@ export default function App({
         const sourceKey = getSourceKey(currentState.source);
 
         try {
-          const nextState = await window.codiff.getRepositoryState(currentState.source);
+          const nextState = await getRepositoryState(currentState.source);
           const orderedState = {
             ...nextState,
             files: sortFiles(nextState.files),
@@ -595,7 +610,14 @@ export default function App({
       );
       return result;
     },
-    [bumpItemVersion, refreshWalkthroughForState, setCollapsed, setReviewComments, setSelectedPath],
+    [
+      bumpItemVersion,
+      getRepositoryState,
+      refreshWalkthroughForState,
+      setCollapsed,
+      setReviewComments,
+      setSelectedPath,
+    ],
   );
 
   const scrollPathIntoReview = useCallback((path: string, behavior: ReviewScrollBehavior) => {
@@ -680,7 +702,7 @@ export default function App({
           }
         });
 
-      const nextState = await window.codiff.getRepositoryState(
+      const nextState = await getRepositoryState(
         getReloadSourceForLaunch(reloadSelection, nextLaunchOptions),
       );
 
@@ -767,9 +789,7 @@ export default function App({
           : window.codiff.getNarrativeWalkthrough(orderedState.source)
         : null;
       // Publish the diff before history or walkthrough generation finishes.
-      const nextViewed = usesViewedFileState(orderedState.source)
-        ? readViewed(orderedState.root)
-        : {};
+      const nextViewed = readViewedForState(orderedState);
       const restoreCommitView =
         getReloadMainMode(reloadSelection, orderedState) === 'commit' &&
         orderedState.source.type === 'working-tree' &&
@@ -853,6 +873,7 @@ export default function App({
       canceled = true;
     };
   }, [
+    getRepositoryState,
     initialLaunchOptions,
     resetCommentFocus,
     scrollPathIntoReview,
@@ -1113,8 +1134,7 @@ export default function App({
       loadingSectionKeysRef.current.clear();
       setLoadingSectionIds(new Set());
 
-      window.codiff
-        .getRepositoryState(currentState.source)
+      getRepositoryState(currentState.source)
         .then((nextState) => {
           if (sourceRequestRef.current !== request) {
             return;
@@ -1129,9 +1149,7 @@ export default function App({
             orderedState.files.some((file) => file.path === selectedPathRef.current)
               ? selectedPathRef.current
               : (orderedState.files[0]?.path ?? null);
-          const nextViewed = usesViewedFileState(orderedState.source)
-            ? readViewed(orderedState.root)
-            : {};
+          const nextViewed = readViewedForState(orderedState, viewedRef.current);
           const walkthroughNeedsRefresh = haveChangedFiles(currentState.files, orderedState.files);
 
           stateRef.current = orderedState;
@@ -1161,6 +1179,7 @@ export default function App({
       removeConfigListener();
     };
   }, [
+    getRepositoryState,
     initialConfig,
     setCollapsed,
     setExpandedReviewKeys,
@@ -1379,7 +1398,7 @@ export default function App({
       : undefined;
 
     Promise.all([
-      window.codiff.getRepositoryState(refreshSource),
+      getRepositoryState(refreshSource),
       window.codiff.getRepositoryHistory(historyLimit, refreshHistorySource),
     ])
       .then(([nextState, history]) => {
@@ -1404,13 +1423,35 @@ export default function App({
         for (const path of changedPaths) {
           bumpItemVersion(path);
         }
+        const nextViewed = readViewedForState(orderedState, viewedRef.current);
+        const viewedChangedPaths = new Set(
+          orderedState.files
+            .filter(
+              (file) =>
+                (viewedRef.current[file.path] === file.fingerprint) !==
+                (nextViewed[file.path] === file.fingerprint),
+            )
+            .map((file) => file.path),
+        );
+        viewedRef.current = nextViewed;
+        setViewed(nextViewed);
         setCollapsed((current) => {
           const next = new Set(current);
           for (const path of changedPaths) {
             next.delete(path);
           }
+          for (const path of viewedChangedPaths) {
+            if (nextViewed[path]) {
+              next.add(path);
+            } else {
+              next.delete(path);
+            }
+          }
           return next;
         });
+        setExpandedReviewKeys(
+          (current) => new Set([...current].filter((key) => !viewedChangedPaths.has(key))),
+        );
         setHistoryEntries(history.entries);
         setHistoryHasMore(history.entries.length >= historyLimit);
         setHistorySource(getHistorySource(orderedState.source) ?? historySourceRef.current);
@@ -1432,13 +1473,16 @@ export default function App({
       });
   }, [
     bumpItemVersion,
+    getRepositoryState,
     historyLimit,
     mainModeRef,
     pendingSource,
     refreshWalkthroughForState,
     setCollapsed,
+    setExpandedReviewKeys,
     setMainMode,
     setSelectedPath,
+    setViewed,
   ]);
 
   // ⌘R / the View menu's "Refresh Changes" item route here from the main
@@ -1482,8 +1526,7 @@ export default function App({
       setScrollTarget(null);
       setMainMode('review');
 
-      return window.codiff
-        .getRepositoryState(source)
+      return getRepositoryState(source)
         .then((nextState) => {
           if (sourceRequestRef.current !== request) {
             return;
@@ -1494,17 +1537,30 @@ export default function App({
             files: sortFiles(nextState.files),
           };
           const session = sourceSessionsRef.current.get(getSourceKey(orderedState.source));
-          const nextViewed =
-            session?.viewed ??
-            (usesViewedFileState(orderedState.source) ? readViewed(orderedState.root) : {});
+          const nextViewed = readViewedForState(orderedState, session?.viewed);
           const nextSelectedPath =
             session?.selectedPath &&
             orderedState.files.some((file) => file.path === session.selectedPath)
               ? session.selectedPath
               : (orderedState.files[0]?.path ?? null);
-          const nextCollapsed =
-            session?.collapsed ?? getCollapsedViewedPaths(orderedState.files, nextViewed);
-          const nextExpandedReviewKeys = session?.expandedReviewKeys ?? new Set<string>();
+          const nextCollapsed = new Set(
+            session?.collapsed ?? getCollapsedViewedPaths(orderedState.files, nextViewed),
+          );
+          const nextExpandedReviewKeys = new Set(session?.expandedReviewKeys);
+          if (session && orderedState.viewedFiles) {
+            for (const file of orderedState.files) {
+              const wasViewed = session.viewed[file.path] === file.fingerprint;
+              const isViewed = nextViewed[file.path] === file.fingerprint;
+              if (wasViewed !== isViewed) {
+                nextExpandedReviewKeys.delete(file.path);
+                if (isViewed) {
+                  nextCollapsed.add(file.path);
+                } else {
+                  nextCollapsed.delete(file.path);
+                }
+              }
+            }
+          }
           const sessionWalkthroughIsCurrent =
             session?.narrativeWalkthrough != null &&
             !haveChangedFiles(session.walkthroughFiles, orderedState.files);
@@ -1516,8 +1572,8 @@ export default function App({
           stateRef.current = orderedState;
           setState(orderedState);
           setHistorySource(getHistorySource(orderedState.source) ?? historySource);
-          setCollapsed(new Set(nextCollapsed));
-          setExpandedReviewKeys(new Set(nextExpandedReviewKeys));
+          setCollapsed(nextCollapsed);
+          setExpandedReviewKeys(nextExpandedReviewKeys);
           setItemVersionByKey({});
           setReviewComments(session?.reviewComments ?? getReviewCommentsFromState(orderedState));
           setReloadDeltaPaths(new Set());
@@ -1549,6 +1605,7 @@ export default function App({
         });
     },
     [
+      getRepositoryState,
       historySource,
       pendingSource,
       refreshWalkthroughForState,

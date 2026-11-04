@@ -249,6 +249,8 @@ export type RepositoryState = {
   reviewComments?: ReadonlyArray<PullRequestExistingReviewComment>;
   root: string;
   source: ReviewSource;
+  /** Remote Viewed files mapped to current fingerprints; absent when unavailable. */
+  viewedFiles?: Readonly<Record<string, string>>;
 };
 
 export type CodiffFeatureFlags = {
@@ -880,6 +882,12 @@ export type PullRequestReviewEvent = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
 export type SubmitPullRequestCommentRequest = {
   comment: PullRequestReviewComment;
   source: Extract<ReviewSource, { type: 'pull-request' }>;
+};
+
+export type SetPullRequestFileViewedRequest = {
+  path: string;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  viewed: boolean;
 };
 
 export type SubmitPullRequestReviewRequest = {
