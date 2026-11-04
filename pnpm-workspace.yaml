@@ -37,14 +37,6 @@ onlyBuiltDependencies:
   - electron-winstaller
   - unrs-resolver
 overrides:
-  # 1.6.3 was published with unresolved workspace/catalog references. These
-  # versions match its source commit, 27bb17834cb273c23c09321f7c1590318b37dc11.
-  '@pierre/diffs@1.6.3>@pierre/highlights': 0.4.0
-  '@pierre/diffs@1.6.3>@pierre/theme': 2.0.0
-  '@pierre/diffs@1.6.3>@pierre/theming': 1.0.2
-  '@pierre/diffs@1.6.3>diff': 9.0.0
-  '@pierre/diffs@1.6.3>hast-util-to-html': 9.0.5
-  '@pierre/diffs@1.6.3>lru_map': 0.4.1
   extract-zip>yauzl: ^3.4.0
   vite@*: 'catalog:'
 patchedDependencies:
