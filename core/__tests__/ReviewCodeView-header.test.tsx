@@ -235,7 +235,7 @@ test('narrow pane layout and sticky header metrics resize together without losin
   await using view = await renderReact(<ReviewCodeViewHarness files={[file]} />);
   const viewport = view.container.querySelector<HTMLElement>('.code-view')!;
   expect(viewport.classList.contains('compact-file-headers')).toBe(true);
-  expect(codeViewMock.lastOptions?.itemMetrics).toEqual({ diffHeaderHeight: 90 });
+  expect(codeViewMock.lastOptions?.itemMetrics).toEqual({ diffHeaderHeight: 90, lineHeight: 20 });
   expect(viewport.style.getPropertyValue('--codiff-file-header-height')).toBe('90px');
   const header = view.container.querySelector('.codiff-file-header')!;
   expect(header.children[0]?.classList.contains('codiff-header-toggle')).toBe(true);
@@ -247,8 +247,15 @@ test('narrow pane layout and sticky header metrics resize together without losin
     resize!();
   });
   expect(viewport.classList.contains('compact-file-headers')).toBe(false);
-  expect(codeViewMock.lastOptions?.itemMetrics).toEqual({ diffHeaderHeight: 54 });
+  expect(codeViewMock.lastOptions?.itemMetrics).toEqual({ diffHeaderHeight: 54, lineHeight: 20 });
   expect(viewport.style.getPropertyValue('--codiff-file-header-height')).toBe('54px');
+});
+
+test('layout metrics follow the code font line height so scroll height matches rendered rows', async () => {
+  await using _view = await renderReact(
+    <ReviewCodeViewHarness diffLineHeight={25} files={[file]} />,
+  );
+  expect(codeViewMock.lastOptions?.itemMetrics).toMatchObject({ lineHeight: 25 });
 });
 
 test('expandUnchanged only expands diffs when full file contents can be loaded', async () => {
