@@ -1,9 +1,15 @@
 # Codiff
 
-Codiff is a beautiful, minimal, local diff viewer for reviewing Git changes and committing them.
+<p align="center">
+  <img alt="Codiff icon" src="./web/src/assets/icon.webp" width="76" height="76" />
+</p>
 
-<img width="48%" src="https://github.com/user-attachments/assets/9801587d-5879-461a-b375-9fbfa3c5f25d" />
-<img width="48%" src="https://github.com/user-attachments/assets/8b92902b-1112-4553-ba59-74e84a61ca7d" />
+<p align="center">
+  Codiff is a beautiful, minimal, local diff viewer for reviewing Git changes and committing them.
+</p>
+
+<img alt="Codiff walkthrough in light mode" width="48%" src="./web/src/assets/codiff-light.webp" />
+<img alt="Codiff walkthrough in dark mode" width="48%" src="./web/src/assets/codiff-dark.webp" />
 
 ## Why Codiff
 
