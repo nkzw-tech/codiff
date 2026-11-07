@@ -2731,8 +2731,8 @@ export function ReviewCodeView({
   }, [codeViewElement]);
   const headerHeight = compactHeaders ? 90 : codeViewItemMetrics.diffHeaderHeight;
   const itemMetrics = useMemo(
-    () => ({ ...codeViewItemMetrics, diffHeaderHeight: headerHeight }),
-    [headerHeight],
+    () => ({ ...codeViewItemMetrics, diffHeaderHeight: headerHeight, lineHeight: diffLineHeight }),
+    [diffLineHeight, headerHeight],
   );
   const codeViewStyle = { '--codiff-file-header-height': `${headerHeight}px` } as CSSProperties;
 
