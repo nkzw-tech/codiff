@@ -160,6 +160,8 @@ export type ReviewSource =
       canEditReviewers?: boolean;
       canEditTitle?: boolean;
       description?: string;
+      /** Signed URLs for private GitHub attachments in {@link description}, keyed by attachment id. */
+      descriptionAssetUrls?: Readonly<Record<string, string>>;
       draft?: boolean;
       headSha?: string;
       host?: string;

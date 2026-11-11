@@ -96,7 +96,7 @@ import {
 } from '../../lib/identifier-navigation.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
 import { isNativeInputTarget, isPrimaryModifier } from '../../lib/keyboard.ts';
-import { sanitizeMarkdownImages } from '../../lib/markdown.tsx';
+import { resolveGitHubAssetUrls, sanitizeMarkdownImages } from '../../lib/markdown.tsx';
 import { isGeneratedWalkthroughFile } from '../../lib/narrative-walkthrough-diff.js';
 import {
   getCommentKey,
@@ -800,6 +800,7 @@ function SourceDescriptionBody({
   author,
   canEdit,
   description,
+  descriptionAssetUrls,
   keymap,
   layoutKey,
   onLayoutReady,
@@ -810,6 +811,7 @@ function SourceDescriptionBody({
   author?: SourceDescriptionAuthor;
   canEdit?: boolean;
   description: string;
+  descriptionAssetUrls?: Readonly<Record<string, string>>;
   keymap?: CodiffKeymap;
   layoutKey: string;
   onLayoutReady: (layoutKey: string) => void;
@@ -834,8 +836,11 @@ function SourceDescriptionBody({
       ? savedDescription.body
       : description;
   const sanitizedDescription = useMemo(
-    () => sanitizeMarkdownImages(stripHtmlComments(displayedDescription)),
-    [displayedDescription],
+    () =>
+      sanitizeMarkdownImages(
+        resolveGitHubAssetUrls(stripHtmlComments(displayedDescription), descriptionAssetUrls),
+      ),
+    [descriptionAssetUrls, displayedDescription],
   );
   const editorRef = useRef<MarkdownEditorHandle | null>(null);
   const canSaveEdit =
@@ -1089,6 +1094,7 @@ export function PullRequestSourceDescription({
             author={sourceAuthor}
             canEdit={canEditDescription}
             description={sourceDescription}
+            descriptionAssetUrls={source.descriptionAssetUrls}
             keymap={keymap}
             layoutKey={layoutKey}
             onLayoutReady={() => {}}
@@ -2811,6 +2817,10 @@ export function ReviewCodeView({
     : shouldShowSourceDescription
       ? (source.description?.trim() ?? '')
       : '';
+  const sourceDescriptionAssetUrls =
+    !shouldShowCommitMessage && source.type === 'pull-request'
+      ? source.descriptionAssetUrls
+      : undefined;
   const sourceDescriptionHasBody = sourceDescription.length > 0;
   const sourceDescriptionHasContent = sourceDescriptionHasBody || shouldShowCommitMessage;
   const canEditSourceDescription =
@@ -4649,6 +4659,7 @@ export function ReviewCodeView({
               author={sourceAuthor}
               canEdit={canEditSourceDescription}
               description={sourceDescription}
+              descriptionAssetUrls={sourceDescriptionAssetUrls}
               keymap={keymap}
               layoutKey="code-view-header"
               onLayoutReady={noopLayoutReady}
@@ -4673,6 +4684,7 @@ export function ReviewCodeView({
       sourceDescription,
       sourceDescriptionActions,
       sourceDescriptionAriaLabel,
+      sourceDescriptionAssetUrls,
       sourceDescriptionCollapsed,
       sourceDescriptionFooter,
       sourceDescriptionHasContent,

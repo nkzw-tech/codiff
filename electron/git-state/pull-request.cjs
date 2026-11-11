@@ -35,7 +35,7 @@ const { parseReviewUrl } = require('../review-source.cjs');
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{direction: 'fetch' | 'push'; name: string; owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
- * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; node_id?: string; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
+ * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; body_html?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; node_id?: string; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
  * @typedef {{author?: {avatar_url?: string}; commit?: {author?: {date?: string; email?: string; name?: string}; message?: string}; parents?: ReadonlyArray<{sha?: string}>; sha?: string}} GitHubCommit
  * @typedef {{[key: string]: any}} GitHubReviewComment
  * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
@@ -343,6 +343,8 @@ const ghApiBuffer = async (repoRoot, args) => {
 const readPullRequestMetadata = async (repoRoot, pullRequest) =>
   JSON.parse(
     await ghApi(repoRoot, [
+      '-H',
+      'Accept: application/vnd.github.full+json',
       `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
     ]),
   );
@@ -751,29 +753,54 @@ const normalizePullRequestFileStatus = (status) =>
         ? 'renamed'
         : 'modified';
 
+const signedAssetSourcePattern =
+  /<(?:img|video)\b[^>]*?\ssrc="(https:\/\/private-user-images\.githubusercontent\.com\/[^"]+)"/gi;
+const signedAssetIdPattern =
+  /\/\d+-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.[a-z0-9]+$/i;
+
+// GitHub only signs private attachment URLs in the rendered HTML. Map each attachment id to
+// its signed URL so the renderer can load it without changing the Markdown that gets edited.
+/** @param {string | null | undefined} bodyHtml */
+const readSignedAssetUrls = (bodyHtml) => {
+  /** @type {Record<string, string>} */
+  const assetUrls = {};
+  for (const match of bodyHtml?.matchAll(signedAssetSourcePattern) ?? []) {
+    const url = match[1].replaceAll('&amp;', '&');
+    const id = signedAssetIdPattern.exec(new URL(url).pathname)?.[1];
+    if (id) {
+      assetUrls[id.toLowerCase()] = url;
+    }
+  }
+  return assetUrls;
+};
+
 /** @param {PullRequestReference} pullRequest @param {GitHubPullRequestMetadata} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
-const createPullRequestSource = (pullRequest, metadata) => ({
-  ...(metadata.user?.login
-    ? {
-        author: {
-          avatarUrl: metadata.user.avatar_url,
-          login: metadata.user.login,
-          url: metadata.user.html_url,
-        },
-      }
-    : {}),
-  ...(metadata.body?.trim() ? { description: metadata.body.trim() } : {}),
-  headSha: metadata.head?.sha,
-  host: 'github.com',
-  number: pullRequest.number,
-  owner: pullRequest.owner,
-  projectPath: `${pullRequest.owner}/${pullRequest.repo}`,
-  provider: 'github',
-  repo: pullRequest.repo,
-  title: metadata.title,
-  type: 'pull-request',
-  url: pullRequest.url,
-});
+const createPullRequestSource = (pullRequest, metadata) => {
+  const descriptionAssetUrls = readSignedAssetUrls(metadata.body_html);
+  return {
+    ...(metadata.user?.login
+      ? {
+          author: {
+            avatarUrl: metadata.user.avatar_url,
+            login: metadata.user.login,
+            url: metadata.user.html_url,
+          },
+        }
+      : {}),
+    ...(metadata.body?.trim() ? { description: metadata.body.trim() } : {}),
+    ...(Object.keys(descriptionAssetUrls).length > 0 ? { descriptionAssetUrls } : {}),
+    headSha: metadata.head?.sha,
+    host: 'github.com',
+    number: pullRequest.number,
+    owner: pullRequest.owner,
+    projectPath: `${pullRequest.owner}/${pullRequest.repo}`,
+    provider: 'github',
+    repo: pullRequest.repo,
+    title: metadata.title,
+    type: 'pull-request',
+    url: pullRequest.url,
+  };
+};
 
 /**
  * Make sure the pull request head and base branch are available as local refs
