@@ -49,7 +49,6 @@ test('only bare GitHub attachment URLs on their own line become media', () => {
 const source = {
   canEditDescription: true,
   description: `## Evidence\n\n${videoUrl}\n`,
-  descriptionAssetUrls: assetUrls,
   number: 392,
   provider: 'github',
   title: 'Videos',
@@ -59,7 +58,11 @@ const source = {
 
 test('PR descriptions play private GitHub attachment videos but edit the original Markdown', async () => {
   await using app = await renderReact(
-    <PullRequestSourceDescription onUpdateDescription={() => {}} source={source} />,
+    <PullRequestSourceDescription
+      descriptionAssetUrls={assetUrls}
+      onUpdateDescription={() => {}}
+      source={source}
+    />,
   );
 
   await waitFor(() => {
@@ -107,7 +110,10 @@ test('PR descriptions resolve only complete media sources and preserve links and
       `![External image](${externalImageUrl})`,
     ].join('\n\n');
     await using app = await renderReact(
-      <PullRequestSourceDescription source={{ ...source, description }} />,
+      <PullRequestSourceDescription
+        descriptionAssetUrls={assetUrls}
+        source={{ ...source, description }}
+      />,
     );
 
     await waitFor(() => {

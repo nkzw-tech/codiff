@@ -1909,6 +1909,7 @@ export default function App({
         }
       />
     ) : undefined,
+    sourceDescriptionAssetUrls: state.descriptionAssetUrls,
     supportsReviewCommentActions: isPullRequest,
     theme: preferences.theme,
     viewed,

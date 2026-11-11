@@ -766,7 +766,11 @@ const readSignedAssetUrls = (bodyHtml) => {
   const assetUrls = {};
   for (const match of bodyHtml?.matchAll(signedAssetSourcePattern) ?? []) {
     const url = match[1].replaceAll('&amp;', '&');
-    const id = signedAssetIdPattern.exec(new URL(url).pathname)?.[1];
+    const parsed = URL.parse(url);
+    if (parsed?.origin !== 'https://private-user-images.githubusercontent.com') {
+      continue;
+    }
+    const id = signedAssetIdPattern.exec(parsed.pathname)?.[1];
     if (id) {
       assetUrls[id.toLowerCase()] = url;
     }
@@ -777,7 +781,6 @@ const readSignedAssetUrls = (bodyHtml) => {
 /** @param {PullRequestReference} pullRequest @param {GitHubPullRequestMetadata} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
 const createPullRequestSource = (pullRequest, metadata) => {
   const description = metadata.body?.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
-  const descriptionAssetUrls = readSignedAssetUrls(metadata.body_html);
   return {
     ...(metadata.user?.login
       ? {
@@ -789,7 +792,6 @@ const createPullRequestSource = (pullRequest, metadata) => {
         }
       : {}),
     ...(description ? { description } : {}),
-    ...(Object.keys(descriptionAssetUrls).length > 0 ? { descriptionAssetUrls } : {}),
     headSha: metadata.head?.sha,
     host: 'github.com',
     number: pullRequest.number,
@@ -1004,7 +1006,9 @@ const readPullRequestState = async (launchPath, source) => {
     })
     .sort((left, right) => left.path.localeCompare(right.path));
 
+  const descriptionAssetUrls = readSignedAssetUrls(metadata.body_html);
   return {
+    ...(Object.keys(descriptionAssetUrls).length > 0 ? { descriptionAssetUrls } : {}),
     files,
     generatedAt: Date.now(),
     launchPath,

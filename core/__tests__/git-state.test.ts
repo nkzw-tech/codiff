@@ -63,7 +63,6 @@ type GitStateModule = {
     pullRequest: { number: number; owner: string; repo: string; url: string },
     metadata: {
       body?: string | null;
-      body_html?: string | null;
       head?: { sha?: string };
       title?: string;
       user?: { avatar_url?: string; html_url?: string; login?: string };
@@ -630,30 +629,6 @@ test('createPullRequestSource normalizes non-empty GitHub PR descriptions', () =
     title: 'Focused fix',
     type: 'pull-request',
   });
-});
-
-test('createPullRequestSource maps private GitHub attachments to their signed URLs', () => {
-  const video =
-    'https://private-user-images.githubusercontent.com/2588927/701684766-013867d7-8788-4446-9c66-75d6ba74a91a.webm?jwt=video';
-  const image =
-    'https://private-user-images.githubusercontent.com/2588927/701684767-C29FC8D3-F2B1-41E3-8759-83A840C6AEF2.png?jwt=image&amp;v=1';
-
-  expect(
-    createPullRequestSource(pullRequestFixture, {
-      body: 'Recording',
-      body_html: [
-        `<video src="${video}" data-canonical-src="${video}" controls="controls"></video>`,
-        `<a href="${image}"><img alt="screen" src="${image}"></a>`,
-        '<img src="https://avatars.githubusercontent.com/u/1?v=4">',
-      ].join('\n'),
-    }).descriptionAssetUrls,
-  ).toEqual({
-    '013867d7-8788-4446-9c66-75d6ba74a91a': video,
-    'c29fc8d3-f2b1-41e3-8759-83a840c6aef2': image.replace('&amp;', '&'),
-  });
-  expect(
-    createPullRequestSource(pullRequestFixture, { body: 'Text', body_html: '<p>Text</p>' }),
-  ).not.toHaveProperty('descriptionAssetUrls');
 });
 
 test('createPullRequestSource omits blank GitHub PR descriptions', () => {
