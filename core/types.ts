@@ -242,6 +242,8 @@ export type RepositoryState = {
   branch: string | null;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
   commitMetadata?: CommitMetadata;
+  /** Signed GitHub attachment URLs for the local description preview only. */
+  descriptionAssetUrls?: Readonly<Record<string, string>>;
   files: ReadonlyArray<ChangedFile>;
   generalComments?: ReadonlyArray<PullRequestGeneralCommentThread>;
   generatedAt: number;

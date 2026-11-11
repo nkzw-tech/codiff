@@ -174,11 +174,18 @@ test('builds file-level review assistant context without inventing a line', asyn
 });
 
 test('builds review assistant context with PR descriptions as orientation only', async () => {
-  const state = createPullRequestAssistantState('## Intent\n\nKeep reviewers oriented.');
+  const state = {
+    ...createPullRequestAssistantState('## Intent\n\nKeep reviewers oriented.'),
+    descriptionAssetUrls: {
+      '013867d7-8788-4446-9c66-75d6ba74a91a':
+        'https://private-user-images.githubusercontent.com/1/2-013867d7-8788-4446-9c66-75d6ba74a91a.webm?jwt=preview-only',
+    },
+  };
 
   const { digest, prompt } = await readReply(state, pullRequestAssistantRequest);
 
   expect(digest.source.description).toBe('## Intent\n\nKeep reviewers oriented.');
+  expect(prompt).not.toContain('jwt=');
   expect(prompt).toContain('author-written PR/MR intent and orientation');
   expect(prompt).toContain('not proof of behavior');
   expect(prompt).toContain(

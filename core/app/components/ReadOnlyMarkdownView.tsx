@@ -207,6 +207,7 @@ function MarkdownSegment({
   contentClassName,
   editorClassName,
   onHeightChange,
+  prepareMarkdown,
   value,
 }: {
   additionalPlugins?: MarkdownEditorProps['additionalPlugins'];
@@ -214,6 +215,7 @@ function MarkdownSegment({
   contentClassName?: string;
   editorClassName?: string;
   onHeightChange?: (height: number) => void;
+  prepareMarkdown?: (value: string) => string;
   value: string;
 }) {
   const normalizedValue = normalizeReadOnlyMarkdownValue(value);
@@ -235,7 +237,7 @@ function MarkdownSegment({
         renderDiagrams
         spellCheck={false}
         suppressHtmlProcessing
-        value={normalizedValue}
+        value={prepareMarkdown ? prepareMarkdown(normalizedValue) : normalizedValue}
         variant="embedded"
       />
     </div>
@@ -249,6 +251,7 @@ function MarkdownParts({
   editorClassName,
   onHeightChange,
   parts,
+  prepareMarkdown,
 }: {
   additionalPlugins?: MarkdownEditorProps['additionalPlugins'];
   ariaLabel: string;
@@ -256,6 +259,7 @@ function MarkdownParts({
   editorClassName?: string;
   onHeightChange?: (height: number) => void;
   parts: ReadonlyArray<MarkdownPart>;
+  prepareMarkdown?: (value: string) => string;
 }) {
   return parts.map((part, index) => {
     if (part.type === 'markdown') {
@@ -267,6 +271,7 @@ function MarkdownParts({
           editorClassName={editorClassName}
           key={`markdown:${index}`}
           onHeightChange={onHeightChange}
+          prepareMarkdown={prepareMarkdown}
           value={part.value}
         />
       );
@@ -295,6 +300,7 @@ function MarkdownParts({
           editorClassName={editorClassName}
           onHeightChange={onHeightChange}
           parts={bodyParts}
+          prepareMarkdown={prepareMarkdown}
         />
       </details>
     );
@@ -309,6 +315,7 @@ export function ReadOnlyMarkdownView({
   density = 'document',
   fallback,
   onHeightChange,
+  prepareMarkdown,
   value,
   variant = 'plain',
 }: {
@@ -319,6 +326,7 @@ export function ReadOnlyMarkdownView({
   density?: MarkdownEditorProps['density'];
   fallback?: ReactNode;
   onHeightChange?: (height: number) => void;
+  prepareMarkdown?: (value: string) => string;
   value: string;
   variant?: MarkdownEditorProps['variant'];
 }) {
@@ -351,7 +359,7 @@ export function ReadOnlyMarkdownView({
             renderDiagrams
             spellCheck={false}
             suppressHtmlProcessing
-            value={normalizedValue}
+            value={prepareMarkdown ? prepareMarkdown(normalizedValue) : normalizedValue}
             variant={variant}
           />
         </div>
@@ -373,6 +381,7 @@ export function ReadOnlyMarkdownView({
           editorClassName={className}
           onHeightChange={onHeightChange}
           parts={parts}
+          prepareMarkdown={prepareMarkdown}
         />
       </div>
     </Suspense>

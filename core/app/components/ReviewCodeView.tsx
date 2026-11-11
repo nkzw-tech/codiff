@@ -800,6 +800,7 @@ function SourceDescriptionBody({
   author,
   canEdit,
   description,
+  descriptionAssetUrls,
   keymap,
   layoutKey,
   onLayoutReady,
@@ -810,6 +811,7 @@ function SourceDescriptionBody({
   author?: SourceDescriptionAuthor;
   canEdit?: boolean;
   description: string;
+  descriptionAssetUrls?: Readonly<Record<string, string>>;
   keymap?: CodiffKeymap;
   layoutKey: string;
   onLayoutReady: (layoutKey: string) => void;
@@ -975,6 +977,7 @@ function SourceDescriptionBody({
                 fallback={
                   <ReadOnlyMarkdown
                     ariaLabel={ariaLabel}
+                    attachmentUrls={descriptionAssetUrls}
                     className="codiff-markdown-preview-editor source-description-markdown-editor source-description-edit-preview"
                     density="compact"
                     onHeightChange={() => onLayoutReady(layoutKey)}
@@ -991,6 +994,7 @@ function SourceDescriptionBody({
                   {!editEditorReady ? (
                     <ReadOnlyMarkdown
                       ariaLabel={ariaLabel}
+                      attachmentUrls={descriptionAssetUrls}
                       className="codiff-markdown-preview-editor source-description-markdown-editor source-description-edit-preview"
                       density="compact"
                       onHeightChange={() => onLayoutReady(layoutKey)}
@@ -1025,6 +1029,7 @@ function SourceDescriptionBody({
           <div className="codiff-markdown-preview source-description-markdown">
             <ReadOnlyMarkdown
               ariaLabel={ariaLabel}
+              attachmentUrls={descriptionAssetUrls}
               className="codiff-markdown-preview-editor source-description-markdown-editor"
               density="compact"
               onHeightChange={() => onLayoutReady(layoutKey)}
@@ -1040,6 +1045,7 @@ function SourceDescriptionBody({
 
 export function PullRequestSourceDescription({
   actions,
+  descriptionAssetUrls,
   footer,
   keymap,
   onUpdateDescription,
@@ -1048,6 +1054,7 @@ export function PullRequestSourceDescription({
   source,
 }: {
   actions?: ReactNode;
+  descriptionAssetUrls?: Readonly<Record<string, string>>;
   footer?: ReactNode;
   keymap?: CodiffKeymap;
   onUpdateDescription?: (body: string) => Promise<void> | void;
@@ -1055,7 +1062,7 @@ export function PullRequestSourceDescription({
   onUploadDescriptionAsset?: (file: File) => Promise<string> | string;
   source: PullRequestSource;
 }) {
-  const sourceDescription = source.description?.trim() ?? '';
+  const sourceDescription = source.description?.trimEnd() ?? '';
   const sourceTitle = source.title?.trim() ?? '';
   const sourceDescriptionHasBody = sourceDescription.length > 0;
   const sourceAuthor = source.author ? getPullRequestDescriptionAuthor(source.author) : undefined;
@@ -1089,6 +1096,7 @@ export function PullRequestSourceDescription({
             author={sourceAuthor}
             canEdit={canEditDescription}
             description={sourceDescription}
+            descriptionAssetUrls={descriptionAssetUrls}
             keymap={keymap}
             layoutKey={layoutKey}
             onLayoutReady={() => {}}
@@ -2638,6 +2646,7 @@ export function ReviewCodeView({
   showWhitespace,
   source,
   sourceDescriptionActions,
+  sourceDescriptionAssetUrls,
   sourceDescriptionFooter,
   supportsReviewCommentActions,
   theme = 'system',
@@ -2704,6 +2713,7 @@ export function ReviewCodeView({
   showWhitespace: boolean;
   source: ReviewSource;
   sourceDescriptionActions?: ReactNode;
+  sourceDescriptionAssetUrls?: Readonly<Record<string, string>>;
   sourceDescriptionFooter?: ReactNode;
   supportsReviewCommentActions: boolean;
   theme?: CodiffPreferences['theme'];
@@ -2809,7 +2819,7 @@ export function ReviewCodeView({
   const sourceDescription = shouldShowCommitMessage
     ? commitMessageMetadata.body.trim()
     : shouldShowSourceDescription
-      ? (source.description?.trim() ?? '')
+      ? (source.description?.trimEnd() ?? '')
       : '';
   const sourceDescriptionHasBody = sourceDescription.length > 0;
   const sourceDescriptionHasContent = sourceDescriptionHasBody || shouldShowCommitMessage;
@@ -4649,6 +4659,9 @@ export function ReviewCodeView({
               author={sourceAuthor}
               canEdit={canEditSourceDescription}
               description={sourceDescription}
+              descriptionAssetUrls={
+                shouldShowSourceDescription ? sourceDescriptionAssetUrls : undefined
+              }
               keymap={keymap}
               layoutKey="code-view-header"
               onLayoutReady={noopLayoutReady}
@@ -4673,9 +4686,11 @@ export function ReviewCodeView({
       sourceDescription,
       sourceDescriptionActions,
       sourceDescriptionAriaLabel,
+      sourceDescriptionAssetUrls,
       sourceDescriptionCollapsed,
       sourceDescriptionFooter,
       sourceDescriptionHasContent,
+      shouldShowSourceDescription,
       sourceDescriptionLabel,
       sourceTitle,
       toggleSourceDescriptionCollapsed,

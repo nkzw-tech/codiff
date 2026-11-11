@@ -88,7 +88,7 @@ process.stdin.on('end', () => {
     process.stdout.write('');
     return;
   } else {
-    response = {node_id: 'PR_test', head: {sha: 'head-sha'}};
+    response = {node_id: 'PR_test', head: {sha: 'head-sha'}, ...JSON.parse(process.env.CODIFF_PR_TEST_METADATA || '{}')};
   }
   process.stdout.write(JSON.stringify(response));
 });
@@ -99,6 +99,7 @@ process.stdin.on('end', () => {
     callsPath,
     environment: createTemporaryEnvironment({
       CODIFF_GH_PATH: fakeGh,
+      CODIFF_PR_TEST_METADATA: undefined,
       CODIFF_VIEWED_TEST_CALLS: callsPath,
       CODIFF_VIEWED_TEST_ERROR: undefined,
       CODIFF_VIEWED_TEST_HEAD: undefined,
@@ -122,11 +123,41 @@ test('loads viewed progress across pages and attaches current file fingerprints'
     ),
   );
   expect(state.files).toHaveLength(4);
+  expect(state.descriptionAssetUrls).toBeUndefined();
   const calls = (await readFile(fixture.callsPath, 'utf8'))
     .trim()
     .split('\n')
     .map((line) => JSON.parse(line));
   expect(calls.some((call) => call.args.includes('cursor=next-page'))).toBe(true);
+});
+
+test('keeps signed PR attachment URLs separate from the serializable review source', async () => {
+  await using directory = await createTemporaryDirectory('codiff-pr-assets-');
+  const fixture = await createFixture(directory.path);
+  using _environment = fixture.environment;
+  const videoId = '013867d7-8788-4446-9c66-75d6ba74a91a';
+  const imageId = 'c29fc8d3-f2b1-41e3-8759-83a840c6aef2';
+  const description = `https://github.com/user-attachments/assets/${videoId}`;
+  const video = `https://private-user-images.githubusercontent.com/1/2-${videoId}.webm?jwt=video`;
+  const image = `https://private-user-images.githubusercontent.com/1/3-${imageId.toUpperCase()}.png?jwt=image&amp;v=1`;
+  using _metadata = createTemporaryEnvironment({
+    CODIFF_PR_TEST_METADATA: JSON.stringify({
+      body: description,
+      body_html: [
+        `<video src="${video}" data-canonical-src="${video}" controls></video>`,
+        `<a href="${image}"><img alt="screen" src="${image}"></a>`,
+        '<img src="https://avatars.githubusercontent.com/u/1?v=4">',
+      ].join('\n'),
+    }),
+  });
+
+  const state = await readPullRequestState(directory.path, source);
+  expect(state.descriptionAssetUrls).toEqual({
+    [imageId]: image.replace('&amp;', '&'),
+    [videoId]: video,
+  });
+  expect(state.source).toMatchObject({ description });
+  expect(JSON.stringify(state.source)).not.toContain('jwt=');
 });
 
 test('keeps the PR usable when progress lookup fails or belongs to a newer head', async () => {

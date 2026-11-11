@@ -177,7 +177,7 @@ printf '%s' '{}'
 
   const calls = (await readFile(callsPath, 'utf8')).trim().split('\n');
   expect(calls).toEqual([
-    'api repos/nkzw-tech/codiff/pulls/12 | ',
+    'api -H Accept: application/vnd.github.full+json repos/nkzw-tech/codiff/pulls/12 | ',
     'api -X POST repos/nkzw-tech/codiff/pulls/12/reviews --input - | ' +
       '{"body":"General feedback.","comments":[],"event":"COMMENT"}',
   ]);
