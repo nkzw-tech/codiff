@@ -3,9 +3,9 @@
  */
 
 import { act } from 'react';
-import { expect, test } from 'vite-plus/test';
+import { expect, test, vi } from 'vite-plus/test';
 import { PullRequestSourceDescription } from '../app/components/ReviewCodeView.tsx';
-import { resolveGitHubAssetUrls } from '../lib/markdown.tsx';
+import { embedGitHubAttachments } from '../lib/github-attachments.ts';
 import type { ReviewSource } from '../types.ts';
 import { renderReact, waitFor } from './helpers/react.tsx';
 
@@ -17,33 +17,33 @@ const signedVideoUrl = `https://private-user-images.githubusercontent.com/1/2-${
 const signedImageUrl = `https://private-user-images.githubusercontent.com/1/3-${imageId}.png?jwt=image-token`;
 const assetUrls = { [imageId]: signedImageUrl, [videoId]: signedVideoUrl };
 
-test('GitHub attachment URLs resolve to signed URLs outside code', () => {
+test('only bare GitHub attachment URLs on their own line become media', () => {
+  const legacyUrl = `https://github.com/owner/repo/assets/42/${videoId.toUpperCase()}`;
+  const unchanged = [
+    `Recording: ${videoUrl}`,
+    `[Download](${videoUrl})`,
+    `<${videoUrl}>`,
+    `![screen](${imageUrl})`,
+    `\`![example](${imageUrl})\``,
+    'https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000000',
+    '',
+    `    ${videoUrl}`,
+    '',
+    '````',
+    '````still code',
+    videoUrl,
+    '````',
+    '',
+    '> ```',
+    `> ${videoUrl}`,
+    '> ```',
+  ];
   expect(
-    resolveGitHubAssetUrls(
-      [
-        videoUrl,
-        `  https://github.com/jitta/mutual-fund/assets/42/${videoId.toUpperCase()}  `,
-        `Recording: ${videoUrl}`,
-        `<img alt="screen" src="${imageUrl}" />`,
-        `![screen](${imageUrl})`,
-        `https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000000`,
-        '```',
-        videoUrl,
-        '```',
-      ].join('\n'),
+    embedGitHubAttachments(
+      [videoUrl, `  ${legacyUrl}  `, '', ...unchanged].join('\n'),
       assetUrls,
     ).split('\n'),
-  ).toEqual([
-    `![](${signedVideoUrl})`,
-    `![](${signedVideoUrl})`,
-    `Recording: ${videoUrl}`,
-    `<img alt="screen" src="${signedImageUrl}" />`,
-    `![screen](${signedImageUrl})`,
-    `https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000000`,
-    '```',
-    videoUrl,
-    '```',
-  ]);
+  ).toEqual([`![](${videoUrl})`, `  ![](${legacyUrl})  `, '', ...unchanged]);
 });
 
 const source = {
@@ -80,4 +80,53 @@ test('PR descriptions play private GitHub attachment videos but edit the origina
   )!;
   expect(editor.textContent).toContain(videoUrl);
   expect(editor.textContent).not.toContain('jwt=');
+});
+
+test('PR descriptions resolve only complete media sources and preserve links and code', async () => {
+  const externalImageUrl = `https://example.invalid/screenshot?src=${imageUrl}`;
+  const requestedImages: Array<string> = [];
+  // jsdom does not load images. Record the requested sources and complete the
+  // load so the preview can render them, without making any network requests.
+  vi.stubGlobal(
+    'Image',
+    class {
+      onload?: () => void;
+      set src(value: string) {
+        requestedImages.push(value);
+        queueMicrotask(() => this.onload?.());
+      }
+    },
+  );
+  try {
+    const description = [
+      `    ${videoUrl}`,
+      `[Download](${imageUrl})`,
+      `\`![example](${imageUrl})\``,
+      `![Markdown image](${imageUrl})`,
+      `<img alt="HTML image [1]" src="${imageUrl}" width="80" />`,
+      `![External image](${externalImageUrl})`,
+    ].join('\n\n');
+    await using app = await renderReact(
+      <PullRequestSourceDescription source={{ ...source, description }} />,
+    );
+
+    await waitFor(() => {
+      expect(requestedImages).toContain(externalImageUrl);
+      expect(app.container.querySelector('img[alt="Markdown image"]')?.getAttribute('src')).toBe(
+        signedImageUrl,
+      );
+      const htmlImage = app.container.querySelector('img[alt="HTML image [1]"]');
+      expect(htmlImage?.getAttribute('src')).toBe(signedImageUrl);
+      expect(htmlImage?.getAttribute('width')).toBe('80');
+      expect(app.container.querySelector('img[alt="External image"]')?.getAttribute('src')).toBe(
+        externalImageUrl,
+      );
+    });
+    expect(app.container.querySelector('a')?.getAttribute('href')).toBe(imageUrl);
+    expect(app.container.textContent).toContain(`![example](${imageUrl})`);
+    expect(app.container.querySelector('video')).toBeNull();
+    expect(new Set(requestedImages)).toEqual(new Set([externalImageUrl, signedImageUrl]));
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

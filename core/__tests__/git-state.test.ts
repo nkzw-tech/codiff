@@ -662,6 +662,14 @@ test('createPullRequestSource omits blank GitHub PR descriptions', () => {
   );
 });
 
+test('createPullRequestSource preserves indentation at the start of a GitHub PR description', () => {
+  const code =
+    '    https://github.com/user-attachments/assets/013867d7-8788-4446-9c66-75d6ba74a91a';
+  expect(createPullRequestSource(pullRequestFixture, { body: `\n${code}\n` }).description).toBe(
+    code,
+  );
+});
+
 test('createPullRequestSection renders full contents so pull request diffs can expand context', () => {
   const section = createPullRequestSection(
     pullRequestFixture,

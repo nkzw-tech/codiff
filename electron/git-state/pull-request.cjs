@@ -776,6 +776,7 @@ const readSignedAssetUrls = (bodyHtml) => {
 
 /** @param {PullRequestReference} pullRequest @param {GitHubPullRequestMetadata} metadata @returns {Extract<ReviewSource, {type: 'pull-request'}>} */
 const createPullRequestSource = (pullRequest, metadata) => {
+  const description = metadata.body?.replace(/^(?:[ \t]*\r?\n)+/, '').trimEnd();
   const descriptionAssetUrls = readSignedAssetUrls(metadata.body_html);
   return {
     ...(metadata.user?.login
@@ -787,7 +788,7 @@ const createPullRequestSource = (pullRequest, metadata) => {
           },
         }
       : {}),
-    ...(metadata.body?.trim() ? { description: metadata.body.trim() } : {}),
+    ...(description ? { description } : {}),
     ...(Object.keys(descriptionAssetUrls).length > 0 ? { descriptionAssetUrls } : {}),
     headSha: metadata.head?.sha,
     host: 'github.com',

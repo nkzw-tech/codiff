@@ -129,58 +129,6 @@ export const sanitizeMarkdownImages = (text: string): string =>
     },
   );
 
-const githubAssetUrl =
-  /https:\/\/github\.com\/(?:user-attachments\/assets|[\w.-]+\/[\w.-]+\/assets\/\d+)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/
-    .source;
-const standaloneGitHubAssetPattern = new RegExp(`^\\s*${githubAssetUrl}\\s*$`, 'i');
-const embeddedGitHubAssetPattern = new RegExp(
-  `(\\]\\(|\\bsrc\\s*=\\s*["']?)(${githubAssetUrl})`,
-  'gi',
-);
-const codeFencePattern = /^ {0,3}(`{3,}|~{3,})/;
-
-// GitHub embeds an attachment URL that sits alone on a line as an image or video, and private
-// attachments only load through the signed URLs from the rendered HTML.
-export const resolveGitHubAssetUrls = (
-  text: string,
-  assetUrls: Readonly<Record<string, string>> | undefined,
-): string => {
-  if (!assetUrls) {
-    return text;
-  }
-
-  let fenceMarker: string | null = null;
-
-  return text
-    .split('\n')
-    .map((line) => {
-      const marker = codeFencePattern.exec(line)?.[1];
-      if (fenceMarker) {
-        if (marker && marker[0] === fenceMarker[0] && marker.length >= fenceMarker.length) {
-          fenceMarker = null;
-        }
-        return line;
-      }
-      if (marker) {
-        fenceMarker = marker;
-        return line;
-      }
-
-      const standaloneId = standaloneGitHubAssetPattern.exec(line)?.[1];
-      if (standaloneId) {
-        const signedUrl = assetUrls[standaloneId.toLowerCase()];
-        return signedUrl ? `![](${signedUrl})` : line;
-      }
-
-      return line.replaceAll(
-        embeddedGitHubAssetPattern,
-        (_match, prefix: string, url: string, id: string) =>
-          prefix + (assetUrls[id.toLowerCase()] ?? url),
-      );
-    })
-    .join('\n');
-};
-
 const findMarkdownLinkClose = (text: string, startIndex: number) => {
   let depth = 0;
 
