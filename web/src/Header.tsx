@@ -1,5 +1,6 @@
 import { Menu } from '@base-ui/react/menu';
 import { CaretDownIcon as CaretDown } from '@phosphor-icons/react/CaretDown';
+import { Link } from '@void/react';
 import { useEffect, useState } from 'react';
 import { auth } from 'void/client/react';
 import icon from './assets/icon.webp';
@@ -65,10 +66,10 @@ export default function Header() {
   return (
     <header className="codiff-web-header">
       <div className="codiff-web-header-inner">
-        <a className="codiff-web-brand" href="/">
+        <Link className="codiff-web-brand" href="/">
           <img alt="" className="codiff-web-brand-icon" draggable={false} src={icon} />
           <span>Codiff</span>
-        </a>
+        </Link>
         {isPending ? (
           <div aria-hidden className="codiff-web-header-spacer">
             <SignInButton />

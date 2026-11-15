@@ -2148,7 +2148,8 @@ function StatefulReviewCommentHarness({
 }
 
 test('pointer-driven comment blurs preserve each newly focused editor across repeated moves', async () => {
-  vi.useFakeTimers();
+  // Keep jsdom's animation-frame scheduler alive across this timeout-only test.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   using _timers = {
     [Symbol.dispose]() {
       vi.useRealTimers();

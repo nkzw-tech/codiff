@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from 'react';
+import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vite-plus/test';
 
@@ -11,15 +11,13 @@ const auth = vi.hoisted(() => ({
   signOut: vi.fn(),
   useSession: vi.fn(),
 }));
-const router = vi.hoisted(() => ({ path: '/' }));
+const params = vi.hoisted(() => ({ code: 'share-code', slug: 'shared-slug' }));
 const suspendedPage = vi.hoisted(() => new Promise<never>(() => {}));
 
 vi.mock('void/client/react', () => ({ auth }));
 vi.mock('@void/react', () => ({
-  useRouter: () => ({
-    path: router.path,
-    query: new URLSearchParams(),
-  }),
+  Link: (props: ComponentProps<'a'>) => <a {...props} />,
+  useParams: () => params,
 }));
 vi.mock('./sharing/ConnectPage.tsx', () => ({
   default: () => {
@@ -40,7 +38,12 @@ vi.mock('./sharing/WalkthroughPage.tsx', () => ({
   },
 }));
 
+import ConnectRoute from '../pages/connect/[code].tsx';
+import PlanRoute from '../pages/p/[slug].tsx';
+import StatsRoute from '../pages/stats.tsx';
+import WalkthroughRoute from '../pages/w/[slug].tsx';
 import App from './App.tsx';
+import PageSuspense from './PageSuspense.tsx';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -59,7 +62,6 @@ beforeEach(() => {
     }
   ).IS_REACT_ACT_ENVIRONMENT = true;
   window.history.replaceState({}, '', '/?source=homepage#guide');
-  router.path = '/';
   container = document.createElement('div');
   document.body.append(container);
   root = createRoot(container);
@@ -74,13 +76,18 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-test.each(['/p/shared-plan', '/w/shared-walkthrough', '/connect/share-code'])(
+test.each([PlanRoute, WalkthroughRoute, ConnectRoute])(
   'uses the shared Thinking state while loading %s',
-  async (path) => {
-    router.path = path;
+  async (Page) => {
     auth.useSession.mockReturnValue({ data: null, isPending: false });
 
-    await act(async () => root.render(<App />));
+    await act(async () =>
+      root.render(
+        <PageSuspense>
+          <Page />
+        </PageSuspense>,
+      ),
+    );
 
     const loading = container.querySelector('[role="status"]');
     expect(loading?.textContent).toBe('Thinking…');
@@ -90,10 +97,9 @@ test.each(['/p/shared-plan', '/w/shared-walkthrough', '/connect/share-code'])(
 );
 
 test('renders stats inside the standard public shell and header', async () => {
-  router.path = '/stats';
   auth.useSession.mockReturnValue({ data: null, isPending: false });
 
-  await act(async () => root.render(<App />));
+  await act(async () => root.render(<StatsRoute />));
 
   expect(container.querySelector('.codiff-web-shell')).not.toBeNull();
   expect(container.querySelector('.codiff-web-header')).not.toBeNull();

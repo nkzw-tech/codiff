@@ -364,7 +364,7 @@ test("rendered diagrams offer GitHub's zoom and pan controls plus source and cop
   ]) {
     getButton(view.container, label);
   }
-  expect(getTransform(view.container)).toBe('translate(0px, 0px) scale(1)');
+  expect(getTransform(view.container)).toBe('translate(0px) scale(1)');
 });
 
 test('diagram buttons zoom, pan, and reset the view', async () => {
@@ -372,10 +372,10 @@ test('diagram buttons zoom, pan, and reset the view', async () => {
   const { container } = view;
 
   await click(getButton(container, 'Zoom in'));
-  expect(getTransform(container)).toBe('translate(0px, 0px) scale(1.25)');
+  expect(getTransform(container)).toBe('translate(0px) scale(1.25)');
   await click(getButton(container, 'Reset view'));
   await click(getButton(container, 'Zoom out'));
-  expect(getTransform(container)).toBe('translate(0px, 0px) scale(0.8)');
+  expect(getTransform(container)).toBe('translate(0px) scale(0.8)');
   await click(getButton(container, 'Reset view'));
 
   await click(getButton(container, 'Pan up'));
@@ -383,13 +383,13 @@ test('diagram buttons zoom, pan, and reset the view', async () => {
   await click(getButton(container, 'Pan left'));
   expect(getTransform(container)).toBe('translate(100px, 100px) scale(1)');
   await click(getButton(container, 'Pan down'));
-  expect(getTransform(container)).toBe('translate(100px, 0px) scale(1)');
+  expect(getTransform(container)).toBe('translate(100px) scale(1)');
   await click(getButton(container, 'Pan right'));
   await click(getButton(container, 'Pan right'));
-  expect(getTransform(container)).toBe('translate(-100px, 0px) scale(1)');
+  expect(getTransform(container)).toBe('translate(-100px) scale(1)');
 
   await click(getButton(container, 'Reset view'));
-  expect(getTransform(container)).toBe('translate(0px, 0px) scale(1)');
+  expect(getTransform(container)).toBe('translate(0px) scale(1)');
 });
 
 test('modifier scrolling zooms the diagram while plain scrolling is left alone', async () => {
@@ -399,7 +399,7 @@ test('modifier scrolling zooms the diagram while plain scrolling is left alone',
   const plain = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -500 });
   await dispatch(viewport, plain);
   expect(plain.defaultPrevented).toBe(false);
-  expect(getTransform(view.container)).toBe('translate(0px, 0px) scale(1)');
+  expect(getTransform(view.container)).toBe('translate(0px) scale(1)');
 
   const command = new WheelEvent('wheel', {
     bubbles: true,
@@ -409,7 +409,7 @@ test('modifier scrolling zooms the diagram while plain scrolling is left alone',
   });
   await dispatch(viewport, command);
   expect(command.defaultPrevented).toBe(true);
-  expect(getTransform(view.container)).toBe('translate(0px, 0px) scale(2)');
+  expect(getTransform(view.container)).toBe('translate(0px) scale(2)');
 
   const pinch = new WheelEvent('wheel', {
     bubbles: true,
@@ -419,7 +419,7 @@ test('modifier scrolling zooms the diagram while plain scrolling is left alone',
   });
   await dispatch(viewport, pinch);
   expect(pinch.defaultPrevented).toBe(true);
-  expect(getTransform(view.container)).toBe('translate(0px, 0px) scale(1)');
+  expect(getTransform(view.container)).toBe('translate(0px) scale(1)');
 });
 
 test('dragging pans the diagram and double-clicking resets it', async () => {
@@ -427,7 +427,7 @@ test('dragging pans the diagram and double-clicking resets it', async () => {
   const viewport = view.container.querySelector('.codiff-mermaid-viewport')!;
   await dispatch(viewport, pointer('pointerdown', 10, 10, 2));
   await dispatch(viewport, pointer('pointermove', 40, 30));
-  expect(getTransform(view.container)).toBe('translate(0px, 0px) scale(1)');
+  expect(getTransform(view.container)).toBe('translate(0px) scale(1)');
 
   await dispatch(viewport, pointer('pointerdown', 10, 10));
   await dispatch(viewport, pointer('pointermove', 25, 20));
@@ -437,7 +437,7 @@ test('dragging pans the diagram and double-clicking resets it', async () => {
   expect(getTransform(view.container)).toBe('translate(30px, 20px) scale(1)');
 
   await dispatch(viewport, new MouseEvent('dblclick', { bubbles: true }));
-  expect(getTransform(view.container)).toBe('translate(0px, 0px) scale(1)');
+  expect(getTransform(view.container)).toBe('translate(0px) scale(1)');
 });
 
 test('diagrams copy their Mermaid code and toggle to the source', async () => {

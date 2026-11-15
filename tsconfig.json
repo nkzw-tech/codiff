@@ -20,5 +20,5 @@
     "types": ["vite-plus/client"]
   },
   "exclude": ["core/node_modules", "dist", "node_modules", "out"],
-  "include": ["web/.fate/*.ts", "**/*.cjs", "**/*.ts", "**/*.tsx"]
+  "include": ["web/.fate/*.ts", "web/.void/*.d.ts", "**/*.cjs", "**/*.ts", "**/*.tsx"]
 }

@@ -1,4 +1,4 @@
-import { computed, dataView, type Entity, FateRequestError, field, list } from '@nkzw/fate/server';
+import { dataView, type Entity, FateRequestError, field, list, memo } from '@nkzw/fate/server';
 import type {
   PlanRow,
   ShareCommentMessageRow,
@@ -54,7 +54,7 @@ const canManageShare = <
     sharedByUserId: null | string;
   },
 >() =>
-  computed<Row, boolean, PermissionContext>({
+  memo<Row, boolean, PermissionContext>({
     resolve: async (_record, values, context) =>
       Boolean(
         values.sharedByUserId &&
@@ -67,7 +67,7 @@ const canManageShare = <
   });
 
 const canEditShareComment = () =>
-  computed<ShareCommentMessageRow, boolean, PermissionContext>({
+  memo<ShareCommentMessageRow, boolean, PermissionContext>({
     resolve: async (_record, values, context) =>
       Boolean(
         values.authorUserId &&
@@ -89,7 +89,7 @@ const protectedUploadIntentField = <
 >(
   fieldName: FieldName,
 ) =>
-  computed<UploadIntentRow, UploadIntentRow[FieldName], { request: Request }>({
+  memo<UploadIntentRow, UploadIntentRow[FieldName], { request: Request }>({
     resolve: async (_intent, values, context) => {
       const secret = context?.request.headers.get(uploadIntentSecretHeader);
       if (!secret || values.secretHash !== (await sha256(secret))) {

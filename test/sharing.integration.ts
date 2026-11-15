@@ -104,6 +104,23 @@ afterAll(async () => {
   await server.dispose();
 });
 
+test.each(['/', '/stats', '/p/shared-plan', '/w/shared-walkthrough', '/connect/share-code'])(
+  'serves the client-rendered page and shared head at %s',
+  async (path) => {
+    const response = await SELF.fetch(`${origin}${path}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<title>Codiff</title>');
+    expect(html).toContain('lang="en"');
+    expect(html).toContain('/apple-touch-icon.png');
+  },
+);
+
+test('returns 404 for unknown pages instead of rendering the home page', async () => {
+  const response = await SELF.fetch(`${origin}/statss`);
+  expect(response.status).toBe(404);
+});
+
 const planSnapshot = {
   codiffVersion: '1.8.0',
   document: {

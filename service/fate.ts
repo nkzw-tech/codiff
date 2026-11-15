@@ -566,6 +566,9 @@ export const createSharingFateServer = ({
 }: CreateSharingFateServerOptions) => {
   const sources = createDrizzleSourceAdapter<SharingFateContext>({
     db: ({ db: database }) => database,
+    // D1 allows six concurrent connections. Leave nestedPaginationBatching off: Fate 2.2's
+    // grouped queries can exceed D1's limit of 100 bound parameters.
+    nestedPaginationConcurrency: 6,
     schema,
     views: databaseViews,
   });

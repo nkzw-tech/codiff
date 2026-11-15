@@ -1,9 +1,9 @@
 import '@nkzw/codiff-core/styles.css';
 import '../src/styles.css';
-import { StrictMode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 import { FateClient } from 'react-fate';
 import { createFateClient } from 'react-fate/client';
-import App from '../src/App.tsx';
+import PageSuspense from '../src/PageSuspense.tsx';
 
 const fate = createFateClient({
   headers: () => {
@@ -16,11 +16,11 @@ const fate = createFateClient({
   },
 });
 
-export default function CodiffPage() {
+export default function Layout({ children }: { children: ReactNode }) {
   return (
     <StrictMode>
       <FateClient client={fate}>
-        <App />
+        <PageSuspense>{children}</PageSuspense>
       </FateClient>
     </StrictMode>
   );

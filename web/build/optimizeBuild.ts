@@ -28,15 +28,15 @@ export const optimizeBuild = async (distDir: string, assetsDir: string) => {
     `/${assetsDir}/*\n  Cache-Control: public, max-age=31536000, immutable\n`,
   );
 
-  // Void preloads static entry imports, while the page is a dynamic import. Add pages to the
-  // manifest's import list so their chunks and dependencies download alongside the entry.
+  // Preload the shared layout alongside the entry. Pages have their own chunks; preloading
+  // all of them would download the plan and walkthrough viewers even on the home page.
   const manifest: Record<string, ManifestEntry> = JSON.parse(await readFile(manifestPath, 'utf8'));
   const entryId = 'virtual:void-pages-client';
   const entry = manifest[entryId];
-  const pages = entry?.dynamicImports?.filter((id) => id.startsWith('pages/')) ?? [];
-  if (pages.length === 0) {
-    throw new Error(`No page chunks found under ${entryId} in ${manifestPath}.`);
+  const layouts = entry?.dynamicImports?.filter((id) => id === 'pages/layout.tsx') ?? [];
+  if (layouts.length === 0) {
+    throw new Error(`No layout chunk found under ${entryId} in ${manifestPath}.`);
   }
-  entry.imports = [...new Set([...(entry.imports ?? []), ...pages])];
+  entry.imports = [...new Set([...(entry.imports ?? []), ...layouts])];
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 };

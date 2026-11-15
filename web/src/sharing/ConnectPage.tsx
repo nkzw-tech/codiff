@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { type ViewRef, useFateClient, useLiveView, useRequest, view } from 'react-fate';
 import { auth } from 'void/client/react';
+import { routeUrl } from 'void/routes';
 import { errorMessage, signInWithGitHub, usePageTitle } from './utils.ts';
 
 const UploadIntentView = view<UploadIntent>()({
@@ -54,7 +55,9 @@ const IntentStatus = ({
   useEffect(() => {
     if (intent.status === 'uploaded' && intent.walkthroughSlug) {
       window.location.replace(
-        `/${intent.shareKind === 'plan' ? 'p' : 'w'}/${encodeURIComponent(intent.walkthroughSlug)}`,
+        routeUrl(intent.shareKind === 'plan' ? '/p/[slug]' : '/w/[slug]', {
+          params: { slug: intent.walkthroughSlug },
+        }),
       );
     }
   }, [intent.shareKind, intent.status, intent.walkthroughSlug]);

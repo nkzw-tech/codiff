@@ -466,13 +466,9 @@ exit 1
     const body = uploadedBody as unknown as UploadedBody;
     const codexArgs = (await readFile(codexArgsPath, 'utf8')).trimEnd().split('\n');
     expect(codexArgs[codexArgs.indexOf('-m') + 1]).toBe('gpt-6.1-sol');
-    if (reasoningEffort) {
-      expect(codexArgs[codexArgs.indexOf('-c') + 1]).toBe(
-        `model_reasoning_effort="${reasoningEffort}"`,
-      );
-    } else {
-      expect(codexArgs).not.toContain('-c');
-    }
+    expect(codexArgs[codexArgs.indexOf('-c') + 1]).toBe(
+      `model_reasoning_effort="${reasoningEffort || 'low'}"`,
+    );
     expect(stderr).toBe('');
     expect(stdout).toBe(`${origin}/w/generated-walkthrough\n`);
     expect(body.snapshot.repository).toMatchObject({

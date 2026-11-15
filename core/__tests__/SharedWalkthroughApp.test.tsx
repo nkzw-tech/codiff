@@ -281,8 +281,8 @@ test.each([
 });
 
 test.each([
-  { columns: '292px 0 minmax(0, 1fr)', position: 'left' },
-  { columns: 'minmax(0, 1fr) 0 292px', position: 'right' },
+  { columns: '292px 0px minmax(0px, 1fr)', position: 'left' },
+  { columns: 'minmax(0px, 1fr) 0px 292px', position: 'right' },
 ] as const)('$position review surface layout', async (testCase) => {
   window.localStorage.clear();
   await using view = await renderReact(

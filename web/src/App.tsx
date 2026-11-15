@@ -1,20 +1,7 @@
-import { Button, Thinking } from '@nkzw/codiff-core/react';
+import { Button } from '@nkzw/codiff-core/react';
 import { GithubLogoIcon as GithubLogo } from '@phosphor-icons/react/GithubLogo';
-import { useRouter } from '@void/react';
-import { lazy, Suspense } from 'react';
 import Header from './Header.tsx';
 import HomeGuide from './HomeGuide.tsx';
-
-const ConnectPage = lazy(() => import('./sharing/ConnectPage.tsx'));
-const PlanPage = lazy(() => import('./sharing/PlanPage.tsx'));
-const StatsPage = lazy(() => import('./sharing/StatsPage.tsx'));
-const WalkthroughPage = lazy(() => import('./sharing/WalkthroughPage.tsx'));
-
-const PageThinking = () => (
-  <div className="codiff-web-page-thinking">
-    <Thinking />
-  </div>
-);
 
 const NakazawaTechLogo = () => (
   <svg
@@ -133,43 +120,6 @@ const NakazawaTechLogo = () => (
 );
 
 export default function App() {
-  const router = useRouter();
-  const connect = /^\/connect\/([^/]+)\/?$/.exec(router.path);
-  const plan = /^\/p\/([^/]+)\/?$/.exec(router.path);
-  const walkthrough = /^\/w\/([^/]+)\/?$/.exec(router.path);
-
-  if (plan) {
-    return (
-      <Suspense fallback={<PageThinking />}>
-        <PlanPage slug={decodeURIComponent(plan[1])} />
-      </Suspense>
-    );
-  }
-  if (walkthrough) {
-    return (
-      <Suspense fallback={<PageThinking />}>
-        <WalkthroughPage slug={decodeURIComponent(walkthrough[1])} />
-      </Suspense>
-    );
-  }
-  if (connect) {
-    return (
-      <Suspense fallback={<PageThinking />}>
-        <ConnectPage code={decodeURIComponent(connect[1])} />
-      </Suspense>
-    );
-  }
-  if (router.path === '/stats' || router.path === '/stats/') {
-    return (
-      <div className="codiff-web-shell">
-        <Header />
-        <Suspense fallback={<PageThinking />}>
-          <StatsPage />
-        </Suspense>
-      </div>
-    );
-  }
-
   return (
     <div className="codiff-web-shell">
       <Header />

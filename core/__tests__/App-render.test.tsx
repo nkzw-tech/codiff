@@ -539,7 +539,7 @@ test('desktop app places the sidebar on the configured side', async () => {
   await waitFor(() => {
     const shell = app.container.querySelector<HTMLElement>('.app-shell');
     expect(shell?.dataset.sidebarPosition).toBe('right');
-    expect(shell?.style.gridTemplateColumns).toBe('minmax(0, 1fr) 0 292px');
+    expect(shell?.style.gridTemplateColumns).toBe('minmax(0px, 1fr) 0px 292px');
   });
 });
 

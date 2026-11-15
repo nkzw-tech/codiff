@@ -1,1 +1,1 @@
-export { head } from './[...].server.ts';
+export const ssr = false;
