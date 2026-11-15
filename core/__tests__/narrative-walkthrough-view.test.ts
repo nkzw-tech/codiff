@@ -1,3 +1,4 @@
+import { DiffHunksRenderer } from '@pierre/diffs';
 import { expect, test } from 'vite-plus/test';
 import {
   getWalkthroughBlockScrollTarget,
@@ -893,6 +894,83 @@ test('focusChangedFileForHunks renders only the matching hunk', () => {
   const parsed = parseSectionDiffWithOptions(focused!, focused!.sections[0], false);
   expect(parsed.hunks).toHaveLength(1);
   expect(parsed.hunks[0].additionStart).toBe(1);
+});
+
+test('pull request walkthrough context expands up to an omitted hunk on either side', async () => {
+  const path = 'example.txt';
+  const oldLines = Array.from({ length: 36 }, (_, index) => `context-line-${index + 1}\n`);
+  const newLines = [...oldLines];
+  newLines[4] = 'first-selected-change\n';
+  newLines[25] = 'last-selected-change\n';
+  newLines.splice(16, 0, 'omitted-change\n');
+  const section = {
+    binary: false,
+    id: `${path}:pull-request:12`,
+    kind: 'pull-request',
+    loadState: 'ready',
+    newFile: { contents: newLines.join(''), name: path },
+    oldFile: { contents: oldLines.join(''), name: path },
+    patch: [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      '@@ -5 +5 @@',
+      '-context-line-5',
+      '+first-selected-change',
+      '@@ -16,0 +17 @@',
+      '+omitted-change',
+      '@@ -26 +27 @@',
+      '-context-line-26',
+      '+last-selected-change',
+      '',
+    ].join('\n'),
+  } satisfies ChangedFile['sections'][number];
+  const file = {
+    fingerprint: 'pr-context',
+    path,
+    sections: [section],
+    status: 'modified',
+  } satisfies ChangedFile;
+  const hunks = [1, 3].map((ordinal) =>
+    hunk({
+      added: 1,
+      deleted: 1,
+      display: path,
+      id: `${section.id}:h${ordinal}`,
+      path,
+      sectionId: section.id,
+      status: file.status,
+    }),
+  );
+  const runs = resolveWalkthroughHunkRuns(group({ hunks, id: 'pr-context' }), [file]);
+  expect(runs.map((run) => run.hunks)).toEqual([[hunks[0]], [hunks[1]]]);
+
+  const [before, after] = await Promise.all(
+    runs.map(async (run) => {
+      const focused = focusChangedFileForHunks(file, section, run.hunks)!;
+      const diff = parseSectionDiffWithOptions(focused, focused.sections[0], true);
+      const renderer = new DiffHunksRenderer({ diffStyle: 'split', lineDiffType: 'none' });
+      try {
+        const collapsed = renderer.renderFullHTML(await renderer.asyncRender(diff));
+        expect(collapsed).not.toContain('context-line-15');
+        expect(collapsed).not.toContain('context-line-18');
+        renderer.expandHunk(0, 'both', 50);
+        renderer.expandHunk(1, 'both', 50);
+        return renderer.renderFullHTML(await renderer.asyncRender(diff));
+      } finally {
+        renderer.cleanUp();
+      }
+    }),
+  );
+  expect(before).toContain('first-selected-change');
+  expect(before).toContain('context-line-16');
+  expect(before).not.toContain('context-line-17');
+  expect(before).not.toContain('omitted-change');
+  expect(after).toContain('last-selected-change');
+  expect(after).toContain('context-line-17');
+  expect(after).not.toContain('context-line-16');
+  expect(after).not.toContain('omitted-change');
+  expect(after).toMatch(/data-line="27"[^>]*><span>last-selected-change/);
 });
 
 test('focusChangedFileForHunks renders selected hunks in agent order', () => {

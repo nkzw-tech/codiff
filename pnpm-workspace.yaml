@@ -40,6 +40,7 @@ overrides:
   extract-zip>yauzl: ^3.4.0
   vite@*: 'catalog:'
 patchedDependencies:
+  '@pierre/diffs@1.6.4': patches/@pierre__diffs@1.6.4.patch
   native-keymap@3.3.9: patches/native-keymap@3.3.9.patch
 peerDependencyRules:
   allowAny:
