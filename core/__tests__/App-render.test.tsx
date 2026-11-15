@@ -26,6 +26,34 @@ import type {
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, setInputValue, waitFor } from './helpers/react.tsx';
 
+const codeViewSpy = vi.hoisted(() => ({
+  items: [] as ReadonlyArray<{ fileDiff?: unknown; type: string }>,
+  loadDiffFiles: undefined as ((fileDiff: unknown) => Promise<unknown>) | undefined,
+}));
+
+// Passes through to the real CodeView and records what App hands it, so a test can call the
+// `loadDiffFiles` option that @pierre/diffs invokes when a hunk expand arrow is clicked.
+vi.mock('@pierre/diffs/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pierre/diffs/react')>();
+  const { createElement, forwardRef } = await import('react');
+  return {
+    ...actual,
+    CodeView: forwardRef(function SpiedCodeView(
+      props: {
+        items: ReadonlyArray<{ fileDiff?: unknown; type: string }>;
+        options?: { loadDiffFiles?: (fileDiff: unknown) => Promise<unknown> };
+      },
+      ref,
+    ) {
+      if (props.items.some((item) => item.type === 'diff')) {
+        codeViewSpy.items = props.items;
+        codeViewSpy.loadDiffFiles = props.options?.loadDiffFiles;
+      }
+      return createElement(actual.CodeView as never, { ...props, ref });
+    }),
+  };
+});
+
 const reactActEnvironment = globalThis as typeof globalThis & {
   ResizeObserver?: typeof ResizeObserver;
   Worker?: typeof Worker;
@@ -1944,6 +1972,94 @@ test('narrative walkthrough stops show pull request descriptions once', async ()
   expect(app.container.querySelectorAll('.source-description-markdown')).toHaveLength(1);
   expect(app.container.textContent).toContain('Keep context visible in walkthrough');
   expect(app.container.textContent).toContain('Keep the PR context visible.');
+});
+
+test('walkthrough hunk expansion serves pull request contents from app state', async () => {
+  codeViewSpy.items = [];
+  codeViewSpy.loadDiffFiles = undefined;
+  const path = 'src/app.ts';
+  const base = createChangedFile(path, { kind: 'pull-request' });
+  const section = {
+    ...base.sections[0]!,
+    loadState: 'ready' as const,
+    newFile: { contents: 'new\n', name: path },
+    oldFile: { contents: 'old\n', name: path },
+  };
+  const source = {
+    number: 12,
+    provider: 'github',
+    title: 'Expand hunks',
+    type: 'pull-request',
+    url: 'https://github.com/nkzw-tech/codiff/pull/12',
+  } satisfies ReviewSource;
+  const narrativeWalkthrough = {
+    agent: 'codex',
+    chapters: [
+      {
+        blurb: 'Review the implementation.',
+        icon: 'gear',
+        id: 'impl',
+        stops: [
+          {
+            added: 1,
+            deleted: 1,
+            hunkIds: [`${section.id}:h1`],
+            hunks: [
+              {
+                added: 1,
+                anchor: { display: path, sectionId: section.id, side: 'both' },
+                deleted: 1,
+                id: `${section.id}:h1`,
+                path,
+                status: 'modified',
+              },
+            ],
+            id: 's1',
+            importance: 'critical',
+            prose: 'Review this file.',
+            title: 'Implementation path',
+          },
+        ],
+        title: 'Implementation',
+      },
+    ],
+    focus: 'Focus.',
+    generatedAt: '2026-06-07T00:00:00.000Z',
+    kind: 'narrative',
+    repo: { branch: 'main', root: '/repo' },
+    source,
+    support: [],
+    title: 'Narrative',
+    version: 4,
+  } satisfies NarrativeWalkthrough;
+
+  window.codiff = createCodiffMock({
+    getLaunchOptions: vi.fn(async () => ({
+      repositoryPathProvided: true,
+      source,
+      walkthrough: true,
+      walkthroughFile: '/tmp/walkthrough.json',
+    })),
+    getNarrativeWalkthrough: vi.fn(async () => ({
+      status: 'ready' as const,
+      walkthrough: narrativeWalkthrough,
+    })),
+    getRepositoryState: vi.fn(async () => ({
+      ...repositoryState,
+      files: [{ ...base, sections: [section] }],
+      source,
+    })),
+  });
+
+  await using _app = await renderReact(<App />);
+
+  await waitFor(() => expect(codeViewSpy.items.some((item) => item.type === 'diff')).toBe(true));
+  const focusedDiff = codeViewSpy.items.find((item) => item.type === 'diff')!.fileDiff;
+  await expect(codeViewSpy.loadDiffFiles!(focusedDiff)).resolves.toEqual({
+    newFile: section.newFile,
+    oldFile: section.oldFile,
+  });
+  expect(window.codiff.getDiffSectionContent).not.toHaveBeenCalled();
 });
 
 test('narrative walkthrough stops do not repeat commit details', async () => {

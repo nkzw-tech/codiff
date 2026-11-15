@@ -1,0 +1,44 @@
+diff --git a/dist/utils/renderDiffWithHighlighter.js b/dist/utils/renderDiffWithHighlighter.js
+--- a/dist/utils/renderDiffWithHighlighter.js
++++ b/dist/utils/renderDiffWithHighlighter.js
+@@ -22,0 +23,4 @@
++	// A focused diff can start inside the source file while keeping its original line indices.
++	const firstHunk = diff.hunks[0];
++	const preserveLineIndices = isWindowedHighlight || (!diff.isPartial && firstHunk != null &&
++		(firstHunk.additionLineIndex > firstHunk.collapsedBefore || firstHunk.deletionLineIndex > firstHunk.collapsedBefore));
+@@ -45 +49 @@
+-		if (isWindowedHighlight) {
++		if (preserveLineIndices) {
+@@ -121 +125 @@
+-		if (shouldGroupAll) {
++		if (shouldGroupAll && !preserveLineIndices) {
+@@ -134 +138,6 @@
+-		]]) if (segments.length > 0) for (const segment of segments) for (let index = 0; index < segment.count; index++) target[segment.targetIndex + index] = lines[segment.originalOffset + index];
++		]]) if (segments.length > 0) for (const segment of segments) for (let index = 0; index < segment.count; index++) {
++			const sourceIndex = segment.originalOffset + index;
++			const targetIndex = segment.targetIndex + index;
++			if (lazyLineAST) setDeferredArrayItem(target, targetIndex, () => lines[sourceIndex]);
++			else target[targetIndex] = lines[sourceIndex];
++		}
+diff --git a/dist/worker/worker.js b/dist/worker/worker.js
+--- a/dist/worker/worker.js
++++ b/dist/worker/worker.js
+@@ -1591,0 +1592,4 @@
++	// A focused diff can start inside the source file while keeping its original line indices.
++	const firstHunk = diff.hunks[0];
++	const preserveLineIndices = isWindowedHighlight || (!diff.isPartial && firstHunk != null &&
++		(firstHunk.additionLineIndex > firstHunk.collapsedBefore || firstHunk.deletionLineIndex > firstHunk.collapsedBefore));
+@@ -1614 +1618 @@
+-		if (isWindowedHighlight) {
++		if (preserveLineIndices) {
+@@ -1690 +1694 @@
+-		if (shouldGroupAll) {
++		if (shouldGroupAll && !preserveLineIndices) {
+@@ -1703 +1707,6 @@
+-		]]) if (segments.length > 0) for (const segment of segments) for (let index = 0; index < segment.count; index++) target[segment.targetIndex + index] = lines[segment.originalOffset + index];
++		]]) if (segments.length > 0) for (const segment of segments) for (let index = 0; index < segment.count; index++) {
++			const sourceIndex = segment.originalOffset + index;
++			const targetIndex = segment.targetIndex + index;
++			if (lazyLineAST) setDeferredArrayItem(target, targetIndex, () => lines[sourceIndex]);
++			else target[targetIndex] = lines[sourceIndex];
++		}

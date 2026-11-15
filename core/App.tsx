@@ -515,6 +515,13 @@ export default function App({
     async (file: ChangedFile, section: DiffSection): Promise<FileDiffLoadedFiles> => {
       const currentState = stateRef.current;
       if (!currentState || !supportsLazyDiffContent(currentState.source)) {
+        // Walkthrough focusing strips the contents a pull-request section already has.
+        const loaded = currentState?.files
+          .find((candidate) => candidate.path === file.path)
+          ?.sections.find((candidate) => candidate.id === section.id);
+        if (loaded?.newFile) {
+          return { newFile: loaded.newFile, oldFile: loaded.oldFile ?? null };
+        }
         throw new Error(`Cannot load diff contents for '${file.path}'.`);
       }
 

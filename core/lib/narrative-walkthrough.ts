@@ -10,8 +10,9 @@ import type {
   WalkthroughSupportGroup,
   WalkthroughStop,
 } from '../types.ts';
-import { getDiffLineCount, getVisibleDiffSections } from './diff.ts';
+import { getDiffLineCount, getVisibleDiffSections, setFocusedSectionContext } from './diff.ts';
 import {
+  extractPatchHunks,
   filterPatchToHunkIds,
   getHunkOrdinal,
   getSectionWalkthroughHunks,
@@ -400,14 +401,19 @@ export const resolveWalkthroughHunkRuns = (
       : null;
     const ordinal = getHunkOrdinal(resolved.section.id, hunk.id);
     // Pierre's scroll anchors assume source-order hunks within each diff item.
-    // Split backward jumps into separate runs to preserve the narrative order.
+    // Split backward jumps to preserve narrative order and keep omitted PR
+    // hunks between runs so either side can expand its own unchanged context.
     if (
       previous &&
       previous.resolved.file.path === resolved.file.path &&
       previous.resolved.section.id === resolved.section.id &&
       previousOrdinal != null &&
       ordinal != null &&
-      previousOrdinal < ordinal
+      previousOrdinal < ordinal &&
+      (resolved.section.kind !== 'pull-request' ||
+        !resolved.section.oldFile ||
+        !resolved.section.newFile ||
+        ordinal === previousOrdinal + 1)
     ) {
       const hunks = [...previous.hunks, hunk];
       runs[runs.length - 1] = {
@@ -490,23 +496,50 @@ export const focusChangedFileForHunks = (
   }
 
   const signature = focusSignature(section, hunkIds);
+  const focusedSection = {
+    ...section,
+    newFile: undefined,
+    oldFile: undefined,
+    patch: focusedPatch,
+    summary: {
+      ...section.summary,
+      fingerprint: signature,
+      reason: section.summary?.reason ?? 'Focused walkthrough hunk.',
+    },
+  };
+
+  if (section.kind === 'pull-request' && section.oldFile && section.newFile) {
+    const sourceHunks = extractPatchHunks(section.patch);
+    const first = getHunkOrdinal(section.id, hunkIds[0] ?? '');
+    if (
+      first != null &&
+      hunkIds.every((id, index) => getHunkOrdinal(section.id, id) === first + index)
+    ) {
+      const previous = sourceHunks[first - 2];
+      const next = sourceHunks[first + hunkIds.length - 1];
+      if (previous || next) {
+        setFocusedSectionContext(
+          focusedSection,
+          { newFile: section.newFile, oldFile: section.oldFile },
+          {
+            end: next && {
+              addition: next.additionStart - Number(next.additionCount > 0),
+              deletion: next.deletionStart - Number(next.deletionCount > 0),
+            },
+            start: previous && {
+              addition: previous.additionStart + Math.max(previous.additionCount - 1, 0),
+              deletion: previous.deletionStart + Math.max(previous.deletionCount - 1, 0),
+            },
+          },
+        );
+      }
+    }
+  }
 
   return {
     ...file,
     fingerprint: `${file.fingerprint}:${signature}`,
-    sections: [
-      {
-        ...section,
-        newFile: undefined,
-        oldFile: undefined,
-        patch: focusedPatch,
-        summary: {
-          ...section.summary,
-          fingerprint: signature,
-          reason: section.summary?.reason ?? 'Focused walkthrough hunk.',
-        },
-      },
-    ],
+    sections: [focusedSection],
   };
 };
 

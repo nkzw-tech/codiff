@@ -49,6 +49,75 @@ const getLoadedContentsKey = (file: ChangedFile, section: DiffSection) =>
 const loadedSectionContents = new Map<string, FileDiffLoadedFiles>();
 const pendingSectionLoads = new Map<string, Promise<FileDiffLoadedFiles>>();
 
+type DiffContextBoundary = {
+  addition: number;
+  deletion: number;
+};
+
+type DiffContextBounds = {
+  end?: DiffContextBoundary;
+  start?: DiffContextBoundary;
+};
+
+const focusedSectionContext = new WeakMap<
+  DiffSection,
+  { bounds: DiffContextBounds; files: FileDiffLoadedFiles }
+>();
+
+export const setFocusedSectionContext = (
+  section: DiffSection,
+  files: FileDiffLoadedFiles,
+  bounds: DiffContextBounds,
+) => {
+  focusedSectionContext.set(section, { bounds, files });
+};
+
+// Keep source line numbers and file indices while restricting the collapsed
+// rows to the unchanged context between this run and its neighboring hunks.
+const hydrateFocusedDiff = (
+  partial: FileDiffMetadata,
+  { bounds, files }: { bounds: DiffContextBounds; files: FileDiffLoadedFiles },
+): FileDiffMetadata => {
+  const diff = hydratePartialDiff('merge', partial, files);
+  const first = diff.hunks[0];
+  const last = diff.hunks.at(-1);
+  if (!first || !last) {
+    return diff;
+  }
+
+  const availableBefore = bounds.start
+    ? Math.max(
+        0,
+        Math.min(
+          first.collapsedBefore - bounds.start.addition,
+          first.deletionStart - Number(first.deletionCount > 0) - bounds.start.deletion,
+        ),
+      )
+    : first.collapsedBefore;
+  const hiddenBefore = first.collapsedBefore - availableBefore;
+  first.collapsedBefore = availableBefore;
+  for (const hunk of diff.hunks) {
+    hunk.splitLineStart -= hiddenBefore;
+    hunk.unifiedLineStart -= hiddenBefore;
+  }
+
+  const additionEnd = last.additionStart + Math.max(last.additionCount - 1, 0);
+  const deletionEnd = last.deletionStart + Math.max(last.deletionCount - 1, 0);
+  const availableAfter = Math.max(
+    0,
+    Math.min(
+      Math.min(diff.additionLines.length, bounds.end?.addition ?? Infinity) - additionEnd,
+      Math.min(diff.deletionLines.length, bounds.end?.deletion ?? Infinity) - deletionEnd,
+    ),
+  );
+  const hiddenAfter = Math.max(0, diff.additionLines.length - additionEnd) - availableAfter;
+  diff.additionLines.length = Math.min(diff.additionLines.length, additionEnd + availableAfter);
+  diff.deletionLines.length = Math.min(diff.deletionLines.length, deletionEnd + availableAfter);
+  diff.splitLineCount -= hiddenBefore + hiddenAfter;
+  diff.unifiedLineCount -= hiddenBefore + hiddenAfter;
+  return diff;
+};
+
 const fileDiffSectionLookup = new WeakMap<
   FileDiffMetadata,
   { file: ChangedFile; section: DiffSection }
@@ -326,9 +395,15 @@ export const parseSectionDiffWithOptions = (
     const parsedFileDiff = parsePatchFiles(section.patch, { cacheKeyPrefix: cacheKey })[0]
       ?.files[0];
     if (parsedFileDiff) {
+      const context = focusedSectionContext.get(section);
       const loaded = parsedFileDiff.isPartial ? getLoadedSectionContents(file, section) : undefined;
       let hydrated: FileDiffMetadata | null = null;
-      if (loaded) {
+      if (
+        context &&
+        (parsedFileDiff.type === 'change' || parsedFileDiff.type === 'rename-changed')
+      ) {
+        hydrated = hydrateFocusedDiff({ ...parsedFileDiff, cacheKey }, context);
+      } else if (loaded) {
         try {
           // A fresh parse under a new cache key (e.g. a whitespace toggle)
           // starts partial again even though contents were already fetched.
