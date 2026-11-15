@@ -10,6 +10,7 @@ const {
   parseJSONMessage,
   truncate,
 } = require('./agent-shared.cjs');
+const { getOpenAIModelReasoningEffort } = require('./codex.cjs');
 const {
   AGENTS,
   CHANGE_TYPES,
@@ -781,7 +782,7 @@ const getWalkthroughSize = (state) => ({
 });
 
 /**
- * Use the compatibility model for large default-Codex walkthroughs. Explicit
+ * Use the stronger fallback model for large default-Codex walkthroughs. Explicit
  * model or effort selections and non-Codex backends keep their configured model.
  *
  * @param {RepositoryState} state
@@ -920,6 +921,8 @@ const getNarrativeWalkthroughCacheKey = (
   reasoningEffort,
 ) => {
   const prompt = buildNarrativeWalkthroughPrompt(state, context, agent.label, customPrompt);
+  const codexEffort =
+    agent.id === 'codex' ? getOpenAIModelReasoningEffort(model, reasoningEffort) : undefined;
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -936,9 +939,7 @@ const getNarrativeWalkthroughCacheKey = (
           })),
         })),
         model: agent.normalizeModel(model),
-        ...(agent.id === 'codex' && reasoningEffort?.trim()
-          ? { reasoningEffort: reasoningEffort.trim() }
-          : {}),
+        ...(codexEffort ? { reasoningEffort: codexEffort } : {}),
         prompt,
         responseSchema: narrativeWalkthroughResponseSchema,
         version: WALKTHROUGH_CACHE_KEY_VERSION,

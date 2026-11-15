@@ -70,7 +70,7 @@
         },
         "openAIModel": {
           "type": "string",
-          "default": "gpt-5.6-terra",
+          "default": "gpt-6.1-terra",
           "description": "The OpenAI model to use for review assistance and walkthroughs."
         },
         "openAIReasoningEffort": {

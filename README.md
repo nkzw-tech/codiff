@@ -153,7 +153,7 @@ counts; when it is `false`, Codiff hides those changes from the working-tree rev
     "diffStyle": "split",
     "editorCommand": "",
     "lastRepositoryPath": "",
-    "openAIModel": "gpt-5.6-terra",
+    "openAIModel": "gpt-6.1-terra",
     "openAIReasoningEffort": "",
     "opencodeModel": "opencode-default",
     "sidebarPosition": "left",
@@ -218,11 +218,19 @@ application menu:
 
 The Codex `Model` and `Reasoning Effort` menus load the installed CLI's model catalog in the
 background. They offer its visible models and supported reasoning efforts, including new models
-without a Codiff update. Legacy models omitted from a successful catalog, including GPT-5.5,
-remain configurable by ID; a selected model missing from the catalog appears as a custom choice.
+without a Codiff update. The CLI determines model visibility for its configured account and
+provider. Models omitted from a successful catalog remain configurable by ID; a selected model
+missing from the catalog appears as a custom choice.
 If discovery fails or an older CLI does not support it, the predefined model choices remain
 available, and selecting Codex or changing configuration retries discovery. Custom model IDs in
 `settings.openAIModel` are also accepted.
+
+Codex defaults to GPT-6.1 Terra with medium reasoning. With automatic reasoning selected,
+default walkthroughs of 100 or more reviewable hunks use GPT-6.1 Sol with low reasoning.
+Unavailable models fall back to Terra and then Sol, skipping the model already attempted.
+Saved model selections are preserved; select GPT-6.1 Terra and leave `openAIReasoningEffort`
+empty to adopt the new defaults. A saved GPT-5.5 selection can recover through fallback when
+it is unavailable, since GPT-5.5 has retired from Codex with ChatGPT sign-in.
 
 Set `settings.openAIReasoningEffort` to an effort supported by your selected model, for example
 `"high"` with `settings.openAIModel` set to `"gpt-6.1-sol"`. Selecting a different model in the menu
@@ -230,15 +238,11 @@ resets an explicit effort that the new model does not advertise. Leave the effor
 Codiff's existing defaults for its predefined models and inherit Codex settings for other models.
 An unsupported explicit effort reports an error rather than triggering a model fallback.
 An explicit effort also applies to a fallback model; clear it to use that model's default.
-Walkthrough caches distinguish explicit reasoning efforts, so a new generation request with a
-different effort does not reuse the previous effort's result.
+Walkthrough caches include Codiff's resolved reasoning effort, so a changed model default or
+explicit effort does not reuse the previous effort's result.
 
-Codex walkthroughs still default to GPT-5.6 Terra with low reasoning. GPT-5.6 Sol and Luna use
-medium reasoning unless you override it. If a selected model is unavailable, Codiff retries with
-Terra when applicable and then GPT-5.5, persisting the first model that succeeds unless you changed
-the selection during the run. Walkthroughs with at least 100 reviewable hunks use GPT-5.5 with low
-reasoning when Terra is the configured default and no explicit effort is configured. An explicit
-effort keeps the selected model for these large walkthroughs.
+When a fallback succeeds, Codiff saves that model unless you changed the selection during the
+run. An explicit effort keeps the selected model for large walkthroughs too.
 
 Install the backend you want and verify it is available before using `codiff -w`:
 

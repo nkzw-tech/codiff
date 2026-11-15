@@ -15,8 +15,8 @@ const {
 } = require('./agent-shared.cjs');
 
 const CODEX_TIMEOUT_MS = 90_000;
-const DEFAULT_OPENAI_MODEL = 'gpt-5.6-terra';
-const FALLBACK_OPENAI_MODEL = 'gpt-5.5';
+const DEFAULT_OPENAI_MODEL = 'gpt-6.1-terra';
+const FALLBACK_OPENAI_MODEL = 'gpt-6.1-sol';
 const CODEX_REASONING_EFFORT = 'low';
 const CODEX_MACOS_BLOCKED_MESSAGE =
   'macOS blocked the local Codex CLI. Update Codex CLI from the official OpenAI release, then run `codex --version` and try again.';
@@ -55,24 +55,26 @@ const CODEX_NOT_FOUND_MESSAGE =
 const OPENAI_MODELS = Object.freeze([
   {
     id: DEFAULT_OPENAI_MODEL,
-    label: 'Default: GPT-5.6 Terra',
-  },
-  {
-    id: 'gpt-5.6-sol',
-    label: 'Strong: GPT-5.6 Sol',
-  },
-  {
-    id: 'gpt-5.6-luna',
-    label: 'Fast: GPT-5.6 Luna',
+    label: 'Default: GPT-6.1 Terra',
   },
   {
     id: FALLBACK_OPENAI_MODEL,
-    label: 'Compatibility: GPT-5.5',
+    label: 'Strong: GPT-6.1 Sol',
+  },
+  {
+    id: 'gpt-6-luna',
+    label: 'Fast: GPT-6 Luna',
+  },
+  {
+    id: 'gpt-6-astra',
+    label: 'GPT-6 Astra',
   },
 ]);
 const OPENAI_MODEL_REASONING_EFFORTS = new Map([
-  [DEFAULT_OPENAI_MODEL, CODEX_REASONING_EFFORT],
+  [DEFAULT_OPENAI_MODEL, 'medium'],
   [FALLBACK_OPENAI_MODEL, CODEX_REASONING_EFFORT],
+  ['gpt-5.5', CODEX_REASONING_EFFORT],
+  ['gpt-5.6-terra', CODEX_REASONING_EFFORT],
   ['gpt-5.6-sol', 'medium'],
   ['gpt-5.6-luna', 'medium'],
   ['gpt-6-astra', CODEX_REASONING_EFFORT],
@@ -235,12 +237,7 @@ const getOpenAIModelReasoningEffort = (model, reasoningEffort) =>
 /** @param {unknown} model @param {unknown} [fallbackModel] */
 const getOpenAIModelFallbacks = (model, fallbackModel = FALLBACK_OPENAI_MODEL) => {
   const normalizedModel = normalizeOpenAIModel(model);
-  const candidates = [
-    ...(normalizedModel !== DEFAULT_OPENAI_MODEL && normalizedModel !== FALLBACK_OPENAI_MODEL
-      ? [DEFAULT_OPENAI_MODEL]
-      : []),
-    normalizeOpenAIModel(fallbackModel),
-  ];
+  const candidates = [DEFAULT_OPENAI_MODEL, normalizeOpenAIModel(fallbackModel)];
   return [...new Set(candidates)].filter((candidate) => candidate !== normalizedModel);
 };
 
@@ -839,6 +836,7 @@ module.exports = {
   FALLBACK_OPENAI_MODEL,
   getCodexCommand,
   getCodexInstallPaths,
+  getOpenAIModelReasoningEffort,
   isCodexNotFoundError,
   normalizeOpenAIModel,
   OPENAI_MODELS,

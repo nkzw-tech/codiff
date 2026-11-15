@@ -449,7 +449,7 @@ test.each([
   },
 );
 
-test('uses GPT-5.5 for large walkthroughs only with automatic effort on the default model', () => {
+test('uses GPT-6.1 Sol for large walkthroughs only with automatic effort on the default model', () => {
   const createState = (hunkCount: number) => ({
     branch: 'main',
     files: [
@@ -473,23 +473,23 @@ test('uses GPT-5.5 for large walkthroughs only with automatic effort on the defa
     source: { type: 'working-tree' },
   });
   const codexAgent = {
-    defaultModel: 'gpt-5.6-terra',
-    fallbackModel: 'gpt-5.5',
+    defaultModel: 'gpt-6.1-terra',
+    fallbackModel: 'gpt-6.1-sol',
     id: 'codex',
     normalizeModel: (model: unknown) => String(model),
   };
 
-  expect(resolveNarrativeWalkthroughModel(createState(99), codexAgent, 'gpt-5.6-terra')).toBe(
-    'gpt-5.6-terra',
+  expect(resolveNarrativeWalkthroughModel(createState(99), codexAgent, 'gpt-6.1-terra')).toBe(
+    'gpt-6.1-terra',
   );
-  expect(resolveNarrativeWalkthroughModel(createState(100), codexAgent, 'gpt-5.6-terra')).toBe(
-    'gpt-5.5',
+  expect(resolveNarrativeWalkthroughModel(createState(100), codexAgent, 'gpt-6.1-terra')).toBe(
+    'gpt-6.1-sol',
   );
   expect(
-    resolveNarrativeWalkthroughModel(createState(100), codexAgent, 'gpt-5.6-terra', 'max'),
-  ).toBe('gpt-5.6-terra');
-  expect(resolveNarrativeWalkthroughModel(createState(100), codexAgent, 'gpt-5.6-sol')).toBe(
-    'gpt-5.6-sol',
+    resolveNarrativeWalkthroughModel(createState(100), codexAgent, 'gpt-6.1-terra', 'max'),
+  ).toBe('gpt-6.1-terra');
+  expect(resolveNarrativeWalkthroughModel(createState(100), codexAgent, 'gpt-6-astra')).toBe(
+    'gpt-6-astra',
   );
   expect(
     resolveNarrativeWalkthroughModel(
@@ -671,6 +671,14 @@ test('builds cache keys from semantic generation inputs', () => {
   expect(getNarrativeWalkthroughCacheKey(state, codex, 'gpt-6.1-sol', null, undefined, '')).toBe(
     automatic,
   );
+  expect(automatic).toBe(low);
+  const terraAutomatic = getNarrativeWalkthroughCacheKey(state, codex, 'gpt-6.1-terra', null);
+  expect(
+    getNarrativeWalkthroughCacheKey(state, codex, 'gpt-6.1-terra', null, undefined, 'medium'),
+  ).toBe(terraAutomatic);
+  expect(
+    getNarrativeWalkthroughCacheKey(state, codex, 'gpt-6.1-terra', null, undefined, 'low'),
+  ).not.toBe(terraAutomatic);
   expect(
     getNarrativeWalkthroughCacheKey(state, agent, 'claude-sonnet', null, undefined, 'high'),
   ).toBe(key);

@@ -16,6 +16,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const { getAgent } = require('../electron/agent.cjs');
+const { getOpenAIModelReasoningEffort } = require('../electron/codex.cjs');
 const { readConfig } = require('../electron/config.cjs');
 const { readRepositoryState } = require('../electron/git-state.cjs');
 const {
@@ -42,8 +43,9 @@ for (let index = 0; index < args.length; index += 1) {
 label ||= `run-${Date.now()}`;
 const repetitions = Number(readOption('--repetitions', '2'));
 const caseFilter = readOption('--case', '');
-const effort = readOption('--effort', 'high');
 const productionDefaults = args.includes('--production-defaults');
+const effort = readOption('--effort', productionDefaults ? 'default' : 'high');
+const reasoningEffort = effort === 'default' ? undefined : effort;
 const configuredModel = readConfig().settings.openAIModel;
 const model = readOption(
   '--model',
@@ -55,8 +57,8 @@ const cases = (await readCases()).filter((item) => !caseFilter || item.id === ca
 if (!Number.isInteger(repetitions) || repetitions < 1) {
   throw new Error('--repetitions must be a positive integer.');
 }
-if (!['low', 'medium', 'high'].includes(effort)) {
-  throw new Error('--effort must be low, medium, or high.');
+if (!['default', 'low', 'medium', 'high'].includes(effort)) {
+  throw new Error('--effort must be default, low, medium, or high.');
 }
 if (cases.length === 0) {
   throw new Error(`No eval case matched ${JSON.stringify(caseFilter)}.`);
@@ -133,7 +135,7 @@ for (const evalCase of cases) {
             phase,
           });
         },
-        reasoningEffort: effort,
+        reasoningEffort,
       },
       null,
     );
@@ -151,6 +153,7 @@ for (const evalCase of cases) {
     }
 
     const meta = {
+      actualEffort: getOpenAIModelReasoningEffort(actualModel, reasoningEffort) ?? null,
       actualModel,
       agentMs: agentStartedAt && agentFinishedAt ? roundMs(agentFinishedAt - agentStartedAt) : null,
       commit: evalCase.commit,
