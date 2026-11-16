@@ -745,6 +745,7 @@ const readMergeRequestImageContent = async (launchPath, source, requestedPath) =
 };
 
 module.exports = {
+  glabApi,
   createGitLabPosition,
   createMergeRequestFetchRefspecs,
   listMergeRequestHistory,

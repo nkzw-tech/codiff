@@ -235,6 +235,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     root: '/repo',
   })),
   getRepositoryState: vi.fn(async () => repositoryState),
+  getReviewProjects: vi.fn(async () => []),
   getTerminalHelperStatus: vi.fn(async () => ({
     command: 'codiff',
     installed: true,
@@ -255,6 +256,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     path: '/usr/local/bin/codiff',
   })),
   isWindowFullScreen: vi.fn(async () => false),
+  listReviewRequests: vi.fn(async () => ({ entries: [] })),
   markPlanReady: vi.fn(async () => {}),
   markWindowReady: vi.fn(),
   onConfigChanged: vi.fn(() => () => {}),
@@ -583,7 +585,12 @@ test('stale persisted collapsed sidebar state does not hide the sidebar on launc
   expect(app.container.querySelector('.sidebar [role="tablist"]')).toBeNull();
   const modeControl = topBar?.querySelector('.review-mode-control');
   const modes = modeControl?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [];
-  expect([...modes].map((mode) => mode.textContent)).toEqual(['Walkthrough', 'Tree', 'History']);
+  expect([...modes].map((mode) => mode.textContent)).toEqual([
+    'Walkthrough',
+    'Tree',
+    'History',
+    'PRs',
+  ]);
   const sidebarToggle = topBar?.querySelector<HTMLButtonElement>('.sidebar-toggle-button');
   await act(async () => sidebarToggle?.click());
   expect(app.container.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(
@@ -2525,7 +2532,8 @@ test('plan mode opens the Markdown editor without loading repository state', asy
   });
   expect(container.querySelector('.plan-comment-affordance')).not.toBeNull();
   await act(async () => {
-    commentAffordance.dispatchEvent(
+    const currentAffordance = container.querySelector<HTMLElement>('.plan-comment-affordance')!;
+    currentAffordance.dispatchEvent(
       new MouseEvent('pointerout', {
         bubbles: true,
         relatedTarget: planWorkspace,
@@ -4288,4 +4296,134 @@ test('commit viewed progress synchronizes tree, walkthrough, and uncovered suppo
       'false',
     ]);
   });
+});
+
+test('keeps the review browser usable while opening requests and ignores stale reviews', async () => {
+  const github = {
+    host: 'github.com',
+    id: 'github',
+    path: 'test/repo',
+    provider: 'github',
+    remote: 'origin',
+  } as const;
+  const gitlab = {
+    host: 'gitlab.example.com',
+    id: 'gitlab',
+    path: 'team/repo',
+    provider: 'gitlab',
+    remote: 'upstream',
+  } as const;
+  const first = {
+    number: 1,
+    provider: 'github',
+    title: 'First PR',
+    type: 'pull-request',
+    url: 'https://github.com/test/repo/pull/1',
+  } as const;
+  const second = {
+    ...first,
+    number: 2,
+    title: 'Second PR',
+    url: 'https://github.com/test/repo/pull/2',
+  } as const;
+  const third = {
+    number: 3,
+    provider: 'gitlab',
+    title: 'GitLab MR',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/team/repo/-/merge_requests/3',
+  } as const;
+  const summarize = (source: typeof first | typeof second | typeof third) => ({
+    author: 'reviewer',
+    draft: source.number === 2,
+    source,
+    state: 'open' as const,
+    updatedAt: Date.now(),
+  });
+  const firstReview = Promise.withResolvers<RepositoryState>();
+  const secondReview = {
+    ...repositoryState,
+    files: [],
+    source: second,
+  };
+  const listReviewRequests = vi.fn<Window['codiff']['listReviewRequests']>(
+    async ({ cursor, projectId }) =>
+      projectId === gitlab.id
+        ? { entries: [summarize(third)] }
+        : cursor
+          ? { entries: [summarize(second)] }
+          : { entries: [summarize(first)], nextCursor: 'next' },
+  );
+  window.codiff = createCodiffMock({
+    getRepositoryState: vi.fn(async (source) => {
+      if (source?.type === 'pull-request' && source.number === 1) {
+        return firstReview.promise;
+      }
+      if (source?.type === 'pull-request' && source.number === 3) {
+        throw new Error('Request is no longer accessible.');
+      }
+      return source?.type === 'pull-request' ? secondReview : repositoryState;
+    }),
+    getReviewProjects: vi.fn(async () => [github, gitlab]),
+    listReviewRequests,
+  });
+
+  await using app = await renderReact(<App />);
+  const tab = (label: string) =>
+    [...app.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (button) => button.textContent === label,
+    );
+  const rows = () => [...app.container.querySelectorAll<HTMLButtonElement>('.review-request-row')];
+  await waitFor(() => expect(tab('PRs')).toBeDefined());
+  expect(listReviewRequests).not.toHaveBeenCalled();
+  await act(async () => tab('PRs')!.click());
+  await waitFor(() => expect(rows()).toHaveLength(1));
+  expect(listReviewRequests).toHaveBeenCalledWith(
+    expect.objectContaining({
+      filter: 'open',
+      projectId: github.id,
+      sort: 'updated',
+    }),
+  );
+  await act(async () =>
+    app.container.querySelector<HTMLButtonElement>('.review-requests-more')!.click(),
+  );
+  await waitFor(() => expect(rows()).toHaveLength(2));
+  await act(async () => rows()[0].click());
+  await act(async () => rows()[1].click());
+  await waitFor(() =>
+    expect(app.container.querySelector('.review-top-bar-source-label')?.textContent).toBe('PR #2'),
+  );
+  await act(async () => firstReview.resolve({ ...repositoryState, source: first }));
+  expect(app.container.querySelector('.review-top-bar-source-label')?.textContent).toBe('PR #2');
+  expect(rows()[1].getAttribute('aria-current')).toBe('true');
+  expect(app.container.querySelector('main.review')?.textContent).toContain('Second PR');
+  expect(tab('PRs')?.getAttribute('aria-selected')).toBe('true');
+  expect(window.codiff.getNarrativeWalkthrough).not.toHaveBeenCalled();
+
+  await act(async () => tab('History')!.click());
+  await waitFor(() =>
+    expect(window.codiff.getRepositoryHistory).toHaveBeenCalledWith(expect.any(Number), second),
+  );
+  await act(async () => tab('PRs')!.click());
+  expect(rows()).toHaveLength(2);
+  expect(listReviewRequests).toHaveBeenCalledTimes(2);
+
+  const projectPicker = app.container.querySelector<HTMLElement & { value: string }>(
+    '[aria-label="Review repository"]',
+  )!;
+  await act(async () => {
+    projectPicker.value = gitlab.id;
+    projectPicker.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await waitFor(() => expect(rows()[0]?.textContent).toContain('!3'));
+  expect(tab('MRs')?.getAttribute('aria-selected')).toBe('true');
+  await act(async () => rows()[0].click());
+  await waitFor(() =>
+    expect(app.container.querySelector('.review [role="alert"]')?.textContent).toContain(
+      'Request is no longer accessible.',
+    ),
+  );
+  expect(rows()).toHaveLength(1);
+  expect(tab('MRs')?.getAttribute('aria-selected')).toBe('true');
 });

@@ -1,9 +1,11 @@
 import { ArrowSquareOutIcon as ArrowSquareOut } from '@phosphor-icons/react/ArrowSquareOut';
 import { ClockCounterClockwiseIcon as ClockCounterClockwise } from '@phosphor-icons/react/ClockCounterClockwise';
+import { GitPullRequestIcon as GitPullRequest } from '@phosphor-icons/react/GitPullRequest';
 import { PathIcon as Path } from '@phosphor-icons/react/Path';
 import { TreeStructureIcon as TreeStructure } from '@phosphor-icons/react/TreeStructure';
 import type { FileDiffLoadedFiles } from '@pierre/diffs';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from './app/components/Button.tsx';
 import { CommandBar } from './app/components/CommandBar.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import { OpenReviewSourceDialog } from './app/components/OpenReviewSourceDialog.tsx';
@@ -23,10 +25,12 @@ import {
 } from './app/components/Panels.tsx';
 import {
   preloadReviewMarkdown,
+  PullRequestSourceDescription,
   ReviewCodeView,
   type ReviewDiffBlock,
 } from './app/components/ReviewCodeView.tsx';
 import type { ReviewModeItem } from './app/components/ReviewModeControl.tsx';
+import { ReviewRequestSidebar } from './app/components/ReviewRequestSidebar.tsx';
 import { ReviewTopBar } from './app/components/ReviewTopBar.tsx';
 import { Sidebar } from './app/components/Sidebar.tsx';
 import { CommitView } from './app/components/walkthrough/CommitView.tsx';
@@ -50,6 +54,7 @@ import {
 import { useInitialWindowReveal } from './app/hooks/useInitialWindowReveal.ts';
 import { usePullRequestViewedSync } from './app/hooks/usePullRequestViewedSync.ts';
 import { useResizableSidebar } from './app/hooks/useResizableSidebar.ts';
+import { useReviewProjects } from './app/hooks/useReviewProjects.ts';
 import { useReviewFileState } from './app/hooks/useReviewState.ts';
 import { createDefaultConfig } from './config/defaults.ts';
 import { getShortcutLabel } from './config/keymap.ts';
@@ -205,6 +210,7 @@ export default function App({
   const [historyHasMore, setHistoryHasMore] = useState(true);
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyNeedsLoad, setHistoryNeedsLoad] = useState(false);
   const [historySource, setHistorySource] = useState<ReviewSource | null>(null);
   const [localChangesDetected, setLocalChangesDetected] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<CodiffUpdateStatus | null>(null);
@@ -225,6 +231,10 @@ export default function App({
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [isWindowFullScreen, setIsWindowFullScreen] = useState(false);
   const [pendingSource, setPendingSource] = useState<ReviewSource | null>(null);
+  const [browserReviewError, setBrowserReviewError] = useState<{
+    message: string;
+    source: ReviewSource;
+  } | null>(null);
   const [planDocument, setPlanDocument] = useState<CodiffMarkdownDocument | null>(null);
   const [codeEditingStore] = useState(createCodeEditingStore);
   useUnsavedCodeEditsGuard(codeEditingStore);
@@ -235,6 +245,7 @@ export default function App({
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [state, setState] = useState<RepositoryState | null>(null);
+  const reviewProjects = useReviewProjects(state?.root);
   const [terminalHelperInstalling, setTerminalHelperInstalling] = useState(false);
   const [terminalHelperStatus, setTerminalHelperStatus] = useState<TerminalHelperStatus>(
     defaultTerminalHelperStatus,
@@ -303,6 +314,7 @@ export default function App({
     [syncViewed, toggleReviewViewed],
   );
   const {
+    activeReviewCommentDraftRef,
     askCodex,
     createComment,
     deleteComment,
@@ -735,12 +747,10 @@ export default function App({
         null;
       const historyRequest = ++historyRequestRef.current;
       const sourceRequest = sourceRequestRef.current;
+      setHistoryNeedsLoad(false);
       setHistoryLoading(true);
       setHistorySource(nextHistorySource);
-      const isCurrentHistory = () =>
-        !canceled &&
-        historyRequestRef.current === historyRequest &&
-        sourceRequestRef.current === sourceRequest;
+      const isCurrentHistory = () => !canceled && historyRequestRef.current === historyRequest;
       const loadHistory = () => {
         void window.codiff
           .getRepositoryHistory(HISTORY_PAGE_SIZE, nextHistorySource ?? undefined)
@@ -1346,17 +1356,12 @@ export default function App({
 
   useEffect(() => window.codiff.onFindInDiffs(openDiffSearch), [openDiffSearch]);
 
-  const loadMoreHistory = useCallback(() => {
-    if (historyLoading || !historyHasMore) {
-      return;
-    }
-
-    const nextLimit = historyLimit + HISTORY_PAGE_SIZE;
+  const loadHistoryPage = useCallback((source: ReviewSource | null, nextLimit: number) => {
     const request = historyRequestRef.current + 1;
     historyRequestRef.current = request;
     setHistoryLoading(true);
     window.codiff
-      .getRepositoryHistory(nextLimit, historySource ?? undefined)
+      .getRepositoryHistory(nextLimit, source ?? undefined)
       .then((history) => {
         if (historyRequestRef.current !== request) {
           return;
@@ -1376,7 +1381,30 @@ export default function App({
           setHistoryLoading(false);
         }
       });
-  }, [historyHasMore, historyLimit, historyLoading, historySource]);
+  }, []);
+
+  useEffect(() => {
+    if (sidebarMode === 'history' && historyNeedsLoad && !pendingSource) {
+      const timer = window.setTimeout(() => {
+        setHistoryNeedsLoad(false);
+        loadHistoryPage(historySource, HISTORY_PAGE_SIZE);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+  }, [historyNeedsLoad, historySource, loadHistoryPage, pendingSource, sidebarMode]);
+
+  const loadMoreHistory = useCallback(() => {
+    if (!historyNeedsLoad && !historyLoading && historyHasMore) {
+      loadHistoryPage(historySource, historyLimit + HISTORY_PAGE_SIZE);
+    }
+  }, [
+    historyHasMore,
+    historyLimit,
+    historyLoading,
+    historyNeedsLoad,
+    historySource,
+    loadHistoryPage,
+  ]);
 
   const activatePath = useCallback(
     (path: string) => {
@@ -1460,6 +1488,7 @@ export default function App({
           (current) => new Set([...current].filter((key) => !viewedChangedPaths.has(key))),
         );
         setHistoryEntries(history.entries);
+        setHistoryNeedsLoad(false);
         setHistoryHasMore(history.entries.length >= historyLimit);
         setHistorySource(getHistorySource(orderedState.source) ?? historySourceRef.current);
         setSelectedPath((current) =>
@@ -1513,15 +1542,29 @@ export default function App({
   const selectSource = useCallback(
     (
       source: ReviewSource,
-      { throwOnError = false }: { throwOnError?: boolean } = {},
+      {
+        fromBrowser = false,
+        throwOnError = false,
+      }: { fromBrowser?: boolean; throwOnError?: boolean } = {},
     ): Promise<void> => {
       const currentState = stateRef.current;
       const sourceKey = getSourceKey(source);
-      const currentDisplayKey = getSourceKey(pendingSource ?? currentState?.source ?? source);
-      if (currentDisplayKey === sourceKey) {
+      const currentDisplaySource = pendingSource ?? currentState?.source ?? source;
+      setBrowserReviewError(null);
+      if (
+        getSourceKey(currentDisplaySource) === sourceKey ||
+        (source.type === 'pull-request' &&
+          currentDisplaySource.type === 'pull-request' &&
+          source.url.toLowerCase() === currentDisplaySource.url.toLowerCase())
+      ) {
         return Promise.resolve();
       }
 
+      const draft = activeReviewCommentDraftRef.current;
+      if (draft) {
+        updateComment(draft.id, draft.body);
+        updateActiveReviewCommentDraft(null);
+      }
       saveCurrentSourceSession();
       const request = sourceRequestRef.current + 1;
       sourceRequestRef.current = request;
@@ -1530,6 +1573,9 @@ export default function App({
       resetCommentFocus();
       setReloadDeltaPaths(new Set());
       resetDiffSearch();
+      if (fromBrowser) {
+        setFileSearchQuery('');
+      }
       setScrollTarget(null);
       setMainMode('review');
 
@@ -1578,11 +1624,27 @@ export default function App({
           stateGenerationRef.current += 1;
           stateRef.current = orderedState;
           setState(orderedState);
-          setHistorySource(getHistorySource(orderedState.source) ?? historySource);
+          const nextHistorySource = getHistorySource(orderedState.source) ?? historySource;
+          setHistorySource(nextHistorySource);
+          if (
+            nextHistorySource &&
+            (nextHistorySource.type === 'pull-request' || historySource?.type === 'pull-request') &&
+            (!historySource || getSourceKey(historySource) !== getSourceKey(nextHistorySource))
+          ) {
+            historyRequestRef.current += 1;
+            setHistoryEntries([]);
+            setHistoryHasMore(false);
+            setHistoryLoading(false);
+            setHistoryNeedsLoad(true);
+          }
           setCollapsed(nextCollapsed);
           setExpandedReviewKeys(nextExpandedReviewKeys);
           setItemVersionByKey({});
-          setReviewComments(session?.reviewComments ?? getReviewCommentsFromState(orderedState));
+          setReviewComments(
+            session && orderedState.source.type === 'pull-request'
+              ? getRefreshedReviewComments(orderedState, session.reviewComments)
+              : (session?.reviewComments ?? getReviewCommentsFromState(orderedState)),
+          );
           setReloadDeltaPaths(new Set());
           setViewed(nextViewed);
           setSelectedPath(nextSelectedPath);
@@ -1594,13 +1656,18 @@ export default function App({
           setWalkthroughUnread(false);
           setLocalChangesDetected(false);
           setPendingSource(null);
-          if (!sessionWalkthroughIsCurrent) {
+          if (
+            !sessionWalkthroughIsCurrent &&
+            (!fromBrowser || sidebarModeRef.current === 'walkthrough')
+          ) {
             refreshWalkthroughForState(orderedState, session?.narrativeWalkthrough ?? null);
           }
         })
         .catch((error: unknown) => {
           if (sourceRequestRef.current === request) {
-            if (!throwOnError) {
+            if (fromBrowser) {
+              setBrowserReviewError({ message: getRepositoryLoadError(error).message, source });
+            } else if (!throwOnError) {
               setLoadError(getRepositoryLoadError(error));
             }
             setWalkthroughLoading(false);
@@ -1612,6 +1679,7 @@ export default function App({
         });
     },
     [
+      activeReviewCommentDraftRef,
       getRepositoryState,
       historySource,
       pendingSource,
@@ -1630,6 +1698,9 @@ export default function App({
       setWalkthroughError,
       setWalkthroughLoading,
       setWalkthroughUnread,
+      sidebarModeRef,
+      updateActiveReviewCommentDraft,
+      updateComment,
     ],
   );
 
@@ -1664,8 +1735,18 @@ export default function App({
     [showOpenReviewSourceDialog],
   );
 
+  const changeReviewMode = useCallback(
+    (mode: typeof sidebarMode) => {
+      if (mode === 'pull-requests') {
+        expandSidebar();
+      }
+      changeSidebarMode(mode);
+    },
+    [changeSidebarMode, expandSidebar],
+  );
+
   const commandBarCommands = useAppCommands({
-    changeSidebarMode,
+    changeSidebarMode: changeReviewMode,
     focusFileFilter,
     getReviewCommandTarget,
     onOpenDiffSearch: openDiffSearch,
@@ -1954,6 +2035,15 @@ export default function App({
       label: 'History',
       value: 'history',
     },
+    {
+      icon: <GitPullRequest aria-hidden size={14} weight="bold" />,
+      label:
+        (reviewProjects.project?.provider ??
+          (state.source.type === 'pull-request' ? state.source.provider : undefined)) === 'gitlab'
+          ? 'MRs'
+          : 'PRs',
+      value: 'pull-requests',
+    },
   ] satisfies ReadonlyArray<ReviewModeItem<typeof sidebarMode>>;
 
   return (
@@ -2011,7 +2101,7 @@ export default function App({
         }
         mode={sidebarMode}
         modes={reviewModes}
-        onModeChange={changeSidebarMode}
+        onModeChange={changeReviewMode}
         onToggleSidebar={toggleSidebar}
         repository={
           <span className="review-top-bar-repository review-top-bar-repository-path">
@@ -2072,51 +2162,62 @@ export default function App({
       ) : null}
       <KeyboardShortcutsHelp keymap={codiffConfig.keymap} visible={shortcutsHelpVisible} />
       <aside className="squircle sidebar">
-        <Sidebar
-          branchSource={
-            historySource?.type === 'branch-diff'
-              ? historySource
-              : historySource?.type === 'branch-working-tree' &&
-                  historySource.baseRef &&
-                  historySource.headRef
-                ? {
-                    baseRef: historySource.baseRef,
-                    headRef: historySource.headRef,
-                    ref: historySource.ref,
-                    type: 'branch-diff',
-                  }
-                : null
-          }
-          commitFiles={state.files}
-          commitViewOpen={showPlainCommitView}
+        {sidebarMode === 'pull-requests' ? null : (
+          <Sidebar
+            branchSource={
+              historySource?.type === 'branch-diff'
+                ? historySource
+                : historySource?.type === 'branch-working-tree' &&
+                    historySource.baseRef &&
+                    historySource.headRef
+                  ? {
+                      baseRef: historySource.baseRef,
+                      headRef: historySource.headRef,
+                      ref: historySource.ref,
+                      type: 'branch-diff',
+                    }
+                  : null
+            }
+            commitFiles={state.files}
+            commitViewOpen={showPlainCommitView}
+            currentSource={pendingSource ?? state.source}
+            files={visibleFiles}
+            historyEntries={historyEntries}
+            historyHasMore={historyHasMore}
+            historyLoading={historyLoading}
+            keymap={codiffConfig.keymap}
+            mode={sidebarMode}
+            narrativeNavigation={narrativeNavigation}
+            narrativeWalkthrough={narrativeWalkthrough}
+            onActivatePath={activatePath}
+            onLoadMoreHistory={loadMoreHistory}
+            onSearchQueryChange={
+              sidebarMode === 'history' ? setHistorySearchQuery : setFileSearchQuery
+            }
+            onSelectSource={selectSource}
+            onShareWalkthrough={enabledShareWalkthrough}
+            onToggleCommitView={showPlainCommitView ? closeCommitView : openCommitView}
+            pullRequestSource={historySource?.type === 'pull-request' ? historySource : null}
+            reloadDeltaPaths={reloadDeltaPaths}
+            searchQuery={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
+            selectedPath={visibleSelectedPath}
+            shareWalkthroughDisabled={walkthroughSharing}
+            showWhitespace={showWhitespace}
+            summaryLoading={isSwitchingSource}
+            viewed={viewed}
+            walkthroughError={walkthroughError}
+            walkthroughLoading={walkthroughLoading}
+            walkthroughProgress={walkthroughProgress}
+          />
+        )}
+        <ReviewRequestSidebar
+          active={sidebarMode === 'pull-requests'}
           currentSource={pendingSource ?? state.source}
-          files={visibleFiles}
-          historyEntries={historyEntries}
-          historyHasMore={historyHasMore}
-          historyLoading={historyLoading}
+          key={state.root}
           keymap={codiffConfig.keymap}
-          mode={sidebarMode}
-          narrativeNavigation={narrativeNavigation}
-          narrativeWalkthrough={narrativeWalkthrough}
-          onActivatePath={activatePath}
-          onLoadMoreHistory={loadMoreHistory}
-          onSearchQueryChange={
-            sidebarMode === 'history' ? setHistorySearchQuery : setFileSearchQuery
-          }
-          onSelectSource={selectSource}
-          onShareWalkthrough={enabledShareWalkthrough}
-          onToggleCommitView={showPlainCommitView ? closeCommitView : openCommitView}
-          pullRequestSource={historySource?.type === 'pull-request' ? historySource : null}
-          reloadDeltaPaths={reloadDeltaPaths}
-          searchQuery={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
-          selectedPath={visibleSelectedPath}
-          shareWalkthroughDisabled={walkthroughSharing}
-          showWhitespace={showWhitespace}
-          summaryLoading={isSwitchingSource}
-          viewed={viewed}
-          walkthroughError={walkthroughError}
-          walkthroughLoading={walkthroughLoading}
-          walkthroughProgress={walkthroughProgress}
+          onSelect={(source) => void selectSource(source, { fromBrowser: true })}
+          reviewProjects={reviewProjects}
+          root={state.root}
         />
         {updateStatus ? (
           <UpdatePill
@@ -2134,6 +2235,31 @@ export default function App({
       <main className="review">
         {isSwitchingSource ? (
           <ReviewSourceLoading />
+        ) : browserReviewError && sidebarMode === 'pull-requests' ? (
+          <div className="empty-state">
+            <div className="empty-panel squircle" role="alert">
+              <strong>Could not open {getSourceLabel(browserReviewError.source)}</strong>
+              <p>
+                {browserReviewError.message.replace(
+                  /^Error invoking remote method '[^']+': Error: /,
+                  '',
+                )}
+              </p>
+              <div className="empty-panel-actions">
+                <Button
+                  onClick={() =>
+                    void selectSource(browserReviewError.source, { fromBrowser: true })
+                  }
+                  type="button"
+                >
+                  Retry
+                </Button>
+                <Button onClick={() => setBrowserReviewError(null)} type="button">
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : showPlainCommitView ? (
           <CommitView
             branch={state.branch}
@@ -2167,6 +2293,25 @@ export default function App({
                 title={walkthroughError?.code === 'PI_NOT_FOUND' ? 'Pi CLI not found' : undefined}
               />
             </div>
+          </div>
+        ) : state.source.type === 'pull-request' && visibleFiles.length === 0 ? (
+          <div className="review-request-empty">
+            <PullRequestSourceDescription
+              actions={commonReviewProps.sourceDescriptionActions}
+              descriptionAssetUrls={state.descriptionAssetUrls}
+              key={state.source.url}
+              keymap={codiffConfig.keymap}
+              source={state.source}
+            />
+            <p>
+              {state.files.length === 0
+                ? getEmptySourceTitle(state.source)
+                : hasDiffSearchQuery
+                  ? 'No matches in diffs'
+                  : fileSearchQuery
+                    ? 'No matching files'
+                    : 'Whitespace-only changes hidden'}
+            </p>
           </div>
         ) : state.files.length === 0 ? (
           <div className="empty-state">

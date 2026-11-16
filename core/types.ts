@@ -179,6 +179,39 @@ export type ReviewSource =
 /** Sources that can be entered from the palette or native application menu. */
 export type OpenReviewSourceKind = 'branch' | 'commit' | 'pull-request';
 
+export type ReviewProject = {
+  host: string;
+  id: string;
+  path: string;
+  provider: 'github' | 'gitlab';
+  remote: string;
+};
+
+export type ReviewRequestState = 'closed' | 'merged' | 'open';
+export type ReviewRequestFilter = ReviewRequestState | 'all';
+export type ReviewRequestSort = 'newest' | 'oldest' | 'updated';
+
+export type ReviewRequestSummary = {
+  author?: string;
+  draft: boolean;
+  source: Extract<ReviewSource, { type: 'pull-request' }> & { number: number; title: string };
+  state: ReviewRequestState;
+  updatedAt: number;
+};
+
+export type ReviewRequestListQuery = {
+  cursor?: string;
+  filter: ReviewRequestFilter;
+  projectId: string;
+  search: string;
+  sort: ReviewRequestSort;
+};
+
+export type ReviewRequestPage = {
+  entries: ReadonlyArray<ReviewRequestSummary>;
+  nextCursor?: string;
+};
+
 export type HistoryEntry = {
   author: string;
   committedAt: number;

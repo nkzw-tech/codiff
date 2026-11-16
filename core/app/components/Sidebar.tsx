@@ -263,11 +263,28 @@ function HistorySidebar({
               author: null,
               committedAt: null,
               gravatarUrl: undefined,
+              key: 'working-tree',
+              kind: 'entry' as const,
+              ref: 'local',
+              source: { type: 'working-tree' } satisfies ReviewSource,
+              subject: 'Uncommitted changes',
+            }
+          : null,
+        !normalizedQuery
+          ? {
+              author: null,
+              committedAt: null,
+              gravatarUrl: undefined,
               key: getSourceKey(pullRequestSource),
               kind: 'entry' as const,
-              ref: pullRequestSource.number ? `PR #${pullRequestSource.number}` : 'PR',
+              ref:
+                pullRequestSource.provider === 'gitlab'
+                  ? `MR !${pullRequestSource.number ?? ''}`
+                  : `PR #${pullRequestSource.number ?? ''}`,
               source: pullRequestSource satisfies ReviewSource,
-              subject: pullRequestSource.title || 'Pull Request',
+              subject:
+                pullRequestSource.title ||
+                (pullRequestSource.provider === 'gitlab' ? 'Merge Request' : 'Pull Request'),
             }
           : null,
         {

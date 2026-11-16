@@ -1240,6 +1240,7 @@ module.exports = {
   createPullRequestSource,
   getGhCommand,
   getPullRequestHeadImageSource,
+  ghApi,
   listPullRequestHistory,
   normalizeGitHubCommit,
   normalizeGitHubPullRequestCommit,

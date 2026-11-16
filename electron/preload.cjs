@@ -60,6 +60,8 @@ const codiff = {
   getPlanReview: () => ipcRenderer.invoke('codiff:getPlanReview'),
   getRepositoryHistory: (limit, source) =>
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
+  getReviewProjects: () => ipcRenderer.invoke('codiff:getReviewProjects'),
+  listReviewRequests: (query) => ipcRenderer.invoke('codiff:listReviewRequests', query),
   getRepositoryState: (source) => {
     const initial = source ? undefined : initialRepositoryState;
     initialRepositoryState = undefined;

@@ -95,6 +95,11 @@ export function useAppCommands({
         title: 'Show History',
       }),
       registry.register({
+        execute: () => changeSidebarMode('pull-requests'),
+        id: 'sidebar-pull-requests',
+        title: 'Browse Pull and Merge Requests',
+      }),
+      registry.register({
         execute: () => changeSidebarMode('walkthrough'),
         id: 'sidebar-walkthrough',
         title: 'Show Walkthrough',

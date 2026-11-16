@@ -24,6 +24,9 @@ import type {
   RepositoryState,
   ReviewAssistantRequest,
   ReviewAssistantResult,
+  ReviewProject,
+  ReviewRequestListQuery,
+  ReviewRequestPage,
   ReviewSource,
   SaveMarkdownDocumentRequest,
   SaveMarkdownDocumentResult,
@@ -79,12 +82,14 @@ declare global {
       getRepositoryFile: (path: string) => Promise<RepositoryFileDocument>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
+      getReviewProjects: () => Promise<ReadonlyArray<ReviewProject>>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;
       installAgentSkill: () => Promise<AgentSkillStatus>;
       installTerminalHelper: () => Promise<TerminalHelperStatus>;
       isWindowFullScreen: () => Promise<boolean>;
+      listReviewRequests: (query: ReviewRequestListQuery) => Promise<ReviewRequestPage>;
       markPlanReady: () => Promise<void>;
       markWindowReady: () => void;
       onConfigChanged: (callback: (config: CodiffConfig) => void) => () => void;

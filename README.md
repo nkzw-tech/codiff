@@ -71,6 +71,10 @@ Full GitHub and GitLab review URLs are also supported. GitLab hosts and nested p
 derived from the URL or local Git remote and authenticated through `glab`; Codiff does not require
 instance-specific configuration.
 
+In the desktop app, use **PRs** or **MRs** next to **History** to browse the current repository's
+reviews. The sidebar starts with open requests, including drafts, sorted by most recently updated.
+Select a request to open its review while keeping the list in view.
+
 Start with an LLM-generated narrative walkthrough. When generating a walkthrough without an
 explicit target, Codiff uses local changes when present and falls back to `HEAD` when the working
 tree is clean:
@@ -123,6 +127,7 @@ The command bar includes actions for common review workflows:
 - Focus File Filter
 - Find in Diffs
 - Show File Tree, Show History, and Show Walkthrough
+- Browse Pull and Merge Requests
 - Copy Review Comments
 - Copy Review Comments and Close
 - Toggle Viewed for the currently selected file

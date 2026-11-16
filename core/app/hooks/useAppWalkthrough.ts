@@ -215,13 +215,8 @@ export function useAppWalkthrough({
   const changeSidebarMode = useCallback(
     (mode: SidebarMode) => {
       setMainMode('review');
-      if (mode === 'tree') {
-        setSidebarMode('tree');
-        return;
-      }
-
-      if (mode === 'history') {
-        setSidebarMode('history');
+      if (mode !== 'walkthrough') {
+        setSidebarMode(mode);
         return;
       }
 

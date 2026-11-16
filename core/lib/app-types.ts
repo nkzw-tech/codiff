@@ -125,7 +125,7 @@ export type ReviewComment = {
   url?: string;
 };
 
-export type SidebarMode = 'tree' | 'walkthrough' | 'history';
+export type SidebarMode = 'tree' | 'walkthrough' | 'history' | 'pull-requests';
 
 export type PullRequestSource = Extract<ReviewSource, { type: 'pull-request' }>;
 

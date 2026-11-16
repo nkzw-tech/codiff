@@ -1513,6 +1513,180 @@ html[data-codiff-platform='darwin'] .sidebar {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tree-selection-focus) 42%, transparent);
 }
 
+.review-requests-sidebar:not([hidden]) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.review-requests-sidebar .sidebar-search-row {
+  padding-bottom: 5px;
+}
+
+.review-requests-controls {
+  border-bottom: 1px solid var(--sidebar-border);
+  display: grid;
+  flex: none;
+  gap: 4px;
+  padding: 0 8px 7px;
+}
+
+.review-requests-project,
+.review-requests-filters {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.review-requests-project-name {
+  color: var(--muted);
+  font: 500 11px/1.3 var(--font-sans);
+  overflow: hidden;
+  padding-left: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-requests-select {
+  -webkit-app-region: no-drag;
+  color: var(--muted);
+  min-width: 0;
+  position: relative;
+}
+
+.review-requests-select select {
+  appearance: none;
+  background: var(--hover-wash);
+  border: 0;
+  border-radius: 7px;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  font: 600 11px/1.35 var(--font-sans);
+  max-width: 100%;
+  padding: 5px 22px 5px 8px;
+  text-overflow: ellipsis;
+}
+
+.review-requests-project .review-requests-select select {
+  background: transparent;
+}
+
+.review-requests-select select:hover {
+  background: rgb(127 127 127 / 0.15);
+}
+
+.review-requests-select svg {
+  pointer-events: none;
+  position: absolute;
+  right: 7px;
+  top: calc(50% - 5px);
+}
+
+.review-requests-refresh.codiff-button {
+  color: var(--muted);
+  flex: none;
+  height: 24px;
+  width: 25px;
+}
+
+.history-list.review-requests-list {
+  gap: 3px;
+  padding-top: 6px;
+}
+
+.history-entry.review-request-row {
+  column-gap: 8px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: 44px;
+  padding: 7px 8px;
+  row-gap: 3px;
+}
+
+.review-request-state {
+  align-self: start;
+  color: var(--muted);
+  grid-row: span 2;
+  margin-top: 1px;
+}
+
+.review-request-state[data-state='open'] {
+  color: var(--added);
+}
+
+.review-request-state[data-state='closed'] {
+  color: var(--deleted);
+}
+
+.review-request-state[data-state='merged'] {
+  color: light-dark(#8052bc, #bf9cf7);
+}
+
+.review-request-title {
+  font: 600 12px/1.35 var(--font-sans);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-request-meta {
+  color: var(--muted);
+  display: flex;
+  font: 11px/1.35 var(--font-sans);
+  gap: 7px;
+  justify-content: space-between;
+  white-space: nowrap;
+}
+
+.review-request-meta > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.review-request-meta time {
+  flex: none;
+}
+
+.review-request-number {
+  font-variant-numeric: tabular-nums;
+}
+
+.review-requests-message {
+  align-items: flex-start;
+  color: var(--muted);
+  display: grid;
+  font: 12px/1.4 var(--font-sans);
+  gap: 7px;
+  justify-items: start;
+  overflow-wrap: anywhere;
+  padding: 12px 10px;
+}
+
+.review-requests-message strong {
+  color: var(--text);
+}
+
+.review-requests-more {
+  align-self: center;
+  flex: none;
+  margin: 4px 0;
+}
+
+.review-request-empty {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+.review-request-empty > p {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
 .history-section {
   align-items: center;
   color: var(--text);
@@ -1724,6 +1898,23 @@ html[data-codiff-platform='darwin'] .sidebar {
   min-height: 0;
   overflow: hidden;
   position: relative;
+}
+
+.app-shell > .review {
+  container: desktop-review / inline-size;
+}
+
+@container desktop-review (max-width: 680px) {
+  .codiff-source-description-header:not(.editable-title):has(> .source-description-review-actions) {
+    grid-auto-flow: row;
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .codiff-source-description-header > .source-description-review-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
 }
 
 .codiff-web-review {

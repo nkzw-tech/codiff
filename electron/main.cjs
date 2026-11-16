@@ -29,6 +29,7 @@ const {
   validateRepositoryPath,
 } = require('./git-state.cjs');
 const { attachExternalLinkHandling } = require('./external-links.cjs');
+const { listReviewRequests, readReviewProjects } = require('./git-state/review-requests.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { readCodexModels } = require('./codex-models.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
@@ -147,6 +148,8 @@ const windowRepositories = new Map();
 const windowLaunchOptions = new Map();
 /** @type {Map<number, Promise<RepositoryState>>} */
 const windowInitialRepositoryStates = new Map();
+/** @type {Map<number, symbol>} */
+const windowRepositoryRequests = new Map();
 /** @type {Map<number, number>} */
 const walkthroughProgressGenerations = new Map();
 /** @type {Map<number, string>} */
@@ -1132,6 +1135,7 @@ const createWindow = (
     walkthroughLaunchController.clear(webContentsId);
     walkthroughProgressGenerations.delete(webContentsId);
     windowRepositories.delete(webContentsId);
+    windowRepositoryRequests.delete(webContentsId);
     windowLaunchOptions.delete(webContentsId);
   });
   window.webContents.on('render-process-gone', () => {
@@ -1561,6 +1565,8 @@ ipcMain.handle('codiff:openReleasePage', () => {
 });
 
 ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
+  const request = Symbol();
+  windowRepositoryRequests.set(event.sender.id, request);
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   const walkthroughState = walkthroughLaunchController.getInitialRepositoryState(
@@ -1578,9 +1584,11 @@ ipcMain.handle('codiff:getRepositoryState', async (event, source) => {
   const state = initialState
     ? await initialState
     : await readRepositoryStateWithConfig(repositoryPath, source || launchOptions?.source);
-  storeResolvedRepositoryState(event.sender.id, state);
-  rememberLastRepositoryPath(state.root);
-  void resetRepositoryWatcher(event.sender.id, state.root);
+  if (windowRepositoryRequests.get(event.sender.id) === request) {
+    storeResolvedRepositoryState(event.sender.id, state);
+    rememberLastRepositoryPath(state.root);
+    void resetRepositoryWatcher(event.sender.id, state.root);
+  }
   return state;
 });
 
@@ -2000,6 +2008,14 @@ ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   return listRepositoryHistory(repositoryPath, limit, source);
 });
+
+ipcMain.handle('codiff:getReviewProjects', (event) =>
+  readReviewProjects(windowRepositories.get(event.sender.id) || getLaunchPath()),
+);
+
+ipcMain.handle('codiff:listReviewRequests', (event, query) =>
+  listReviewRequests(windowRepositories.get(event.sender.id) || getLaunchPath(), query),
+);
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();

@@ -106,6 +106,7 @@ test('app commands register the complete command set and delegate dynamic action
     'open-folder',
     'sidebar-tree',
     'sidebar-history',
+    'sidebar-pull-requests',
     'sidebar-walkthrough',
     'copy-comments',
     'copy-comments-and-close',
@@ -134,6 +135,7 @@ test('app commands register the complete command set and delegate dynamic action
   command('open-commit').execute();
   command('open-branch').execute();
   command('sidebar-history').execute();
+  command('sidebar-pull-requests').execute();
   command('open-file').execute();
   command('toggle-sidebar').execute();
   command('toggle-word-wrap').execute();
@@ -143,6 +145,7 @@ test('app commands register the complete command set and delegate dynamic action
   expect(onOpenDiffSearch).toHaveBeenCalledOnce();
   expect(onOpenReviewSource.mock.calls).toEqual([['pull-request'], ['commit'], ['branch']]);
   expect(changeSidebarMode).toHaveBeenCalledWith('history');
+  expect(changeSidebarMode).toHaveBeenCalledWith('pull-requests');
   expect(onOpenSelectedFile).toHaveBeenCalledOnce();
   expect(onToggleSidebar).toHaveBeenCalledOnce();
   expect(onToggleWordWrap).toHaveBeenCalledOnce();

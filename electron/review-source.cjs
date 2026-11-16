@@ -121,12 +121,8 @@ const parseRemoteUrl = (value) => {
   }
 };
 
-/** @param {string} repositoryPath */
-const readReviewRemotes = (repositoryPath) => {
-  const root = execFileSync('git', ['-C', repositoryPath, 'rev-parse', '--show-toplevel'], {
-    encoding: 'utf8',
-  }).trim();
-  const raw = execFileSync('git', ['-C', root, 'remote', '-v'], { encoding: 'utf8' });
+/** @param {string} raw */
+const parseReviewRemotes = (raw) => {
   const remotes = [];
   for (const line of raw.split('\n')) {
     const match = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
@@ -137,6 +133,12 @@ const readReviewRemotes = (repositoryPath) => {
   }
   return remotes;
 };
+
+/** @param {string} repositoryPath */
+const readReviewRemotes = (repositoryPath) =>
+  parseReviewRemotes(
+    execFileSync('git', ['-C', repositoryPath, 'remote', '-v'], { encoding: 'utf8' }),
+  );
 
 /** @param {{direction: string; name: string}} remote */
 const remotePriority = (remote) =>
@@ -179,6 +181,7 @@ const resolveReviewUrl = (repositoryPath, number, provider) => {
 
 module.exports = {
   parseRemoteUrl,
+  parseReviewRemotes,
   parseReviewUrl,
   readReviewRemotes,
   resolveReviewUrl,
