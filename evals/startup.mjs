@@ -90,6 +90,7 @@ for (const [name, fileCount, lineCount] of [
       CODIFF_BENCHMARK_CAPTURE:
         values.capture && run === 0 ? join(values.capture, `${name}.png`) : '',
       CODIFF_BENCHMARK_HOME: home,
+      CODIFF_CONFIG_DIR: join(home, '.codiff'),
       CODIFF_BENCHMARK_ORIGIN: String(Date.now()),
       CODIFF_BENCHMARK_OUTPUT: output,
       CODIFF_PLAN_FILE: name === 'plan' ? markdownPath : '',

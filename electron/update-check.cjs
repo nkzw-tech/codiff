@@ -1,14 +1,12 @@
 // @ts-check
 
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
-const { homedir } = require('node:os');
 const { join } = require('node:path');
+const { getConfigDir } = require('./config-dir.cjs');
 
 const LATEST_RELEASE_URL = 'https://api.github.com/repos/nkzw-tech/codiff/releases/latest';
 const UPDATE_CHECK_INTERVAL_MS = 20 * 60 * 60 * 1000;
 const USER_AGENT = 'codiff-update-check';
-
-const getDefaultConfigDir = () => join(homedir(), '.codiff');
 
 /**
  * @typedef {{
@@ -94,7 +92,7 @@ const parseUpdateState = (raw) => {
  * @returns {UpdateState | null}
  */
 const readUpdateState = (configDir) => {
-  const filePath = join(configDir ?? getDefaultConfigDir(), 'update-state.json');
+  const filePath = join(configDir ?? getConfigDir(), 'update-state.json');
 
   if (!existsSync(filePath)) {
     return null;
@@ -112,7 +110,7 @@ const readUpdateState = (configDir) => {
  * @param {string} [configDir]
  */
 const writeUpdateState = (state, configDir) => {
-  const dir = configDir ?? getDefaultConfigDir();
+  const dir = configDir ?? getConfigDir();
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }

@@ -10,13 +10,13 @@ const {
   statSync,
   writeFileSync,
 } = require('node:fs');
-const { homedir } = require('node:os');
 const { join } = require('node:path');
+const { getConfigDir } = require('./config-dir.cjs');
 
 const MAX_STORED_WALKTHROUGH_BYTES = 8 * 1024 * 1024;
 const STORED_WALKTHROUGH_VERSION = 1;
 
-const getWalkthroughStoreDir = () => join(homedir(), '.codiff', 'walkthroughs');
+const getWalkthroughStoreDir = () => join(getConfigDir(), 'walkthroughs');
 
 /** @param {string} cacheKey */
 const getWalkthroughStorePath = (cacheKey) =>
