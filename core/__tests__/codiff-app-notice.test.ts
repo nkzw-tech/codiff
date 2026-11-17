@@ -61,6 +61,39 @@ test('prints the cached update notice on --version', async () => {
   expect(stderr).toContain('codiff update');
 });
 
+test.each(['custom', 'xdg'])(
+  'shell launcher reads config and update state from %s',
+  async (source) => {
+    await using home = await createTemporaryDirectory('codiff-app-home-');
+    const configDir = join(home.path, source === 'custom' ? 'custom config' : 'xdg/codiff');
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, 'update-state.json'),
+      JSON.stringify({
+        compatible: true,
+        lastCheckedAt: '2026-07-29T00:00:00.000Z',
+        latestVersion: '99.0.0',
+      }),
+    );
+    const run = () =>
+      execFileAsync('sh', [wrapperPath, '--version'], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CODIFF_CONFIG_DIR: source === 'custom' ? configDir : '',
+          HOME: home.path,
+          XDG_CONFIG_HOME: join(home.path, 'xdg'),
+        },
+      });
+    expect((await run()).stderr).toContain('99.0.0');
+    await writeFile(
+      join(configDir, 'codiff.jsonc'),
+      JSON.stringify({ settings: { checkForUpdates: false } }),
+    );
+    expect((await run()).stderr).toBe('');
+  },
+);
+
 test('prints no notice for a dismissed version', async () => {
   await using home = await createTemporaryDirectory('codiff-app-home-');
   await writeState(home.path, {

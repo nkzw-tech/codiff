@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,6 +46,29 @@ const getSchemaDefaults = (section: 'keymap' | 'settings') =>
       property.default,
     ]),
   );
+
+test.each([
+  ['custom', 'xdg', 'custom'],
+  ['', 'xdg', 'xdg/codiff'],
+  [undefined, undefined, '.codiff'],
+  ['', '', '.codiff'],
+  [undefined, 'relative', '.codiff'],
+] as const)(
+  'config directory precedence: CODIFF_CONFIG_DIR=%s, XDG_CONFIG_HOME=%s',
+  (custom, xdg, target) => {
+    using home = createTemporaryDirectorySync('codiff-config-path.');
+    using _environment = createTemporaryEnvironment({
+      CODIFF_CONFIG_DIR: custom ? join(home.path, custom) : custom,
+      HOME: home.path,
+      XDG_CONFIG_HOME: xdg === 'xdg' ? join(home.path, xdg) : xdg,
+    });
+    const config = createDefaultConfig();
+    config.settings.codeFontSize = 19;
+    writeConfig(config);
+    expect(existsSync(join(home.path, target, 'codiff.jsonc'))).toBe(true);
+    expect(readConfig().settings.codeFontSize).toBe(19);
+  },
+);
 
 test('schema defaults match config defaults', () => {
   const defaults = createDefaultConfig();
@@ -177,6 +200,7 @@ test('electron defaults load from packaged app shape', () => {
   mkdirSync(join(packageRoot, 'config'));
   mkdirSync(join(packageRoot, 'electron'));
   copyFileSync('config/defaults.json', join(packageRoot, 'config/defaults.json'));
+  copyFileSync('electron/config-dir.cjs', join(packageRoot, 'electron/config-dir.cjs'));
   copyFileSync('electron/config.cjs', join(packageRoot, 'electron/config.cjs'));
 
   const packageRequire = createRequire(join(packageRoot, 'electron/config.cjs'));

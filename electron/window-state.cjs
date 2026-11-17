@@ -1,14 +1,12 @@
 // @ts-check
 
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
-const { homedir } = require('node:os');
 const { join } = require('node:path');
+const { getConfigDir } = require('./config-dir.cjs');
 
 const MIN_WINDOW_WIDTH = 480;
 const MIN_WINDOW_HEIGHT = 320;
 const MIN_OVERLAP = 100;
-
-const getDefaultConfigDir = () => join(homedir(), '.codiff');
 
 /**
  * @typedef {{
@@ -63,7 +61,7 @@ const parseWindowState = (raw) => {
  * @returns {WindowState | null}
  */
 const readWindowState = (configDir) => {
-  const filePath = join(configDir ?? getDefaultConfigDir(), 'window-state.json');
+  const filePath = join(configDir ?? getConfigDir(), 'window-state.json');
 
   if (!existsSync(filePath)) {
     return null;
@@ -82,7 +80,7 @@ const readWindowState = (configDir) => {
  * @param {string} [configDir]
  */
 const writeWindowState = (state, configDir) => {
-  const dir = configDir ?? getDefaultConfigDir();
+  const dir = configDir ?? getConfigDir();
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }

@@ -4,6 +4,9 @@ declare global {
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+delete process.env.CODIFF_CONFIG_DIR;
+delete process.env.XDG_CONFIG_HOME;
+
 const createMemoryStorage = (): Storage => {
   const values = new Map<string, string>();
   return {

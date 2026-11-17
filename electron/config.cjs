@@ -8,8 +8,8 @@ const {
   watch,
   writeFileSync,
 } = require('node:fs');
-const { homedir } = require('node:os');
 const { join } = require('node:path');
+const { getConfigDir } = require('./config-dir.cjs');
 
 /**
  * @typedef {import('../core/config/types.ts').CodiffConfig} CodiffConfig
@@ -32,8 +32,6 @@ const createDefaultConfig = () => ({
   keymap: { ...defaultConfigTemplate.keymap },
   settings: { ...defaultConfigTemplate.settings },
 });
-
-const getConfigDir = () => join(homedir(), '.codiff');
 
 /** @param {string} [configDir] */
 const getConfigPath = (configDir) => join(configDir ?? getConfigDir(), 'codiff.jsonc');

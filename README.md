@@ -138,7 +138,10 @@ The command bar includes actions for common review workflows:
 
 ## Configuration
 
-Codiff reads configuration from `~/.codiff/codiff.jsonc`. Open `Codiff > Open Config File...` to
+Codiff reads `codiff.jsonc` from `CODIFF_CONFIG_DIR` when set, then `$XDG_CONFIG_HOME/codiff`
+when `XDG_CONFIG_HOME` is an absolute path, or `~/.codiff` otherwise. Empty values count as unset.
+Window state, update state, and saved walkthroughs use the same directory.
+Open `Codiff > Open Config File...` to
 create the file with defaults and open it in your editor. The file supports JSONC comments and
 trailing commas, includes a JSON schema reference for editor completion, and is watched while Codiff
 is running so changes apply to open windows.

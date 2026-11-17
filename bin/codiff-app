@@ -71,9 +71,20 @@ is_iso_timestamp() {
   case "$iso_tail" in ''|Z|.[0-9][0-9][0-9]|.[0-9][0-9][0-9]Z) ;; *) return 1 ;; esac
 }
 
+get_config_dir() {
+  if [ -n "${CODIFF_CONFIG_DIR:-}" ]; then
+    printf '%s\n' "$CODIFF_CONFIG_DIR"
+  else
+    case "${XDG_CONFIG_HOME:-}" in
+      /*) printf '%s/codiff\n' "$XDG_CONFIG_HOME" ;;
+      *) [ -n "${HOME:-}" ] && printf '%s/.codiff\n' "$HOME" ;;
+    esac
+  fi
+}
+
 update_notifications_enabled() {
-  [ -n "${HOME:-}" ] || return 0
-  config_file="$HOME/.codiff/codiff.jsonc"
+  config_dir="$(get_config_dir)" || return 0
+  config_file="$config_dir/codiff.jsonc"
   [ -f "$config_file" ] && [ -r "$config_file" ] || return 0
   # Read the last uncommented boolean value so compact JSONC, escaped strings,
   # and duplicate keys behave like the app's config parser.
@@ -160,9 +171,9 @@ update_notifications_enabled() {
 # notice is best effort: a missing, unreadable, or corrupt cache must stay
 # silent and must never change the wrapped command's exit status.
 print_update_notice() {
-  [ -n "${HOME:-}" ] || return 0
+  config_dir="$(get_config_dir)" || return 0
   update_notifications_enabled || return 0
-  state_file="$HOME/.codiff/update-state.json"
+  state_file="$config_dir/update-state.json"
   [ -f "$state_file" ] && [ -r "$state_file" ] || return 0
   # tail -n 1 mirrors JSON duplicate-key last-wins resolution.
   checked_at="$(sed -n 's/.*"lastCheckedAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | tail -n 1)"

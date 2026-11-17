@@ -92,6 +92,7 @@ for (const [name, fileCount, lineCount] of [
       CODIFF_BENCHMARK_HOME: home,
       CODIFF_BENCHMARK_ORIGIN: String(Date.now()),
       CODIFF_BENCHMARK_OUTPUT: output,
+      CODIFF_CONFIG_DIR: join(home, '.codiff'),
       CODIFF_PLAN_FILE: name === 'plan' ? markdownPath : '',
       CODIFF_REPOSITORY_PATH: name === 'error' ? home : repository,
       ELECTRON_RENDERER_URL: '',
