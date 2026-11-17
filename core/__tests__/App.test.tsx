@@ -5,6 +5,7 @@ import {
   canRenderImagePreview,
   getDiffLineCount,
   getMarkdownPreviewContents,
+  MAX_MARKDOWN_DOCUMENT_PREVIEW_LENGTH,
   getSectionForFileDiff,
   getTotalDiffLineCount,
   getVisibleDiffSections,
@@ -525,6 +526,35 @@ test('markdown previews retain both revisions for modified files', () => {
   expect(preview?.contents).toBe(file.sections[0].newFile?.contents);
   expect(preview?.oldContents).toBe(file.sections[0].oldFile?.contents);
 });
+
+test.each([
+  ['at the limit', MAX_MARKDOWN_DOCUMENT_PREVIEW_LENGTH, 'untracked', true],
+  ['above the limit', MAX_MARKDOWN_DOCUMENT_PREVIEW_LENGTH + 1, 'untracked', false],
+  ['above the limit', MAX_MARKDOWN_DOCUMENT_PREVIEW_LENGTH + 1, 'modified', true],
+] as const)(
+  '%s, a %i character %s Markdown file is previewed: %s',
+  (_, length, status, previewed) => {
+    const file = {
+      fingerprint: `markdown-preview-limit:${length}:${status}`,
+      path: 'notes.md',
+      sections: [
+        {
+          binary: false,
+          id: 'notes.md:unstaged',
+          kind: 'unstaged',
+          loadState: 'ready',
+          newFile: { contents: 'x'.repeat(length), name: 'notes.md' },
+          oldFile: { contents: status === 'modified' ? 'old\n' : '', name: 'notes.md' },
+          patch: '',
+        },
+      ],
+      status,
+    } satisfies ChangedFile;
+    const [{ fileDiff, section }] = getVisibleDiffSections(file, false);
+
+    expect(getMarkdownPreviewContents(file, section, fileDiff) != null).toBe(previewed);
+  },
+);
 
 test('inline markdown shows markdown and GitHub HTML images', () => {
   const html = renderToStaticMarkup(
