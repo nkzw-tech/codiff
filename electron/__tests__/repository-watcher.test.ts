@@ -415,6 +415,25 @@ test('clean and large dirty repository watcher polls use one Git process', async
   expect(snapshot.pathVersions?.['large.bin']).toHaveLength(16);
 }, 15_000);
 
+test('polling leaves the Git index untouched', async () => {
+  await using directory = await createTemporaryDirectory('codiff-watcher-index-');
+  const repository = await realpath(directory.path);
+  const path = join(repository, 'tracked.txt');
+  const indexPath = join(repository, '.git', 'index');
+
+  await git(repository, ['init']);
+  await writeFile(path, 'tracked\n');
+  await git(repository, ['add', 'tracked.txt']);
+  await git(repository, ['commit', '-m', 'initial']);
+  // A changed modification time makes `git status` refresh the index entry.
+  await utimes(path, 1_700_000_000, 1_700_000_000);
+  const before = await readFile(indexPath);
+
+  await readRepositoryWatcherSnapshot(repository);
+
+  expect((await readFile(indexPath)).equals(before)).toBe(true);
+});
+
 test('detects same-size edits when the modification time is preserved', async () => {
   await using directory = await createTemporaryDirectory('codiff-preserved-mtime-');
   const repository = await realpath(directory.path);
