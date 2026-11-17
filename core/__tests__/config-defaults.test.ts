@@ -200,6 +200,7 @@ test('electron defaults load from packaged app shape', () => {
   mkdirSync(join(packageRoot, 'config'));
   mkdirSync(join(packageRoot, 'electron'));
   copyFileSync('config/defaults.json', join(packageRoot, 'config/defaults.json'));
+  copyFileSync('electron/config-dir.cjs', join(packageRoot, 'electron/config-dir.cjs'));
   copyFileSync('electron/config.cjs', join(packageRoot, 'electron/config.cjs'));
 
   const packageRequire = createRequire(join(packageRoot, 'electron/config.cjs'));
