@@ -77,9 +77,10 @@ import {
   type WalkthroughNote,
 } from './lib/app-types.ts';
 import {
-  isPatchOnlyDiffSection,
+  getFailedSectionLoadState,
   shouldLoadDiffSectionContents,
   shouldPreloadSectionContentsForSearch,
+  updateDiffSection,
 } from './lib/diff.ts';
 import { sortFiles, splitRepositoryPath } from './lib/files.ts';
 import {
@@ -144,24 +145,6 @@ const disableCodeViewWorkerPool = process.env.NODE_ENV === 'test';
 const PlanEditorView = lazy(async () => ({
   default: (await import('./app/components/PlanEditorView.tsx')).PlanEditorView,
 }));
-
-const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
-  isPatchOnlyDiffSection(section)
-    ? {
-        ...section,
-        summary: {
-          canLoad: false,
-          reason: 'Codiff could not load full file context.',
-        },
-      }
-    : {
-        ...section,
-        loadState: 'error',
-        summary: {
-          canLoad: false,
-          reason: 'Codiff could not load this file.',
-        },
-      };
 
 const getPreferencesFromConfig = ({ settings }: CodiffConfig): CodiffPreferences => ({
   ...settings,
@@ -464,16 +447,7 @@ export default function App({
 
             return {
               ...current,
-              files: current.files.map((candidate) =>
-                candidate.path === file.path
-                  ? {
-                      ...candidate,
-                      sections: candidate.sections.map((candidateSection) =>
-                        candidateSection.id === section.id ? loadedSection : candidateSection,
-                      ),
-                    }
-                  : candidate,
-              ),
+              files: updateDiffSection(current.files, file.path, section.id, () => loadedSection),
             };
           });
           bumpItemVersion(file.path);
@@ -491,17 +465,11 @@ export default function App({
 
             return {
               ...current,
-              files: current.files.map((candidate) =>
-                candidate.path === file.path
-                  ? {
-                      ...candidate,
-                      sections: candidate.sections.map((candidateSection) =>
-                        candidateSection.id === section.id
-                          ? getFailedSectionLoadState(candidateSection)
-                          : candidateSection,
-                      ),
-                    }
-                  : candidate,
+              files: updateDiffSection(
+                current.files,
+                file.path,
+                section.id,
+                getFailedSectionLoadState,
               ),
             };
           });
@@ -1039,15 +1007,11 @@ export default function App({
 
             return {
               ...current,
-              files: current.files.map((file) =>
-                file.path === request.file.path
-                  ? {
-                      ...file,
-                      sections: file.sections.map((candidate) =>
-                        candidate.id === request.section.id ? loadedSection : candidate,
-                      ),
-                    }
-                  : file,
+              files: updateDiffSection(
+                current.files,
+                request.file.path,
+                request.section.id,
+                () => loadedSection,
               ),
             };
           });
@@ -1067,17 +1031,11 @@ export default function App({
 
             return {
               ...current,
-              files: current.files.map((file) =>
-                file.path === request.file.path
-                  ? {
-                      ...file,
-                      sections: file.sections.map((candidate) =>
-                        candidate.id === request.section.id
-                          ? getFailedSectionLoadState(candidate)
-                          : candidate,
-                      ),
-                    }
-                  : file,
+              files: updateDiffSection(
+                current.files,
+                request.file.path,
+                request.section.id,
+                getFailedSectionLoadState,
               ),
             };
           });

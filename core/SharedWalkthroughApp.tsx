@@ -41,6 +41,10 @@ import {
 } from './app/hooks/useDocumentAppearance.ts';
 import { useResizableSidebar } from './app/hooks/useResizableSidebar.ts';
 import { useReviewCommentDrafts } from './app/hooks/useReviewCommentDrafts.ts';
+import {
+  useReviewContentLoader,
+  type ReviewContentLoader,
+} from './app/hooks/useReviewContentLoader.ts';
 import { useReviewFileState } from './app/hooks/useReviewState.ts';
 import { createDefaultConfig } from './config/defaults.ts';
 import { matchesShortcut } from './config/keymap.ts';
@@ -149,6 +153,7 @@ const writeStoredSidebarCollapsed = (sidebarCollapsed: boolean) => {
 
 export type ReviewWalkthroughStatus = 'failed' | 'generating' | 'idle' | 'ready';
 export type ReviewMode = 'comments' | 'tree' | 'walkthrough';
+export type { ReviewContentLoader };
 
 const getSnapshotReviewComments = (
   snapshot: SharedWalkthroughSnapshot,
@@ -182,6 +187,8 @@ const disabledCommitMessage = async (): Promise<WalkthroughCommitMessageResult> 
 
 export type ReviewSurfaceProps = {
   commenting?: ReviewCommenting;
+  /** Loads deferred sections, full-file context and image previews on demand. */
+  contentLoader?: ReviewContentLoader;
   externalUrl?: string;
   gitIdentity?: GitIdentity | null;
   initialMode?: ReviewMode;
@@ -232,6 +239,7 @@ const shouldCollapseSidebarInitially = () =>
 
 export function ReviewSurface({
   commenting,
+  contentLoader,
   externalUrl,
   gitIdentity = null,
   initialMode,
@@ -339,6 +347,8 @@ export function ReviewSurface({
   } = useReviewFileState({
     initialSelectedPath: snapshot.files[0]?.path ?? null,
   });
+  const { files, loadingSectionIds, onLoadImageContent, onLoadSection, onLoadSectionContents } =
+    useReviewContentLoader({ contentLoader, onSectionChange: bumpItemVersion, snapshot });
   const { resizeSidebar, sidebarWidth } = useResizableSidebar({
     collapseThreshold: SIDEBAR_COLLAPSE_THRESHOLD,
     onCollapse: () => {
@@ -419,12 +429,12 @@ export function ReviewSurface({
 
   const visibleFiles = useMemo(
     () =>
-      sortFiles(snapshot.files).filter(
+      sortFiles(files).filter(
         (file) =>
           fuzzyMatches(file.path, fileSearchQuery) &&
           fileHasVisibleDiff(file, snapshot.preferences.showWhitespace),
       ),
-    [fileSearchQuery, snapshot.files, snapshot.preferences.showWhitespace],
+    [fileSearchQuery, files, snapshot.preferences.showWhitespace],
   );
   const visibleSelectedPath =
     selectedPath && visibleFiles.some((file) => file.path === selectedPath)
@@ -927,11 +937,13 @@ export function ReviewSurface({
     isReadOnly: !canComment,
     itemVersionByKey,
     keymap,
-    loadingSectionIds: new Set<string>(),
+    loadingSectionIds,
     onCommentDraftChange: updateActiveReviewCommentDraft,
     onCreateComment: createComment,
     onDeleteComment: deleteComment,
-    onLoadSection: noop,
+    onLoadImageContent,
+    onLoadSection,
+    onLoadSectionContents,
     onResolveThread: resolveDiscussion ?? noop,
     onSaveCommentEdit: updateExistingReviewComment,
     onSelectPathFromScroll: noop,
@@ -1326,7 +1338,7 @@ export function ReviewSurface({
         ) : (
           <NarrativeWalkthroughView
             allowCommit={false}
-            files={snapshot.files}
+            files={files}
             navigation={navigation}
             onActiveReviewTargetChange={noop}
             onCommit={disabledCommit}

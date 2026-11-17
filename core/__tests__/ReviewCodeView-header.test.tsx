@@ -265,13 +265,6 @@ test('expandUnchanged only expands diffs when full file contents can be loaded',
   );
   expect(codeViewMock.lastOptions?.expandUnchanged).toBe(true);
 
-  await view.rerender(
-    <ReviewCodeViewHarness
-      expandUnchanged
-      files={[file]}
-      isReadOnly
-      onLoadSectionContents={loadContents}
-    />,
-  );
+  await view.rerender(<ReviewCodeViewHarness expandUnchanged files={[file]} />);
   expect(codeViewMock.lastOptions?.expandUnchanged).toBe(false);
 });
