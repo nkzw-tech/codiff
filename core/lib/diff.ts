@@ -169,6 +169,13 @@ export type MarkdownPreviewContents = {
   oldContents?: string;
 };
 
+// Rendering a whole document blocks the renderer for seconds at this size and
+// for minutes a few times above it. Larger added files keep the text diff.
+export const MAX_MARKDOWN_DOCUMENT_PREVIEW_LENGTH = 64 * 1024;
+
+const getDocumentPreview = (contents: string): MarkdownPreviewContents | null =>
+  contents.length > MAX_MARKDOWN_DOCUMENT_PREVIEW_LENGTH ? null : { contents };
+
 export const getMarkdownPreviewContents = (
   file: ChangedFile,
   section: DiffSection,
@@ -183,21 +190,16 @@ export const getMarkdownPreviewContents = (
   const oldFile = section.oldFile ?? loaded?.oldFile;
   const isNew = (file.status === 'added' || file.status === 'untracked') && !oldFile?.contents;
   if (newFile && (oldFile || isNew)) {
-    return {
-      contents: newFile.contents,
-      oldContents: isNew ? undefined : oldFile?.contents,
-    };
+    return isNew
+      ? getDocumentPreview(newFile.contents)
+      : { contents: newFile.contents, oldContents: oldFile?.contents };
   }
 
   if (file.status === 'deleted' && oldFile) {
     return { contents: '', oldContents: oldFile.contents };
   }
 
-  return isNew
-    ? {
-        contents: joinDiffLines(fileDiff.additionLines),
-      }
-    : null;
+  return isNew ? getDocumentPreview(joinDiffLines(fileDiff.additionLines)) : null;
 };
 
 const emptyDiffLineCount: DiffLineCount = {
