@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
-import type { PullRequestSource, SidebarMode, WalkthroughError } from '../../lib/app-types.ts';
+import type { SidebarMode, WalkthroughError } from '../../lib/app-types.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import type { ChangedFile, HistoryEntry, NarrativeWalkthrough, ReviewSource } from '../../types.ts';
 import { Button } from './Button.tsx';
@@ -13,7 +13,6 @@ import type { NarrativeNavigation } from './walkthrough/useNarrativeNavigation.t
 import { WalkthroughProgress } from './walkthrough/WalkthroughProgress.tsx';
 
 export function Sidebar({
-  branchSource,
   commitFiles,
   commitViewOpen,
   currentSource,
@@ -21,6 +20,7 @@ export function Sidebar({
   historyEntries,
   historyHasMore,
   historyLoading,
+  historySource,
   keymap,
   mode,
   narrativeNavigation,
@@ -31,7 +31,6 @@ export function Sidebar({
   onSelectSource,
   onShareWalkthrough,
   onToggleCommitView,
-  pullRequestSource,
   reloadDeltaPaths,
   searchQuery,
   selectedPath,
@@ -43,7 +42,6 @@ export function Sidebar({
   walkthroughLoading,
   walkthroughProgress,
 }: {
-  branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
   commitFiles: ReadonlyArray<ChangedFile>;
   commitViewOpen: boolean;
   currentSource: ReviewSource;
@@ -51,6 +49,7 @@ export function Sidebar({
   historyEntries: ReadonlyArray<HistoryEntry>;
   historyHasMore: boolean;
   historyLoading: boolean;
+  historySource: ReviewSource | null;
   keymap: CodiffKeymap;
   mode: SidebarMode;
   narrativeNavigation: NarrativeNavigation;
@@ -61,7 +60,6 @@ export function Sidebar({
   onSelectSource: (source: ReviewSource) => void;
   onShareWalkthrough?: () => void;
   onToggleCommitView: () => void;
-  pullRequestSource: PullRequestSource | null;
   reloadDeltaPaths: ReadonlySet<string>;
   searchQuery: string;
   selectedPath: string | null;
@@ -113,14 +111,13 @@ export function Sidebar({
       </div>
       {mode === 'history' ? (
         <HistorySidebar
-          branchSource={branchSource}
           currentSource={currentSource}
           entries={historyEntries}
           hasMore={historyHasMore}
+          historySource={historySource}
           loading={historyLoading}
           onLoadMore={onLoadMoreHistory}
           onSelectSource={onSelectSource}
-          pullRequestSource={pullRequestSource}
           searchQuery={searchQuery}
         />
       ) : mode === 'walkthrough' && narrativeWalkthrough ? (

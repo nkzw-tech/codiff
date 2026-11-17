@@ -2164,20 +2164,6 @@ export default function App({
       <aside className="squircle sidebar">
         {sidebarMode === 'pull-requests' ? null : (
           <Sidebar
-            branchSource={
-              historySource?.type === 'branch-diff'
-                ? historySource
-                : historySource?.type === 'branch-working-tree' &&
-                    historySource.baseRef &&
-                    historySource.headRef
-                  ? {
-                      baseRef: historySource.baseRef,
-                      headRef: historySource.headRef,
-                      ref: historySource.ref,
-                      type: 'branch-diff',
-                    }
-                  : null
-            }
             commitFiles={state.files}
             commitViewOpen={showPlainCommitView}
             currentSource={pendingSource ?? state.source}
@@ -2185,6 +2171,7 @@ export default function App({
             historyEntries={historyEntries}
             historyHasMore={historyHasMore}
             historyLoading={historyLoading}
+            historySource={historySource}
             keymap={codiffConfig.keymap}
             mode={sidebarMode}
             narrativeNavigation={narrativeNavigation}
@@ -2197,7 +2184,6 @@ export default function App({
             onSelectSource={selectSource}
             onShareWalkthrough={enabledShareWalkthrough}
             onToggleCommitView={showPlainCommitView ? closeCommitView : openCommitView}
-            pullRequestSource={historySource?.type === 'pull-request' ? historySource : null}
             reloadDeltaPaths={reloadDeltaPaths}
             searchQuery={sidebarMode === 'history' ? historySearchQuery : fileSearchQuery}
             selectedPath={visibleSelectedPath}

@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useRef } from 'react';
-import type { PullRequestSource } from '../../lib/app-types.ts';
 import { getShortRef, getSourceKey } from '../../lib/source.ts';
 import type { HistoryEntry, ReviewSource } from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
@@ -29,30 +28,45 @@ const shortDate = (timestamp: number) => {
 };
 
 export function HistorySidebar({
-  branchSource,
   currentSource,
   entries,
   hasMore,
+  historySource,
   loading,
   onLoadMore,
   onSelectSource,
-  pullRequestSource,
   searchQuery,
+  showPullRequestWorkingTree = true,
 }: {
-  branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
   currentSource: ReviewSource;
   entries: ReadonlyArray<HistoryEntry>;
   hasMore: boolean;
+  historySource: ReviewSource | null;
   loading: boolean;
   onLoadMore: () => void;
   onSelectSource: (source: ReviewSource) => void;
-  pullRequestSource: PullRequestSource | null;
   searchQuery: string;
+  // Embedded hosts review a pull request without a local checkout to switch to.
+  showPullRequestWorkingTree?: boolean;
 }) {
   const currentSourceKey = getSourceKey(currentSource);
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => {
+    const pullRequestSource = historySource?.type === 'pull-request' ? historySource : null;
+    const branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null =
+      historySource?.type === 'branch-diff'
+        ? historySource
+        : historySource?.type === 'branch-working-tree' &&
+            historySource.baseRef &&
+            historySource.headRef
+          ? {
+              baseRef: historySource.baseRef,
+              headRef: historySource.headRef,
+              ref: historySource.ref,
+              type: 'branch-diff',
+            }
+          : null;
     const commitRows = entries.map((entry) => ({
       author: entry.author,
       committedAt: entry.committedAt,
@@ -79,7 +93,7 @@ export function HistorySidebar({
         ? commitRows.filter((row) => row.scope === 'base').filter(matchesQuery)
         : [];
       return [
-        !normalizedQuery
+        showPullRequestWorkingTree && !normalizedQuery
           ? {
               author: null,
               committedAt: null,
@@ -202,7 +216,7 @@ export function HistorySidebar({
         : null,
       ...localRows,
     ].filter((row): row is NonNullable<typeof row> => row != null);
-  }, [branchSource, entries, normalizedQuery, pullRequestSource]);
+  }, [entries, historySource, normalizedQuery, showPullRequestWorkingTree]);
   const maybeLoadMore = useCallback(() => {
     const element = listRef.current;
     if (!element || loading || !hasMore || normalizedQuery) {
