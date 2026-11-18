@@ -433,7 +433,9 @@ export const getReviewCommentsFromState = (state: RepositoryState): ReadonlyArra
   (state.reviewComments ?? []).flatMap((comment) => {
     const file = state.files.find((candidate) => candidate.path === comment.filePath);
     const section =
-      file?.sections.find((candidate) => candidate.id === comment.sectionId) ?? file?.sections[0];
+      comment.sectionId == null
+        ? file?.sections[0]
+        : file?.sections.find((candidate) => candidate.id === comment.sectionId);
     return section
       ? [
           {

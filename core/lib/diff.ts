@@ -489,6 +489,7 @@ const sectionHasVisibleDiff = (
   section: DiffSection,
   fileDiff: FileDiffMetadata,
 ) =>
+  (file.status === 'conflicted' && section.kind === 'combined') ||
   section.binary ||
   (section.loadState != null && section.loadState !== 'ready') ||
   fileHasMetadataDiff(file, section) ||

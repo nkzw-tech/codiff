@@ -83,13 +83,22 @@ The `<scope>` segment depends on which diff you anchored against:
 
 - `staged` — the staged diff (`git diff --staged`).
 - `unstaged` — the working-tree diff (`git diff`).
+- `combined:<merge-base SHA>` — **All changes vs `<branch>`** (`branch+`), which is what
+  `codiff <branch>` opens, even when the working tree is clean. Each file has one section
+  for its cumulative changes since the merge base. The SHA is the full output of
+  `git merge-base <branch> HEAD`. To print the first hunk id of `src/app.ts` for a review
+  against `main`, run:
+
+  ```sh
+  printf 'src/app.ts:combined:%s:h1\n' "$(git merge-base main HEAD)"
+  ```
+
 - `pull-request:<number>` — a pull request.
-- `<commit SHA>` — every commit-like target: a single commit, a branch comparison, or a
-  ref range. This is always the **full 40-character SHA of the diff's new (head) side**,
+- `<commit SHA>` — every other commit-like target: a single commit, a committed-only branch
+  comparison, or a ref range. This is always the **full 40-character SHA of the diff's new (head) side**,
   resolved with `git rev-parse` — never a ref name or a `branch:`/`range:` prefix:
   - single commit (`codiff <ref>`): the resolved commit SHA.
-  - branch comparison (`codiff <branch>` — current branch vs `<branch>`): the resolved
-    **`HEAD`** SHA, _not_ `<branch>`.
+  - **Committed only vs `<branch>`** in the app: the resolved **`HEAD`** SHA, _not_ `<branch>`.
   - ref range (`codiff base..head` or `base...head`): the resolved SHA of `head`.
 
 ## Validation

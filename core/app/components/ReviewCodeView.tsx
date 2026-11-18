@@ -174,7 +174,7 @@ const isEditableWorkingTreeSection = (
   (sourceType === 'working-tree' || sourceType === 'branch-working-tree') &&
   file.status !== 'deleted' &&
   file.sections.at(-1)?.id === section.id &&
-  (section.kind === 'staged' || section.kind === 'unstaged');
+  (section.kind === 'combined' || section.kind === 'staged' || section.kind === 'unstaged');
 
 function CopyFilePathButton({ path }: { path: string }) {
   const [copied, markCopied] = useCopiedState(1600);
@@ -3346,7 +3346,7 @@ export function ReviewCodeView({
         meta.section.loadState === 'ready' ||
         meta.section.loadState === 'deferred') &&
       !meta.isMarkdownPreview &&
-      meta.section.kind === 'unstaged' &&
+      (meta.section.kind === 'combined' || meta.section.kind === 'unstaged') &&
       isEditableWorkingTreeSection(source.type, meta.file, meta.section) &&
       onLoadSectionContents != null &&
       window.codiff?.getRepositoryFile != null,

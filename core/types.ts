@@ -4,7 +4,7 @@ import type { CodiffDiffStyle } from './config/types.ts';
 export type DiffSection = {
   binary: boolean;
   id: string;
-  kind: 'commit' | 'pull-request' | 'staged' | 'unstaged';
+  kind: 'combined' | 'commit' | 'pull-request' | 'staged' | 'unstaged';
   loadState?: 'binary' | 'deferred' | 'directory' | 'error' | 'ready' | 'too-large';
   newFile?: {
     cacheKey?: string;

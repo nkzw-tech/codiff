@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { expect, test, vi } from 'vite-plus/test';
 import { createTemporaryDirectory } from '../../core/__tests__/helpers/resources.ts';
@@ -96,6 +98,43 @@ test('marks historical snapshot candidates as unsafe for editor fallback', async
       path: 'src/greeting.ts',
     });
   }
+});
+
+test('definition search uses the working tree for combined additions and the base for deletions', async () => {
+  await using directory = await createTemporaryDirectory('codiff-definitions-combined-');
+  createDefinitionNavigationRepository(directory.path);
+  await writeFile(
+    join(directory.path, 'src/farewell.ts'),
+    'export function formatFarewell(name: string) {\n  return `Bye, ${name}!`;\n}\n',
+  );
+  const source = {
+    baseRef: 'HEAD',
+    headRef: 'HEAD',
+    ref: 'main',
+    type: 'branch-working-tree',
+  } satisfies DefinitionSearchRequest['source'];
+
+  const additions = await findDefinitions(directory.path, {
+    ...request,
+    identifier: 'formatFarewell',
+    kind: 'combined',
+    source,
+  });
+  expect(additions).toMatchObject({
+    candidates: [{ canOpenInEditor: true, lineNumber: 1, path: 'src/farewell.ts' }],
+    status: 'ready',
+  });
+
+  const deletions = await findDefinitions(directory.path, {
+    ...request,
+    kind: 'combined',
+    side: 'deletions',
+    source,
+  });
+  expect(deletions).toMatchObject({
+    candidates: [{ canOpenInEditor: false, path: 'src/greeting.ts' }],
+    status: 'ready',
+  });
 });
 
 test('parses revision-prefixed git grep records', () => {

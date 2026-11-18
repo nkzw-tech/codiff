@@ -174,6 +174,24 @@ test.each(['MacIntel', 'Win32'])(
   },
 );
 
+test('a combined section offers code editing', async () => {
+  const combinedFile = createChangedFile('combined.txt', { kind: 'combined' });
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      codeEditingStore={store}
+      files={[combinedFile]}
+      onLoadSectionContents={async () => ({
+        newFile: { contents: 'new\n', name: combinedFile.path },
+        oldFile: { contents: 'old\n', name: combinedFile.path },
+      })}
+      source={{ baseRef: 'base', headRef: 'head', ref: 'main', type: 'branch-working-tree' }}
+    />,
+  );
+  expect(
+    view.container.querySelector(`button[aria-label="Edit ${combinedFile.path}"]`),
+  ).not.toBeNull();
+});
+
 test('the edit shortcut respects read-only reviews and native inputs', async () => {
   vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
   const props = {

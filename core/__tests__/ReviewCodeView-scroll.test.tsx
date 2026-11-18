@@ -188,7 +188,7 @@ const editMarkdown = async (container: HTMLElement) => {
   await act(async () => button?.click());
 };
 
-const createCombinedFile = (contents: string, fingerprint: string) => {
+const createCommittedAndUnstagedFile = (contents: string, fingerprint: string) => {
   const file = createLoadedMarkdownFile(contents, fingerprint);
   const section = file.sections[0]!;
   return {
@@ -214,6 +214,18 @@ const createCombinedFile = (contents: string, fingerprint: string) => {
         },
       },
     ],
+  } satisfies ChangedFile;
+};
+
+const createCombinedFile = (contents: string, fingerprint: string) => {
+  const file = createLoadedMarkdownFile(contents, fingerprint);
+  return {
+    ...file,
+    sections: file.sections.map((section) => ({
+      ...section,
+      id: 'plan.md:combined:1111111111111111111111111111111111111111',
+      kind: 'combined' as const,
+    })),
   } satisfies ChangedFile;
 };
 
@@ -524,7 +536,10 @@ test('hunk navigation visits rendered Markdown changes', async () => {
 });
 
 test('later edits to a newly added Markdown file are still shown as diffs', async () => {
-  const file = { ...createCombinedFile('# Updated\n', 'new-with-edits'), status: 'added' as const };
+  const file = {
+    ...createCommittedAndUnstagedFile('# Updated\n', 'new-with-edits'),
+    status: 'added' as const,
+  };
   const firstSection = { ...file.sections[0]!, oldFile: undefined };
   await using view = await renderReact(
     <ReviewCodeViewHarness files={[{ ...file, sections: [firstSection, file.sections[1]!] }]} />,
@@ -643,7 +658,7 @@ test('switching edited Markdown back to a diff flushes and refreshes it first', 
   expect(JSON.stringify(codeViewMock.lastItems)).toContain('# Saved');
 });
 
-test('combined branch Markdown edits only the final working-tree section', async () => {
+test('switching edited Markdown to a combined diff saves and refreshes it', async () => {
   const order: Array<string> = [];
   const initialFile = createCombinedFile('# Edited\n', 'plan.md:combined-initial');
   const refreshedFile = createCombinedFile('# Saved\n', 'plan.md:combined-refreshed');
