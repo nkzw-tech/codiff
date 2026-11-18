@@ -25,6 +25,7 @@ minimumReleaseAgeExclude:
   - react-fate
   - void
   - '@pierre/*'
+  - '@cloudflare/workers-types@5.20261117.1'
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.6.0
   vite-plus: 1.6.0
