@@ -3222,6 +3222,80 @@ export function ReviewCodeView({
     walkthroughNotes,
   ]);
 
+  // The viewer keeps the reading position across updates for the item ids that survive them. A
+  // comparison's section ids carry its head ref, so a refresh that picks up a commit replaces every
+  // item; find the file being read again by path and put the same line back where it was.
+  const readingContextKey =
+    source.type === 'branch-diff' || source.type === 'branch-working-tree'
+      ? `${source.type}:${source.ref}`
+      : sourceKey;
+  const readingPositionRef = useRef<{
+    contextKey: string;
+    itemKey: string;
+    target: Extract<CodeViewScrollTarget, { type: 'item' | 'line' }>;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const viewer = codeViewRef.current?.getInstance();
+    const getItemKey = (id: string) => {
+      const meta = itemMetadata.get(id);
+      return meta && `${meta.blockId}:${meta.file.path}:${meta.section.kind}`;
+    };
+    const position = readingPositionRef.current;
+    readingPositionRef.current = null;
+    if (position?.contextKey === readingContextKey) {
+      const item = items.find(({ id }) => getItemKey(id) === position.itemKey);
+      if (item && item.id !== position.target.id) {
+        codeViewRef.current?.scrollTo({ ...position.target, id: item.id });
+      }
+    }
+
+    // Cleanups run before the viewer receives the next items, so this still reads the old layout.
+    return () => {
+      const scrollTop = viewer?.getScrollTop() ?? 0;
+      if (!viewer || scrollTop <= 0) {
+        return;
+      }
+      // Anchor to the first item or line that starts below the top edge, as the viewer does.
+      for (const { id, instance } of viewer.getRenderedItems()) {
+        const itemKey = getItemKey(id);
+        const itemTop = viewer.getTopForItem(id);
+        if (!itemKey || itemTop == null) {
+          continue;
+        }
+        const line =
+          itemTop < scrollTop
+            ? instance.getNumericScrollAnchor(scrollTop + headerHeight - itemTop)
+            : undefined;
+        if (itemTop < scrollTop && !line) {
+          continue;
+        }
+        readingPositionRef.current = {
+          contextKey: readingContextKey,
+          itemKey,
+          target: line
+            ? {
+                align: 'start',
+                behavior: 'instant',
+                id,
+                lineNumber: line.lineNumber,
+                // Line targets already clear the sticky file header; item targets do not.
+                offset: itemTop + line.top - scrollTop - headerHeight,
+                side: line.side,
+                type: 'line',
+              }
+            : {
+                align: 'start',
+                behavior: 'instant',
+                id,
+                offset: itemTop - scrollTop,
+                type: 'item',
+              },
+        };
+        return;
+      }
+    };
+  }, [headerHeight, itemMetadata, items, readingContextKey]);
+
   const codeViewItems = useMemo<ReadonlyArray<CodeViewItem<ReviewAnnotationMetadata>>>(() => {
     if (items.length > 0 || !sourceDescriptionItemId) {
       return items;

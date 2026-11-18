@@ -18,7 +18,9 @@
     src: url('./fonts/firacode/FiraCode-SemiBold.woff2') format('woff2');
   }
 
-  :root {
+  :root,
+  .share-shell,
+  .shared-plan-shell {
     --app-bg: #f8f8f6;
     --code-bg: #ffffff;
     --codiff-font-mono: 'Fira Code', monospace;
@@ -50,7 +52,9 @@
   }
 
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root,
+    .share-shell,
+    .shared-plan-shell {
       --app-bg: #141414;
       --code-bg: #1c1c1c;
       --codiff-link: var(--tree-selection-focus);

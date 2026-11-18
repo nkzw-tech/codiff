@@ -3500,3 +3500,55 @@ test('viewed state and collapse synchronize when switching between tree and walk
   ]);
   expect(collapsedCount()).toBe(0);
 });
+
+// Comparison sections are identified by the head they were read at.
+const createComparisonFiles = (headRef: string) =>
+  ['src/first.ts', 'src/second.ts'].map((path) => {
+    const file = createChangedFile(path, { kind: 'commit' });
+    return { ...file, sections: [{ ...file.sections[0], id: `${path}:${headRef}` }] };
+  });
+
+const createBranchSource = (headRef: string) =>
+  ({ baseRef: 'base', headRef, ref: 'main', type: 'branch-diff' }) satisfies ReviewSource;
+
+test('a refreshed comparison with a new head keeps the file being read in place', async () => {
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      files={createComparisonFiles('head1')}
+      scrollTarget={{ path: 'src/second.ts', request: 1 }}
+      selectedPath="src/second.ts"
+      source={createBranchSource('head1')}
+    />,
+  );
+  await waitFor(() => expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(1));
+  const { offset } = codeViewMock.scrollTo.mock.lastCall![0];
+  codeViewMock.renderedElements.set('diff:src/second.ts:head1', document.createElement('div'));
+
+  await view.rerender(
+    <ReviewCodeViewHarness
+      files={createComparisonFiles('head2')}
+      scrollTarget={{ path: 'src/second.ts', request: 1 }}
+      selectedPath="src/second.ts"
+      source={createBranchSource('head2')}
+    />,
+  );
+  expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(2);
+  expect(codeViewMock.scrollTo).toHaveBeenLastCalledWith({
+    align: 'start',
+    behavior: 'instant',
+    id: 'diff:src/second.ts:head2',
+    offset,
+    type: 'item',
+  });
+
+  // Another comparison starts from its own top, even where it shares a path.
+  await view.rerender(
+    <ReviewCodeViewHarness
+      files={createComparisonFiles('head3')}
+      scrollTarget={{ path: 'src/second.ts', request: 1 }}
+      selectedPath="src/second.ts"
+      source={{ ref: 'head3', type: 'commit' }}
+    />,
+  );
+  expect(codeViewMock.scrollTo).toHaveBeenCalledTimes(2);
+});

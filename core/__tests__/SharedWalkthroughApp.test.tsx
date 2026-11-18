@@ -972,3 +972,137 @@ test('a review surface without a content loader offers no deferred section load'
   expect(view.container.textContent).toContain('src/large.ts');
   expect(getLoadButton(view.container)).toBeNull();
 });
+
+const historyEntry = (ref: string, subject: string) => ({
+  author: 'Ada',
+  committedAt: 1_780_000_000_000,
+  parents: [],
+  ref: ref.repeat(40),
+  subject,
+});
+
+test('hosts that provide history get a History tab to pick a commit from', async () => {
+  const onSelectSource = vi.fn();
+  const snapshot = { ...sharedWalkthroughSnapshot, files: [] };
+  await using view = await renderReact(<ReviewSurface initialMode="tree" snapshot={snapshot} />);
+  const getHistoryTab = () =>
+    [...view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) =>
+      tab.textContent?.includes('History'),
+    );
+  expect(getHistoryTab()).toBeUndefined();
+
+  await view.rerender(
+    <ReviewSurface
+      history={{
+        entries: [historyEntry('a', 'Add parser'), historyEntry('b', 'Fix lexer')],
+        hasMore: false,
+        loading: false,
+        onLoadMore: () => {},
+        onSelectSource,
+        source: sharedWalkthroughSource,
+      }}
+      initialMode="tree"
+      snapshot={snapshot}
+    />,
+  );
+  await act(async () => getHistoryTab()?.click());
+  const subjects = () =>
+    [...view.container.querySelectorAll('.history-entry-subject')].map(
+      ({ textContent }) => textContent,
+    );
+  expect(subjects()).toEqual(['Uncommitted changes', 'Add parser', 'Fix lexer']);
+  expect(view.container.querySelector('.history-entry.selected')?.textContent).toContain(
+    'Uncommitted changes',
+  );
+  expect(view.container.querySelector('.empty-panel')?.textContent).toContain('No local changes');
+
+  await setInputValue(
+    view.container.querySelector<HTMLInputElement>('[placeholder="Filter history"]')!,
+    'lexer',
+  );
+  expect(subjects()).toEqual(['Fix lexer']);
+  await act(async () =>
+    view.container.querySelector<HTMLButtonElement>('.history-entry[title="Fix lexer"]')?.click(),
+  );
+  expect(onSelectSource).toHaveBeenCalledWith({ ref: 'b'.repeat(40), type: 'commit' });
+});
+
+test('embedded pull request history has no local changes entry', async () => {
+  const source = {
+    number: 7,
+    title: 'Provider review',
+    type: 'pull-request',
+    url: 'https://github.com/fixture/repo/pull/7',
+  } as const;
+  await using view = await renderReact(
+    <ReviewSurface
+      history={{
+        entries: [{ ...historyEntry('a', 'Review change'), scope: 'pull-request' }],
+        hasMore: false,
+        loading: false,
+        onLoadMore: () => {},
+        onSelectSource: () => {},
+        source,
+      }}
+      initialMode="history"
+      snapshot={{
+        ...sharedWalkthroughSnapshot,
+        repository: { ...sharedWalkthroughSnapshot.repository, source },
+      }}
+    />,
+  );
+  expect(
+    [...view.container.querySelectorAll('.history-entry-subject')].map(
+      ({ textContent }) => textContent,
+    ),
+  ).toEqual(['Provider review', 'Review change']);
+});
+
+test('hosts can offer a refresh for local changes and mark a comparison as loading', async () => {
+  const onRefresh = vi.fn();
+  const commitSnapshot = {
+    ...sharedWalkthroughSnapshot,
+    repository: {
+      ...sharedWalkthroughSnapshot.repository,
+      source: { ref: 'a'.repeat(40), type: 'commit' },
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  await using view = await renderReact(
+    <ReviewSurface
+      initialMode="tree"
+      refresh={{ changesDetected: false, onRefresh }}
+      snapshot={sharedWalkthroughSnapshot}
+    />,
+  );
+  const visibleBanner = () => view.container.querySelector('.repository-change-banner.visible');
+  expect(visibleBanner()).toBeNull();
+
+  await view.rerender(
+    <ReviewSurface
+      initialMode="tree"
+      refresh={{ changesDetected: true, onRefresh }}
+      snapshot={sharedWalkthroughSnapshot}
+    />,
+  );
+  await act(async () =>
+    visibleBanner()?.querySelector<HTMLButtonElement>('.repository-change-reload')?.click(),
+  );
+  expect(onRefresh).toHaveBeenCalledOnce();
+
+  // A commit cannot change, so there is nothing to refresh.
+  await view.rerender(
+    <ReviewSurface
+      initialMode="tree"
+      refresh={{ changesDetected: true, onRefresh }}
+      snapshot={commitSnapshot}
+    />,
+  );
+  expect(visibleBanner()).toBeNull();
+
+  expect(view.container.querySelector('.review-source-loading')).toBeNull();
+  await view.rerender(
+    <ReviewSurface comparisonLoading initialMode="tree" snapshot={commitSnapshot} />,
+  );
+  expect(view.container.querySelector('.review-source-loading')).not.toBeNull();
+  expect(view.container.querySelector('.code-view')).toBeNull();
+});

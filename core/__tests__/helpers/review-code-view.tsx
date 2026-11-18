@@ -92,7 +92,7 @@ vi.mock('@pierre/diffs/react', async () => {
                 element:
                   codeViewMock.renderedElements.get(item.id) ?? document.createElement('div'),
                 id: item.id,
-                instance: {},
+                instance: { getNumericScrollAnchor: () => undefined },
                 item,
                 type: item.type,
                 version: item.version,
