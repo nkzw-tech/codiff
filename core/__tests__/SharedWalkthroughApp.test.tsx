@@ -6,8 +6,19 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
-import { ReviewSurface, type ReviewCommenting, type ReviewSurfaceProps } from '../react.ts';
-import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
+import { getVisibleDiffSections } from '../lib/diff.ts';
+import {
+  ReviewSurface,
+  type ReviewCommenting,
+  type ReviewContentLoader,
+  type ReviewSurfaceProps,
+} from '../react.ts';
+import type {
+  ChangedFile,
+  DiffSection,
+  NarrativeWalkthrough,
+  SharedWalkthroughSnapshot,
+} from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { renderReact, setInputValue, waitFor } from './helpers/react.tsx';
 
@@ -801,6 +812,165 @@ test('shared walkthroughs initially preview Markdown when other files are genera
   await waitFor(() => {
     expect(container.querySelector('.codiff-markdown-preview')).not.toBeNull();
   });
+});
+
+const createDeferredFile = (path: string): ChangedFile => {
+  const file = createChangedFile(path);
+  return {
+    ...file,
+    sections: file.sections.map((section) => ({
+      ...section,
+      loadState: 'deferred',
+      patch: '',
+      summary: { canLoad: true, reason: 'Large file.' },
+    })),
+  };
+};
+
+const createContentLoader = (loadSectionContent: ReviewContentLoader['loadSectionContent']) =>
+  ({
+    loadImageContent: vi.fn<ReviewContentLoader['loadImageContent']>(async ({ path }) => ({
+      newImage: {
+        dataUrl: 'data:image/png;base64,bmV3',
+        mimeType: 'image/png',
+        name: path,
+        size: 3,
+      },
+      status: 'ready',
+    })),
+    loadSectionContent: vi.fn(loadSectionContent),
+  }) satisfies ReviewContentLoader;
+
+const renderTreeReview = (files: ReadonlyArray<ChangedFile>, contentLoader?: ReviewContentLoader) =>
+  renderReact(
+    <ReviewSurface
+      contentLoader={contentLoader}
+      initialMode="tree"
+      snapshot={{ ...sharedWalkthroughSnapshot, files }}
+    />,
+  );
+
+const getLoadButton = (container: HTMLElement) =>
+  container.querySelector<HTMLButtonElement>('.codiff-load-button');
+
+const getLineCountTitle = (container: HTMLElement) =>
+  container.querySelector('.codiff-file-header .codiff-line-count')?.getAttribute('title');
+
+test('a read-only review surface loads a deferred section through its content loader', async () => {
+  const file = createDeferredFile('src/large.ts');
+  const loaded = Promise.withResolvers<DiffSection>();
+  const contentLoader = createContentLoader(() => loaded.promise);
+  await using view = await renderTreeReview([file], contentLoader);
+
+  const loadButton = getLoadButton(view.container);
+  await act(async () => {
+    loadButton?.click();
+    loadButton?.click();
+  });
+  expect(loadButton?.textContent).toBe('Loading...');
+  expect(contentLoader.loadSectionContent.mock.calls).toEqual([
+    [
+      {
+        force: true,
+        kind: 'unstaged',
+        path: 'src/large.ts',
+        showWhitespace: false,
+        source: sharedWalkthroughSource,
+      },
+    ],
+  ]);
+
+  await act(async () => loaded.resolve(createChangedFile('src/large.ts').sections[0]));
+  await waitFor(() =>
+    expect(getLineCountTitle(view.container)).toBe('1 added line, 1 removed line'),
+  );
+  expect(getLoadButton(view.container)).toBeNull();
+});
+
+test('a failed deferred section load stops offering the load', async () => {
+  const contentLoader = createContentLoader(async () => {
+    throw new Error('Offline.');
+  });
+  await using view = await renderTreeReview([createDeferredFile('src/large.ts')], contentLoader);
+
+  expect(getLoadButton(view.container)).not.toBeNull();
+  await act(async () => getLoadButton(view.container)?.click());
+
+  await waitFor(() => expect(getLoadButton(view.container)).toBeNull());
+  expect(getLineCountTitle(view.container)).toBeUndefined();
+});
+
+test('a deferred section result for a replaced snapshot is dropped', async () => {
+  const loaded = Promise.withResolvers<DiffSection>();
+  const contentLoader = createContentLoader(() => loaded.promise);
+  await using view = await renderTreeReview([createDeferredFile('src/large.ts')], contentLoader);
+  await act(async () => getLoadButton(view.container)?.click());
+
+  await view.rerender(
+    <ReviewSurface
+      contentLoader={contentLoader}
+      initialMode="tree"
+      snapshot={{ ...sharedWalkthroughSnapshot, files: [createDeferredFile('src/large.ts')] }}
+    />,
+  );
+  await act(async () => loaded.resolve(createChangedFile('src/large.ts').sections[0]));
+
+  expect(getLoadButton(view.container)?.textContent).toBe('Load');
+});
+
+test('a read-only review surface expands patch-only context through its content loader', async () => {
+  const file = createChangedFile('src/context.ts', {
+    patch:
+      'diff --git a/src/context.ts b/src/context.ts\n--- a/src/context.ts\n+++ b/src/context.ts\n@@ -2,3 +2,3 @@\n b\n-c\n+C\n d\n',
+  });
+  const contentLoader = createContentLoader(async () => ({
+    ...file.sections[0],
+    newFile: { contents: 'a\nb\nC\nd\ne\n', name: file.path },
+    oldFile: { contents: 'a\nb\nc\nd\ne\n', name: file.path },
+  }));
+  await using view = await renderTreeReview([file], contentLoader);
+  const getExpandButton = () =>
+    [...view.container.querySelectorAll('diffs-container')]
+      .map((host) => host.shadowRoot?.querySelector<HTMLElement>('[data-expand-button]'))
+      .find((button) => button != null);
+
+  await waitFor(() => expect(getExpandButton()).toBeDefined());
+  await act(async () => getExpandButton()?.click());
+
+  await waitFor(() =>
+    expect(getVisibleDiffSections(file, false)[0]?.fileDiff.isPartial).toBe(false),
+  );
+  expect(contentLoader.loadSectionContent).toHaveBeenCalledOnce();
+});
+
+test('a read-only review surface previews images through its content loader', async () => {
+  const file = createChangedFile('assets/logo.png');
+  const image = {
+    ...file,
+    sections: file.sections.map((section) => ({ ...section, binary: true, patch: '' })),
+  };
+  const contentLoader = createContentLoader(async () => {
+    throw new Error('Not used by this test.');
+  });
+  await using view = await renderTreeReview([image], contentLoader);
+
+  await waitFor(() =>
+    expect(
+      view.container.querySelector<HTMLImageElement>('img[alt="New assets/logo.png"]')?.src,
+    ).toBe('data:image/png;base64,bmV3'),
+  );
+  expect(contentLoader.loadImageContent).toHaveBeenCalledWith({
+    kind: 'unstaged',
+    path: 'assets/logo.png',
+    source: sharedWalkthroughSource,
+  });
+});
+
+test('a review surface without a content loader offers no deferred section load', async () => {
+  await using view = await renderTreeReview([createDeferredFile('src/large.ts')]);
+
+  expect(view.container.textContent).toContain('src/large.ts');
+  expect(getLoadButton(view.container)).toBeNull();
 });
 
 const historyEntry = (ref: string, subject: string) => ({

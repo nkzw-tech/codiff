@@ -271,7 +271,7 @@ function CodeViewHeader({
   isSectionLoading: boolean;
   meta: CodeViewItemMetadata;
   onCreateFileComment: () => void;
-  onLoadSection: (file: ChangedFile, section: DiffSection) => void;
+  onLoadSection?: (file: ChangedFile, section: DiffSection) => void;
   onOpenFile?: (file: ChangedFile) => void;
   onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean, reviewKey: string) => void;
   onToggleMarkdownPreview: (file: ChangedFile, section: DiffSection) => void;
@@ -396,7 +396,7 @@ function CodeViewHeader({
           </Button>
         ) : null}
         {editActions}
-        {canLoadSection && !readOnly ? (
+        {canLoadSection && onLoadSection ? (
           <button
             className="codiff-load-button"
             disabled={isSectionLoading}
@@ -2688,7 +2688,7 @@ export function ReviewCodeView({
   onDeleteComment: (commentId: string) => void;
   onFindDefinitions?: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
   onLoadImageContent?: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
-  onLoadSection: (file: ChangedFile, section: DiffSection) => void;
+  onLoadSection?: (file: ChangedFile, section: DiffSection) => void;
   onLoadSectionContents?: (file: ChangedFile, section: DiffSection) => Promise<FileDiffLoadedFiles>;
   onOpenDefinition?: (candidate: DefinitionCandidate) => void;
   onOpenFile?: (file: ChangedFile) => void;
@@ -2988,7 +2988,7 @@ export function ReviewCodeView({
         nextSearchTargetsByBaseItemId.set(baseItemId, searchTargets);
         const markdownPreview = getMarkdownPreviewContents(file, section, fileDiff);
         const canRenderImage =
-          !isReadOnly && onLoadImageContent != null && canRenderImagePreview(file.path, section);
+          onLoadImageContent != null && canRenderImagePreview(file.path, section);
         const canRenderMarkdown = markdownPreview != null;
         const canEditMarkdown =
           canRenderMarkdown &&
@@ -3683,7 +3683,7 @@ export function ReviewCodeView({
   // context on a patch-only diff; the partial FileDiffMetadata is hydrated in
   // place (see `parseSectionDiffWithOptions` for the identity contract).
   const loadDiffFiles = useMemo(() => {
-    if (!onLoadSectionContents || isReadOnly) {
+    if (!onLoadSectionContents) {
       return undefined;
     }
 
@@ -3697,7 +3697,7 @@ export function ReviewCodeView({
 
       return loadSectionContents(target.file, target.section, onLoadSectionContents);
     };
-  }, [isReadOnly, onLoadSectionContents]);
+  }, [onLoadSectionContents]);
 
   const codeViewOptions: CodeViewOptions<ReviewAnnotationMetadata, undefined> = useMemo(
     () =>
@@ -3783,9 +3783,6 @@ export function ReviewCodeView({
               });
             return;
           }
-          if (isReadOnly) {
-            return;
-          }
           if (isInteractiveReviewEvent(line.event)) {
             return;
           }
@@ -3796,7 +3793,11 @@ export function ReviewCodeView({
           }
 
           if (shouldLoadDiffSectionContents(meta.section)) {
-            onLoadSection(meta.file, meta.section);
+            onLoadSection?.(meta.file, meta.section);
+            return;
+          }
+
+          if (isReadOnly) {
             return;
           }
 

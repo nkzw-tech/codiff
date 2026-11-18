@@ -39,6 +39,41 @@ export const shouldPreloadSectionContentsForSearch = (section: DiffSection) =>
   shouldLoadDiffSectionContents(section) ||
   (section.summary?.canLoad !== false && isPatchOnlyDiffSection(section));
 
+export const getFailedSectionLoadState = (section: DiffSection): DiffSection =>
+  isPatchOnlyDiffSection(section)
+    ? {
+        ...section,
+        summary: {
+          canLoad: false,
+          reason: 'Codiff could not load full file context.',
+        },
+      }
+    : {
+        ...section,
+        loadState: 'error',
+        summary: {
+          canLoad: false,
+          reason: 'Codiff could not load this file.',
+        },
+      };
+
+export const updateDiffSection = (
+  files: ReadonlyArray<ChangedFile>,
+  path: string,
+  sectionId: string,
+  update: (section: DiffSection) => DiffSection,
+): ReadonlyArray<ChangedFile> =>
+  files.map((file) =>
+    file.path === path
+      ? {
+          ...file,
+          sections: file.sections.map((section) =>
+            section.id === sectionId ? update(section) : section,
+          ),
+        }
+      : file,
+  );
+
 // Full file contents fetched lazily for patch-only sections via the CodeView
 // `loadDiffFiles` option. Kept outside React state so the library's in-place
 // hydration of the rendered diff is not reset by re-renders. Keyed without the
