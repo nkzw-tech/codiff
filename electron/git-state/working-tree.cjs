@@ -146,10 +146,10 @@ const readPatchMap = async (repoRoot, kind, options = {}) => {
 
 /**
  * @param {string} repoRoot
- * @param {{ paths?: ReadonlyArray<string>; requestedPath?: string; base?: string; env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ paths?: ReadonlyArray<string>; requestedPath?: string; env?: NodeJS.ProcessEnv }} [options]
  * @returns {Promise<Array<StatusItem>>}
  */
-const listUntrackedItems = async (repoRoot, { paths, requestedPath, base, env } = {}) => {
+const listUntrackedItems = async (repoRoot, { paths, requestedPath, env } = {}) => {
   const requested = paths && new Set(paths);
   const fileSpecs = paths?.map((path) => `:(literal)${path}`) ?? ['.'];
   // Preserve collapsed generated directories when looking up a single file.
@@ -195,37 +195,9 @@ const listUntrackedItems = async (repoRoot, { paths, requestedPath, base, env } 
     .map((path) => path.replace(/\/$/, ''))
     .filter((path) => path && (!requested || requested.has(path)))
     .sort();
-  // Rename discovery can need a full snapshot even on a single-file read.
-  // A file removed from the base can reappear past the display limit. Include
-  // it in the comparison so it can cancel the deletion or become a modification.
-  const baseRemovals =
-    base && !requested && files.length > MAX_UNTRACKED_INITIAL_ITEMS
-      ? new Set(
-          (
-            await git(
-              repoRoot,
-              [
-                'diff',
-                '--cached',
-                '--no-renames',
-                '--diff-filter=D',
-                '--name-only',
-                '-z',
-                base,
-                '--',
-              ],
-              { env },
-            )
-          ).split('\0'),
-        )
-      : undefined;
-  let ordinaryFiles = 0;
   const included = requested
     ? files
-    : files.filter((path) => {
-        if (baseRemovals?.has(path)) return true;
-        return ordinaryFiles++ < MAX_UNTRACKED_INITIAL_ITEMS || path === requestedPath;
-      });
+    : files.filter((path, index) => index < MAX_UNTRACKED_INITIAL_ITEMS || path === requestedPath);
   /** @type {Array<StatusItem>} */
   const items = included.map((path) => ({
     path,

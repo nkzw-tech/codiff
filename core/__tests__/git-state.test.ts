@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
 import { canRenderImagePreview, fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
+import { getRefreshSource } from '../lib/source.ts';
 import type {
   DiffImageContentRequest,
   DiffImageContentResult,
@@ -1623,7 +1624,7 @@ test.each(['commit', 'rebase'])(
         source,
       });
       expect(lazy.id).toBe(initial.files[0].sections[0].id);
-      const refreshed = await readRepositoryState(repo, source);
+      const refreshed = await readRepositoryState(repo, getRefreshSource(source));
       expect(refreshed.source).toMatchObject({
         baseRef: (await git(repo, ['merge-base', target, 'HEAD'])).trim(),
         headRef: (await git(repo, ['rev-parse', 'HEAD'])).trim(),
@@ -1638,6 +1639,62 @@ test.each(['commit', 'rebase'])(
     });
   },
 );
+
+test('branch+ can reopen a resolved comparison after the target branch is deleted', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'base');
+    await git(repo, ['branch', 'review-base']);
+    await writeRepoFile(repo, 'file.txt', 'committed\n');
+    await commitAll(repo, 'feature');
+    const initial = await readRepositoryState(repo, {
+      ref: 'review-base',
+      type: 'branch-working-tree',
+    });
+
+    await git(repo, ['branch', '-D', 'review-base']);
+    await writeRepoFile(repo, 'file.txt', 'edited\n');
+    const reopened = await readRepositoryState(repo, initial.source);
+    expect(reopened.source).toEqual(initial.source);
+    expect(reopened.files[0].sections[0]).toMatchObject({
+      id: initial.files[0].sections[0].id,
+      newFile: { contents: 'edited\n' },
+      oldFile: { contents: 'base\n' },
+    });
+  });
+});
+
+test('branch+ stages files present outside the sparse checkout in its private index', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'included/file', 'included\n');
+    await writeRepoFile(repo, 'excluded/tracked', 'original\n');
+    await commitAll(repo, 'base');
+    await git(repo, ['sparse-checkout', 'set', '--cone', '--sparse-index', 'included']);
+    await writeRepoFile(repo, 'excluded/tracked', 'edited\n');
+    await writeRepoFile(repo, 'excluded/new', 'added\n');
+    const index = readFileSync(join(repo, '.git/index'));
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(state.files).toMatchObject([
+      { path: 'excluded/new', sections: [{ newFile: { contents: 'added\n' } }], status: 'added' },
+      {
+        path: 'excluded/tracked',
+        sections: [{ newFile: { contents: 'edited\n' } }],
+        status: 'modified',
+      },
+    ]);
+    for (const file of state.files) {
+      expect(
+        await readDiffSectionContent(repo, {
+          basePath: file.path,
+          kind: 'combined',
+          path: file.path,
+          source: state.source,
+        }),
+      ).toEqual(file.sections[0]);
+    }
+    expect(readFileSync(join(repo, '.git/index'))).toEqual(index);
+  });
+});
 
 test('branch+ detects same-size text and image edits when their timestamps match the index', async () => {
   await withRepo(async (repo) => {
@@ -2325,9 +2382,25 @@ test('branch+ produces one comparison per regenerated file in a tracked build di
       { path: 'dist/a.js', sections: [{ newFile: { contents: 'updated\n' } }], status: 'modified' },
     ]);
     await git(repo, ['commit', '-m', 'remove generated file']);
-    expect((await readRepositoryState(repo, source)).files).toMatchObject([
-      { path: 'dist/a.js', status: 'deleted' },
+    const changed = await readRepositoryState(repo, source);
+    expect(changed.files).toMatchObject([
+      { path: 'dist/a.js', sections: [{ newFile: { contents: 'updated\n' } }], status: 'modified' },
     ]);
+    expect(
+      await readDiffSectionContent(repo, {
+        basePath: 'dist/a.js',
+        kind: 'combined',
+        path: 'dist/a.js',
+        source: changed.source,
+      }),
+    ).toEqual(changed.files[0].sections[0]);
+    await writeRepoFile(repo, 'dist/a.js', 'original\n');
+    expect((await readRepositoryState(repo, source)).files).toEqual([]);
+
+    // The directory itself is now entirely untracked.
+    await git(repo, ['rm', '--cached', 'dist/b.js']);
+    await git(repo, ['commit', '-m', 'remove sibling']);
+    expect((await readRepositoryState(repo, source)).files).toEqual([]);
   });
 });
 

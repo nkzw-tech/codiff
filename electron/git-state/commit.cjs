@@ -658,12 +658,7 @@ const createSnapshotPlaceholderFile = async (repoRoot, item, ref) => {
  * @returns {Promise<RepositoryState>}
  */
 const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
-  const { oldRef, repoRoot, source } = await resolveBranchWorkingTreeComparison(
-    launchPath,
-    typeof input === 'object' && input.type === 'branch-working-tree'
-      ? { ref: input.ref, type: 'branch' }
-      : input,
-  );
+  const { oldRef, repoRoot, source } = await resolveBranchWorkingTreeComparison(launchPath, input);
   const ref = getCombinedSectionRef(oldRef);
 
   return withBranchSnapshot(repoRoot, oldRef, async (snapshot) => {

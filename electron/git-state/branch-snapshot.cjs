@@ -150,6 +150,7 @@ const stagePaths = async (repoRoot, env, paths, placeholders, tracked) => {
       repoRoot,
       [
         'add',
+        '--sparse',
         ...(tracked ? ['--update'] : []),
         '--ignore-errors',
         '--pathspec-from-file=-',
@@ -330,37 +331,30 @@ const omitOversizedAdditions = async (repoRoot, env, base, paths, placeholders) 
 const prepareBranchSnapshot = async (repoRoot, env, base, selection, errors) => {
   const { paths } = selection;
   const pathspec = paths?.map((path) => `:(literal)${path}`) ?? [];
-  const [originalStatus, untracked] = await Promise.all([
+  const [originalStatus, baseDeletions] = await Promise.all([
     readStatus(repoRoot, env, pathspec),
-    listUntrackedItems(repoRoot, { ...selection, env, base }),
+    git(
+      repoRoot,
+      [
+        'diff',
+        '--cached',
+        '--no-renames',
+        '--diff-filter=D',
+        '--name-only',
+        '-z',
+        base,
+        '--',
+        ...pathspec,
+      ],
+      { env },
+    ),
   ]);
   const status = parseStatus(originalStatus);
-  const cachedRemovals = new Set(
-    status.filter((item) => item.staged && item.status === 'deleted').map((item) => item.path),
-  );
-  const removedUntracked = cachedRemovals.size
-    ? (
-        await git(
-          repoRoot,
-          ['ls-files', '--others', '--exclude-standard', '-z', '--', ...pathspec],
-          { env },
-        )
-      )
-        .split('\0')
-        .filter((path) => cachedRemovals.has(path))
-    : [];
-  const recoveredPaths = new Set(removedUntracked);
-  const placeholders = [
-    ...errors.filter((item) => !paths || paths.includes(item.path)),
-    ...untracked.filter((item) => item.directory && !recoveredPaths.has(item.path)),
-  ];
-  /** @type {ReadonlyArray<string>} */
-  let untrackedPaths = [
-    ...new Set([
-      ...untracked.filter((item) => !item.directory).map((item) => item.path),
-      ...removedUntracked,
-    ]),
-  ];
+  const removedPaths = new Set([
+    ...baseDeletions.split('\0').filter(Boolean),
+    ...status.filter((item) => item.staged && item.status === 'deleted').map((item) => item.path),
+  ]);
+  const placeholders = errors.filter((item) => !paths || paths.includes(item.path));
   // A deleted child can now be behind a symlink. Remove its index entry
   // directly so Git never has to traverse the replacement on disk.
   const deletions = status.filter((item) => item.worktreeDeleted).map((item) => item.path);
@@ -378,16 +372,36 @@ const prepareBranchSnapshot = async (repoRoot, env, base, selection, errors) => 
       .map((item) => [item.path, item]),
   );
   await stagePaths(repoRoot, env, [...updates.keys()], placeholders, updates);
-  if (untrackedPaths.length) {
-    untrackedPaths = await omitOversizedAdditions(
+
+  /** @param {ReadonlyArray<string>} additions */
+  const stageAdditions = async (additions) => {
+    if (!additions.length) return;
+    const eligible = await omitOversizedAdditions(repoRoot, env, base, additions, placeholders);
+    await stagePaths(repoRoot, env, eligible, placeholders);
+  };
+
+  // Restore known files before Git collapses generated directories and before
+  // the ordinary untracked-file limit is applied. Respect the checkout's ignores.
+  const removed = [...removedPaths];
+  const restored = new Set();
+  for (let i = 0; i < removed.length; i += 64) {
+    const batch = removed.slice(i, i + 64).map((path) => `:(literal)${path}`);
+    const others = await git(
       repoRoot,
-      env,
-      base,
-      untrackedPaths,
-      placeholders,
+      ['ls-files', '--others', '--directory', '--exclude-standard', '-z', '--', ...batch],
+      { env },
     );
+    for (const path of others.split('\0')) {
+      if (removedPaths.has(path)) restored.add(path);
+    }
   }
-  await stagePaths(repoRoot, env, untrackedPaths, placeholders);
+  await stageAdditions([...restored]);
+
+  const untracked = (await listUntrackedItems(repoRoot, { ...selection, env })).filter(
+    (item) => !restored.has(item.path),
+  );
+  placeholders.push(...untracked.filter((item) => item.directory));
+  await stageAdditions(untracked.filter((item) => !item.directory).map((item) => item.path));
 
   let treeEnv = env;
   if (paths) {
