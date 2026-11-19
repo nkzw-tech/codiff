@@ -317,7 +317,8 @@ const validateRepositoryPath = (path) => {
     throw new Error('Invalid repository path.');
   }
 
-  return normalized;
+  // Git identifies paths with forward slashes on every platform.
+  return normalized.split(sep).join('/');
 };
 
 /** @param {string} repoRoot @param {string} path */

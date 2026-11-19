@@ -234,6 +234,19 @@ const readGitFiles = async (repoRoot, ref, paths, options = {}) => {
       continue;
     }
 
+    if (entry.type === 'commit') {
+      // A gitlink names a commit in the submodule's own object store.
+      files.set(path, {
+        binary: false,
+        file: {
+          cacheKey: `gitlink:${entry.object}:${path}`,
+          contents: `Subproject commit ${entry.object}\n`,
+          name: path,
+        },
+      });
+      continue;
+    }
+
     const object = sizes.get(entry.object);
     if (!object || object.type !== 'blob') {
       files.set(path, createEmptyFileContent(path, ref, options.refScopedEmptyCacheKey));

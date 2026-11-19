@@ -248,5 +248,6 @@ const readCommitMetadataForCommit = async (repoRoot, commit, firstParent, status
 };
 
 module.exports = {
+  parseNumstat,
   readCommitMetadataForCommit,
 };

@@ -79,7 +79,6 @@ const withBranchSnapshot = async (repoRoot, run, paths) => {
     const untracked = paths
       ? listedUntracked.filter((item) => paths.includes(item.path))
       : listedUntracked;
-    const placeholders = untracked.filter((item) => item.directory);
     const status = parseStatus(originalStatus);
     const cachedRemovals = status.filter((item) => item.staged && item.status === 'deleted');
     const removedUntracked = cachedRemovals.length
@@ -100,6 +99,10 @@ const withBranchSnapshot = async (repoRoot, run, paths) => {
           .split('\0')
           .filter(Boolean)
       : [];
+    const recoveredPaths = new Set(removedUntracked);
+    const placeholders = untracked.filter(
+      (item) => item.directory && !recoveredPaths.has(item.path),
+    );
     let untrackedPaths = [
       ...new Set([
         ...untracked.filter((item) => !item.directory).map((item) => item.path),

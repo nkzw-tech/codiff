@@ -4,6 +4,7 @@ import {
   getHighlighterOptions,
   hydratePartialDiff,
   preloadHighlighter,
+  SPLIT_WITH_NEWLINES,
   type CodeViewDiffItem,
   type CodeViewItem,
   type FileDiffLoadedFiles,
@@ -265,7 +266,14 @@ export function useCodeEditing({
           loadEditContents(item, metadata),
           window.codiff.getRepositoryFile(metadata.file.path),
         ]);
-        if (!loaded.newFile || loaded.newFile.contents !== document.content) {
+        // Git may normalize CRLF when staging the combined snapshot. Edit the
+        // checkout's exact bytes, but still reject any other change since review.
+        const checkoutLineEndings = loaded.newFile?.contents !== document.content;
+        if (
+          checkoutLineEndings &&
+          (metadata.section.kind !== 'combined' ||
+            loaded.newFile?.contents !== document.content.replaceAll('\r\n', '\n'))
+        ) {
           throw new Error('The file changed on disk. Refresh the diff before editing.');
         }
         const key = crypto.randomUUID();
@@ -277,6 +285,11 @@ export function useCodeEditing({
         // Keep the prepared highlight cache for an unchanged document, including
         // the stable hydrated key used while warming a partial diff.
         // Pierre owns a separate edit-session diff and detaches cached markup.
+        if (checkoutLineEndings) {
+          fileDiff.additionLines = document.content.split(SPLIT_WITH_NEWLINES);
+          fileDiff.additionCharacterCount = document.content.length;
+          fileDiff.cacheKey = `code-edit:${key}`;
+        }
         fileDiff.cacheKey ??= `code-edit:${key}`;
         const rendered = codeViewRef.current
           ?.getInstance()

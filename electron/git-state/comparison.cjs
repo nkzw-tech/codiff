@@ -9,6 +9,7 @@ const {
   summarizeContent,
   validateRepositoryPath,
 } = require('./common.cjs');
+const { parseNumstat } = require('./commit-metadata.cjs');
 const { createEmptyFileContent, readGitFiles } = require('./git-files.cjs');
 
 /**
@@ -86,11 +87,7 @@ const chunk = (values, size) => {
 
 /** @param {string} patch */
 const splitCommitPatch = (patch) =>
-  patch
-    .split(/(?=^diff --git )/m)
-    .map((part) => part.trimEnd())
-    .filter((part) => part.startsWith('diff --git '))
-    .map((part) => `${part}\n`);
+  patch.split(/(?=^diff --git )/m).filter((part) => part.startsWith('diff --git '));
 
 /**
  * @param {string} repoRoot
@@ -104,20 +101,18 @@ const readComparisonPatches = async (repoRoot, newRef, oldRef, items, options) =
   const patches = new Map();
 
   for (const itemChunk of chunk(items, 200)) {
-    if (itemChunk.length === 0) {
+    const [command, ...args] = createComparisonPatchArgs(newRef, oldRef, itemChunk, options);
+    const output = await git(repoRoot, [command, '--numstat', '-z', ...args], { env: options.env });
+    if (!output) {
       continue;
     }
-
-    const patch = await git(
-      repoRoot,
-      createComparisonPatchArgs(newRef, oldRef, itemChunk, options),
-      { env: options.env },
-    );
-    const patchChunks = splitCommitPatch(patch);
-
-    if (patchChunks.length === itemChunk.length) {
-      for (let index = 0; index < itemChunk.length; index += 1) {
-        patches.set(itemChunk[index].path, patchChunks[index]);
+    // Git emits numstat paths in patch order and omits whitespace-only changes from both.
+    const separator = output.indexOf('\0\0');
+    const paths = [...parseNumstat(output.slice(0, separator)).keys()];
+    const patchChunks = splitCommitPatch(output.slice(separator + 2));
+    if (paths.length === patchChunks.length) {
+      for (const [index, path] of paths.entries()) {
+        patches.set(path, patchChunks[index]);
       }
     } else {
       await Promise.all(

@@ -1474,11 +1474,19 @@ test.each([false, true])(
       await git(repo, ['checkout', '-b', 'feature']);
       await writeRepoFile(repo, 'whitespace.txt', 'const amount  =  1;\n');
       await writeRepoFile(repo, 'meaningful.txt', 'const value  =  2;\n');
+      const tracePath = join(repo, '.git', 'patch-trace.jsonl');
+      using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
       const combined = await readRepositoryState(
         repo,
         { ref: target, type: 'branch-working-tree' },
         { showWhitespace },
       );
+      const patchCommands = readFileSync(tracePath, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { argv?: Array<string>; event: string })
+        .filter(({ argv, event }) => event === 'start' && argv?.includes('--patch'));
+      expect(patchCommands).toHaveLength(1);
       const expected = new Map(combined.files.map((file) => [file.path, file.sections[0]]));
       expect(expected.get('whitespace.txt')?.patch.includes('@@')).toBe(showWhitespace);
       expect(expected.get('meaningful.txt')?.patch).toContain('@@');
@@ -1928,6 +1936,50 @@ process.exit(result.status ?? 1);
   },
 );
 
+test('branch+ shows the old and new commits for an updated submodule', async () => {
+  await withRepo(async (repo) => {
+    const submodule = join(repo, 'lib');
+    await mkdir(submodule);
+    await git(submodule, ['init']);
+    await writeRepoFile(submodule, 'module.txt', 'first\n');
+    await commitAll(submodule, 'first');
+    const first = (await git(submodule, ['rev-parse', 'HEAD'])).trim();
+    await commitAll(repo, 'pin submodule');
+    await writeRepoFile(submodule, 'module.txt', 'second\n');
+    await commitAll(submodule, 'second');
+    const second = (await git(submodule, ['rev-parse', 'HEAD'])).trim();
+
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(state.files).toHaveLength(1);
+    const [file] = state.files;
+    expect(file.sections[0]).toMatchObject({
+      newFile: { contents: `Subproject commit ${second}\n` },
+      oldFile: { contents: `Subproject commit ${first}\n` },
+    });
+    expect(fileHasVisibleDiff(file, false)).toBe(true);
+  });
+});
+
+test('branch+ produces one comparison per regenerated file in a tracked build directory', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'dist/a.js', 'original\n');
+    await writeRepoFile(repo, 'dist/b.js', 'sibling\n');
+    await commitAll(repo, 'base');
+    const base = (await git(repo, ['rev-parse', 'HEAD'])).trim();
+    const source = { ref: base, type: 'branch-working-tree' } as const;
+    await git(repo, ['rm', '--cached', 'dist/a.js']);
+    expect((await readRepositoryState(repo, source)).files).toEqual([]);
+    await writeRepoFile(repo, 'dist/a.js', 'updated\n');
+    expect((await readRepositoryState(repo, source)).files).toMatchObject([
+      { path: 'dist/a.js', sections: [{ newFile: { contents: 'updated\n' } }], status: 'modified' },
+    ]);
+    await git(repo, ['commit', '-m', 'remove generated file']);
+    expect((await readRepositoryState(repo, source)).files).toMatchObject([
+      { path: 'dist/a.js', status: 'deleted' },
+    ]);
+  });
+});
+
 test('branch+ keeps unresolved conflicts visible without resolving the real index', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'file.txt', 'base\n');
@@ -1993,27 +2045,27 @@ test('branch+ limits untracked files and omits unchanged files removed from the 
 test('branch+ loads current text and images on demand and respects file size limits', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'raw.bin', Uint8Array.from([0, 1, 2, 3]));
-    await writeRepoFile(repo, 'pixel.png', Uint8Array.from([137, 80, 78, 71, 1]));
+    await writeRepoFile(repo, 'nested/pixel.png', Uint8Array.from([137, 80, 78, 71, 1]));
     await commitAll(repo, 'base');
     const target = (await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     await git(repo, ['checkout', '-b', 'feature']);
     const committedLines = 'large committed line\n'.repeat(60_000);
-    await writeRepoFile(repo, 'large.txt', committedLines);
+    await writeRepoFile(repo, 'nested/large.txt', committedLines);
     await commitAll(repo, 'large commit');
     const finalContents = `${committedLines}end\n`;
-    await writeRepoFile(repo, 'large.txt', finalContents);
+    await writeRepoFile(repo, 'nested/large.txt', finalContents);
     await writeRepoFile(repo, 'huge.txt', 'x'.repeat(2 * 1024 * 1024 + 1));
     await writeRepoFile(repo, 'raw.bin', Uint8Array.from([0, 9, 2, 3]));
-    await writeRepoFile(repo, 'pixel.png', Uint8Array.from([137, 80, 78, 71, 1, 2, 3]));
+    await writeRepoFile(repo, 'nested/pixel.png', Uint8Array.from([137, 80, 78, 71, 1, 2, 3]));
 
     const state = await readRepositoryState(repo, { ref: target, type: 'branch-working-tree' });
     const section = (path: string) => state.files.find((file) => file.path === path)?.sections[0];
-    expect(section('large.txt')).toMatchObject({
+    expect(section('nested/large.txt')).toMatchObject({
       kind: 'combined',
       loadState: 'deferred',
       patch: '',
     });
-    expect(section('large.txt')?.newFile).toBeUndefined();
+    expect(section('nested/large.txt')?.newFile).toBeUndefined();
     expect(section('huge.txt')).toMatchObject({
       loadState: 'too-large',
       summary: { canLoad: false },
@@ -2023,7 +2075,7 @@ test('branch+ loads current text and images on demand and respects file size lim
     const loaded = await readDiffSectionContent(repo, {
       force: true,
       kind: 'combined',
-      path: 'large.txt',
+      path: 'nested/large.txt',
       source: state.source,
     });
     expect(loaded).toMatchObject({
@@ -2036,21 +2088,21 @@ test('branch+ loads current text and images on demand and respects file size lim
 
     const image = await readDiffImageContent(repo, {
       kind: 'combined',
-      path: 'pixel.png',
+      path: 'nested/pixel.png',
       source: state.source,
     });
     expect(image).toMatchObject({ newImage: { size: 7 }, oldImage: { size: 5 }, status: 'ready' });
 
-    const previous = state.files.find((file) => file.path === 'large.txt')!;
-    await writeRepoFile(repo, 'large.txt', `${committedLines}new\n`);
+    const previous = state.files.find((file) => file.path === 'nested/large.txt')!;
+    await writeRepoFile(repo, 'nested/large.txt', `${committedLines}new\n`);
     const refreshed = await readRepositoryState(repo, state.source);
-    const updated = refreshed.files.find((file) => file.path === 'large.txt')!;
+    const updated = refreshed.files.find((file) => file.path === 'nested/large.txt')!;
     expect(updated.sections[0].id).toBe(previous.sections[0].id);
     expect(updated.fingerprint).not.toBe(previous.fingerprint);
     const refreshedContents = await readDiffSectionContent(repo, {
       force: true,
       kind: 'combined',
-      path: 'large.txt',
+      path: 'nested/large.txt',
       source: state.source,
     });
     expect(refreshedContents.newFile?.contents).toBe(`${committedLines}new\n`);

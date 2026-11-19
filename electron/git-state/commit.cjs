@@ -669,6 +669,7 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
 
   return withBranchSnapshot(repoRoot, async (snapshot) => {
     const status = await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef);
+    const comparedPaths = new Set(status.map((item) => item.path));
     const [state, placeholders] = await Promise.all([
       readComparisonState({
         launchPath,
@@ -686,9 +687,9 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
         status,
       }),
       Promise.all(
-        snapshot.untrackedPlaceholders.map((item) =>
-          createUntrackedPlaceholderFile(repoRoot, item, ref),
-        ),
+        snapshot.untrackedPlaceholders
+          .filter((item) => !comparedPaths.has(item.path))
+          .map((item) => createUntrackedPlaceholderFile(repoRoot, item, ref)),
       ),
     ]);
     return { ...state, files: [...state.files, ...placeholders].sort(fileSort) };
@@ -703,11 +704,10 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
  * @param {DiffSectionContentRequest | DiffImageContentRequest} request
  */
 const getBranchSnapshotPaths = async (repoRoot, oldRef, request) => {
-  const path = request.path;
-  validateRepositoryPath(path);
+  const path = validateRepositoryPath(request.path);
   if (request.basePath != null) {
-    validateRepositoryPath(request.basePath);
-    return request.basePath === path ? [path] : [request.basePath, path];
+    const basePath = validateRepositoryPath(request.basePath);
+    return basePath === path ? [path] : [basePath, path];
   }
   const baseEntry = await git(repoRoot, ['ls-tree', '-z', oldRef, '--', `:(literal)${path}`]);
   return baseEntry ? [path] : undefined;

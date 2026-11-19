@@ -625,6 +625,27 @@ test('starting an edit focuses visible code below the sticky header without scro
   }
 });
 
+test('combined edits preserve checkout line endings and reject stale content', async () => {
+  const document = { content: 'new\r\n', path: file.path, root: '/repo', version: 'version' };
+  vi.mocked(window.codiff.getRepositoryFile).mockResolvedValue(document);
+  const combined = { ...metadata, section: { ...metadata.section, kind: 'combined' as const } };
+  await using view = await renderReact(<Harness editMetadata={combined} />);
+  await click(view.container, 'Edit');
+  await edit();
+  expect(handle!.getEditor(item.id)!.getText()).toBe('updated\r\n');
+  await click(view.container, 'Done');
+  await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+  expect(window.codiff.saveRepositoryFile).toHaveBeenCalledWith(
+    expect.objectContaining({ baseVersion: 'version', content: 'updated\r\n' }),
+  );
+  vi.mocked(window.codiff.getRepositoryFile).mockResolvedValue({
+    ...document,
+    content: 'external change\r\n',
+  });
+  await click(view.container, 'Edit');
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('changed on disk');
+});
+
 test('Done saves complete Pierre contents; Revert discards a draft before auto-save', async () => {
   await using view = await renderReact(<Harness />);
   await click(view.container, 'Edit');
