@@ -1,8 +1,8 @@
-import {
-  type PullRequestExistingReviewComment,
-  type PullRequestGeneralCommentThread,
-  type PullRequestReviewComment,
-  type SharedWalkthroughSnapshot,
+import type {
+  PullRequestExistingReviewComment,
+  PullRequestGeneralCommentThread,
+  PullRequestReviewComment,
+  SharedWalkthroughSnapshot,
 } from '@nkzw/codiff-core';
 import {
   resolveSubmittedShareReply,

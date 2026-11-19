@@ -9,16 +9,16 @@ import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react/PencilSi
 import { SquareSplitVerticalIcon as SquareSplitVertical } from '@phosphor-icons/react/SquareSplitVertical';
 import { WarningOctagonIcon as WarningOctagon } from '@phosphor-icons/react/WarningOctagon';
 import { XIcon as X } from '@phosphor-icons/react/X';
-import {
-  type CodeViewLineSelection,
-  type CodeViewItem,
-  type CodeViewOptions,
-  type CodeViewScrollTarget,
-  type DiffLineAnnotation,
-  type FileDiffLoadedFiles,
-  type FileDiffMetadata,
-  type LineAnnotation,
-  type SelectedLineRange,
+import type {
+  CodeViewLineSelection,
+  CodeViewItem,
+  CodeViewOptions,
+  CodeViewScrollTarget,
+  DiffLineAnnotation,
+  FileDiffLoadedFiles,
+  FileDiffMetadata,
+  LineAnnotation,
+  SelectedLineRange,
 } from '@pierre/diffs';
 import {
   CodeView,
@@ -875,7 +875,7 @@ function SourceDescriptionBody({
     setEditEditorReady(false);
     setEditError(null);
     setEditing(true);
-    preloadMarkdownEditor();
+    void preloadMarkdownEditor();
   }, [canEditDescription, displayedDescription, editSubmitting]);
 
   const cancelEdit = useCallback(() => {

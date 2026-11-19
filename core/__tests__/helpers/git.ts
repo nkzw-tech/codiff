@@ -52,6 +52,6 @@ export const withGitTestEnvironment = async <T>(
   for (const key of keys) {
     scopedEnvironment[key] = environment[key];
   }
-  await using _environment = createTemporaryEnvironment(scopedEnvironment);
+  using _environment = createTemporaryEnvironment(scopedEnvironment);
   return await callback();
 };

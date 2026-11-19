@@ -1156,8 +1156,8 @@ function layoutFromRows(
 
   rows.forEach(([plain, shifted], index) => {
     const codes = keyRows[index];
-    const shiftedCharacters = [...shifted];
-    [...plain].forEach((character, position) => {
+    const shiftedCharacters = Array.from(shifted);
+    Array.from(plain).forEach((character, position) => {
       layout[codes[position]] = {
         value: character,
         withShift: shiftedCharacters[position] ?? '',

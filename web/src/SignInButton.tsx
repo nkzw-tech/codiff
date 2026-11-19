@@ -1,5 +1,5 @@
 import { Button } from '@nkzw/codiff-core/react';
-import { type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { auth } from 'void/client/react';
 
 export default function SignInButton({

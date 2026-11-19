@@ -10,10 +10,10 @@ const getNameParts = (name: string) =>
   name
     .trim()
     .split(/\s+/)
-    .map((part) => [...part].filter((character) => /[\p{L}\p{N}]/u.test(character)).join(''))
+    .map((part) => part.replaceAll(/[^\p{L}\p{N}]/gu, ''))
     .filter(Boolean);
 
-const getInitial = (part: string) => [...part][0]?.toLocaleUpperCase() ?? '';
+const getInitial = (part: string) => Array.from(part)[0]?.toLocaleUpperCase() ?? '';
 
 const getAvatarInitials = (name: string) => {
   const parts = getNameParts(name);
@@ -21,7 +21,7 @@ const getAvatarInitials = (name: string) => {
     return '?';
   }
   if (parts.length === 1) {
-    return [...parts[0]].slice(0, 2).join('').toLocaleUpperCase();
+    return Array.from(parts[0]).slice(0, 2).join('').toLocaleUpperCase();
   }
   return `${getInitial(parts[0])}${getInitial(parts.at(-1) ?? '')}` || '?';
 };

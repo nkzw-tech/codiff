@@ -66,15 +66,15 @@ import {
   getAgentLabel,
   HISTORY_PAGE_SIZE,
 } from './lib/app-constants.ts';
-import {
-  type CodeViewInstance,
-  type RepositoryLoadError,
-  type ReviewComment,
-  type ReviewIdentity,
-  type ReviewScrollBehavior,
-  type ReviewScrollTarget,
-  type SourceSession,
-  type WalkthroughNote,
+import type {
+  CodeViewInstance,
+  RepositoryLoadError,
+  ReviewComment,
+  ReviewIdentity,
+  ReviewScrollBehavior,
+  ReviewScrollTarget,
+  SourceSession,
+  WalkthroughNote,
 } from './lib/app-types.ts';
 import {
   getFailedSectionLoadState,

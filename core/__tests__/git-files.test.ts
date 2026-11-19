@@ -230,7 +230,7 @@ test.each(batchCases)(
   'batches pull request content reads for $fileCount files',
   async ({ fileCount, maximumProcesses }) => {
     const tracePath = join(repo, `trace-${fileCount}.jsonl`);
-    await using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
+    using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
 
     const paths = Array.from(
       { length: fileCount },

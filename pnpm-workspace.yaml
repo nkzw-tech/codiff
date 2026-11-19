@@ -27,8 +27,8 @@ minimumReleaseAgeExclude:
   - '@pierre/*'
   - '@cloudflare/workers-types@5.20261117.1'
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
-  vite-plus: 1.6.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
+  vite-plus: 1.7.0
   vitest: 5.1.0
 nodeLinker: hoisted
 onlyBuiltDependencies:

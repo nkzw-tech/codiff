@@ -300,7 +300,7 @@ test('headless walkthrough share resolves GitHub PR branch targets', async () =>
   );
   await chmod(join(fakeBin, 'gh'), 0o755);
 
-  await using _environment = createTemporaryEnvironment({
+  using _environment = createTemporaryEnvironment({
     GH_ARGS_FILE: ghArgsPath,
     PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
   });

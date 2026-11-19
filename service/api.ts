@@ -179,14 +179,13 @@ type ParsedUpload =
       snapshot: WalkthroughManifest;
     };
 
-const json = (value: unknown, init?: ResponseInit) =>
-  new Response(JSON.stringify(value), {
-    ...init,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      ...(init?.headers ?? {}),
-    },
-  });
+const json = (value: unknown, init?: ResponseInit) => {
+  const headers = new Headers(init?.headers);
+  if (!headers.has('content-type')) {
+    headers.set('content-type', 'application/json; charset=utf-8');
+  }
+  return new Response(JSON.stringify(value), { ...init, headers });
+};
 
 const notFound = () => json({ error: 'not-found' }, { status: 404 });
 const badRequest = (message: string) => json({ error: message }, { status: 400 });

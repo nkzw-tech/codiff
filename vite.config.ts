@@ -1,6 +1,6 @@
 import { availableParallelism } from 'node:os';
 import { resolve } from 'node:path';
-import nkzw from '@nkzw/oxlint-config';
+import nkzw from '@nkzw/oxlint-config/with-sorting';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite-plus';
 
@@ -58,6 +58,15 @@ export default defineConfig({
         files: ['core/lib/narrative-walkthrough-diff.cjs'],
       },
     ],
+    // Enable these v3 rules individually as existing findings are addressed.
+    rules: {
+      'quality/no-array-filter-map': 'off',
+      'quality/no-chained-type-assertions': 'off',
+      'quality/no-conditional-empty-object-spread': 'off',
+      'quality/no-known-value-widening': 'off',
+      'quality/no-unknown-returns': 'off',
+      'quality/no-unsafe-dictionary-type': 'off',
+    },
   },
   optimizeDeps: {
     // ghostty-web inlines its WASM binary as a huge base64 data URL, which

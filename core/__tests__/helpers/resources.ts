@@ -39,12 +39,7 @@ export const bindDisposableHttpServer = async (server: Server, host = '127.0.0.1
   await new Promise<void>((resolveListen) => {
     server.listen(0, host, resolveListen);
   });
-  return {
-    ...server,
-    async [Symbol.asyncDispose]() {
-      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-    },
-  };
+  return server;
 };
 
 export const createDisposableHttpServer = async (handler: RequestListener, host = '127.0.0.1') =>

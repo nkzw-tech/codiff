@@ -752,7 +752,7 @@ test('accepts only one concurrent upload for an intent', async () => {
     uploadShare(intent, planSnapshot),
     uploadShare(intent, planSnapshot),
   ]);
-  expect(responses.map((response) => response.status).sort()).toEqual([200, 401]);
+  expect(responses.map((response) => response.status).sort((a, b) => a - b)).toEqual([200, 401]);
 
   const successful = responses.find((response) => response.status === 200);
   if (!successful) {

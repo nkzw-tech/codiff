@@ -79,6 +79,7 @@ const getDb = (): Database => {
 
 export const db = new Proxy({} as Database, {
   get(_target, property, receiver) {
+    // oxlint-disable-next-line quality/no-reflect-get -- Forward getter calls with their original receiver.
     return Reflect.get(getDb(), property, receiver);
   },
 });

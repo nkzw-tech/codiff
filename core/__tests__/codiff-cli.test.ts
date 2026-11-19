@@ -82,7 +82,7 @@ const withFakeGitHubCli = async <T>(
     '#!/bin/sh\nfor arg in "$@"; do\n  printf "%s\\n" "$arg" >> "$CODIFF_TEST_GH_ARGS"\ndone\nprintf "%s\\n" "$CODIFF_TEST_GH_RESPONSE"\n',
   );
   await chmod(commandPath, 0o755);
-  await using _environment = createTemporaryEnvironment({
+  using _environment = createTemporaryEnvironment({
     CODIFF_TEST_GH_ARGS: argsPath,
     CODIFF_TEST_GH_RESPONSE: JSON.stringify(response),
     PATH: `${directory.path}:${process.env.PATH ?? ''}`,
@@ -241,7 +241,7 @@ test(
     await writeFile(planFile, '# Plan\n');
     await writeFile(join(fakeBin, 'git'), `#!/bin/sh\nprintf invoked > "${gitMarker}"\nexit 99\n`);
     await chmod(join(fakeBin, 'git'), 0o755);
-    await using _environment = createTemporaryEnvironment({
+    using _environment = createTemporaryEnvironment({
       PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
     });
     const realWorkspace = await realpath(workspace);

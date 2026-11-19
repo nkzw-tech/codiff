@@ -31,7 +31,7 @@ const letters = 'abcdefghijklmnopqrstuvwxyz';
 // else (Numpad, Space, Enter, function keys) never answers for a character a
 // combo can name.
 const writingSystemCodes = [
-  ...[...letters].map((letter) => `Key${letter.toUpperCase()}`),
+  ...Array.from(letters, (letter) => `Key${letter.toUpperCase()}`),
   ...'1234567890'.split('').map((digit) => `Digit${digit}`),
   'Backquote',
   'Minus',

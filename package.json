@@ -62,7 +62,7 @@
     "@electron-forge/maker-squirrel": "^8.0.1",
     "@electron-forge/maker-zip": "^8.0.1",
     "@nkzw/eslint-plugin": "^2.0.0",
-    "@nkzw/oxlint-config": "^2.0.1",
+    "@nkzw/oxlint-config": "^3.0.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

@@ -115,7 +115,7 @@ process.stdin.on('end', () => {
 `,
   );
   await chmod(fakeGlabPath, 0o755);
-  await using _environment = createTemporaryEnvironment({
+  using _environment = createTemporaryEnvironment({
     CODIFF_GLAB_PATH: fakeGlabPath,
     CODIFF_GLAB_TEST_CALLS: callsPath,
     SHELL: undefined,
@@ -461,7 +461,7 @@ printf '%s' '{}'
     );
     await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);
 
-    await using _environment = createTemporaryEnvironment({
+    using _environment = createTemporaryEnvironment({
       CODIFF_GLAB_PATH: fakeGlab,
       GITLAB_TOKEN: undefined,
       SHELL: fakeShell,
@@ -512,7 +512,7 @@ printf '%s' '{}'
     );
     await Promise.all([chmod(fakeShell, 0o755), chmod(fakeGlab, 0o755)]);
 
-    await using _environment = createTemporaryEnvironment({
+    using _environment = createTemporaryEnvironment({
       CODIFF_GLAB_PATH: fakeGlab,
       GITLAB_TOKEN: 'from-process',
       SHELL: fakeShell,

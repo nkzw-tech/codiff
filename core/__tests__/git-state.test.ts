@@ -246,7 +246,7 @@ process.stdin.on('end', () => {
 `,
   );
   await chmod(fakeGh, 0o755);
-  await using _environment = createTemporaryEnvironment({
+  using _environment = createTemporaryEnvironment({
     CODIFF_GITHUB_TEST_CALLS: callsPath,
     CODIFF_GITHUB_TEST_MODE: mode,
     PATH: `${fakeBinDirectory.path}:${process.env.PATH ?? ''}`,
@@ -380,7 +380,7 @@ exec git "$@"
     );
     await chmod(wrapperPath, 0o755);
 
-    await using _environment = createTemporaryEnvironment({
+    using _environment = createTemporaryEnvironment({
       CODIFF_TEST_ORIGINAL_PATH: process.env.PATH ?? '',
       PATH: `${wrapperDirectory.path}:${process.env.PATH ?? ''}`,
     });
@@ -1250,7 +1250,7 @@ test(
       await commitAll(repo, 'initial commit');
 
       const tracePath = join(repo, '.git', 'walkthrough-trace.jsonl');
-      await using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
+      using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: tracePath });
       await readWalkthroughRepositoryState(repo);
       const processCount = readFileSync(tracePath, 'utf8')
         .trim()

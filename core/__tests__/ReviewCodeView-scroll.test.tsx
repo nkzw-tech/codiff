@@ -2739,7 +2739,7 @@ test('modifier-clicking an identifier finds and opens its definition without com
       onOpenDefinition={onOpenDefinition}
     />,
   );
-  await using _platform = {
+  using _platform = {
     [Symbol.dispose]() {
       platform.mockRestore();
     },
@@ -2802,7 +2802,7 @@ test('macOS Control-click keeps the context-menu gesture instead of finding a de
   await using _view = await renderReact(
     <ReviewCodeViewHarness files={[file]} onFindDefinitions={onFindDefinitions} />,
   );
-  await using _platform = {
+  using _platform = {
     [Symbol.dispose]() {
       platform.mockRestore();
     },
@@ -2869,7 +2869,7 @@ test('definition results inside the rendered diff jump in Codiff instead of open
       onOpenDefinition={onOpenDefinition}
     />,
   );
-  await using _platform = {
+  using _platform = {
     [Symbol.dispose]() {
       platform.mockRestore();
     },
@@ -2950,7 +2950,7 @@ test('historical definitions outside the diff do not open the current checkout',
       source={{ ref: 'abcdef0', type: 'commit' }}
     />,
   );
-  await using _platform = {
+  using _platform = {
     [Symbol.dispose]() {
       platform.mockRestore();
     },
@@ -3010,7 +3010,7 @@ test('definition search rejection becomes an unavailable result', async () => {
       onOpenDefinition={() => {}}
     />,
   );
-  await using _platform = {
+  using _platform = {
     [Symbol.dispose]() {
       platform.mockRestore();
     },
@@ -3069,7 +3069,7 @@ test('definition result is invalidated when the review source changes', async ()
       onOpenDefinition={() => {}}
     />,
   );
-  await using _platform = {
+  using _platform = {
     [Symbol.dispose]() {
       platform.mockRestore();
     },
@@ -3126,7 +3126,7 @@ test('modifier navigation follows file hosts reused by CodeView virtualization',
   await using _view = await renderReact(
     <ReviewCodeViewHarness files={[file]} onFindDefinitions={onFindDefinitions} />,
   );
-  await using _platform = {
+  using _platform = {
     [Symbol.dispose]() {
       platform.mockRestore();
     },
@@ -3144,7 +3144,7 @@ test('modifier navigation follows file hosts reused by CodeView virtualization',
   const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
   document.body.append(host);
 
-  await using _host = {
+  using _host = {
     [Symbol.dispose]() {
       host.remove();
     },
