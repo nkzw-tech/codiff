@@ -4,6 +4,8 @@ const { createHash, randomUUID } = require('node:crypto');
 const { open, readFile, realpath, rename, stat, unlink } = require('node:fs/promises');
 const { basename, dirname, isAbsolute, relative, resolve, sep } = require('node:path');
 
+const { gitOrEmpty } = require('./git-state/common.cjs');
+
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 /** @param {string} content */
@@ -54,8 +56,14 @@ const readResolvedFile = async (resolved) => {
 };
 
 /** @param {string} repositoryRoot @param {string} path */
-const readRepositoryFile = async (repositoryRoot, path) =>
-  readResolvedFile(await resolveRepositoryFile(repositoryRoot, path));
+const readRepositoryFile = async (repositoryRoot, path) => {
+  const document = await readResolvedFile(await resolveRepositoryFile(repositoryRoot, path));
+  if (document.content.includes('$Id:')) {
+    const ident = await gitOrEmpty(document.root, ['check-attr', '-z', 'ident', '--', path]);
+    if (ident.split('\0')[2] === 'set') return { ...document, gitIdent: true };
+  }
+  return document;
+};
 
 /**
  * @param {string} repositoryRoot

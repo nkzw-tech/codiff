@@ -266,13 +266,17 @@ export function useCodeEditing({
           loadEditContents(item, metadata),
           window.codiff.getRepositoryFile(metadata.file.path),
         ]);
-        // Git may normalize CRLF when staging the combined snapshot. Edit the
-        // checkout's exact bytes, but still reject any other change since review.
-        const checkoutLineEndings = loaded.newFile?.contents !== document.content;
+        // Git's ident and CRLF conversions preserve the reviewed line mapping.
+        // Verify the canonical text, then edit and save the actual checkout.
+        const checkoutDiffers = loaded.newFile?.contents !== document.content;
+        const checkoutText = document.gitIdent
+          ? document.content.replaceAll(/\$Id: (?:[a-f0-9]{40}|[a-f0-9]{64}) \$/g, '$Id$')
+          : document.content;
         if (
-          checkoutLineEndings &&
+          checkoutDiffers &&
           (metadata.section.kind !== 'combined' ||
-            loaded.newFile?.contents !== document.content.replaceAll('\r\n', '\n'))
+            (loaded.newFile?.contents !== checkoutText &&
+              loaded.newFile?.contents !== checkoutText.replaceAll('\r\n', '\n')))
         ) {
           throw new Error('The file changed on disk. Refresh the diff before editing.');
         }
@@ -285,7 +289,7 @@ export function useCodeEditing({
         // Keep the prepared highlight cache for an unchanged document, including
         // the stable hydrated key used while warming a partial diff.
         // Pierre owns a separate edit-session diff and detaches cached markup.
-        if (checkoutLineEndings) {
+        if (checkoutDiffers) {
           fileDiff.additionLines = document.content.split(SPLIT_WITH_NEWLINES);
           fileDiff.additionCharacterCount = document.content.length;
           fileDiff.cacheKey = `code-edit:${key}`;

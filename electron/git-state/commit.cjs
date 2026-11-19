@@ -614,7 +614,7 @@ const readBranchWorkingTreeStatus = async (repoRoot, snapshot, oldRef) => {
     sort: false,
   });
   const unreadable = new Set(
-    snapshot.untrackedPlaceholders
+    snapshot.placeholders
       .filter((item) => item.summary?.loadState === 'error')
       .map((item) => item.path),
   );
@@ -625,7 +625,7 @@ const readBranchWorkingTreeStatus = async (repoRoot, snapshot, oldRef) => {
     .map((item) => (conflicted.has(item.path) ? { ...item, status: 'conflicted' } : item));
   const paths = new Set(items.map((item) => item.path));
   for (const path of conflicted) {
-    if (!paths.has(path)) {
+    if (!paths.has(path) && !unreadable.has(path)) {
       items.push({ path, status: 'conflicted' });
     }
   }
@@ -633,18 +633,17 @@ const readBranchWorkingTreeStatus = async (repoRoot, snapshot, oldRef) => {
 };
 
 /**
- * The snapshot diff has no rows for collapsed directories or the untracked-file limit.
- * Their working-tree summaries explain the omissions.
+ * Represent paths intentionally omitted from the snapshot tree with their working-tree summaries.
  * @param {string} repoRoot
  * @param {StatusItem} item
  * @param {string} ref
  * @returns {Promise<ChangedFile>}
  */
-const createUntrackedPlaceholderFile = async (repoRoot, item, ref) => {
+const createSnapshotPlaceholderFile = async (repoRoot, item, ref) => {
   const section = await createSection(repoRoot, item, 'unstaged');
   return {
     fingerprint: getFingerprint(
-      `${ref}\n${item.status}\n${item.path}\n${section.summary?.reason || ''}`,
+      `${ref}\n${item.status}\n${item.path}\n${section.summary?.reason || ''}\n${section.summary?.fingerprint || ''}`,
     ),
     path: item.path,
     sections: [{ ...section, id: `${item.path}:${ref}`, kind: 'combined' }],
@@ -667,7 +666,7 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
   );
   const ref = getCombinedSectionRef(oldRef);
 
-  return withBranchSnapshot(repoRoot, async (snapshot) => {
+  return withBranchSnapshot(repoRoot, oldRef, async (snapshot) => {
     const status = await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef);
     const comparedPaths = new Set(status.map((item) => item.path));
     const [state, placeholders] = await Promise.all([
@@ -686,9 +685,9 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
         status,
       }),
       Promise.all(
-        snapshot.untrackedPlaceholders
+        snapshot.placeholders
           .filter((item) => !comparedPaths.has(item.path))
-          .map((item) => createUntrackedPlaceholderFile(repoRoot, item, ref)),
+          .map((item) => createSnapshotPlaceholderFile(repoRoot, item, ref)),
       ),
     ]);
     return { ...state, files: [...state.files, ...placeholders].sort(fileSort) };
@@ -725,8 +724,15 @@ const readBranchWorkingTreeSectionContent = async (launchPath, request) => {
 
   return withBranchSnapshot(
     repoRoot,
-    async (snapshot) =>
-      readComparisonSectionContent(
+    oldRef,
+    async (snapshot) => {
+      const placeholder = snapshot.placeholders.find((item) => item.path === request.path);
+      if (placeholder) {
+        return (
+          await createSnapshotPlaceholderFile(repoRoot, placeholder, getCombinedSectionRef(oldRef))
+        ).sections[0];
+      }
+      return readComparisonSectionContent(
         repoRoot,
         snapshot.tree,
         oldRef,
@@ -740,7 +746,8 @@ const readBranchWorkingTreeSectionContent = async (launchPath, request) => {
           section: { kind: 'combined', ref: getCombinedSectionRef(oldRef) },
           showWhitespace: request.showWhitespace,
         },
-      ),
+      );
+    },
     await getBranchSnapshotPaths(repoRoot, oldRef, request),
   );
 };
@@ -758,16 +765,21 @@ const readBranchWorkingTreeImageContent = async (launchPath, request) => {
     );
     return await withBranchSnapshot(
       repoRoot,
-      async (snapshot) =>
-        readComparisonImageContent(
+      oldRef,
+      async (snapshot) => {
+        const addition = snapshot.placeholders.find(
+          (item) => item.path === request.path && item.summary?.loadState === 'too-large',
+        );
+        return readComparisonImageContent(
           repoRoot,
           snapshot.tree,
           oldRef,
-          await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef),
+          addition ? [addition] : await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef),
           request.path,
           'branch',
           { env: snapshot.env, workingTree: true },
-        ),
+        );
+      },
       await getBranchSnapshotPaths(repoRoot, oldRef, request),
     );
   } catch (error) {

@@ -366,6 +366,13 @@ const bufferToTextFile = (name, buffer, cacheKey) => {
   };
 };
 
+// The supported raster formats all have non-text bytes in their headers.
+/** @param {Buffer} bytes */
+const isTextImagePointer = (bytes) =>
+  bytes
+    .subarray(0, 512)
+    .every((byte) => byte === 9 || byte === 10 || byte === 13 || (byte >= 32 && byte < 127));
+
 /**
  * @param {string} repoRoot
  * @param {string} spec
@@ -389,7 +396,16 @@ const readImageSpec = async (repoRoot, spec, path, env) => {
   }
 
   try {
-    return bufferToImageRevision(path, await gitBuffer(repoRoot, ['show', spec], { env }));
+    let bytes = await gitBuffer(repoRoot, ['show', spec], { env });
+    if (env && isTextImagePointer(bytes)) {
+      // Smudge the base revision in the private snapshot. A clean-only driver
+      // (or an unavailable LFS asset) can leave the pointer unchanged.
+      bytes = await gitBuffer(repoRoot, ['cat-file', '--filters', spec], {
+        env: { ...env, GIT_LFS_SKIP_SMUDGE: '1' },
+      });
+      if (isTextImagePointer(bytes)) return undefined;
+    }
+    return bufferToImageRevision(path, bytes);
   } catch {
     return undefined;
   }

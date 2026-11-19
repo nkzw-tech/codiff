@@ -79,7 +79,7 @@ declare global {
       ) => Promise<NarrativeWalkthroughResult>;
       getPlanReview: () => Promise<PlanReview | null>;
       getPreferences: () => Promise<CodiffPreferences>;
-      getRepositoryFile: (path: string) => Promise<RepositoryFileDocument>;
+      getRepositoryFile: (path: string) => Promise<RepositoryFileDocument & { gitIdent?: boolean }>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
       getReviewProjects: () => Promise<ReadonlyArray<ReviewProject>>;

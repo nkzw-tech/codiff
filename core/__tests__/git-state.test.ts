@@ -1889,6 +1889,88 @@ test('single-file patches exclude descendants when a directory becomes a file', 
   });
 });
 
+test('branch+ recovers staged removals without passing the deletion list as one Git argument vector', async () => {
+  await withRepo(async (repo) => {
+    const paths = Array.from({ length: 320 }, (_, index) => `removed/file-${index}.txt`);
+    await Promise.all(paths.map((path) => writeRepoFile(repo, path, 'before\n')));
+    await commitAll(repo, 'base');
+    await git(repo, ['rm', '-r', 'removed']);
+    await writeRepoFile(repo, paths[0], 'recreated\n');
+    const trace = join(repo, '.git', 'removals-trace');
+    using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: trace });
+    const { files } = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(files.filter(({ status }) => status === 'deleted')).toHaveLength(paths.length - 1);
+    expect(files.find(({ path }) => path === paths[0])).toMatchObject({ status: 'modified' });
+    const commands = readFileSync(trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { argv?: Array<string> });
+    for (const { argv } of commands) {
+      if (argv?.includes('--others')) {
+        expect(argv.length).toBeLessThan(paths.length);
+      }
+    }
+  });
+});
+
+test('branch+ isolates rejected tracked and untracked conversions from valid changes', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'tracked.txt', 'before\n');
+    await commitAll(repo, 'base');
+    await git(repo, ['config', 'core.safecrlf', 'true']);
+    await git(repo, ['config', 'core.autocrlf', 'input']);
+    await writeRepoFile(repo, 'tracked.txt', 'after\r\n');
+    await writeRepoFile(repo, 'untracked.txt', 'new\r\n');
+    await writeRepoFile(repo, 'valid.txt', 'valid\n');
+    const index = readFileSync(join(repo, '.git/index'));
+    const { files } = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(files).toMatchObject([
+      { path: 'tracked.txt', sections: [{ loadState: 'error' }], status: 'modified' },
+      { path: 'untracked.txt', sections: [{ loadState: 'error' }] },
+      { path: 'valid.txt', sections: [{ newFile: { contents: 'valid\n' } }] },
+    ]);
+    expect(readFileSync(join(repo, '.git/index'))).toEqual(index);
+  });
+});
+
+test('branch+ keeps standalone oversized additions out of the temporary object store', async () => {
+  await withRepo(async (repo) => {
+    await git(repo, ['commit', '--allow-empty', '-m', 'base']);
+    const large = Buffer.alloc(3 * 1024 * 1024);
+    await writeRepoFile(repo, 'large.bin', large);
+    const trace = join(repo, '.git', 'snapshot-trace');
+    using _environment = createTemporaryEnvironment({ GIT_TRACE2_EVENT: trace });
+    const source = { ref: 'HEAD', type: 'branch-working-tree' } as const;
+    const state = await readRepositoryState(repo, source);
+    expect(state.files).toMatchObject([
+      {
+        path: 'large.bin',
+        sections: [{ loadState: 'too-large', summary: { size: large.length } }],
+        status: 'added',
+      },
+    ]);
+    const lazy = await readDiffSectionContent(repo, {
+      basePath: 'large.bin',
+      force: true,
+      kind: 'combined',
+      path: 'large.bin',
+      source: state.source,
+    });
+    expect(lazy).toMatchObject({ loadState: 'too-large', summary: { size: large.length } });
+    const commands = readFileSync(trace, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { argv?: Array<string> });
+    expect(commands.some(({ argv }) => argv?.includes('add'))).toBe(false);
+    await git(repo, ['add', 'large.bin']);
+    await git(repo, ['commit', '-m', 'large asset']);
+    await rename(join(repo, 'large.bin'), join(repo, 'moved.bin'));
+    expect((await readRepositoryState(repo, source)).files).toMatchObject([
+      { oldPath: 'large.bin', path: 'moved.bin', status: 'renamed' },
+    ]);
+  });
+});
+
 test('branch+ previews checkout images stored as text by a clean filter', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, '.gitattributes', '*.png filter=asset\n');
@@ -1910,6 +1992,39 @@ test('branch+ previews checkout images stored as text by a clean filter', async 
     });
     expect(image).toMatchObject({
       newImage: { dataUrl: `data:image/png;base64,${bytes.toString('base64')}` },
+      status: 'ready',
+    });
+  });
+});
+
+test('branch+ renders a smudged base image and omits an unresolved pointer', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.png filter=asset\n');
+    await git(repo, ['config', 'filter.asset.clean', 'git hash-object --stdin']);
+    const original = Buffer.from([137, 80, 78, 71, 0, 1]);
+    const edited = Buffer.from([137, 80, 78, 71, 0, 2]);
+    await writeRepoFile(repo, 'old-bytes', original);
+    await writeRepoFile(repo, 'image.png', original);
+    await commitAll(repo, 'original');
+    await writeRepoFile(repo, 'image.png', edited);
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    const request = {
+      basePath: 'image.png',
+      kind: 'combined',
+      path: 'image.png',
+      source: state.source,
+    } as const;
+    const unresolved = await readDiffImageContent(repo, request);
+    expect(unresolved).toEqual({
+      newImage: expect.objectContaining({
+        dataUrl: `data:image/png;base64,${edited.toString('base64')}`,
+      }),
+      status: 'ready',
+    });
+    await git(repo, ['config', 'filter.asset.smudge', 'cat old-bytes']);
+    expect(await readDiffImageContent(repo, request)).toMatchObject({
+      newImage: { dataUrl: `data:image/png;base64,${edited.toString('base64')}` },
+      oldImage: { dataUrl: `data:image/png;base64,${original.toString('base64')}` },
       status: 'ready',
     });
   });
@@ -2244,7 +2359,7 @@ test('lazy branch+ reads stage only the reviewed file pair and read its current 
     const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
     const renamed = state.files.find((file) => file.path === 'new.txt')!;
     expect(renamed.oldPath).toBe('old.txt');
-    // A full snapshot would now fail while staging the unrelated asset.
+    // The unrelated asset now rejects staging.
     await git(repo, ['config', 'filter.asset.clean', 'false']);
     await writeRepoFile(repo, 'new.txt', 'one\ntwo\nthree\nfour\nfive\n');
     await writeRepoFile(repo, 'new.png', Uint8Array.of(0, 1, 2));

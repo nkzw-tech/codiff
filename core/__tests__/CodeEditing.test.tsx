@@ -646,6 +646,32 @@ test('combined edits preserve checkout line endings and reject stale content', a
   expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('changed on disk');
 });
 
+test('combined edits preserve Git ident expansion and reject changes outside the keyword', async () => {
+  const expanded = `$Id: ${'a'.repeat(40)} $`;
+  const document = {
+    content: `new ${expanded}\r\n`,
+    gitIdent: true,
+    path: file.path,
+    root: '/repo',
+    version: 'version',
+  };
+  vi.mocked(window.codiff.getRepositoryFile).mockResolvedValue(document);
+  const combined = { ...metadata, section: { ...metadata.section, kind: 'combined' as const } };
+  await using view = await renderReact(<Harness contents={'new $Id$\n'} editMetadata={combined} />);
+  await click(view.container, 'Edit');
+  await edit();
+  await click(view.container, 'Done');
+  expect(window.codiff.saveRepositoryFile).toHaveBeenCalledWith(
+    expect.objectContaining({ content: `updated ${expanded}\r\n` }),
+  );
+  vi.mocked(window.codiff.getRepositoryFile).mockResolvedValue({
+    ...document,
+    content: `external ${expanded}\r\n`,
+  });
+  await click(view.container, 'Edit');
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('changed on disk');
+});
+
 test('Done saves complete Pierre contents; Revert discards a draft before auto-save', async () => {
   await using view = await renderReact(<Harness />);
   await click(view.container, 'Edit');

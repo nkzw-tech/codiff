@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { chmod, lstat, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -11,7 +12,10 @@ import type {
 
 const require = createRequire(import.meta.url);
 const { readRepositoryFile, writeRepositoryFile } = require('../repository-file.cjs') as {
-  readRepositoryFile: (root: string, path: string) => Promise<RepositoryFileDocument>;
+  readRepositoryFile: (
+    root: string,
+    path: string,
+  ) => Promise<RepositoryFileDocument & { gitIdent?: boolean }>;
   writeRepositoryFile: (
     root: string,
     request: SaveRepositoryFileRequest,
@@ -34,6 +38,20 @@ test('saves UTF-8 source without changing line endings, BOM, or executable permi
   expect(await readFile(path, 'utf8')).toBe(content);
   expect(result.document.version).not.toBe(document.version);
   expect((await stat(path)).mode & 0o777).toBe(0o755);
+});
+
+test('recognizes expanded Git ident keywords only on paths with the attribute', async () => {
+  await using directory = await createTemporaryDirectory('codiff-edit-ident-');
+  execFileSync('git', ['init', '--quiet', directory.path]);
+  const content = `new $Id: ${'a'.repeat(40)} $\n`;
+  await writeFile(join(directory.path, 'source.ts'), content);
+  await writeFile(join(directory.path, '.gitattributes'), 'source.ts ident\n');
+  expect(await readRepositoryFile(directory.path, 'source.ts')).toMatchObject({
+    content,
+    gitIdent: true,
+  });
+  await writeFile(join(directory.path, '.gitattributes'), 'source.ts -ident\n');
+  expect((await readRepositoryFile(directory.path, 'source.ts')).gitIdent).toBeUndefined();
 });
 
 test('keeps external edits and rejects saves belonging to a different repository', async () => {
