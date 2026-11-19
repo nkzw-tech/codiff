@@ -50,6 +50,8 @@ const createComparisonPatchArgs = (newRef, oldRef, items, options) => [
   ...(oldRef ? ['diff'] : ['show', '--format=']),
   '--patch',
   '--no-ext-diff',
+  // A textconv cache writes a real notes ref pointing into the temporary object store.
+  ...(options.section?.kind === 'combined' ? ['--no-textconv'] : []),
   '--find-renames',
   ...getWhitespaceDiffArgs(options),
   ...(oldRef ? [oldRef] : []),

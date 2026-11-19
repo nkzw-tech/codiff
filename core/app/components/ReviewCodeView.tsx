@@ -78,6 +78,7 @@ import {
   workerHighlighterOptions,
 } from '../../lib/code-view-options.ts';
 import {
+  getDiffContentRequest,
   canRenderImagePreview,
   getDiffLineCountFromVisibleSections,
   getDiffParseOptions,
@@ -1202,8 +1203,7 @@ function ImageDiffPreview({
     const activeRequestKey = requestKey;
 
     loadImageContent({
-      kind: section.kind,
-      path: file.path,
+      ...getDiffContentRequest(section.kind, file.path, file.oldPath),
       source,
     })
       .then((nextResult) => {
@@ -1229,7 +1229,7 @@ function ImageDiffPreview({
     return () => {
       canceled = true;
     };
-  }, [file.path, loadImageContent, requestKey, section.kind, source]);
+  }, [file.oldPath, file.path, loadImageContent, requestKey, section.kind, source]);
 
   useEffect(() => {
     onLayoutReady(section.id);

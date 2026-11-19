@@ -1900,8 +1900,22 @@ process.exit(result.status ?? 1);
         return;
       }
       const state = await readRepositoryState(repo, { ref: target, type: 'branch-working-tree' });
-      expect(state.files.map((file) => file.path)).toEqual(['tracked.txt', 'valid.txt']);
-      expect(state.files[0].sections[0].newFile?.contents).toBe('final\n');
+      expect(state.files.map((file) => file.path)).toEqual(
+        failure === 'unreadable'
+          ? ['bad.txt', 'tracked.txt', 'valid.txt']
+          : ['tracked.txt', 'valid.txt'],
+      );
+      if (failure === 'unreadable') {
+        expect(state.files[0].sections[0]).toMatchObject({
+          kind: 'combined',
+          loadState: 'error',
+          summary: { canLoad: false, reason: expect.stringContaining('Git could not add') },
+        });
+        expect(fileHasVisibleDiff(state.files[0], false)).toBe(true);
+      }
+      expect(
+        state.files.find((file) => file.path === 'tracked.txt')?.sections[0].newFile?.contents,
+      ).toBe('final\n');
       const section = await readDiffSectionContent(repo, {
         kind: 'combined',
         path: 'valid.txt',
@@ -2040,6 +2054,66 @@ test('branch+ loads current text and images on demand and respects file size lim
       source: state.source,
     });
     expect(refreshedContents.newFile?.contents).toBe(`${committedLines}new\n`);
+  });
+});
+
+test('branch+ leaves refs and objects valid with textconv caching enabled', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.txt diff=plain\n');
+    await git(repo, ['config', 'diff.plain.textconv', 'cat']);
+    await git(repo, ['config', 'diff.plain.cachetextconv', 'true']);
+    await writeRepoFile(repo, 'file.txt', 'base\n');
+    await commitAll(repo, 'base');
+    const refs = await git(repo, ['show-ref']);
+    await writeRepoFile(repo, 'file.txt', 'edited\n');
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    const section = await readDiffSectionContent(repo, {
+      kind: 'combined',
+      path: 'file.txt',
+      source: state.source,
+    });
+    expect(section.patch).toContain('+edited');
+    expect(state.files[0].sections[0].patch).toBe(section.patch);
+    expect(await git(repo, ['show-ref'])).toBe(refs);
+    await git(repo, ['fsck', '--full', '--no-dangling']);
+  });
+});
+
+test('lazy branch+ reads stage only the reviewed file pair and read its current contents', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.asset filter=asset\n');
+    await git(repo, ['config', 'filter.asset.clean', 'cat']);
+    await git(repo, ['config', 'filter.asset.required', 'true']);
+    await writeRepoFile(repo, 'old.txt', 'one\ntwo\nthree\nfour\n');
+    await commitAll(repo, 'base');
+    await rename(join(repo, 'old.txt'), join(repo, 'new.txt'));
+    await writeRepoFile(repo, 'unrelated.asset', 'asset\n');
+    await writeRepoFile(repo, 'new.png', Uint8Array.of(0, 1));
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    const renamed = state.files.find((file) => file.path === 'new.txt')!;
+    expect(renamed.oldPath).toBe('old.txt');
+    // A full snapshot would now fail while staging the unrelated asset.
+    await git(repo, ['config', 'filter.asset.clean', 'false']);
+    await writeRepoFile(repo, 'new.txt', 'one\ntwo\nthree\nfour\nfive\n');
+    await writeRepoFile(repo, 'new.png', Uint8Array.of(0, 1, 2));
+    const [text, image] = await Promise.all([
+      readDiffSectionContent(repo, {
+        basePath: renamed.oldPath,
+        kind: 'combined',
+        path: renamed.path,
+        source: state.source,
+      }),
+      readDiffImageContent(repo, {
+        basePath: 'new.png',
+        kind: 'combined',
+        path: 'new.png',
+        source: state.source,
+      }),
+    ]);
+    expect(text.oldFile?.contents).toBe('one\ntwo\nthree\nfour\n');
+    expect(text.patch).toContain('rename from old.txt');
+    expect(text.patch).toContain('+five');
+    expect(image).toMatchObject({ newImage: { size: 3 }, status: 'ready' });
   });
 });
 

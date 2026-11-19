@@ -7,6 +7,7 @@ const {
   getGravatarHash,
   git,
   normalizeStatus,
+  validateRepositoryPath,
 } = require('./common.cjs');
 const { withBranchSnapshot } = require('./branch-snapshot.cjs');
 const {
@@ -89,14 +90,24 @@ const readCommitParents = async (repoRoot, commit) => {
  * @param {string} repoRoot
  * @param {string} commit
  * @param {string | undefined} firstParent
- * @param {{env?: NodeJS.ProcessEnv; sort?: boolean}} [options]
+ * @param {{env?: NodeJS.ProcessEnv; pathspec?: ReadonlyArray<string>; sort?: boolean}} [options]
  */
 const readCommitNameStatus = async (repoRoot, commit, firstParent, options = {}) =>
   parseCommitNameStatus(
     await git(
       repoRoot,
       firstParent
-        ? ['diff', '--name-status', '-r', '-z', '-M', firstParent, commit]
+        ? [
+            'diff',
+            '--name-status',
+            '-r',
+            '-z',
+            '-M',
+            firstParent,
+            commit,
+            '--',
+            ...(options.pathspec ?? []),
+          ]
         : ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '--root', '-M', commit],
       { env: options.env },
     ),
@@ -599,13 +610,19 @@ const getCombinedSectionRef = (oldRef) => `combined:${oldRef}`;
 const readBranchWorkingTreeStatus = async (repoRoot, snapshot, oldRef) => {
   const status = await readCommitNameStatus(repoRoot, snapshot.tree, oldRef, {
     env: snapshot.env,
+    pathspec: snapshot.pathspec,
     sort: false,
   });
+  const unreadable = new Set(
+    snapshot.untrackedPlaceholders
+      .filter((item) => item.summary?.loadState === 'error')
+      .map((item) => item.path),
+  );
   const conflicted = new Set(snapshot.conflictedPaths);
   /** @type {Array<Pick<StatusItem, 'oldPath' | 'path' | 'status'>>} */
-  const items = status.map((item) =>
-    conflicted.has(item.path) ? { ...item, status: 'conflicted' } : item,
-  );
+  const items = status
+    .filter((item) => !unreadable.has(item.path))
+    .map((item) => (conflicted.has(item.path) ? { ...item, status: 'conflicted' } : item));
   const paths = new Set(items.map((item) => item.path));
   for (const path of conflicted) {
     if (!paths.has(path)) {
@@ -679,6 +696,24 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
 };
 
 /**
+ * The full comparison has already resolved rename pairs for the UI. Callers
+ * without this information can still discover renames for paths new to the base.
+ * @param {string} repoRoot
+ * @param {string} oldRef
+ * @param {DiffSectionContentRequest | DiffImageContentRequest} request
+ */
+const getBranchSnapshotPaths = async (repoRoot, oldRef, request) => {
+  const path = request.path;
+  validateRepositoryPath(path);
+  if (request.basePath != null) {
+    validateRepositoryPath(request.basePath);
+    return request.basePath === path ? [path] : [request.basePath, path];
+  }
+  const baseEntry = await git(repoRoot, ['ls-tree', '-z', oldRef, '--', `:(literal)${path}`]);
+  return baseEntry ? [path] : undefined;
+};
+
+/**
  * A section read uses the review's merge base and the working tree at the time of the read.
  * @param {string} launchPath
  * @param {DiffSectionContentRequest} request
@@ -689,23 +724,26 @@ const readBranchWorkingTreeSectionContent = async (launchPath, request) => {
     /** @type {BranchWorkingTreeSource} */ (request.source),
   );
 
-  return withBranchSnapshot(repoRoot, async (snapshot) =>
-    readComparisonSectionContent(
-      repoRoot,
-      snapshot.tree,
-      oldRef,
-      await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef),
-      request.path,
-      'branch',
-      {
-        blobCacheKeys: true,
-        env: snapshot.env,
-        force: request.force,
-        literalPaths: true,
-        section: { kind: 'combined', ref: getCombinedSectionRef(oldRef) },
-        showWhitespace: request.showWhitespace,
-      },
-    ),
+  return withBranchSnapshot(
+    repoRoot,
+    async (snapshot) =>
+      readComparisonSectionContent(
+        repoRoot,
+        snapshot.tree,
+        oldRef,
+        await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef),
+        request.path,
+        'branch',
+        {
+          blobCacheKeys: true,
+          env: snapshot.env,
+          force: request.force,
+          literalPaths: true,
+          section: { kind: 'combined', ref: getCombinedSectionRef(oldRef) },
+          showWhitespace: request.showWhitespace,
+        },
+      ),
+    await getBranchSnapshotPaths(repoRoot, oldRef, request),
   );
 };
 
@@ -720,16 +758,19 @@ const readBranchWorkingTreeImageContent = async (launchPath, request) => {
       launchPath,
       /** @type {BranchWorkingTreeSource} */ (request.source),
     );
-    return await withBranchSnapshot(repoRoot, async (snapshot) =>
-      readComparisonImageContent(
-        repoRoot,
-        snapshot.tree,
-        oldRef,
-        await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef),
-        request.path,
-        'branch',
-        snapshot.env,
-      ),
+    return await withBranchSnapshot(
+      repoRoot,
+      async (snapshot) =>
+        readComparisonImageContent(
+          repoRoot,
+          snapshot.tree,
+          oldRef,
+          await readBranchWorkingTreeStatus(repoRoot, snapshot, oldRef),
+          request.path,
+          'branch',
+          snapshot.env,
+        ),
+      await getBranchSnapshotPaths(repoRoot, oldRef, request),
     );
   } catch (error) {
     return {

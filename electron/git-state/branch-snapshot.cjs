@@ -3,7 +3,7 @@
 const { promises: fs } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { delimiter, join, resolve } = require('node:path');
-const { git, gitBufferWithInput, parseStatus } = require('./common.cjs');
+const { createSummary, git, gitBuffer, gitBufferWithInput, parseStatus } = require('./common.cjs');
 const { listUntrackedItems } = require('./working-tree.cjs');
 
 /**
@@ -12,6 +12,7 @@ const { listUntrackedItems } = require('./working-tree.cjs');
  *   conflictedPaths: ReadonlyArray<string>;
  *   env: NodeJS.ProcessEnv;
  *   tree: string;
+ *   pathspec: ReadonlyArray<string>;
  *   untrackedPlaceholders: ReadonlyArray<StatusItem>;
  * }} BranchSnapshot
  */
@@ -23,8 +24,9 @@ const { listUntrackedItems } = require('./working-tree.cjs');
  * @template T
  * @param {string} repoRoot
  * @param {(snapshot: BranchSnapshot) => Promise<T>} run
+ * @param {ReadonlyArray<string>} [paths] Paths in the reviewed file pair for a lazy read.
  */
-const withBranchSnapshot = async (repoRoot, run) => {
+const withBranchSnapshot = async (repoRoot, run, paths) => {
   const directory = await fs.mkdtemp(join(tmpdir(), 'codiff-branch-snapshot-'));
 
   try {
@@ -65,10 +67,19 @@ const withBranchSnapshot = async (repoRoot, run) => {
       }
     }
 
-    const [untracked, originalStatus] = await Promise.all([
+    const pathspec = paths?.map((path) => `:(literal)${path}`) ?? [];
+    const [listedUntracked, originalStatus] = await Promise.all([
       listUntrackedItems(repoRoot),
-      git(repoRoot, ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '-uno'], { env }),
+      git(
+        repoRoot,
+        ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '-uno', '--', ...pathspec],
+        { env },
+      ),
     ]);
+    const untracked = paths
+      ? listedUntracked.filter((item) => paths.includes(item.path))
+      : listedUntracked;
+    const placeholders = untracked.filter((item) => item.directory);
     const status = parseStatus(originalStatus);
     const cachedRemovals = status.filter((item) => item.staged && item.status === 'deleted');
     const removedUntracked = cachedRemovals.length
@@ -95,7 +106,20 @@ const withBranchSnapshot = async (repoRoot, run) => {
         ...removedUntracked,
       ]),
     ];
-    await git(repoRoot, ['add', '--update'], { env });
+    // An untracked-only or already deleted path will not match 'git add --update'.
+    const updates = status.filter((item) => item.unstaged);
+    if (!paths || updates.length) {
+      await git(
+        repoRoot,
+        [
+          'add',
+          '--update',
+          '--',
+          ...(paths ? updates.map((item) => `:(literal)${item.path}`) : []),
+        ],
+        { env },
+      );
+    }
     while (untrackedPaths.length > 0) {
       try {
         await gitBufferWithInput(
@@ -108,6 +132,30 @@ const withBranchSnapshot = async (repoRoot, run) => {
       } catch (error) {
         const exitCode = /** @type {Error & {exitCode?: number}} */ (error).exitCode;
         if (exitCode === 1) {
+          // --ignore-errors stages the readable files. Ask the private index which
+          // paths are still untracked instead of parsing localized Git diagnostics.
+          const remaining = new Set(
+            (
+              await git(
+                repoRoot,
+                ['ls-files', '--others', '--exclude-standard', '-z', '--', ...pathspec],
+                { env },
+              )
+            ).split('\0'),
+          );
+          for (const path of untrackedPaths.filter((path) => remaining.has(path))) {
+            placeholders.push({
+              path,
+              staged: false,
+              status: 'untracked',
+              unstaged: true,
+              untracked: true,
+              summary: createSummary('Git could not add this file to the review snapshot.', {
+                canLoad: false,
+                loadState: 'error',
+              }),
+            });
+          }
           break;
         }
         if (exitCode !== 128) {
@@ -136,14 +184,27 @@ const withBranchSnapshot = async (repoRoot, run) => {
       }
     }
 
-    const tree = (await git(repoRoot, ['write-tree'], { env })).trim();
+    let treeEnv = env;
+    if (paths) {
+      // Only materialize this pair. The copied index can still contain unresolved
+      // conflicts elsewhere, which would make a whole-index write-tree fail.
+      const entries = await gitBuffer(repoRoot, ['ls-files', '--stage', '-z', '--', ...pathspec], {
+        env,
+      });
+      treeEnv = { ...env, GIT_INDEX_FILE: join(directory, 'selected-index') };
+      await gitBufferWithInput(repoRoot, ['update-index', '-z', '--index-info'], entries, {
+        env: treeEnv,
+      });
+    }
+    const tree = (await git(repoRoot, ['write-tree'], { env: treeEnv })).trim();
     return await run({
       conflictedPaths: status
         .filter((item) => item.status === 'conflicted')
         .map((item) => item.path),
       env,
       tree,
-      untrackedPlaceholders: untracked.filter((item) => item.directory),
+      pathspec,
+      untrackedPlaceholders: placeholders,
     });
   } finally {
     await fs.rm(directory, { force: true, recursive: true });

@@ -886,6 +886,7 @@ module.exports = {
   getImageMimeType,
   getWhitespaceDiffArgs,
   git,
+  gitBuffer,
   gitBufferWithInput,
   gitOrEmpty,
   normalizeStatus,

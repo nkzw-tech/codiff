@@ -77,6 +77,7 @@ import {
   type WalkthroughNote,
 } from './lib/app-types.ts';
 import {
+  getDiffContentRequest,
   getFailedSectionLoadState,
   shouldLoadDiffSectionContents,
   shouldPreloadSectionContentsForSearch,
@@ -429,8 +430,7 @@ export default function App({
       window.codiff
         .getDiffSectionContent({
           force: true,
-          kind: section.kind,
-          path: file.path,
+          ...getDiffContentRequest(section.kind, file.path, file.oldPath),
           showWhitespace: preferencesRef.current.showWhitespace,
           source: currentState.source,
         })
@@ -507,8 +507,7 @@ export default function App({
 
       const loadedSection = await window.codiff.getDiffSectionContent({
         force: true,
-        kind: section.kind,
-        path: file.path,
+        ...getDiffContentRequest(section.kind, file.path, file.oldPath),
         showWhitespace: preferencesRef.current.showWhitespace,
         source: currentState.source,
       });
@@ -988,8 +987,7 @@ export default function App({
       try {
         const loadedSection = await window.codiff.getDiffSectionContent({
           force: true,
-          kind: request.section.kind,
-          path: request.file.path,
+          ...getDiffContentRequest(request.section.kind, request.file.path, request.file.oldPath),
           showWhitespace: preferences.showWhitespace,
           source: state.source,
         });

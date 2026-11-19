@@ -1,6 +1,7 @@
 import type { FileDiffLoadedFiles } from '@pierre/diffs';
 import { useCallback, useRef, useState } from 'react';
 import {
+  getDiffContentRequest,
   getFailedSectionLoadState,
   shouldLoadDiffSectionContents,
   updateDiffSection,
@@ -49,8 +50,7 @@ export function useReviewContentLoader({
 
       return contentLoader.loadSectionContent({
         force: true,
-        kind: section.kind,
-        path: file.path,
+        ...getDiffContentRequest(section.kind, file.path, file.oldPath),
         showWhitespace: snapshot.preferences.showWhitespace,
         source: snapshot.repository.source,
       });

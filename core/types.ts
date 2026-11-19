@@ -767,12 +767,9 @@ export type GitIdentity = {
   username?: string;
 };
 
-export type DiffSectionContentRequest = {
+export type DiffSectionContentRequest = DiffImageContentRequest & {
   force?: boolean;
-  kind: DiffSection['kind'];
-  path: string;
   showWhitespace?: boolean;
-  source?: ReviewSource;
 };
 
 export type DefinitionSearchRequest = {
@@ -805,6 +802,8 @@ export type DefinitionSearchResult =
     };
 
 export type DiffImageContentRequest = {
+  /** Base-side path from the combined review, including unchanged names. */
+  basePath?: string;
   kind: DiffSection['kind'];
   path: string;
   source?: ReviewSource;

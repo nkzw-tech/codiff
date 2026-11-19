@@ -30,6 +30,9 @@ export const isPatchOnlyDiffSection = (section: DiffSection) =>
   section.oldFile == null &&
   section.newFile == null;
 
+export const getDiffContentRequest = (kind: DiffSection['kind'], path: string, oldPath?: string) =>
+  kind === 'combined' ? { basePath: oldPath ?? path, kind, path } : { kind, path };
+
 export const shouldLoadDiffSectionContents = (section: DiffSection) =>
   section.summary?.canLoad !== false && section.loadState === 'deferred';
 
