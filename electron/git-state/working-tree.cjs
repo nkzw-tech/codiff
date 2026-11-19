@@ -5,6 +5,7 @@ const {
   createSection,
   createSummary,
   fileSort,
+  GENERATED_DIRECTORY_NAMES,
   generatedDirectoryPathspecExcludes,
   generatedDirectoryPathspecs,
   getFingerprint,
@@ -142,31 +143,62 @@ const readPatchMap = async (repoRoot, kind, options = {}) => {
   return splitPatchByPath(await git(repoRoot, args));
 };
 
-/** @param {string} repoRoot @returns {Promise<Array<StatusItem>>} */
-const listUntrackedItems = async (repoRoot) => {
+/**
+ * @param {string} repoRoot
+ * @param {{ paths?: ReadonlyArray<string>; requestedPath?: string; env?: NodeJS.ProcessEnv }} [options]
+ * @returns {Promise<Array<StatusItem>>}
+ */
+const listUntrackedItems = async (repoRoot, { paths, requestedPath, env } = {}) => {
+  const requested = paths && new Set(paths);
+  const fileSpecs = paths?.map((path) => `:(literal)${path}`) ?? ['.'];
+  // Preserve collapsed generated directories when looking up a single file.
+  const directorySpecs = paths
+    ? paths.flatMap((path) => {
+        const parts = path.split('/');
+        const index = parts.findIndex((part) => GENERATED_DIRECTORY_NAMES.has(part));
+        return index < 0 ? [] : [`:(literal)${parts.slice(0, index + 1).join('/')}`];
+      })
+    : generatedDirectoryPathspecs;
   const [rawFiles, rawDirectories] = await Promise.all([
-    git(repoRoot, [
-      'ls-files',
-      '--others',
-      '--exclude-standard',
-      '-z',
-      '--',
-      '.',
-      ...generatedDirectoryPathspecExcludes,
-    ]),
-    git(repoRoot, [
-      'ls-files',
-      '--others',
-      '--exclude-standard',
-      '--directory',
-      '-z',
-      '--',
-      ...generatedDirectoryPathspecs,
-    ]),
+    git(
+      repoRoot,
+      [
+        'ls-files',
+        '--others',
+        '--exclude-standard',
+        '-z',
+        '--',
+        ...fileSpecs,
+        ...generatedDirectoryPathspecExcludes,
+      ],
+      { env },
+    ),
+    directorySpecs.length
+      ? git(
+          repoRoot,
+          [
+            'ls-files',
+            '--others',
+            '--exclude-standard',
+            '--directory',
+            '-z',
+            '--',
+            ...directorySpecs,
+          ],
+          { env },
+        )
+      : '',
   ]);
-  const paths = rawFiles.split('\0').filter(Boolean).sort();
+  const files = rawFiles
+    .split('\0')
+    .filter((path) => path && (!requested || requested.has(path)))
+    .sort();
+  // Rename discovery can need a full snapshot even on a single-file read.
+  const included = requested
+    ? files
+    : files.filter((path, index) => index < MAX_UNTRACKED_INITIAL_ITEMS || path === requestedPath);
   /** @type {Array<StatusItem>} */
-  const items = paths.slice(0, MAX_UNTRACKED_INITIAL_ITEMS).map((path) => ({
+  const items = included.map((path) => ({
     path,
     staged: false,
     status: 'untracked',
@@ -174,8 +206,8 @@ const listUntrackedItems = async (repoRoot) => {
     untracked: true,
   }));
 
-  if (paths.length > MAX_UNTRACKED_INITIAL_ITEMS) {
-    const omitted = paths.length - MAX_UNTRACKED_INITIAL_ITEMS;
+  if (files.length > included.length) {
+    const omitted = files.length - included.length;
     items.push({
       directory: true,
       path: `Untracked files not shown (${omitted} more)`,
@@ -191,10 +223,12 @@ const listUntrackedItems = async (repoRoot) => {
     });
   }
 
-  for (const path of rawDirectories.split('\0').filter(Boolean)) {
+  for (const entry of rawDirectories.split('\0').filter(Boolean)) {
+    const path = entry.endsWith('/') ? entry.slice(0, -1) : entry;
+    if (requested && !requested.has(path)) continue;
     items.push({
       directory: true,
-      path: path.endsWith('/') ? path.slice(0, -1) : path,
+      path,
       staged: false,
       status: 'untracked',
       unstaged: true,

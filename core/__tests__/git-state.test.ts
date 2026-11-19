@@ -16,7 +16,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from 'vite-plus/test';
-import { fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
+import { canRenderImagePreview, fileHasVisibleDiff, getDiffLineCount } from '../lib/diff.ts';
 import type {
   DiffImageContentRequest,
   DiffImageContentResult,
@@ -1889,6 +1889,37 @@ test('single-file patches exclude descendants when a directory becomes a file', 
   });
 });
 
+test.skipIf(process.platform === 'win32')(
+  'branch+ replaces a tracked directory with a symlink',
+  async () => {
+    await withRepo(async (repo) => {
+      await writeRepoFile(repo, 'one/file', 'original\n');
+      await writeRepoFile(repo, 'two/file', 'target\n');
+      await commitAll(repo, 'base');
+      await writeRepoFile(repo, 'one/file', 'staged\n');
+      await git(repo, ['add', 'one/file']);
+      await rm(join(repo, 'one'), { recursive: true });
+      await symlink('two', join(repo, 'one'));
+      const index = readFileSync(join(repo, '.git/index'));
+      const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+      expect(state.files.map(({ path, status }) => [path, status]).sort()).toEqual([
+        ['one', 'added'],
+        ['one/file', 'deleted'],
+      ]);
+      for (const file of state.files) {
+        const section = await readDiffSectionContent(repo, {
+          basePath: file.path,
+          kind: 'combined',
+          path: file.path,
+          source: state.source,
+        });
+        expect(section).toEqual(file.sections[0]);
+      }
+      expect(readFileSync(join(repo, '.git/index'))).toEqual(index);
+    });
+  },
+);
+
 test('branch+ recovers staged removals without passing the deletion list as one Git argument vector', async () => {
   await withRepo(async (repo) => {
     const paths = Array.from({ length: 320 }, (_, index) => `removed/file-${index}.txt`);
@@ -1997,6 +2028,30 @@ test('branch+ previews checkout images stored as text by a clean filter', async 
   });
 });
 
+test('branch+ previews an image renamed from an extensionless path', async () => {
+  await withRepo(async (repo) => {
+    const bytes = Buffer.from([137, 80, 78, 71, 0, 1]);
+    await writeRepoFile(repo, 'asset', bytes);
+    await commitAll(repo, 'base');
+    await rename(join(repo, 'asset'), join(repo, 'asset.png'));
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    const [file] = state.files;
+    expect(file).toMatchObject({ oldPath: 'asset', path: 'asset.png', status: 'renamed' });
+    const image = await readDiffImageContent(repo, {
+      basePath: file.oldPath,
+      kind: 'combined',
+      path: file.path,
+      source: state.source,
+    });
+    expect(image).toEqual({
+      newImage: expect.objectContaining({
+        dataUrl: `data:image/png;base64,${bytes.toString('base64')}`,
+      }),
+      status: 'ready',
+    });
+  });
+});
+
 test('branch+ renders a smudged base image and omits an unresolved pointer', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, '.gitattributes', '*.png filter=asset\n');
@@ -2025,6 +2080,18 @@ test('branch+ renders a smudged base image and omits an unresolved pointer', asy
     expect(await readDiffImageContent(repo, request)).toMatchObject({
       newImage: { dataUrl: `data:image/png;base64,${edited.toString('base64')}` },
       oldImage: { dataUrl: `data:image/png;base64,${original.toString('base64')}` },
+      status: 'ready',
+    });
+
+    await rm(join(repo, 'image.png'));
+    const deleted = await readRepositoryState(repo, state.source);
+    const [file] = deleted.files;
+    expect(file.status).toBe('deleted');
+    expect(canRenderImagePreview(file.path, file.sections[0])).toBe(true);
+    expect(await readDiffImageContent(repo, request)).toEqual({
+      oldImage: expect.objectContaining({
+        dataUrl: `data:image/png;base64,${original.toString('base64')}`,
+      }),
       status: 'ready',
     });
   });
@@ -2254,6 +2321,32 @@ test('branch+ limits untracked files and omits unchanged files removed from the 
     expect(state.files.some((file) => file.path.startsWith('Untracked files not shown'))).toBe(
       true,
     );
+  });
+});
+
+test('branch+ loads a reviewed file after it falls outside the initial untracked limit', async () => {
+  await withRepo(async (repo) => {
+    await git(repo, ['commit', '--allow-empty', '-m', 'base']);
+    await Promise.all(
+      Array.from({ length: 999 }, (_, index) => writeRepoFile(repo, `k${index}`, '')),
+    );
+    const contents = 'reviewed line\n'.repeat(90_000);
+    await writeRepoFile(repo, 'z.txt', contents);
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(state.files.find(({ path }) => path === 'z.txt')?.sections[0].loadState).toBe(
+      'deferred',
+    );
+    await writeRepoFile(repo, 'a.txt', 'another file\n');
+    for (const basePath of ['z.txt', undefined]) {
+      const section = await readDiffSectionContent(repo, {
+        basePath,
+        force: true,
+        kind: 'combined',
+        path: 'z.txt',
+        source: state.source,
+      });
+      expect(section.newFile?.contents).toBe(contents);
+    }
   });
 });
 

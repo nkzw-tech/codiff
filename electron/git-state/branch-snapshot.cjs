@@ -209,9 +209,9 @@ const omitOversizedAdditions = async (repoRoot, env, base, paths, placeholders) 
  * @param {string} repoRoot
  * @param {string} base
  * @param {(snapshot: BranchSnapshot) => Promise<T>} run
- * @param {ReadonlyArray<string>} [paths] Paths in the reviewed file pair for a lazy read.
+ * @param {{ paths?: ReadonlyArray<string>; requestedPath?: string }} [selection] Reviewed file and known rename pair for a lazy read.
  */
-const withBranchSnapshot = async (repoRoot, base, run, paths) => {
+const withBranchSnapshot = async (repoRoot, base, run, selection = {}) => {
   const directory = await fs.mkdtemp(join(tmpdir(), 'codiff-branch-snapshot-'));
 
   try {
@@ -252,9 +252,10 @@ const withBranchSnapshot = async (repoRoot, base, run, paths) => {
       }
     }
 
+    const { paths } = selection;
     const pathspec = paths?.map((path) => `:(literal)${path}`) ?? [];
-    const [listedUntracked, originalStatus] = await Promise.all([
-      listUntrackedItems(repoRoot),
+    const [untracked, originalStatus] = await Promise.all([
+      listUntrackedItems(repoRoot, { ...selection, env }),
       git(
         repoRoot,
         [
@@ -270,9 +271,6 @@ const withBranchSnapshot = async (repoRoot, base, run, paths) => {
         { env },
       ),
     ]);
-    const untracked = paths
-      ? listedUntracked.filter((item) => paths.includes(item.path))
-      : listedUntracked;
     const status = parseStatus(originalStatus);
     const cachedRemovals = new Set(
       status.filter((item) => item.staged && item.status === 'deleted').map((item) => item.path),
@@ -299,8 +297,21 @@ const withBranchSnapshot = async (repoRoot, base, run, paths) => {
         ...removedUntracked,
       ]),
     ];
+    // A deleted child can now be behind a symlink. Remove its index entry
+    // directly so Git never has to traverse the replacement on disk.
+    const deletions = status.filter((item) => item.worktreeDeleted).map((item) => item.path);
+    if (deletions.length) {
+      await gitBufferWithInput(
+        repoRoot,
+        ['update-index', '--force-remove', '-z', '--stdin'],
+        Buffer.from(deletions.join('\0') + '\0'),
+        { env },
+      );
+    }
     const updates = new Map(
-      status.filter((item) => item.unstaged).map((item) => [item.path, item]),
+      status
+        .filter((item) => item.unstaged && !item.worktreeDeleted)
+        .map((item) => [item.path, item]),
     );
     await stagePaths(repoRoot, env, [...updates.keys()], placeholders, updates);
     if (untrackedPaths.length) {

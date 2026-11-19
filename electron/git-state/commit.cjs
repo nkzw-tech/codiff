@@ -701,14 +701,14 @@ const readBranchWorkingTreeState = async (launchPath, input, options = {}) => {
  * @param {string} oldRef
  * @param {DiffSectionContentRequest | DiffImageContentRequest} request
  */
-const getBranchSnapshotPaths = async (repoRoot, oldRef, request) => {
+const getBranchSnapshotSelection = async (repoRoot, oldRef, request) => {
   const path = validateRepositoryPath(request.path);
   if (request.basePath != null) {
     const basePath = validateRepositoryPath(request.basePath);
-    return basePath === path ? [path] : [basePath, path];
+    return { paths: basePath === path ? [path] : [basePath, path] };
   }
   const baseEntry = await git(repoRoot, ['ls-tree', '-z', oldRef, '--', `:(literal)${path}`]);
-  return baseEntry ? [path] : undefined;
+  return baseEntry ? { paths: [path] } : { requestedPath: path };
 };
 
 /**
@@ -748,7 +748,7 @@ const readBranchWorkingTreeSectionContent = async (launchPath, request) => {
         },
       );
     },
-    await getBranchSnapshotPaths(repoRoot, oldRef, request),
+    await getBranchSnapshotSelection(repoRoot, oldRef, request),
   );
 };
 
@@ -780,7 +780,7 @@ const readBranchWorkingTreeImageContent = async (launchPath, request) => {
           { env: snapshot.env, workingTree: true },
         );
       },
-      await getBranchSnapshotPaths(repoRoot, oldRef, request),
+      await getBranchSnapshotSelection(repoRoot, oldRef, request),
     );
   } catch (error) {
     return {

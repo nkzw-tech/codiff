@@ -32,6 +32,7 @@ const execFileAsync = promisify(execFile);
  *   status: GitFileStatus;
  *   summary?: DiffSummary;
  *   unstaged: boolean;
+ *   worktreeDeleted?: boolean;
  *   untracked: boolean;
  * }} StatusItem
  * @typedef {{force?: boolean; patch?: {binary: boolean; patch: string}; patchOnly?: boolean; showWhitespace?: boolean}} ReadFileOptions
@@ -228,6 +229,7 @@ const parseStatus = (raw) => {
     } else {
       current.staged = x !== ' ';
       current.unstaged = y !== ' ';
+      if (y === 'D') current.worktreeDeleted = true;
 
       const statusCode = current.staged ? x : y;
       current.status =
@@ -376,6 +378,22 @@ const isTextImagePointer = (bytes) =>
 /**
  * @param {string} repoRoot
  * @param {string} spec
+ * @param {NodeJS.ProcessEnv} env
+ */
+const readFilteredImageBytes = async (repoRoot, spec, env) => {
+  try {
+    const bytes = await gitBuffer(repoRoot, ['cat-file', '--filters', spec], {
+      env: { ...env, GIT_LFS_SKIP_SMUDGE: '1' },
+    });
+    return bytes.length <= IMAGE_FILE_LIMIT && !isTextImagePointer(bytes) ? bytes : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * @param {string} repoRoot
+ * @param {string} spec
  * @param {string} path
  * @param {NodeJS.ProcessEnv} [env]
  * @returns {Promise<DiffImageRevision | undefined>}
@@ -396,14 +414,12 @@ const readImageSpec = async (repoRoot, spec, path, env) => {
   }
 
   try {
-    let bytes = await gitBuffer(repoRoot, ['show', spec], { env });
+    const bytes = await gitBuffer(repoRoot, ['show', spec], { env });
     if (env && isTextImagePointer(bytes)) {
       // Smudge the base revision in the private snapshot. A clean-only driver
       // (or an unavailable LFS asset) can leave the pointer unchanged.
-      bytes = await gitBuffer(repoRoot, ['cat-file', '--filters', spec], {
-        env: { ...env, GIT_LFS_SKIP_SMUDGE: '1' },
-      });
-      if (isTextImagePointer(bytes)) return undefined;
+      const filtered = await readFilteredImageBytes(repoRoot, spec, env);
+      return filtered && bufferToImageRevision(path, filtered);
     }
     return bufferToImageRevision(path, bytes);
   } catch {
@@ -887,6 +903,7 @@ const gitOrEmpty = async (repoRoot, args) => {
 
 module.exports = {
   EAGER_TEXT_FILE_LIMIT,
+  GENERATED_DIRECTORY_NAMES,
   IMAGE_FILE_LIMIT,
   MANUAL_TEXT_FILE_LIMIT,
   MAX_UNTRACKED_INITIAL_ITEMS,
@@ -909,6 +926,7 @@ module.exports = {
   normalizeStatus,
   parseStatus,
   readFileStat,
+  readFilteredImageBytes,
   readGitFile,
   readGitImageFile,
   readIndexImageFile,

@@ -6,6 +6,7 @@ const {
   getImageMimeType,
   getWhitespaceDiffArgs,
   git,
+  readFilteredImageBytes,
   readGitImageFile,
   readWorkingTreeFile,
   readWorkingTreeImageFile,
@@ -254,8 +255,19 @@ const readComparisonFiles = async (repoRoot, newRef, oldRef, status, options) =>
   if (options.section?.kind === 'combined') {
     // Clean filters can store an image as a small text pointer. Classify these
     // using the checkout so the renderer can offer the actual image preview.
-    for (const [path, stored] of newFiles) {
-      if (stored.file && getImageMimeType(path)) {
+    for (const { path, status: fileStatus } of status) {
+      if (!getImageMimeType(path)) continue;
+      if (fileStatus === 'deleted') {
+        // A deleted image has no checkout. Keep its text diff when its filter
+        // cannot recover image bytes from the stored pointer.
+        if (oldRef && options.env && oldFiles.get(path)?.file) {
+          const bytes = await readFilteredImageBytes(repoRoot, `${oldRef}:${path}`, options.env);
+          if (bytes) oldFiles.set(path, { binary: true, fingerprint: getFingerprint(bytes) });
+        }
+        continue;
+      }
+      const stored = newFiles.get(path);
+      if (stored?.file) {
         const checkout = await readWorkingTreeFile(repoRoot, path, options);
         if (
           checkout.binary ||
@@ -400,7 +412,7 @@ const readComparisonImageContent = async (
     }
 
     const readNewImage = async () => {
-      if (item.status === 'deleted') {
+      if (item.status === 'deleted' || !getImageMimeType(item.path)) {
         return undefined;
       }
       if (options.workingTree) {
@@ -412,9 +424,10 @@ const readComparisonImageContent = async (
       }
       return readGitImageFile(repoRoot, newRef, item.path, options.env);
     };
+    const oldPath = item.oldPath || item.path;
     const [oldImage, newImage] = await Promise.all([
-      oldRef && item.status !== 'added'
-        ? readGitImageFile(repoRoot, oldRef, item.oldPath || item.path, options.env)
+      oldRef && item.status !== 'added' && getImageMimeType(oldPath)
+        ? readGitImageFile(repoRoot, oldRef, oldPath, options.env)
         : undefined,
       readNewImage(),
     ]);
