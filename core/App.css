@@ -3566,7 +3566,7 @@ html[data-codiff-platform='darwin'] .sidebar {
   min-width: 0;
 }
 
-.codiff-file-heading:has(.codiff-file-note):not(:has(.codiff-file-old-path)) .codiff-file-path-row {
+.codiff-file-heading:has(.codiff-file-note, .codiff-file-old-path) .codiff-file-path-row {
   height: 18px;
 }
 
