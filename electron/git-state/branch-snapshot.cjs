@@ -72,7 +72,16 @@ const withBranchSnapshot = async (repoRoot, run, paths) => {
       listUntrackedItems(repoRoot),
       git(
         repoRoot,
-        ['--no-optional-locks', 'status', '--porcelain=v1', '-z', '-uno', '--', ...pathspec],
+        [
+          '--no-optional-locks',
+          'status',
+          '--no-renames',
+          '--porcelain=v1',
+          '-z',
+          '-uno',
+          '--',
+          ...pathspec,
+        ],
         { env },
       ),
     ]);

@@ -1416,12 +1416,14 @@ test('readRepositoryState preserves numstat for committed paths with tabs', asyn
 
 test('committed comparisons include both paths in rename patches', async () => {
   await withRepo(async (repo) => {
-    await writeRepoFile(repo, 'old.txt', 'one\ntwo\nthree\nfour\n');
+    await writeRepoFile(repo, 'route[1].txt', 'one\ntwo\nthree\nfour\n');
+    await writeRepoFile(repo, 'route1.txt', 'before\n');
     await commitAll(repo, 'base');
     const target = (await git(repo, ['branch', '--show-current'])).trim();
     const base = (await git(repo, ['rev-parse', 'HEAD'])).trim();
     await git(repo, ['checkout', '-b', 'feature']);
-    await git(repo, ['mv', 'old.txt', 'new.txt']);
+    await git(repo, ['mv', 'route[1].txt', 'new.txt']);
+    await writeRepoFile(repo, 'route1.txt', 'after\n');
     await commitAll(repo, 'rename');
     const head = (await git(repo, ['rev-parse', 'HEAD'])).trim();
     const expectedPatch = await git(repo, [
@@ -1432,11 +1434,11 @@ test('committed comparisons include both paths in rename patches', async () => {
       base,
       head,
       '--',
-      'old.txt',
+      ':(literal)route[1].txt',
       'new.txt',
     ]);
     expect(expectedPatch).toContain('similarity index 100%');
-    expect(expectedPatch).toContain('rename from old.txt');
+    expect(expectedPatch).toContain('rename from route[1].txt');
     expect(expectedPatch).not.toContain('@@');
     const sources: ReadonlyArray<ReviewSource> = [
       { ref: head, type: 'commit' },
@@ -1447,7 +1449,7 @@ test('committed comparisons include both paths in rename patches', async () => {
     for (const source of sources) {
       const state = await readRepositoryState(repo, source);
       expect(state.files[0]).toMatchObject({
-        oldPath: 'old.txt',
+        oldPath: 'route[1].txt',
         path: 'new.txt',
         status: 'renamed',
       });
@@ -1812,6 +1814,104 @@ test('branch+ matches a commit for index removals, force-added files, and rename
         ]),
       );
     }
+  });
+});
+
+test(
+  'branch+ splits patch batches larger than the Git output buffer',
+  { timeout: 30_000 },
+  async () => {
+    await withRepo(async (repo) => {
+      await git(repo, ['commit', '--allow-empty', '-m', 'base']);
+      // Each file fits the eager limit, but the combined patch exceeds 64 MiB.
+      const contents = `${'x'.repeat(1023)}\n`.repeat(1023);
+      const paths = Array.from({ length: 65 }, (_, i) => `file-${i}.txt`);
+      await Promise.all(paths.map((path) => writeRepoFile(repo, path, contents)));
+      const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+      expect(state.files.map((file) => file.path).sort()).toEqual(paths.sort());
+      for (const file of state.files) {
+        expect(
+          file.sections[0].patch.startsWith(`diff --git a/${file.path} b/${file.path}\n`),
+        ).toBe(true);
+        expect(file.sections[0].patch).toContain('@@ -0,0 +1,1023 @@');
+      }
+    });
+  },
+);
+
+test('branch+ lazy reads preserve intent-to-add renames', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'old.txt', 'one\ntwo\n');
+    await commitAll(repo, 'base');
+    await rename(join(repo, 'old.txt'), join(repo, 'new.txt'));
+    await git(repo, ['add', '--intent-to-add', 'new.txt']);
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    const [file] = state.files;
+    expect(file).toMatchObject({ oldPath: 'old.txt', path: 'new.txt', status: 'renamed' });
+    const section = await readDiffSectionContent(repo, {
+      basePath: file.oldPath,
+      kind: 'combined',
+      path: file.path,
+      source: state.source,
+    });
+    expect(section).toEqual(file.sections[0]);
+  });
+});
+
+test('single-file patches exclude descendants when a directory becomes a file', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, 'item/child', 'old contents\n');
+    await commitAll(repo, 'base');
+    await rm(join(repo, 'item'), { recursive: true });
+    await writeRepoFile(repo, 'item', 'replacement\n');
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    const file = state.files.find(({ path }) => path === 'item')!;
+    expect(file.sections[0].patch).not.toContain('item/child');
+    const section = await readDiffSectionContent(repo, {
+      basePath: file.path,
+      kind: 'combined',
+      path: file.path,
+      source: state.source,
+    });
+    expect(section.patch).toBe(file.sections[0].patch);
+
+    await writeRepoFile(repo, 'item', 'old contents\n');
+    const renamed = await readRepositoryState(repo, state.source);
+    expect(renamed.files[0].oldPath).toBe('item/child');
+    const moved = await readDiffSectionContent(repo, {
+      basePath: 'item/child',
+      kind: 'combined',
+      path: 'item',
+      source: renamed.source,
+    });
+    expect(moved.patch).toContain('rename from item/child');
+    expect(moved.patch).toBe(renamed.files[0].sections[0].patch);
+  });
+});
+
+test('branch+ previews checkout images stored as text by a clean filter', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.png filter=asset\n');
+    await git(repo, ['config', 'filter.asset.clean', 'git hash-object --stdin']);
+    await commitAll(repo, 'base');
+    const bytes = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    );
+    await writeRepoFile(repo, 'image.png', bytes);
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    const [file] = state.files;
+    expect(file.sections[0]).toMatchObject({ binary: true, loadState: 'binary' });
+    const image = await readDiffImageContent(repo, {
+      basePath: file.path,
+      kind: 'combined',
+      path: file.path,
+      source: state.source,
+    });
+    expect(image).toMatchObject({
+      newImage: { dataUrl: `data:image/png;base64,${bytes.toString('base64')}` },
+      status: 'ready',
+    });
   });
 });
 

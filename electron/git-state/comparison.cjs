@@ -3,9 +3,12 @@
 const {
   fileSort,
   getFingerprint,
+  getImageMimeType,
   getWhitespaceDiffArgs,
   git,
   readGitImageFile,
+  readWorkingTreeFile,
+  readWorkingTreeImageFile,
   summarizeContent,
   validateRepositoryPath,
 } = require('./common.cjs');
@@ -24,22 +27,10 @@ const { createEmptyFileContent, readGitFiles } = require('./git-files.cjs');
  *   blobCacheKeys?: boolean;
  *   env?: NodeJS.ProcessEnv;
  *   force?: boolean;
- *   literalPaths?: boolean;
  *   section?: {kind: DiffSection['kind']; ref: string};
  *   showWhitespace?: boolean;
  * }} ComparisonOptions
  */
-
-/**
- * @param {ReadonlyArray<Pick<StatusItem, 'oldPath' | 'path'>>} items
- * @param {ComparisonOptions} options
- */
-const getPathspec = (items, options) => {
-  const paths = [
-    ...new Set(items.flatMap((item) => (item.oldPath ? [item.oldPath, item.path] : [item.path]))),
-  ];
-  return options.literalPaths ? paths.map((path) => `:(literal)${path}`) : paths;
-};
 
 /**
  * @param {string} newRef
@@ -47,19 +38,37 @@ const getPathspec = (items, options) => {
  * @param {ReadonlyArray<Pick<StatusItem, 'oldPath' | 'path'>>} items
  * @param {ComparisonOptions} options
  */
-const createComparisonPatchArgs = (newRef, oldRef, items, options) => [
-  ...(oldRef ? ['diff'] : ['show', '--format=']),
-  '--patch',
-  '--no-ext-diff',
-  // A textconv cache writes a real notes ref pointing into the temporary object store.
-  ...(options.section?.kind === 'combined' ? ['--no-textconv'] : []),
-  '--find-renames',
-  ...getWhitespaceDiffArgs(options),
-  ...(oldRef ? [oldRef] : []),
-  newRef,
-  '--',
-  ...getPathspec(items, options),
-];
+const createComparisonPatchArgs = (newRef, oldRef, items, options) => {
+  const paths = [
+    ...new Set(items.flatMap(({ oldPath, path }) => (oldPath ? [oldPath, path] : [path]))),
+  ];
+  const pathspec = paths.map((path) => `:(literal)${path}`);
+  const single = items.length === 1;
+  const [item] = items;
+  const nestedRename =
+    single &&
+    item.oldPath &&
+    (item.path.startsWith(`${item.oldPath}/`) || item.oldPath.startsWith(`${item.path}/`));
+  // A literal filename can match a directory on the opposite side. Exclude
+  // descendants on single-file reads, except when the rename itself crosses that boundary.
+  if (single && !nestedRename) {
+    pathspec.push(...paths.map((path) => `:(exclude,literal)${path}/`));
+  }
+  return [
+    ...(oldRef ? ['diff'] : ['show', '--format=']),
+    '--patch',
+    '--no-ext-diff',
+    // A textconv cache writes a real notes ref pointing into the temporary object store.
+    ...(options.section?.kind === 'combined' ? ['--no-textconv'] : []),
+    '--find-renames',
+    ...(nestedRename ? ['--diff-filter=RC'] : []),
+    ...getWhitespaceDiffArgs(options),
+    ...(oldRef ? [oldRef] : []),
+    newRef,
+    '--',
+    ...pathspec,
+  ];
+};
 
 /**
  * @param {string} repoRoot
@@ -100,11 +109,26 @@ const readComparisonPatches = async (repoRoot, newRef, oldRef, items, options) =
   /** @type {Map<string, string>} */
   const patches = new Map();
 
-  for (const itemChunk of chunk(items, 200)) {
+  /** @param {typeof items} itemChunk @returns {Promise<void>} */
+  const readChunk = async (itemChunk) => {
     const [command, ...args] = createComparisonPatchArgs(newRef, oldRef, itemChunk, options);
-    const output = await git(repoRoot, [command, '--numstat', '-z', ...args], { env: options.env });
+    let output;
+    try {
+      output = await git(repoRoot, [command, '--numstat', '-z', ...args], { env: options.env });
+    } catch (error) {
+      if (
+        itemChunk.length < 2 ||
+        /** @type {NodeJS.ErrnoException} */ (error).code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+      ) {
+        throw error;
+      }
+      const middle = Math.ceil(itemChunk.length / 2);
+      await readChunk(itemChunk.slice(0, middle));
+      await readChunk(itemChunk.slice(middle));
+      return;
+    }
     if (!output) {
-      continue;
+      return;
     }
     // Git emits numstat paths in patch order and omits whitespace-only changes from both.
     const separator = output.indexOf('\0\0');
@@ -124,8 +148,11 @@ const readComparisonPatches = async (repoRoot, newRef, oldRef, items, options) =
         }),
       );
     }
-  }
+  };
 
+  for (const itemChunk of chunk(items, 200)) {
+    await readChunk(itemChunk);
+  }
   return patches;
 };
 
@@ -224,6 +251,25 @@ const readComparisonFiles = async (repoRoot, newRef, oldRef, status, options) =>
     ),
   ]);
 
+  if (options.section?.kind === 'combined') {
+    // Clean filters can store an image as a small text pointer. Classify these
+    // using the checkout so the renderer can offer the actual image preview.
+    for (const [path, stored] of newFiles) {
+      if (stored.file && getImageMimeType(path)) {
+        const checkout = await readWorkingTreeFile(repoRoot, path, options);
+        if (
+          checkout.binary ||
+          checkout.loadState === 'deferred' ||
+          checkout.loadState === 'too-large'
+        ) {
+          newFiles.set(path, {
+            ...checkout,
+            fingerprint: checkout.fingerprint ?? stored.file.cacheKey,
+          });
+        }
+      }
+    }
+  }
   return { newFiles, oldFiles };
 };
 
@@ -334,7 +380,7 @@ const readComparisonSectionContent = async (
  * @param {ReadonlyArray<ComparisonItem>} status
  * @param {string} requestedPath
  * @param {string} sourceLabel
- * @param {NodeJS.ProcessEnv} [env]
+ * @param {{env?: NodeJS.ProcessEnv; workingTree?: boolean}} [options]
  * @returns {Promise<DiffImageContentResult>}
  */
 const readComparisonImageContent = async (
@@ -344,7 +390,7 @@ const readComparisonImageContent = async (
   status,
   requestedPath,
   sourceLabel,
-  env,
+  options = {},
 ) => {
   try {
     const path = validateRepositoryPath(requestedPath);
@@ -353,9 +399,24 @@ const readComparisonImageContent = async (
       throw new Error(`File is not part of this ${sourceLabel}.`);
     }
 
+    const readNewImage = async () => {
+      if (item.status === 'deleted') {
+        return undefined;
+      }
+      if (options.workingTree) {
+        const checkout = await readWorkingTreeImageFile(repoRoot, item.path);
+        if (checkout) {
+          return checkout;
+        }
+        // A sparse checkout can omit a file that still exists in the snapshot.
+      }
+      return readGitImageFile(repoRoot, newRef, item.path, options.env);
+    };
     const [oldImage, newImage] = await Promise.all([
-      oldRef ? readGitImageFile(repoRoot, oldRef, item.oldPath || item.path, env) : undefined,
-      readGitImageFile(repoRoot, newRef, item.path, env),
+      oldRef && item.status !== 'added'
+        ? readGitImageFile(repoRoot, oldRef, item.oldPath || item.path, options.env)
+        : undefined,
+      readNewImage(),
     ]);
 
     if (!oldImage && !newImage) {
