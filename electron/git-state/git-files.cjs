@@ -270,7 +270,4 @@ const readGitFiles = async (repoRoot, ref, paths, options = {}) => {
   return files;
 };
 
-module.exports = {
-  createEmptyFileContent,
-  readGitFiles,
-};
+module.exports = { readObjectSizes, createEmptyFileContent, readGitFiles };

@@ -6,6 +6,7 @@ const { join } = require('node:path');
 const { findExecutableOnPath, isExecutableFile } = require('../agent-shared.cjs');
 const { getCommandEnvironment } = require('../login-shell-environment.cjs');
 const {
+  BINARY_DIFF_MARKER,
   IMAGE_FILE_LIMIT,
   bufferToImageRevision,
   createSummary,
@@ -860,14 +861,6 @@ const resolvePullRequestContentRefs = async (repoRoot, pullRequest, metadata, se
   const mergeBase = (await gitOrEmpty(repoRoot, ['merge-base', baseRef, headRef])).trim();
   return mergeBase ? { base: mergeBase, head: headRef } : null;
 };
-
-/**
- * git/GitHub emit `Binary files a/x and b/x differ` as a diff metadata line.
- * Anchor to the start of a line so the same text appearing inside a patch's
- * added/removed/context lines (which are prefixed with `+`/`-`/space) does not
- * misclassify a text file as binary.
- */
-const BINARY_DIFF_MARKER = /^Binary files .* differ/m;
 
 /**
  * Build a diff section for a pull request file. When the full base and head

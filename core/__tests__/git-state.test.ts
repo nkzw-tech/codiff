@@ -1944,6 +1944,52 @@ test('branch+ recovers staged removals without passing the deletion list as one 
   });
 });
 
+test('branch+ isolates a required clean filter that fails while Git refreshes the index', async () => {
+  await withRepo(async (repo) => {
+    await writeRepoFile(repo, '.gitattributes', '*.asset filter=asset\n');
+    await git(repo, ['config', 'filter.asset.clean', 'cat']);
+    await git(repo, ['config', 'filter.asset.required', 'true']);
+    await writeRepoFile(repo, 'bad.asset', 'one\n');
+    await writeRepoFile(repo, 'good.txt', 'one\n');
+    await commitAll(repo, 'base');
+    await writeRepoFile(repo, 'bad.asset', 'two\n');
+    await writeRepoFile(repo, 'good.txt', 'two\n');
+    // Same-size edits make status inspect the contents during its stat refresh.
+    await utimes(join(repo, 'bad.asset'), new Date(0), new Date(0));
+    await git(repo, ['config', 'filter.asset.clean', 'false']);
+    const index = readFileSync(join(repo, '.git/index'));
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(state.files).toMatchObject([
+      { path: 'bad.asset', sections: [{ loadState: 'error' }], status: 'modified' },
+      { path: 'good.txt', sections: [{ newFile: { contents: 'two\n' } }] },
+    ]);
+    for (const file of state.files) {
+      const loaded = await readDiffSectionContent(repo, {
+        basePath: file.path,
+        kind: 'combined',
+        path: file.path,
+        source: state.source,
+      });
+      expect(loaded).toEqual(file.sections[0]);
+    }
+    expect(readFileSync(join(repo, '.git/index'))).toEqual(index);
+  });
+});
+
+test('branch+ renders a new text file containing the binary diff marker', async () => {
+  await withRepo(async (repo) => {
+    await git(repo, ['commit', '--allow-empty', '-m', 'base']);
+    const contents = 'export const marker = /Binary files .* differ/;\n';
+    await writeRepoFile(repo, 'marker.ts', contents);
+    const { files } = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(files[0].sections[0]).toMatchObject({
+      binary: false,
+      loadState: 'ready',
+      newFile: { contents },
+    });
+  });
+});
+
 test('branch+ isolates rejected tracked and untracked conversions from valid changes', async () => {
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'tracked.txt', 'before\n');
@@ -1966,7 +2012,9 @@ test('branch+ isolates rejected tracked and untracked conversions from valid cha
 
 test('branch+ keeps standalone oversized additions out of the temporary object store', async () => {
   await withRepo(async (repo) => {
-    await git(repo, ['commit', '--allow-empty', '-m', 'base']);
+    await writeRepoFile(repo, 'tiny.txt', 'x');
+    await commitAll(repo, 'base');
+    await rm(join(repo, 'tiny.txt'));
     const large = Buffer.alloc(3 * 1024 * 1024);
     await writeRepoFile(repo, 'large.bin', large);
     const trace = join(repo, '.git', 'snapshot-trace');
@@ -1979,6 +2027,7 @@ test('branch+ keeps standalone oversized additions out of the temporary object s
         sections: [{ loadState: 'too-large', summary: { size: large.length } }],
         status: 'added',
       },
+      { path: 'tiny.txt', status: 'deleted' },
     ]);
     const lazy = await readDiffSectionContent(repo, {
       basePath: 'large.bin',
@@ -1993,7 +2042,7 @@ test('branch+ keeps standalone oversized additions out of the temporary object s
       .split('\n')
       .map((line) => JSON.parse(line) as { argv?: Array<string> });
     expect(commands.some(({ argv }) => argv?.includes('add'))).toBe(false);
-    await git(repo, ['add', 'large.bin']);
+    await git(repo, ['add', '-A']);
     await git(repo, ['commit', '-m', 'large asset']);
     await rename(join(repo, 'large.bin'), join(repo, 'moved.bin'));
     expect((await readRepositoryState(repo, source)).files).toMatchObject([
@@ -2218,6 +2267,26 @@ process.exit(result.status ?? 1);
   },
 );
 
+test('branch+ loads an untracked embedded repository by its displayed gitlink path', async () => {
+  await withRepo(async (repo) => {
+    await git(repo, ['commit', '--allow-empty', '-m', 'base']);
+    const nested = join(repo, 'sub');
+    await git(repo, ['init', 'sub']);
+    await writeRepoFile(nested, 'file', 'nested\n');
+    await commitAll(nested, 'nested commit');
+    const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
+    expect(state.files).toMatchObject([{ path: 'sub', status: 'added' }]);
+    expect(
+      await readDiffSectionContent(repo, {
+        basePath: 'sub',
+        kind: 'combined',
+        path: 'sub',
+        source: state.source,
+      }),
+    ).toEqual(state.files[0].sections[0]);
+  });
+});
+
 test('branch+ shows the old and new commits for an updated submodule', async () => {
   await withRepo(async (repo) => {
     const submodule = join(repo, 'lib');
@@ -2302,7 +2371,7 @@ test('branch+ limits untracked files and omits unchanged files removed from the 
   await withRepo(async (repo) => {
     await writeRepoFile(repo, 'zzz.txt', 'base\n');
     await commitAll(repo, 'base');
-    const target = (await git(repo, ['branch', '--show-current'])).trim();
+    const target = (await git(repo, ['rev-parse', 'HEAD'])).trim();
     await git(repo, ['rm', '--cached', 'zzz.txt']);
     await Promise.all(
       Array.from({ length: 1001 }, (_, index) =>
@@ -2321,6 +2390,26 @@ test('branch+ limits untracked files and omits unchanged files removed from the 
     expect(state.files.some((file) => file.path.startsWith('Untracked files not shown'))).toBe(
       true,
     );
+
+    await git(repo, ['commit', '-m', 'remove file from branch']);
+    const restored = await readRepositoryState(repo, { ref: target, type: 'branch-working-tree' });
+    expect(restored.files).toEqual(state.files);
+    const contents = 'updated line\n'.repeat(100_000);
+    await writeRepoFile(repo, 'zzz.txt', contents);
+    const edited = await readRepositoryState(repo, restored.source);
+    expect(edited.files.find(({ path }) => path === 'zzz.txt')).toMatchObject({
+      sections: [{ loadState: 'deferred' }],
+      status: 'modified',
+    });
+    expect(
+      await readDiffSectionContent(repo, {
+        basePath: 'zzz.txt',
+        force: true,
+        kind: 'combined',
+        path: 'zzz.txt',
+        source: edited.source,
+      }),
+    ).toMatchObject({ newFile: { contents }, oldFile: { contents: 'base\n' } });
   });
 });
 

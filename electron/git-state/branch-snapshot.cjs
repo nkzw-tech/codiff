@@ -13,6 +13,7 @@ const {
   parseStatus,
   readFileStat,
 } = require('./common.cjs');
+const { readObjectSizes } = require('./git-files.cjs');
 const { listUntrackedItems } = require('./working-tree.cjs');
 
 /**
@@ -25,6 +26,112 @@ const { listUntrackedItems } = require('./working-tree.cjs');
  *   placeholders: ReadonlyArray<StatusItem>;
  * }} BranchSnapshot
  */
+
+/** @param {string} path @param {StatusItem['status']} status @returns {StatusItem} */
+const snapshotError = (path, status) => ({
+  path,
+  status,
+  staged: false,
+  unstaged: true,
+  untracked: true,
+  summary: createSummary('Git could not add this file to the review snapshot.', {
+    canLoad: false,
+    loadState: 'error',
+  }),
+});
+
+/** @param {string} repoRoot @param {NodeJS.ProcessEnv} env @param {ReadonlyArray<string>} pathspec */
+const readStatus = (repoRoot, env, pathspec) =>
+  git(
+    repoRoot,
+    [
+      '--no-optional-locks',
+      'status',
+      '--no-renames',
+      '--porcelain=v1',
+      '-z',
+      '-uno',
+      '--',
+      ...pathspec,
+    ],
+    { env },
+  );
+
+/**
+ * Status and index writes can run a clean filter before staging begins. Locate
+ * failing tracked files with path-limited status reads on the original index.
+ * Keep their blobs in the private index so unrelated rename pairs stay intact.
+ * @param {string} repoRoot
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string} base
+ * @param {unknown} originalError
+ */
+const isolateStatusErrors = async (repoRoot, env, base, originalError) => {
+  /** @type {Map<string, string>} */
+  const entries = new Map();
+  const index = await git(repoRoot, ['ls-files', '--stage', '-z'], { env });
+  for (const entry of index.split('\0')) {
+    const tab = entry.indexOf('\t');
+    if (tab > 0 && entry.slice(0, tab).endsWith(' 0')) entries.set(entry.slice(tab + 1), entry);
+  }
+  /** @type {Array<string>} */
+  const failed = [];
+  /** @param {Array<string>} paths @returns {Promise<void>} */
+  const inspect = async (paths) => {
+    try {
+      await readStatus(
+        repoRoot,
+        env,
+        paths.map((path) => `:(literal)${path}`),
+      );
+    } catch (error) {
+      if (/** @type {{code?: number}} */ (error).code !== 128) throw originalError;
+      if (paths.length > 1) {
+        const middle = Math.ceil(paths.length / 2);
+        await inspect(paths.slice(0, middle));
+        await inspect(paths.slice(middle));
+        return;
+      }
+      // Only quarantine errors attributable to the file itself.
+      try {
+        await git(repoRoot, ['hash-object', '--', paths[0]], { env });
+      } catch (error) {
+        if (/** @type {{code?: number}} */ (error).code !== 128) throw originalError;
+        failed.push(paths[0]);
+        return;
+      }
+      throw originalError;
+    }
+  };
+  const paths = [...entries.keys()];
+  for (let i = 0; i < paths.length; i += 64) await inspect(paths.slice(i, i + 64));
+  if (!failed.length) throw originalError;
+
+  // Reinsert the entries to clear cached stat data. Otherwise even marking
+  // them assume-unchanged can re-run the failing filter while writing the index.
+  await gitBufferWithInput(
+    repoRoot,
+    ['update-index', '-z', '--index-info'],
+    failed.map((path) => entries.get(path) + '\0').join(''),
+    { env },
+  );
+  await gitBufferWithInput(
+    repoRoot,
+    ['update-index', '--assume-unchanged', '-z', '--stdin'],
+    failed.join('\0') + '\0',
+    { env },
+  );
+  const additions = new Set(
+    (
+      await git(
+        repoRoot,
+        ['diff', '--cached', '--no-renames', '--diff-filter=A', '--name-only', '-z', base, '--'],
+        { env },
+      )
+    ).split('\0'),
+  );
+  return failed.map((path) => snapshotError(path, additions.has(path) ? 'added' : 'modified'));
+};
 
 /**
  * A fatal conversion error aborts the whole add, including valid paths. Split
@@ -82,27 +189,12 @@ const stagePaths = async (repoRoot, env, paths, placeholders, tracked) => {
         if (tracked?.get(path)?.status === 'conflicted') {
           await git(repoRoot, ['update-index', '--force-remove', '--', path], { env });
         }
-        recordError(path);
+        placeholders.push(snapshotError(path, tracked?.get(path)?.status ?? 'untracked'));
         return;
       }
       throw error;
     }
-    recordError(path);
-  }
-
-  /** @param {string} path */
-  function recordError(path) {
-    placeholders.push({
-      path,
-      staged: false,
-      status: tracked?.get(path)?.status ?? 'untracked',
-      unstaged: true,
-      untracked: true,
-      summary: createSummary('Git could not add this file to the review snapshot.', {
-        canLoad: false,
-        loadState: 'error',
-      }),
-    });
+    placeholders.push(snapshotError(path, tracked?.get(path)?.status ?? 'untracked'));
   }
 };
 
@@ -139,10 +231,29 @@ const omitOversizedAdditions = async (repoRoot, env, base, paths, placeholders) 
   if (!large.length) return paths;
   const deletions = await git(
     repoRoot,
-    ['diff', '--cached', '--no-renames', '--diff-filter=D', '--name-only', '-z', base, '--'],
+    [
+      'diff',
+      '--cached',
+      '--no-renames',
+      '--diff-filter=D',
+      '--raw',
+      '--no-abbrev',
+      '-z',
+      base,
+      '--',
+    ],
     { env },
   );
-  if (deletions) return paths;
+  const records = deletions.split('\0');
+  const deletedPaths = new Set();
+  const sourceObjects = [];
+  for (let i = 0; i + 1 < records.length; i += 2) {
+    const [oldMode, , object] = records[i].split(' ');
+    deletedPaths.add(records[i + 1]);
+    if (oldMode.startsWith(':100')) sourceObjects.push(object);
+  }
+  const sourceSizes = [...(await readObjectSizes(repoRoot, sourceObjects, env)).values()];
+
   const [attributes, autoCrlf] = await Promise.all([
     gitBufferWithInput(
       repoRoot,
@@ -181,6 +292,13 @@ const omitOversizedAdditions = async (repoRoot, env, base, paths, placeholders) 
   for (const [i, path] of paths.entries()) {
     const stat = stats[i];
     if (!stat?.isFile() || stat.size <= MANUAL_TEXT_FILE_LIMIT || converted.has(path)) continue;
+    // Git's default 50% similarity threshold requires the smaller blob to be
+    // at least half the size of the larger. Same-path replacements always count.
+    if (
+      deletedPaths.has(path) ||
+      sourceSizes.some(({ size }) => size >= stat.size / 2 && size <= stat.size * 2)
+    )
+      continue;
     if (autoText.has(path) && !(await hasBinaryHeader(resolve(repoRoot, path)))) continue;
     omitted.add(path);
     placeholders.push({
@@ -199,6 +317,98 @@ const omitOversizedAdditions = async (repoRoot, env, base, paths, placeholders) 
     });
   }
   return paths.filter((path) => !omitted.has(path));
+};
+
+/**
+ * @param {string} repoRoot
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string} base
+ * @param {{paths?: ReadonlyArray<string>; requestedPath?: string}} selection
+ * @param {ReadonlyArray<StatusItem>} errors
+ * @returns {Promise<BranchSnapshot>}
+ */
+const prepareBranchSnapshot = async (repoRoot, env, base, selection, errors) => {
+  const { paths } = selection;
+  const pathspec = paths?.map((path) => `:(literal)${path}`) ?? [];
+  const [originalStatus, untracked] = await Promise.all([
+    readStatus(repoRoot, env, pathspec),
+    listUntrackedItems(repoRoot, { ...selection, env, base }),
+  ]);
+  const status = parseStatus(originalStatus);
+  const cachedRemovals = new Set(
+    status.filter((item) => item.staged && item.status === 'deleted').map((item) => item.path),
+  );
+  const removedUntracked = cachedRemovals.size
+    ? (
+        await git(
+          repoRoot,
+          ['ls-files', '--others', '--exclude-standard', '-z', '--', ...pathspec],
+          { env },
+        )
+      )
+        .split('\0')
+        .filter((path) => cachedRemovals.has(path))
+    : [];
+  const recoveredPaths = new Set(removedUntracked);
+  const placeholders = [
+    ...errors.filter((item) => !paths || paths.includes(item.path)),
+    ...untracked.filter((item) => item.directory && !recoveredPaths.has(item.path)),
+  ];
+  /** @type {ReadonlyArray<string>} */
+  let untrackedPaths = [
+    ...new Set([
+      ...untracked.filter((item) => !item.directory).map((item) => item.path),
+      ...removedUntracked,
+    ]),
+  ];
+  // A deleted child can now be behind a symlink. Remove its index entry
+  // directly so Git never has to traverse the replacement on disk.
+  const deletions = status.filter((item) => item.worktreeDeleted).map((item) => item.path);
+  if (deletions.length) {
+    await gitBufferWithInput(
+      repoRoot,
+      ['update-index', '--force-remove', '-z', '--stdin'],
+      Buffer.from(deletions.join('\0') + '\0'),
+      { env },
+    );
+  }
+  const updates = new Map(
+    status
+      .filter((item) => item.unstaged && !item.worktreeDeleted)
+      .map((item) => [item.path, item]),
+  );
+  await stagePaths(repoRoot, env, [...updates.keys()], placeholders, updates);
+  if (untrackedPaths.length) {
+    untrackedPaths = await omitOversizedAdditions(
+      repoRoot,
+      env,
+      base,
+      untrackedPaths,
+      placeholders,
+    );
+  }
+  await stagePaths(repoRoot, env, untrackedPaths, placeholders);
+
+  let treeEnv = env;
+  if (paths) {
+    // Only materialize this pair. The copied index can still contain unresolved
+    // conflicts elsewhere, which would make a whole-index write-tree fail.
+    const entries = await gitBuffer(repoRoot, ['ls-files', '--stage', '-z', '--', ...pathspec], {
+      env,
+    });
+    treeEnv = { ...env, GIT_INDEX_FILE: `${env.GIT_INDEX_FILE}.selected` };
+    await gitBufferWithInput(repoRoot, ['update-index', '-z', '--index-info'], entries, {
+      env: treeEnv,
+    });
+  }
+  const tree = (await git(repoRoot, ['write-tree'], { env: treeEnv })).trim();
+  return {
+    conflictedPaths: status.filter((item) => item.status === 'conflicted').map((item) => item.path),
+    env,
+    tree,
+    pathspec,
+    placeholders,
+  };
 };
 
 /**
@@ -242,111 +452,40 @@ const withBranchSnapshot = async (repoRoot, base, run, selection = {}) => {
       GIT_OBJECT_DIRECTORY: join(directory, 'objects'),
     };
     await Promise.all([fs.mkdir(env.GIT_OBJECT_DIRECTORY), fs.mkdir(join(directory, 'hooks'))]);
-    try {
-      const indexStat = await fs.stat(indexPath);
-      await fs.copyFile(indexPath, env.GIT_INDEX_FILE);
-      await fs.utimes(env.GIT_INDEX_FILE, indexStat.atime, Math.floor(indexStat.mtimeMs / 1000));
-    } catch (error) {
-      if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'ENOENT') {
-        throw error;
+    const copyIndex = async () => {
+      try {
+        const indexStat = await fs.stat(indexPath);
+        await fs.copyFile(indexPath, env.GIT_INDEX_FILE);
+        await fs.utimes(env.GIT_INDEX_FILE, indexStat.atime, Math.floor(indexStat.mtimeMs / 1000));
+      } catch (error) {
+        if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'ENOENT') {
+          throw error;
+        }
       }
-    }
-
-    const { paths } = selection;
-    const pathspec = paths?.map((path) => `:(literal)${path}`) ?? [];
-    const [untracked, originalStatus] = await Promise.all([
-      listUntrackedItems(repoRoot, { ...selection, env }),
-      git(
-        repoRoot,
-        [
-          '--no-optional-locks',
-          'status',
-          '--no-renames',
-          '--porcelain=v1',
-          '-z',
-          '-uno',
-          '--',
-          ...pathspec,
-        ],
-        { env },
-      ),
-    ]);
-    const status = parseStatus(originalStatus);
-    const cachedRemovals = new Set(
-      status.filter((item) => item.staged && item.status === 'deleted').map((item) => item.path),
-    );
-    const removedUntracked = cachedRemovals.size
-      ? (
-          await git(
-            repoRoot,
-            ['ls-files', '--others', '--exclude-standard', '-z', '--', ...pathspec],
-            { env },
-          )
-        )
-          .split('\0')
-          .filter((path) => cachedRemovals.has(path))
-      : [];
-    const recoveredPaths = new Set(removedUntracked);
-    const placeholders = untracked.filter(
-      (item) => item.directory && !recoveredPaths.has(item.path),
-    );
-    /** @type {ReadonlyArray<string>} */
-    let untrackedPaths = [
-      ...new Set([
-        ...untracked.filter((item) => !item.directory).map((item) => item.path),
-        ...removedUntracked,
-      ]),
-    ];
-    // A deleted child can now be behind a symlink. Remove its index entry
-    // directly so Git never has to traverse the replacement on disk.
-    const deletions = status.filter((item) => item.worktreeDeleted).map((item) => item.path);
-    if (deletions.length) {
-      await gitBufferWithInput(
-        repoRoot,
-        ['update-index', '--force-remove', '-z', '--stdin'],
-        Buffer.from(deletions.join('\0') + '\0'),
-        { env },
+    };
+    await copyIndex();
+    let snapshot;
+    try {
+      snapshot = await prepareBranchSnapshot(repoRoot, env, base, selection, []);
+    } catch (error) {
+      const failure = /** @type {{code?: number; exitCode?: number}} */ (error);
+      if (failure.code !== 128 && failure.exitCode !== 128) throw error;
+      // A failed add can already have updated some entries. Retry from the real index.
+      await Promise.all([
+        fs.rm(env.GIT_INDEX_FILE, { force: true }),
+        fs.rm(`${env.GIT_INDEX_FILE}.selected`, { force: true }),
+      ]);
+      await copyIndex();
+      // Preserve unrelated errors without scanning batches if status succeeds.
+      const statusError = await readStatus(repoRoot, env, []).then(
+        () => undefined,
+        (failure) => failure,
       );
+      if (statusError?.code !== 128) throw error;
+      const errors = await isolateStatusErrors(repoRoot, env, base, error);
+      snapshot = await prepareBranchSnapshot(repoRoot, env, base, selection, errors);
     }
-    const updates = new Map(
-      status
-        .filter((item) => item.unstaged && !item.worktreeDeleted)
-        .map((item) => [item.path, item]),
-    );
-    await stagePaths(repoRoot, env, [...updates.keys()], placeholders, updates);
-    if (untrackedPaths.length) {
-      untrackedPaths = await omitOversizedAdditions(
-        repoRoot,
-        env,
-        base,
-        untrackedPaths,
-        placeholders,
-      );
-    }
-    await stagePaths(repoRoot, env, untrackedPaths, placeholders);
-
-    let treeEnv = env;
-    if (paths) {
-      // Only materialize this pair. The copied index can still contain unresolved
-      // conflicts elsewhere, which would make a whole-index write-tree fail.
-      const entries = await gitBuffer(repoRoot, ['ls-files', '--stage', '-z', '--', ...pathspec], {
-        env,
-      });
-      treeEnv = { ...env, GIT_INDEX_FILE: join(directory, 'selected-index') };
-      await gitBufferWithInput(repoRoot, ['update-index', '-z', '--index-info'], entries, {
-        env: treeEnv,
-      });
-    }
-    const tree = (await git(repoRoot, ['write-tree'], { env: treeEnv })).trim();
-    return await run({
-      conflictedPaths: status
-        .filter((item) => item.status === 'conflicted')
-        .map((item) => item.path),
-      env,
-      tree,
-      pathspec,
-      placeholders,
-    });
+    return await run(snapshot);
   } finally {
     await fs.rm(directory, { force: true, recursive: true });
   }

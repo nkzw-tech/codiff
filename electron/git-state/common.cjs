@@ -120,6 +120,14 @@ const gitBufferWithInput = (repoPath, args, input, options = {}) =>
     child.stdin.end(input);
   });
 
+/**
+ * git/GitHub emit `Binary files a/x and b/x differ` as a diff metadata line.
+ * Anchor to the start of a line so the same text appearing inside a patch's
+ * added/removed/context lines (which are prefixed with `+`/`-`/space) does not
+ * misclassify a text file as binary.
+ */
+const BINARY_DIFF_MARKER = /^Binary files .* differ/m;
+
 const EAGER_TEXT_FILE_LIMIT = 1024 * 1024;
 const MANUAL_TEXT_FILE_LIMIT = 2 * 1024 * 1024;
 const IMAGE_FILE_LIMIT = 32 * 1024 * 1024;
@@ -704,7 +712,7 @@ const getPatch = async (repoRoot, item, kind, options = {}) => {
     item.status !== 'conflicted' ? rawPatch : diffStart === -1 ? '' : rawPatch.slice(diffStart);
 
   return {
-    binary: /Binary files .* differ/.test(patch),
+    binary: BINARY_DIFF_MARKER.test(patch),
     patch,
   };
 };
@@ -902,6 +910,7 @@ const gitOrEmpty = async (repoRoot, args) => {
 };
 
 module.exports = {
+  BINARY_DIFF_MARKER,
   EAGER_TEXT_FILE_LIMIT,
   GENERATED_DIRECTORY_NAMES,
   IMAGE_FILE_LIMIT,

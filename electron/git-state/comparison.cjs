@@ -1,6 +1,7 @@
 // @ts-check
 
 const {
+  BINARY_DIFF_MARKER,
   fileSort,
   getFingerprint,
   getImageMimeType,
@@ -180,7 +181,7 @@ const createComparisonFile = (ref, item, oldFile, newFile, patch, kind = 'commit
     path: item.path,
     sections: [
       {
-        binary: summary.binary || /Binary files .* differ/.test(patch),
+        binary: summary.binary || BINARY_DIFF_MARKER.test(patch),
         id: `${item.path}:${ref}`,
         kind,
         loadState: summary.loadState,
