@@ -1902,7 +1902,7 @@ test.skipIf(process.platform === 'win32')(
       await symlink('two', join(repo, 'one'));
       const index = readFileSync(join(repo, '.git/index'));
       const state = await readRepositoryState(repo, { ref: 'HEAD', type: 'branch-working-tree' });
-      expect(state.files.map(({ path, status }) => [path, status]).sort()).toEqual([
+      expect(state.files.map(({ path, status }) => [path, status])).toEqual([
         ['one', 'added'],
         ['one/file', 'deleted'],
       ]);
