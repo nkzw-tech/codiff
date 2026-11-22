@@ -62,9 +62,11 @@ test('exposes a static Pi model list', () => {
   expect(PI_MODELS).toEqual([{ id: DEFAULT_PI_MODEL, label: 'Pi default' }]);
 });
 
-test('normalizes Pi model preferences to known models', () => {
+test('preserves configured Pi model IDs and defaults empty values', () => {
   expect(normalizePiModel(DEFAULT_PI_MODEL)).toBe(DEFAULT_PI_MODEL);
-  expect(normalizePiModel('openai/gpt-5')).toBe(DEFAULT_PI_MODEL);
+  expect(normalizePiModel('github-copilot/gpt-6.1-terra')).toBe('github-copilot/gpt-6.1-terra');
+  expect(normalizePiModel('  openai/gpt-6.1-terra  ')).toBe('openai/gpt-6.1-terra');
+  expect(normalizePiModel('')).toBe(DEFAULT_PI_MODEL);
   expect(normalizePiModel(undefined)).toBe(DEFAULT_PI_MODEL);
 });
 
@@ -89,16 +91,25 @@ test('rejects invalid explicit Pi CLI overrides', async () => {
   }
 });
 
-test('runs Pi as an external read-only ephemeral CLI call', async () => {
-  await using directory = await createTemporaryDirectory('codiff-pi-');
-  const fakePiPath = join(directory.path, 'pi');
-  const argsPath = join(directory.path, 'args.txt');
-  const stdinPath = join(directory.path, 'stdin.txt');
-  await using _environment = createTemporaryEnvironment({ CODIFF_PI_PATH: fakePiPath });
+test.each([
+  { name: 'Pi default', model: undefined, modelArgs: [] },
+  {
+    name: 'provider-qualified model',
+    model: 'github-copilot/gpt-6.1-terra',
+    modelArgs: ['--model', 'github-copilot/gpt-6.1-terra'],
+  },
+])(
+  'runs Pi as an external read-only ephemeral CLI call with $name',
+  async ({ model, modelArgs }) => {
+    await using directory = await createTemporaryDirectory('codiff-pi-');
+    const fakePiPath = join(directory.path, 'pi');
+    const argsPath = join(directory.path, 'args.txt');
+    const stdinPath = join(directory.path, 'stdin.txt');
+    await using _environment = createTemporaryEnvironment({ CODIFF_PI_PATH: fakePiPath });
 
-  await writeFile(
-    fakePiPath,
-    `#!/usr/bin/env node
+    await writeFile(
+      fakePiPath,
+      `#!/usr/bin/env node
 const { appendFileSync, writeFileSync } = require('node:fs');
 const argsPath = ${JSON.stringify(argsPath)};
 const stdinPath = ${JSON.stringify(stdinPath)};
@@ -114,26 +125,40 @@ process.stdin.on('end', () => {
   process.stdout.write('{"version":1}');
 });
 `,
-  );
-  await chmod(fakePiPath, 0o755);
+    );
+    await chmod(fakePiPath, 0o755);
 
-  await expect(
-    runPi(directory.path, 'prompt', { required: ['version'], type: 'object' }, 'walkthrough.json'),
-  ).resolves.toBe('{"version":1}');
+    await expect(
+      runPi(
+        directory.path,
+        'prompt',
+        { required: ['version'], type: 'object' },
+        'walkthrough.json',
+        undefined,
+        { model },
+      ),
+    ).resolves.toBe('{"version":1}');
 
-  const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
-  expect(args).toContain('--print');
-  expect(args).toContain('--no-session');
-  expect(args).toContain('--no-skills');
-  expect(args).toContain('--no-prompt-templates');
-  expect(args).toContain('--no-context-files');
-  expect(args).toContain('--tools');
-  expect(args).toContain('read,grep,find,ls');
-  expect(args).not.toContain('--model');
-  const stdin = await readFile(stdinPath, 'utf8');
-  expect(stdin).toContain('prompt');
-  expect(stdin).toContain('Follow this JSON Schema exactly');
-});
+    const args = (await readFile(argsPath, 'utf8')).trim().split('\n');
+    expect(args).toContain('--print');
+    expect(args).toContain('--no-session');
+    expect(args).toContain('--no-skills');
+    expect(args).toContain('--no-prompt-templates');
+    expect(args).toContain('--no-context-files');
+    expect(args).toContain('--tools');
+    expect(args).toContain('read,grep,find,ls');
+    if (model === undefined) {
+      expect(args).not.toContain('--model');
+    } else {
+      const modelIndex = args.indexOf('--model');
+      expect(modelIndex).toBeGreaterThanOrEqual(0);
+      expect(args.slice(modelIndex, modelIndex + 2)).toEqual(['--model', model]);
+    }
+    const stdin = await readFile(stdinPath, 'utf8');
+    expect(stdin).toContain('prompt');
+    expect(stdin).toContain('Follow this JSON Schema exactly');
+  },
+);
 
 test('authenticates Pi from the login shell environment when the app inherited none', async () => {
   await using directory = await createTemporaryDirectory('codiff-pi-login-env-');

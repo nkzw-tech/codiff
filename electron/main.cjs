@@ -32,6 +32,7 @@ const { attachExternalLinkHandling } = require('./external-links.cjs');
 const { listReviewRequests, readReviewProjects } = require('./git-state/review-requests.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { readCodexModels } = require('./codex-models.cjs');
+const { createPiModelCatalogLoader, readPiModels } = require('./pi-models.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
@@ -170,6 +171,9 @@ let codexModels;
 /** @type {Promise<void> | undefined} */
 let codexModelDiscovery;
 const codexModelDiscoveryAbort = new AbortController();
+/** @type {ReadonlyArray<{id: string; label: string}> | undefined} */
+let piModels;
+const piModelDiscoveryAbort = new AbortController();
 
 /**
  * @type {Map<string, ReturnType<typeof createSkillInstaller>>}
@@ -417,6 +421,7 @@ const selectAgentBackend = (backend) => {
 
   updateConfig({ settings: { ...config.settings, agentBackend } });
   if (agentBackend === 'codex') void loadCodexModels();
+  if (agentBackend === 'pi') void loadPiModels();
 };
 
 /** @param {import('./agent.cjs').Agent} agent @param {string} model */
@@ -589,7 +594,7 @@ const buildModelSubmenu = () => {
   return getAgentMenuModels(
     agent,
     selectedModel,
-    agent.id === 'codex' ? codexModels : undefined,
+    agent.id === 'codex' ? codexModels : agent.id === 'pi' ? piModels : undefined,
   ).map((model) => ({
     checked: selectedModel === model.id,
     click: () => selectAgentModel(agent, model.id),
@@ -611,6 +616,16 @@ const loadCodexModels = () => {
     });
   return codexModelDiscovery;
 };
+
+const loadPiModels = createPiModelCatalogLoader({
+  readModels: () => readPiModels({ signal: piModelDiscoveryAbort.signal }),
+  onModels: (models) => {
+    if (!piModelDiscoveryAbort.signal.aborted) {
+      piModels = models.length ? models : undefined;
+      Menu.setApplicationMenu(buildApplicationMenu());
+    }
+  },
+});
 
 /** @returns {Array<import('electron').MenuItemConstructorOptions>} */
 const buildReasoningEffortSubmenu = () => {
@@ -1472,7 +1487,10 @@ if (squirrelStartup || !lock) {
     // Model discovery starts a login shell and an agent process. Keep it out
     // of the initial review's CPU and disk work.
     setTimeout(() => {
-      if (!quitting && getActiveAgent().id === 'codex') void loadCodexModels();
+      if (!quitting) {
+        if (getActiveAgent().id === 'codex') void loadCodexModels();
+        if (getActiveAgent().id === 'pi') void loadPiModels();
+      }
     }, 1000).unref();
 
     watchConfig((nextConfig) => {
@@ -1496,10 +1514,14 @@ if (squirrelStartup || !lock) {
       sendConfigChanged();
       Menu.setApplicationMenu(buildApplicationMenu());
       if (previousAgent !== 'codex' && getActiveAgent().id === 'codex') void loadCodexModels();
+      if (previousAgent !== 'pi' && getActiveAgent().id === 'pi') void loadPiModels();
     });
   });
 
-  app.on('will-quit', () => codexModelDiscoveryAbort.abort());
+  app.on('will-quit', () => {
+    codexModelDiscoveryAbort.abort();
+    piModelDiscoveryAbort.abort();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0 && !walkthroughLaunchController.hasPending()) {
