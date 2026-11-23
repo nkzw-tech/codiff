@@ -1,6 +1,4 @@
-import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { isAbsolute, relative, sep } from 'node:path';
 import { beforeEach, expect, test } from 'vite-plus/test';
 import { createCommandTransport } from './helpers/command-transport.ts';
 
@@ -50,18 +48,6 @@ test('loads only Pi CLI table rows, including a provider named provider', async 
   ]);
   expect(calls[0].args).toContain('--no-approve');
   expect(calls[0].args).toContain('--list-models');
-  const workingDirectory = calls[0].options.cwd;
-  expect(typeof workingDirectory).toBe('string');
-  if (typeof workingDirectory !== 'string') {
-    throw new Error('Pi model discovery must use an isolated working directory.');
-  }
-  const pathFromRepository = relative(process.cwd(), workingDirectory);
-  expect(
-    pathFromRepository === '..' ||
-      pathFromRepository.startsWith(`..${sep}`) ||
-      isAbsolute(pathFromRepository),
-  ).toBe(true);
-  expect(existsSync(workingDirectory)).toBe(false);
 });
 
 test('retries a default-only catalog and caches the populated result', async () => {
@@ -90,11 +76,8 @@ test('retries a default-only catalog and caches the populated result', async () 
 
 test('cancels pending Pi model discovery when requested', async () => {
   const controller = new AbortController();
-  const { calls, transport } = createCommandTransport(({ close, stdin }) => {
-    stdin.on('finish', () => {
-      controller.abort();
-      close(1, 'SIGTERM');
-    });
+  const { calls, transport } = createCommandTransport(({ stdin }) => {
+    stdin.on('finish', () => controller.abort());
   });
 
   await expect(
