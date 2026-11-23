@@ -5,7 +5,8 @@ const { getCommandEnvironment } = require('./login-shell-environment.cjs');
 const { getPiCommand, PI_MODELS } = require('./pi.cjs');
 const { oneLine } = require('./agent-shared.cjs');
 
-const PI_MODEL_DISCOVERY_TIMEOUT_MS = 8_000;
+// Pi allows 15 seconds for catalog lookup after startup; leave room for CLI startup too.
+const PI_MODEL_DISCOVERY_TIMEOUT_MS = 30_000;
 
 /**
  * Cache populated catalogs, but retry a default-only result after Pi is configured.

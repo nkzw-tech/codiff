@@ -40,10 +40,10 @@ const { readKeyboardLayout, watchKeyboardLayout } = require('./keyboard-layout.c
 const { diagnoseWalkthroughMismatch } = require('./walkthrough-diagnosis.cjs');
 const { readCommitMessageReply } = require('./walkthrough-commit-message.cjs');
 const { normalizePiModel } = require('./pi.cjs');
+const { buildAgentModelMenu } = require('./agent-model-menu.cjs');
 const {
   detectInitialAgentBackend,
   getAgent,
-  getAgentMenuModels,
   listAgents,
   normalizeAgentBackend,
 } = require('./agent.cjs');
@@ -591,16 +591,17 @@ const buildAgentSubmenu = () =>
 const buildModelSubmenu = () => {
   const agent = getActiveAgent();
   const selectedModel = config.settings[agent.modelSettingKey];
-  return getAgentMenuModels(
+  const models = agent.id === 'codex' ? codexModels : agent.id === 'pi' ? piModels : undefined;
+  return buildAgentModelMenu({
     agent,
+    models,
+    onRetryPiModelDiscovery:
+      agent.id === 'pi' && (piModels?.length ?? 0) <= agent.models.length
+        ? () => void loadPiModels()
+        : undefined,
+    onSelectModel: (model) => selectAgentModel(agent, model),
     selectedModel,
-    agent.id === 'codex' ? codexModels : agent.id === 'pi' ? piModels : undefined,
-  ).map((model) => ({
-    checked: selectedModel === model.id,
-    click: () => selectAgentModel(agent, model.id),
-    label: model.label,
-    type: 'radio',
-  }));
+  });
 };
 
 const loadCodexModels = () => {
