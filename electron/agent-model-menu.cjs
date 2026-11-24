@@ -19,12 +19,14 @@ const buildAgentModelMenu = ({
   onSelectModel,
   selectedModel,
 }) => {
-  const items = getAgentMenuModels(agent, selectedModel, models).map((model) => ({
-    checked: selectedModel === model.id,
-    click: () => onSelectModel(model.id),
-    label: model.label,
-    type: 'radio',
-  }));
+  const items = getAgentMenuModels(agent, selectedModel, models).map(
+    /** @returns {import('electron').MenuItemConstructorOptions} */ (model) => ({
+      checked: selectedModel === model.id,
+      click: () => onSelectModel(model.id),
+      label: model.label,
+      type: 'radio',
+    }),
+  );
   if (agent.id === 'pi' && onRetryPiModelDiscovery) {
     items.push(
       { type: 'separator' },
