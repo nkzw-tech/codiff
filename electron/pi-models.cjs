@@ -1,5 +1,8 @@
 // @ts-check
 
+const { mkdtempSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
 const { resolveAgentCommandTransport } = require('./agent-command.cjs');
 const { getCommandEnvironment } = require('./login-shell-environment.cjs');
 const { getPiCommand, PI_MODELS } = require('./pi.cjs');
@@ -50,10 +53,27 @@ const readPiModels = async (options = {}) => {
     throw new Error('Pi model discovery was cancelled.');
   }
   const transport = resolveAgentCommandTransport(options.commandTransport, getPiCommand);
-  const child = transport.spawn(transport.command, ['--no-approve', '--list-models'], {
-    env: environment,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
+  // Older Pi releases may load project extensions before parsing flags; isolate discovery from the checkout.
+  const workingDirectory = mkdtempSync(join(tmpdir(), 'codiff-pi-models-'));
+  const cleanup = () => {
+    try {
+      rmSync(workingDirectory, { force: true, recursive: true });
+    } catch {
+      // Do not let best-effort cleanup mask the discovery result.
+    }
+  };
+  /** @type {import('node:child_process').ChildProcess} */
+  let child;
+  try {
+    child = transport.spawn(transport.command, ['--no-approve', '--list-models'], {
+      cwd: workingDirectory,
+      env: environment,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 
   return new Promise((resolve, reject) => {
     let finished = false;
@@ -80,6 +100,9 @@ const readPiModels = async (options = {}) => {
           killTimer.unref();
           child.once('close', () => clearTimeout(killTimer));
         }
+        child.once('close', cleanup);
+      } else {
+        cleanup();
       }
       if (error) reject(error);
       else resolve(models);
