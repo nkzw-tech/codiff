@@ -2,6 +2,9 @@ name: update-homebrew
 
 on:
   workflow_call:
+    secrets:
+      TAP_APP_PRIVATE_KEY:
+        required: true
     inputs:
       release_tag:
         required: true

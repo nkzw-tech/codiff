@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       platform:
-        description: Platform to rebuild
+        description: Platform to rebuild, or release to retry the full draft release
         required: true
         default: windows
         type: choice
@@ -19,6 +19,7 @@ on:
           - windows
           - linux
           - all
+          - release
 
 permissions:
   contents: write
@@ -29,6 +30,8 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Release retries build the tagged source with the current workflow.
+  BUILD_REF: ${{ inputs.platform == 'release' && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
   TAG_NAME: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
@@ -38,6 +41,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
 
       - name: Validate Release Version
         run: |
@@ -58,14 +63,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release view "${TAG_NAME}"
 
+      - name: Verify Release Retry Targets a Draft
+        if: inputs.platform == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh release view "$TAG_NAME" --json isDraft --jq .isDraft)" = true
+
   build-linux:
     needs: create-release
-    if: github.event_name == 'push' || inputs.platform == 'linux' || inputs.platform == 'all'
+    if: github.event_name == 'push' || inputs.platform == 'linux' || inputs.platform == 'all' || inputs.platform == 'release'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
 
       - name: Use Node.js 24.21.0
         uses: actions/setup-node@v4
@@ -129,7 +142,7 @@ jobs:
 
   build-windows:
     needs: create-release
-    if: github.event_name == 'push' || inputs.platform == 'windows' || inputs.platform == 'all'
+    if: github.event_name == 'push' || inputs.platform == 'windows' || inputs.platform == 'all' || inputs.platform == 'release'
     runs-on: windows-2022
     timeout-minutes: 60
     env:
@@ -137,6 +150,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BUILD_REF }}
 
       - name: Use Node.js 24.21.0
         uses: actions/setup-node@v4
@@ -196,12 +211,19 @@ jobs:
 
   build-macos:
     needs: create-release
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || inputs.platform == 'release'
     uses: ./.github/workflows/build-macos.yml
+    secrets:
+      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+    with:
+      release_tag: ${{ inputs.release_tag || github.ref_name }}
 
   publish-release:
     needs: [build-linux, build-windows, build-macos]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || inputs.platform == 'release'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
 
@@ -214,7 +236,9 @@ jobs:
   update-homebrew:
     needs: publish-release
     uses: ./.github/workflows/update-homebrew.yml
+    secrets:
+      TAP_APP_PRIVATE_KEY: ${{ secrets.TAP_APP_PRIVATE_KEY }}
     permissions:
       contents: read
     with:
-      release_tag: ${{ github.ref_name }}
+      release_tag: ${{ inputs.release_tag || github.ref_name }}

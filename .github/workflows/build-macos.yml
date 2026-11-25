@@ -2,6 +2,19 @@ name: build-macos
 
 on:
   workflow_call:
+    secrets:
+      APPLE_CERTIFICATE_BASE64:
+        required: true
+      APPLE_CERTIFICATE_PASSWORD:
+        required: true
+      APPLE_ID:
+        required: true
+      APPLE_PASSWORD:
+        required: true
+    inputs:
+      release_tag:
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
@@ -17,6 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.sha }}
           persist-credentials: false
 
       - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
@@ -98,7 +112,7 @@ jobs:
 
   attach:
     needs: sign
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: inputs.release_tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -110,7 +124,7 @@ jobs:
       - name: Attach verified zip to draft release
         env:
           ARCHIVE: ${{ needs.sign.outputs.archive }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ inputs.release_tag }}
           GH_TOKEN: ${{ github.token }}
         run: |
           test "$ARCHIVE" = "Codiff-darwin-arm64-${TAG_NAME#v}.zip"
