@@ -44,6 +44,7 @@ jobs:
           sha=$(shasum -a 256 "$RUNNER_TEMP/$archive" | cut -d ' ' -f 1)
 
           brew tap nkzw-tech/tap https://github.com/nkzw-tech/homebrew-tap
+          brew trust --cask nkzw-tech/tap/codiff
           cd "$(brew --repository nkzw-tech/tap)"
           ruby - "$version" "$sha" <<'RUBY'
           require 'rubygems/version'
