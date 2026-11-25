@@ -87,7 +87,7 @@
         "piModel": {
           "type": "string",
           "default": "pi-default",
-          "description": "The Pi model to use for review assistance and walkthroughs when agentBackend is 'pi'."
+          "description": "The Pi model to use for review assistance and walkthroughs when agentBackend is 'pi'. Use 'pi-default' to preserve Pi's configured default, or a provider-qualified model id such as 'github-copilot/gpt-6.1-terra'."
         },
         "renderMarkdownAs": {
           "type": "string",

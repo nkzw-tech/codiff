@@ -164,6 +164,7 @@ counts; when it is `false`, Codiff hides those changes from the working-tree rev
     "openAIModel": "gpt-6.1-terra",
     "openAIReasoningEffort": "",
     "opencodeModel": "opencode-default",
+    "piModel": "pi-default",
     "sidebarPosition": "left",
     "showWhitespace": false,
     "theme": "system",
@@ -223,6 +224,8 @@ application menu:
 - `opencode` — the [OpenCode](https://opencode.ai/) CLI, configured with
   `settings.opencodeModel`.
 - `pi` — the Pi CLI, using its configured default model.
+
+When Pi is active, its `Model` menu loads the model list from the installed `pi --list-models` command. Choose `Pi default` to defer to Pi's configured default, or select a specific provider/model. You can also set `settings.piModel` to a provider-qualified ID such as `github-copilot/gpt-6.1-terra`. IDs missing from the discovered list remain configurable and appear as custom choices; Codiff passes them to `pi --model` rather than silently reverting to `pi-default`. If Pi cannot resolve a selected ID, Codiff surfaces Pi's error.
 
 The Codex `Model` and `Reasoning Effort` menus load the installed CLI's model catalog in the
 background. They offer its visible models and supported reasoning efforts, including new models

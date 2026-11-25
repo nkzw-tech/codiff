@@ -8,7 +8,6 @@ const {
   buildSchemaReminder,
   findExecutableOnPath,
   isExecutableFile,
-  normalizeEnum,
   normalizeStructuredOutput,
   oneLine,
 } = require('./agent-shared.cjs');
@@ -41,7 +40,6 @@ const PI_NOT_FOUND_MESSAGE =
 
 /** @type {ReadonlyArray<PiModel>} */
 const PI_MODELS = Object.freeze([{ id: DEFAULT_PI_MODEL, label: 'Pi default' }]);
-const PI_MODEL_IDS = new Set(PI_MODELS.map((model) => model.id));
 
 /** @param {string} [detail] */
 const createPiNotFoundError = (detail) =>
@@ -98,7 +96,10 @@ const getPiLaunchError = (error) => {
 };
 
 /** @param {unknown} value @returns {string} */
-const normalizePiModel = (value) => normalizeEnum(value, PI_MODEL_IDS, DEFAULT_PI_MODEL);
+const normalizePiModel = (value) => {
+  const model = typeof value === 'string' ? value.trim() : '';
+  return model || DEFAULT_PI_MODEL;
+};
 
 /**
  * @param {string} output
