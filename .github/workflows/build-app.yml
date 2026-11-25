@@ -3,7 +3,7 @@ name: build-app
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -194,8 +194,13 @@ jobs:
 
           gh release upload "${TAG_NAME}" "${assets[@]}" --clobber
 
+  build-macos:
+    needs: create-release
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/build-macos.yml
+
   publish-release:
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows, build-macos]
     if: github.event_name == 'push'
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -205,3 +210,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest
+
+  update-homebrew:
+    needs: publish-release
+    uses: ./.github/workflows/update-homebrew.yml
+    permissions:
+      contents: read
+    with:
+      release_tag: ${{ github.ref_name }}

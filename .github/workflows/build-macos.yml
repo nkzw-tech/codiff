@@ -1,0 +1,110 @@
+name: build-macos
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: macos-15
+    environment: macos-release
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.archive.outputs.name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version: 24.21.0
+          run-install: true
+
+      - name: Import Developer ID into a temporary keychain
+        shell: bash
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${CERTIFICATE_BASE64:?Missing APPLE_CERTIFICATE_BASE64}" "${CERTIFICATE_PASSWORD:?Missing APPLE_CERTIFICATE_PASSWORD}"
+          umask 077
+          certificate="$RUNNER_TEMP/codiff.p12"
+          keychain="$RUNNER_TEMP/codiff.keychain-db"
+          trap 'rm -f "$certificate"' EXIT
+          printf '%s' "$CERTIFICATE_BASE64" | base64 -D > "$certificate"
+          password=$(openssl rand -hex 32)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 7200 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain"
+
+      - name: Build, sign and notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          : "${APPLE_ID:?}" "${APPLE_PASSWORD:?}" "${APPLE_SIGNING_IDENTITY:?}" "${APPLE_TEAM_ID:?}"
+          vpr make:mac
+
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          keychain="$RUNNER_TEMP/codiff.keychain-db"
+          if [[ -f "$keychain" ]]; then security delete-keychain "$keychain"; fi
+
+      - name: Verify the packaged app
+        id: archive
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name="Codiff-darwin-arm64-$version.zip"
+          zip="out/make/zip/darwin/arm64/$name"
+          ditto -x -k "$zip" "$RUNNER_TEMP/verify"
+          app="$RUNNER_TEMP/verify/Codiff.app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv --verbose=4 "$app" 2>"$RUNNER_TEMP/signature"
+          grep -Fx "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/signature"
+          grep -F 'Authority=Developer ID Application:' "$RUNNER_TEMP/signature"
+          xcrun stapler validate "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-macos
+          path: out/make/zip/darwin/arm64/${{ steps.archive.outputs.name }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  attach:
+    needs: sign
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-macos
+
+      - name: Attach verified zip to draft release
+        env:
+          ARCHIVE: ${{ needs.sign.outputs.archive }}
+          TAG_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$ARCHIVE" = "Codiff-darwin-arm64-${TAG_NAME#v}.zip"
+          test "$(gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = true
+          gh release upload "$TAG_NAME" "$ARCHIVE" --repo "$GITHUB_REPOSITORY" --clobber

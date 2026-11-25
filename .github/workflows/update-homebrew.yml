@@ -1,0 +1,81 @@
+name: update-homebrew
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published Codiff release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: macos-15
+    environment: homebrew-release
+    timeout-minutes: 20
+    concurrency:
+      group: codiff-homebrew-tap
+      cancel-in-progress: false
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      TAG_NAME: ${{ inputs.release_tag }}
+    steps:
+      - name: Download the public release and update the tapped cask
+        id: cask
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version=${TAG_NAME#v}
+          archive="Codiff-darwin-arm64-$version.zip"
+          curl --fail --location --retry 3 --retry-all-errors -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG_NAME/$archive"
+          sha=$(shasum -a 256 "$RUNNER_TEMP/$archive" | cut -d ' ' -f 1)
+
+          brew tap nkzw-tech/tap https://github.com/nkzw-tech/homebrew-tap
+          cd "$(brew --repository nkzw-tech/tap)"
+          ruby - "$version" "$sha" <<'RUBY'
+          require 'rubygems/version'
+          version, sha = ARGV
+          path = 'Casks/codiff.rb'
+          cask = File.read(path)
+          version_line = /^  version "([0-9]+\.[0-9]+\.[0-9]+)"$/
+          sha_line = /^  sha256 "[a-f0-9]{64}"$/
+          abort 'Unexpected cask format' unless cask.scan(version_line).one? && cask.scan(sha_line).one?
+          previous = cask[version_line, 1]
+          abort "Tap already contains a newer version (#{previous})" if Gem::Version.new(previous) > Gem::Version.new(version)
+          File.write(path, cask.sub(version_line, %(  version "#{version}")).sub(sha_line, %(  sha256 "#{sha}")))
+          RUBY
+
+          brew audit --cask nkzw-tech/tap/codiff
+          brew style --cask nkzw-tech/tap/codiff
+          if ! git diff --quiet -- Casks/codiff.rb; then echo 'changed=true' >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        if: steps.cask.outputs.changed == 'true'
+        id: tap-token
+        with:
+          client-id: ${{ vars.TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: nkzw-tech
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Push the cask update
+        if: steps.cask.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+        run: |
+          cd "$(brew --repository nkzw-tech/tap)"
+          git add Casks/codiff.rb
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "Update Codiff cask to ${TAG_NAME#v}"
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD:main
