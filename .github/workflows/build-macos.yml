@@ -29,6 +29,8 @@ jobs:
         env:
           CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          CERTIFICATE_CHAIN_PEM: ${{ vars.APPLE_CERTIFICATE_CHAIN_PEM }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           : "${CERTIFICATE_BASE64:?Missing APPLE_CERTIFICATE_BASE64}" "${CERTIFICATE_PASSWORD:?Missing APPLE_CERTIFICATE_PASSWORD}"
@@ -42,8 +44,14 @@ jobs:
           security set-keychain-settings -lut 7200 "$keychain"
           security unlock-keychain -p "$password" "$keychain"
           security import "$certificate" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
           security list-keychains -d user -s "$keychain"
+          # Keychain Access can export the private key alone. Pair it with its public certificate chain.
+          if [[ -n "$CERTIFICATE_CHAIN_PEM" ]] && ! security find-identity -v -p codesigning "$keychain" | grep -Fq "\"$APPLE_SIGNING_IDENTITY\""; then
+            printf '%s\n' "$CERTIFICATE_CHAIN_PEM" > "$RUNNER_TEMP/codiff-chain.pem"
+            security import "$RUNNER_TEMP/codiff-chain.pem" -f pemseq -k "$keychain"
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security find-identity -v -p codesigning "$keychain" | grep -F "\"$APPLE_SIGNING_IDENTITY\""
 
       - name: Build, sign and notarize
         env:
