@@ -62,7 +62,7 @@ const readPiModels = async (options = {}) => {
       // Do not let best-effort cleanup mask the discovery result.
     }
   };
-  /** @type {import('node:child_process').ChildProcess} */
+  /** @type {import('node:child_process').ChildProcessWithoutNullStreams} */
   let child;
   try {
     child = transport.spawn(transport.command, ['--no-approve', '--list-models'], {
