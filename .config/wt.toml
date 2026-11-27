@@ -1,0 +1,5 @@
+# Worktrunk hooks. `wt switch --create` runs pre-start; after `git worktree add`, run
+#   wt -C <worktree> hook pre-start --foreground --yes
+# It reflinks the main checkout's ignored files listed in .worktreeinclude (no extra
+# disk on APFS), then lets the package manager reconcile any lockfile change.
+pre-start = "wt step copy-ignored && pnpm install --prefer-offline"
